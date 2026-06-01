@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "scenario": "SA场景接入失败",
+  "fault_tree": "tree/SA场景接入失败.md",
+  "indicators": [
+    "kpi",
+    "chr"
+  ],
+  "steps": [
+    {
+      "id": "kpi",
+      "kind": "script",
+      "run": "scripts/kpi_analyzer.py",
+      "data": "$data.kpi",
+      "out": "result/kpi.json",
+      "desc": "解析 kpi 指标"
+    },
+    {
+      "id": "chr",
+      "kind": "script",
+      "run": "scripts/chr_analyzer.py",
+      "data": "$data.chr",
+      "out": "result/chr.json",
+      "desc": "解析 chr 指标"
+    },
+    {
+      "id": "rca",
+      "kind": "rca",
+      "tree": "tree/SA场景接入失败.md",
+      "inputs": [
+        "result/kpi.json",
+        "result/chr.json"
+      ],
+      "rules": "references/rca_rules.md",
+      "out": "result/rca.json",
+      "desc": "综合根因分析"
+    }
+  ]
+}

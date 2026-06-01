@@ -1,0 +1,5 @@
+KpiTreeJson
+{"name":"N.RRC.SetupAtt.Sum","value":"1200"}
+{"name":"N.RRC.SetupSucc.Sum","value":"1100"}
+{"name":"N.RRC.SetupFail.NoRes<span","value":"60"}
+{"name":"N.NG.Setup.Fail.NoRsp","value":"0"}

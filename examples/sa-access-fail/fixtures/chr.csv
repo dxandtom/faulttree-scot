@@ -1,0 +1,11 @@
+Time,DCErrType,CellId
+2026-06-01 10:00,RrcReject,CellA
+2026-06-01 10:01,RrcReject,CellB
+2026-06-01 10:02,RrcReject,CellA
+2026-06-01 10:03,RrcReject,CellC
+2026-06-01 10:04,TransLink,CellA
+2026-06-01 10:05,Normal,CellB
+2026-06-01 10:06,Normal,CellA
+2026-06-01 10:07,Normal,CellC
+2026-06-01 10:08,Normal,CellA
+2026-06-01 10:09,Normal,CellB
