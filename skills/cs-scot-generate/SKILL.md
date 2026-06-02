@@ -43,7 +43,7 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" \
 对每个指标 `<ind>`:
 1. 读 `references/meta_prompt.md`,注入(子树 md + 该指标的真实数据)→ 产出该指标的「解析脚本生成提示词」,写到 `<work>/codegen_prompts/<ind>_codegen_prompt.md`。
 2. 据其写出**自包含**解析脚本,写到 `<work>/scripts/<ind>_analyzer.py`。
-要点(详见 meta_prompt):数据驱动遍历真实字段;精确映射到真实列、不猜列名;**不发明阈值、不拿替身顶替、不伪造 hit**;算不了的标 `hit:null` + `context`;每条带 `basis`(用了哪列)+ `samples`(几个命中标识)。
+要点(详见 meta_prompt):**脚本只查数据、绝不下判断**——数据驱动遍历真实字段做统计 + 把故障树引用到的计数器/字段定向取值;精确映射真实列、不猜列名;**不发明阈值、不拿替身顶替、绝不输出 hit/judgment/"存在 XX 原因"**;数据里没有的如实标 `found:false`。是否成立、根因全部留给 `fault-tree-rca`。输出 JSON 只有事实:`{indicator, summary, field_stats, referenced}`。
 
 ### 步骤 3:验证每个解析脚本
 ```bash
