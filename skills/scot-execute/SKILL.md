@@ -25,8 +25,10 @@ python scripts/runner.py --plan plan.json --data kpi=<kpi数据> --data chr=<chr
 
 `result/rca.json` 契约:
 ```json
-[{"Root_cause":"根因节点","Fault_tree_path":["父1","父2","根因节点"],"evidence_path":["逐字依据1","逐字依据2","逐字依据3"]}]
+[{"Root_cause":"根因节点","Fault_tree_path":["父1","父2","根因节点"],
+  "evidence_path":[{"node":"父1","condition":"<逐字判断条件>","actual":"<实际数值>","judgment":"<代入比较 → 成立/不成立>"}]}]
 ```
+每条 evidence 含 `condition`(逐字规则)+ `actual`(实际数值)+ `judgment`(怎么判断与结论),取自各指标解析结果的 `conditions`。
 
 ## 设计要点
 - 计划是**直线**的:故障树的分支判断在 RCA 内部完成,执行层只顺序跑。

@@ -85,12 +85,16 @@
   {
     "Root_cause": "根因节点名称",
     "Fault_tree_path": ["父节点1", "父节点2", "根因节点"],
-    "evidence_path": ["逐字摘自父节点1正文", "逐字摘自父节点2正文", "逐字摘自根因节点正文"]
+    "evidence_path": [
+      {"node": "父节点1", "condition": "<逐字判断条件>", "actual": "<实际数值>", "judgment": "<代入比较 → 成立/不成立>"},
+      {"node": "父节点2", "condition": "...", "actual": "...", "judgment": "..."},
+      {"node": "根因节点", "condition": "...", "actual": "...", "judgment": "..."}
+    ]
   }
 ]
 ```
-**evidence_path 规则(正式定)**:与 `Fault_tree_path` 一一对应;每个元素**逐字摘自对应节点的故障树正文**;
-**不掺 JSON 数值、不推断、不组合**;该节点正文无明确依据则置空串 `""`。
+**evidence_path 规则(正式定)**:与 `Fault_tree_path` 一一对应;每个元素是对象,含 `condition`(逐字摘自故障树正文,可追溯原规则)+ `actual`(实际数值)+ `judgment`(代入比较与结论)。
+**必须把"实际值多少、怎么判断、是否成立"写清楚**,不能只写一句裸条件。`condition`/`actual`/`judgment` 取自各指标解析脚本 `conditions` 项(脚本已确定性算好),RCA 不重算。纯描述性中间节点 `condition`/`actual` 置空串、`judgment` 注明。
 
 ---
 

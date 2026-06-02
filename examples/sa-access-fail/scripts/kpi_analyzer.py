@@ -2,8 +2,8 @@
 """[由 scot-generate 为「SA场景接入失败」生成] kpi 指标解析脚本。
 
 读取 kpiTree 格式数据(每行一段 JSON,含 name 与 value),清洗计数器名,
-评估本场景故障子树涉及的 kpi 判断条件,输出规范 JSON(summary + counters + conditions)。
-确定性算术在这里完成,RCA 直接采用 conditions 的命中结果。
+评估本场景故障子树涉及的 kpi 判断条件。每条 condition 都把
+expr / values / actual / judgment / hit 算清楚,RCA 直接取用、不再重算。
 """
 from __future__ import annotations
 
@@ -30,6 +30,11 @@ def _to_num(v) -> float:
         return 0.0
 
 
+def _fmt(x: float) -> str:
+    """数字格式化:整数不带小数点,便于阅读。"""
+    return str(int(x)) if float(x).is_integer() else str(x)
+
+
 def analyze(data_path: str) -> dict:
     """解析 kpi 数据并评估本场景子树涉及的 kpi 判断条件。"""
     rows = load_json_column(data_path)
@@ -42,18 +47,42 @@ def analyze(data_path: str) -> dict:
     def g(n: str) -> float:
         return counters.get(n, 0.0)
 
-    conditions = [
-        {"expr": "N.RRC.SetupAtt.Sum - N.RRC.SetupSucc.Sum > 0",
-         "values": {"N.RRC.SetupAtt.Sum": g("N.RRC.SetupAtt.Sum"),
-                    "N.RRC.SetupSucc.Sum": g("N.RRC.SetupSucc.Sum")},
-         "hit": (g("N.RRC.SetupAtt.Sum") - g("N.RRC.SetupSucc.Sum")) > 0},
-        {"expr": "N.RRC.SetupFail.NoRes > 0",
-         "values": {"N.RRC.SetupFail.NoRes": g("N.RRC.SetupFail.NoRes")},
-         "hit": g("N.RRC.SetupFail.NoRes") > 0},
-        {"expr": "N.NG.Setup.Fail.NoRsp > 0",
-         "values": {"N.NG.Setup.Fail.NoRsp": g("N.NG.Setup.Fail.NoRsp")},
-         "hit": g("N.NG.Setup.Fail.NoRsp") > 0},
-    ]
+    conditions = []
+
+    # 条件1:RRC 建立尝试与成功之差 > 0(说明存在建立失败)
+    att, succ = g("N.RRC.SetupAtt.Sum"), g("N.RRC.SetupSucc.Sum")
+    diff = att - succ
+    hit1 = diff > 0
+    conditions.append({
+        "expr": "N.RRC.SetupAtt.Sum - N.RRC.SetupSucc.Sum > 0",
+        "values": {"N.RRC.SetupAtt.Sum": att, "N.RRC.SetupSucc.Sum": succ},
+        "actual": f"N.RRC.SetupAtt.Sum = {_fmt(att)}, N.RRC.SetupSucc.Sum = {_fmt(succ)}",
+        "judgment": f"{_fmt(att)} - {_fmt(succ)} = {_fmt(diff)} > 0 → {'成立' if hit1 else '不成立'}",
+        "hit": hit1,
+    })
+
+    # 条件2:无线资源不足导致的建立失败计数 > 0
+    nores = g("N.RRC.SetupFail.NoRes")
+    hit2 = nores > 0
+    conditions.append({
+        "expr": "N.RRC.SetupFail.NoRes > 0",
+        "values": {"N.RRC.SetupFail.NoRes": nores},
+        "actual": f"N.RRC.SetupFail.NoRes = {_fmt(nores)}",
+        "judgment": f"{_fmt(nores)} > 0 → {'成立' if hit2 else '不成立'}",
+        "hit": hit2,
+    })
+
+    # 条件3:NG 接口 AMF 无响应计数 > 0
+    norsp = g("N.NG.Setup.Fail.NoRsp")
+    hit3 = norsp > 0
+    conditions.append({
+        "expr": "N.NG.Setup.Fail.NoRsp > 0",
+        "values": {"N.NG.Setup.Fail.NoRsp": norsp},
+        "actual": f"N.NG.Setup.Fail.NoRsp = {_fmt(norsp)}",
+        "judgment": f"{_fmt(norsp)} > 0 → {'成立' if hit3 else '不成立'}",
+        "hit": hit3,
+    })
+
     return {"summary": {"counter_count": len(counters)},
             "counters": counters,
             "conditions": conditions}

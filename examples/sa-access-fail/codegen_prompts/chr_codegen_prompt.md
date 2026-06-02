@@ -11,14 +11,20 @@
   - `DCErrType 中 TransLink 占比 > 20%`
 
 ## 二、确定性计算
-- 统计 `DCErrType` 各取值的出现次数与占比,**用代码**算出每条判断条件是否成立。
+- 统计 `DCErrType` 各取值的出现次数与占比,**用代码**算出每条判断条件:实际占比是多少、是否超过阈值、是否成立。
 
 ## 三、数据处理要点
 - 枚举字段做分布统计;占比 = 该取值计数 / 总记录数 × 100%。
 - 空 `DCErrType` 行不计入分布。
 
 ## 四、输出 JSON
-- `summary`(记录数)、`dcerrtype_distribution`(取值→次数)、`conditions`(每条:`expr`/`values`/`hit`)。
+- `summary`(记录数)、`dcerrtype_distribution`(取值→次数)、`conditions`(数组)。
+- 每条 `conditions` 元素:
+  - `expr`:判断条件原文(逐字);
+  - `values`:用到的实际数值(计数 / 总数 / 占比);
+  - `actual`:实际数值文字,如 `RrcReject = 4 / 总数 10 = 40.0%`;
+  - `judgment`:代入比较 + 结论,如 `40.0% > 30% → 成立`;
+  - `hit`:是否成立。
 
 ## 五、工程要求
 - Python 3.11;参数:数据文件、`-o/--output`;复用 data_loader;中文注释;可直接运行。

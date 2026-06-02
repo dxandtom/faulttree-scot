@@ -1,11 +1,11 @@
 ---
 name: {{SCENARIO_SLUG}}
-description: 诊断「{{SCENARIO}}」的故障根因。当用户报告 {{SCENARIO}}、或提供该场景的 {{INDICATORS}} 指标数据要求定位根因时,务必使用本技能。它按预生成的 SCoT 计划顺序解析各指标数据,再结合故障子树做综合根因分析,输出根因路径与逐字判断依据。
+description: 诊断「{{SCENARIO}}」的故障根因。当用户报告 {{SCENARIO}}、或提供该场景的 {{INDICATORS}} 指标数据要求定位根因时,务必使用本技能。它按预生成的 SCoT 计划顺序解析各指标数据,再结合故障子树做综合根因分析,输出根因路径与判断依据。
 ---
 
-# {{SCENARIO}} —— 故障诊断场景 skill(自包含)
+# {{SCENARIO}} —— 故障诊断场景 skill
 
-本 skill 由 scot-generate 自动生成,**自包含**、可在独立容器内端到端运行,不依赖其它 skill。
+本 skill 由 scot-generate 自动生成,自带本场景诊断所需的子树、解析脚本与规则,平台 harness 在容器内运行即可。
 
 ## 输入
 本场景各指标的数据文件(xlsx 或 csv):{{INDICATORS}}。
@@ -15,15 +15,21 @@ description: 诊断「{{SCENARIO}}」的故障根因。当用户报告 {{SCENARI
 python scripts/runner.py --plan plan.json {{DATA_ARGS}}
 ```
 runner 会:
-1. 依次跑各指标解析脚本(`kind=script`),把结果写到 `result/<指标>.json`;
+1. 依次跑各指标解析脚本(`kind=script`),把结果写到 `result/<指标>.json`(其中 `conditions` 已含每条判断条件的实际值与结论);
 2. 到 `kind=rca` 步骤时,把 `tree/` 子树正文 + 各 `result/*.json` 汇总成 `result/rca_input.json`,并按 `references/rca_rules.md` 做综合根因分析,产出 `result/rca.json`。
-   - RCA 是**模型判断**步骤:若当前环境无可调用模型,runner 会停在这里并打印待办,由所在的 agent harness 依据 `rca_rules.md` 完成并写出 `result/rca.json`。
+   - RCA 是**模型判断**步骤:若当前环境无可调用模型,runner 会停在这里并打印待办,由所在的 agent harness 依据 `rca_rules.md` 完成 `result/rca.json`。
 
 ## 输出
 `result/rca.json`:
 ```json
-[{"Root_cause":"根因节点","Fault_tree_path":["父节点1","父节点2","根因节点"],"evidence_path":["逐字摘自父节点1正文","逐字摘自父节点2正文","逐字摘自根因节点正文"]}]
+[{"Root_cause":"根因节点",
+  "Fault_tree_path":["父节点1","根因节点"],
+  "evidence_path":[
+    {"node":"父节点1","condition":"<逐字判断条件>","actual":"<实际数值>","judgment":"<代入比较 → 成立/不成立>"},
+    {"node":"根因节点","condition":"...","actual":"...","judgment":"..."}
+  ]}]
 ```
+每条依据都讲清"规则 + 实际值 + 怎么判断 + 结论"。
 
 ## 构成
 - `plan.json` —— SCoT 执行计划

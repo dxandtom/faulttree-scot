@@ -2,7 +2,7 @@
 """[由 scot-generate 为「SA场景接入失败」生成] chr 指标解析脚本。
 
 读取 chr 记录(表格),统计 DCErrType 分布与占比,评估本场景子树涉及的 chr 判断条件。
-确定性统计在这里完成,RCA 直接采用 conditions 的命中结果。
+每条 condition 都把 expr / values / actual / judgment / hit 算清楚,RCA 直接取用、不再重算。
 """
 from __future__ import annotations
 
@@ -23,19 +23,21 @@ def analyze(data_path: str) -> dict:
     dist = Counter((r.get("DCErrType") or "").strip()
                    for r in rows if (r.get("DCErrType") or "").strip())
 
-    def ratio(t: str) -> float:
-        return (dist.get(t, 0) / total * 100.0) if total else 0.0
+    def cond_ratio(errtype: str, threshold: float) -> dict:
+        """构造一条「某 DCErrType 占比 > 阈值」的判断结果(含实际值与结论)。"""
+        cnt = dist.get(errtype, 0)
+        ratio = (cnt / total * 100.0) if total else 0.0
+        hit = ratio > threshold
+        return {
+            "expr": f"DCErrType 中 {errtype} 占比 > {int(threshold)}%",
+            "values": {f"{errtype}_count": cnt, "total": total, "ratio_percent": round(ratio, 2)},
+            "actual": f"{errtype} = {cnt} / 总数 {total} = {ratio:.1f}%",
+            "judgment": f"{ratio:.1f}% > {int(threshold)}% → {'成立' if hit else '不成立'}",
+            "hit": hit,
+        }
 
-    conditions = [
-        {"expr": "DCErrType 中 RrcReject 占比 > 30%",
-         "values": {"RrcReject_count": dist.get("RrcReject", 0), "total": total,
-                    "ratio_percent": round(ratio("RrcReject"), 2)},
-         "hit": ratio("RrcReject") > 30},
-        {"expr": "DCErrType 中 TransLink 占比 > 20%",
-         "values": {"TransLink_count": dist.get("TransLink", 0), "total": total,
-                    "ratio_percent": round(ratio("TransLink"), 2)},
-         "hit": ratio("TransLink") > 20},
-    ]
+    conditions = [cond_ratio("RrcReject", 30), cond_ratio("TransLink", 20)]
+
     return {"summary": {"record_count": total},
             "dcerrtype_distribution": dict(dist),
             "conditions": conditions}
