@@ -12,6 +12,7 @@
 - **kpiTree 是"规则字典"(catalog)**:`fixtures/kpi.csv` 每行一段 JSON,只有 `formula`/阈值/定义,**没有实测值**。引擎产出 `rules`(各 KPI 的公式/阈值/定义)+ `counter_index`(计数器 → 用到它的 KPI),`result/kpi.json` 里**没有任何计数器取值**。
 - **CHR 是"逐记录测量"(tabular)**:`fixtures/chr.csv` 是表格,引擎逐列统计(`DCErrType` 分布等),`result/chr.json`。
 - 引擎**只产事实/规则,不下判断、不做故障树匹配**——通篇没有 `hit`/`judgment`/`conditions`。
+- **按故障树投影**:脚本旁有 `tree/`,引擎自动只保留故障树提到的字段/计数器/规则(`result/*.json` 里有 `projection` 计数)。本例 chr 只留 `DCErrType`、kpi 只留 `RRC Setup Success Rate` 规则;真实 kpiTree 几千条会被压到树真正引用的那几条。
 
 ## 跑一遍(用 cs-scot-execute 的执行器)
 ```bash

@@ -11,7 +11,9 @@
 全部由 fault-tree-rca 拿着故障树去做。本引擎只产**事实 / 规则**。
 
 自包含:不 import 任何本仓自定义模块。读 xlsx 需 openpyxl;csv 用标准库。
-用法:python analyzer.py <数据文件> -o <输出.json> [--indicator <标签>]
+用法:python analyzer.py <数据文件> -o <输出.json> [--indicator <标签>] [--fault-tree <故障树.md>]
+给了 --fault-tree(或脚本旁存在唯一的 ../tree/*.md)就**只保留故障树提到的字段/计数器/规则**,
+大幅压缩输出(纯按名字匹配,指标无关)。
 """
 from __future__ import annotations
 
@@ -230,6 +232,42 @@ def _analyze_catalog(nodes, indicator) -> dict:
             "counter_index": counter_index}
 
 
+# ---------- 故障树投影(可选:只保留树提到的,压缩输出) ----------
+def _auto_tree(script_path):
+    """产物布局里 scripts/ 与 tree/ 是兄弟;脚本旁若恰有唯一一棵树 md,自动用它投影。"""
+    d = Path(script_path).resolve().parent.parent / "tree"
+    if d.is_dir():
+        mds = sorted(d.glob("*.md"))
+        if len(mds) == 1:
+            return str(mds[0])
+    return None
+
+
+def _project(result: dict, tree_text: str) -> dict:
+    """只保留故障树文本提到的字段/计数器/规则(纯按名字匹配,指标无关),大幅压缩。"""
+    def mentioned(name) -> bool:
+        s = str(name or "")
+        return len(s) >= 3 and s in tree_text
+
+    if result.get("kind") == "tabular":
+        fs = result.get("field_stats", {})
+        ref = {k: v for k, v in fs.items() if mentioned(k)}
+        result["field_stats"] = ref
+        result["projection"] = {"by": "fault_tree", "kept_fields": len(ref), "total_fields": len(fs)}
+    elif result.get("kind") == "catalog":
+        ci = result.get("counter_index", {})
+        ref_ci = {k: v for k, v in ci.items() if mentioned(k)}
+        rules = result.get("rules", [])
+        ref_rules = [r for r in rules
+                     if mentioned(r.get("name")) or mentioned(r.get("kpiIndex"))
+                     or any(mentioned(c) for c in r.get("counters", []))]
+        result["counter_index"], result["rules"] = ref_ci, ref_rules
+        result["projection"] = {"by": "fault_tree",
+                                "kept_counters": len(ref_ci), "total_counters": len(ci),
+                                "kept_rules": len(ref_rules), "total_rules": len(rules)}
+    return result
+
+
 # ---------- 入口 ----------
 def _default_indicator(script_path, data_path, override):
     if override:
@@ -259,13 +297,20 @@ def main() -> None:
     ap.add_argument("data", help="数据文件(csv/xlsx)")
     ap.add_argument("-o", "--output", required=True)
     ap.add_argument("--indicator", help="指标标签(默认从脚本名 <ind>_analyzer 或数据文件名推断)")
+    ap.add_argument("--fault-tree", help="故障树 md;给了就只保留树提到的字段/计数器/规则(大幅压缩);"
+                                         "默认自动探测脚本旁唯一的 ../tree/*.md")
     args = ap.parse_args()
     indicator = _default_indicator(__file__, args.data, args.indicator)
     result = analyze(args.data, indicator)
+    tree_path = args.fault_tree or _auto_tree(__file__)
+    if tree_path and Path(tree_path).exists():
+        result = _project(result, _decode(Path(tree_path).read_bytes()))
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[analyzer] indicator={indicator} kind={result.get('kind')} → {out}")
+    proj = result.get("projection")
+    extra = f" 投影按故障树:{proj}" if proj else ""
+    print(f"[analyzer] indicator={indicator} kind={result.get('kind')}{extra} → {out}")
 
 
 if __name__ == "__main__":
