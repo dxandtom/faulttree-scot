@@ -5,7 +5,8 @@
 请生成一个解析 kpi 数据的 Python 脚本,满足:
 
 ## 一、理解输入
-- kpi 数据为 kpiTree 格式:每行一段 JSON,含 `name`(计数器名,形如 `N.xxx`/`L.xxx`)与 `value`(取值)。用 `data_loader.load_json_column` 读取(支持 xlsx/csv)。
+- kpi 数据为 kpiTree 格式:每行一段 JSON,含 `name`(计数器名,形如 `N.xxx`/`L.xxx`)与 `value`(取值)。
+- 脚本要**自包含**:内联一个读取函数(每行整行 `json.loads`,因 JSON 内含逗号不能按 CSV 拆列;支持 csv/xlsx + 编码检测),**不要 import 任何本仓自定义模块**。
 - 本场景故障子树涉及的 kpi 计数器与判断条件:
   - `N.RRC.SetupAtt.Sum - N.RRC.SetupSucc.Sum > 0`
   - `N.RRC.SetupFail.NoRes > 0`
@@ -28,4 +29,4 @@
   - `hit`:是否成立。
 
 ## 五、工程要求
-- Python 3.11;参数:数据文件、`-o/--output`;复用 data_loader;中文注释;可直接运行。
+- Python 3.11;参数:数据文件、`-o/--output`;**自包含**(内联读取,不 import 本仓模块);中文注释;可直接运行。

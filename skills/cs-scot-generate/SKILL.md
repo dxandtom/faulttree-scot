@@ -1,80 +1,83 @@
 ---
 name: cs-scot-generate
-description: 把"故障子树 Excel + 各指标数据样例"编译成一个自包含的故障诊断场景 skill。当用户要为某网络保障场景(如 SA场景接入失败)生成诊断脚本与执行计划 SCoT、或说"生成故障树诊断 skill / 生成解析脚本 / 把这个故障树做成场景"时,务必使用本技能。产物两大件:各指标的解析脚本,以及生成并保存的 SCoT 执行计划 plan.json,最终打包成可上传平台、在独立容器里端到端跑出根因的场景 skill。
+description: 把一棵故障树(Excel)+ 若干指标的数据,编译成一个场景的诊断产物:各指标的解析脚本、一份 SCoT 执行计划 plan.json、以及该场景的故障树 md。当用户要为某网络保障场景生成诊断脚本与执行计划、或说"生成故障树诊断脚本 / 把这个故障树做成可执行的诊断 / 生成 SCoT"时,务必使用本技能。指标种类不固定,由用户提供的数据决定。
 ---
 
-# cs-scot-generate —— 故障诊断场景 skill 生成器
+# cs-scot-generate —— 故障诊断产物生成器
 
-## 这个 skill 干什么
-把一个**故障子树(Excel)+ 各指标数据样例**,编译成一个**自包含的场景 skill**(可上传平台、在独立容器里端到端跑出根因)。
+把一棵**故障树(Excel)+ 若干指标的数据**,编译成某场景的**诊断产物**。
 
-产物两大件:
-1. 各指标的**解析脚本**(`scripts/<指标>_analyzer.py`);
-2. **SCoT 执行计划**(`plan.json`)—— 必须生成并保存,见步骤 4。
+## 产物就是这三样(外加留痕)
+1. **SCoT 执行计划** `plan.json`(由 cs-scot-execute 来跑)
+2. **各指标的解析脚本** `scripts/<指标>_analyzer.py`(确定性、**自包含**:内联读取函数,只用标准库;读 xlsx 才需 openpyxl)
+3. **故障树 md** `tree/<场景>.md`(由 Excel 截取该场景子树转成)
 
-## 核心思想:三级生成链(千万不要写死指标)
+> 留痕:还会保存生成各脚本所用的 codegen 提示词到 `codegen_prompts/`。
+> 这些产物是**数据/资产**,不是一个 skill——真正的 skill 只有 cs-scot-generate / cs-scot-execute / fault-tree-rca 三个。
+
+## 指标不固定(重要)
+本 skill **不预设任何具体指标**。你给几种指标的数据,就为几种各生成一个解析脚本;指标名由你定。新增指标**不改本 skill**,只是多走一遍下面的"三级链"。
+
+## 核心机关:三级提示词链
 ```
-元提示词(references/meta_prompt.md,指标无关)
-   │  喂:故障子树 + 某指标的数据格式/样例
+references/meta_prompt.md(元提示词,指标无关,只此一份)
+   │  喂:故障子树 md + 某指标的数据(真实或样例皆可)
    ▼
-该指标的「解析脚本生成提示词」(生成物,每指标一份 → codegen_prompts/<指标>_codegen_prompt.md)
-   │  喂:该指标数据
+该指标的「解析脚本生成提示词」(生成物 → codegen_prompts/<指标>_codegen_prompt.md)
+   │  喂:该指标的数据
    ▼
-该指标的解析脚本(生成物 → scripts/<指标>_analyzer.py)
+该指标的解析脚本(生成物 → scripts/<指标>_analyzer.py,自包含)
 ```
-当前指标是 `kpi` 和 `chr`;将来新增指标时**不改本 skill**,只是多走一遍同样的三级链。元提示词是唯一需要泛化好的资产——它对任意故障子树、任意指标都适用。
+泛化能力全在**元提示词**:它对任意故障子树、任意指标都适用。
 
 ## 输入
 - `fault_tree_excel`(必填):故障树 `.xlsx`。
-- `scenario_name`(必填):场景名,如 `SA场景接入失败`。
-- 每个指标一份**数据样例 + 格式说明**:当前为 `kpi`、`chr`(xlsx 或 csv 均可)。
-- (可选)Excel 截取参数 `start_level` / `start_node` / `exclude_pattern`,透传给 `excel_to_tree.py`。
+- `scenario_name`(必填):场景名。**它是"子树选择器"**——从大故障树里截出该场景子树(作 `--start-node`),并给产物命名。不传它,`excel_to_tree` 会把整棵大树全导出(可能上百 MB)。
+- 每种指标一份**数据**(真实数据或小样例均可;用于生成脚本 + 跑验证)。
+- (可选)`start_level`:场景节点所在层级(大树里场景常在 L2,则传 `--start-level 2`);`exclude_pattern` 等。
 
-> 注:开发时不需要真实保密数据,用结构真实、内容虚构的小样例即可生成并验证脚本。
+## 流水线(把脚本当命令行跑,**不要 import**,用绝对路径)
+约定工作目录 `<work>`。
 
-## 流水线(按序执行)
-约定一个工作目录 `<work>`(下面各步骤的中间产物都放这里)。
-
-### 步骤 1:故障树 Excel → 子树 Markdown(确定性)
+### 步骤 1:Excel → 该场景子树 md
 ```bash
-python scripts/excel_to_tree.py <fault_tree_excel> \
-  -o <work>/tree/<scenario_name>.md \
-  [--start-level N --start-node <名> --exclude-pattern <正则>]
+python "<本skill>/scripts/excel_to_tree.py" "<fault_tree_excel>" \
+  -o "<work>/tree/<scenario_name>.md" \
+  --start-node "<scenario_name>" [--start-level 2] [--exclude-pattern "<正则>"]
 ```
+> **务必带 `--start-node "<scenario_name>"`**,否则导出整棵大树。
 
 ### 步骤 2:逐指标走三级链生成解析脚本
-对每个指标 `<ind>`(kpi、chr、…):
-1. 读 `references/meta_prompt.md`,注入(子树 md + 该指标的数据格式说明/样例)→ 产出该指标的「解析脚本生成提示词」,**保存**到 `<work>/codegen_prompts/<ind>_codegen_prompt.md`。
-2. 读上一步生成的 codegen prompt,据其要求 → 产出解析脚本,**保存**到 `<work>/scripts/<ind>_analyzer.py`。
+对每个指标 `<ind>`:
+1. 读 `references/meta_prompt.md`,注入(子树 md + 该指标数据)→ 产出「解析脚本生成提示词」,保存 `<work>/codegen_prompts/<ind>_codegen_prompt.md`。
+2. 读上一步的 codegen 提示词,产出**自包含**解析脚本,保存 `<work>/scripts/<ind>_analyzer.py`。
+   - 自包含 = 脚本自己内联读取函数(支持 csv/xlsx + 编码检测),**不 import 任何本仓自定义模块**;确定性计算(算术/计数/占比/比较)都在脚本里完成。
 
-> 这两步是"模型生成"步骤(由你/harness 的模型按提示词来写)。确定性的算术计算要写进生成的脚本里,不要留给后面的 RCA 去"目测"。
-
-### 步骤 3:验证每个解析脚本(闭环)
+### 步骤 3:验证每个解析脚本
 ```bash
-python scripts/validate_parser.py <work>/scripts/<ind>_analyzer.py <该指标样例数据>
+python "<本skill>/scripts/validate_parser.py" "<work>/scripts/<ind>_analyzer.py" "<该指标数据>"
 ```
-要求脚本正常退出且产出**合法 JSON**;不过则按报错修脚本,重跑直到通过。
+要求正常退出且产出**合法 JSON**;不过则按报错修脚本,重跑直到通过。
 
-### 步骤 4:生成并保存 SCoT(plan.json)—— 一等产物
-依据已生成的指标脚本,生成一条**直线计划**:每个指标一个 `kind=script` 步骤,最后一个 `kind=rca` 步骤。格式见 `references/plan_schema.md`。由 `assemble_scenario.py` 自动生成并写入场景目录(见步骤 5),也可单独保存到 `<work>/plan.json`。
-
-### 步骤 5:打包自包含场景 skill
+### 步骤 4:归集产物
 ```bash
-python scripts/assemble_scenario.py \
-  --scenario <scenario_name> --work <work> \
-  --indicators kpi,chr \
-  --out examples/<scenario_name>
+python "<本skill>/scripts/assemble_scenario.py" \
+  --scenario "<scenario_name>" --work "<work>" --indicators <ind1>,<ind2> \
+  --out "<输出目录>"
 ```
-它会把:子树 md、各指标解析脚本、`data_loader.py`、cs-scot-execute 的 `runner.py`、fault-tree-rca 的 `rca_rules.md`、生成的 `plan.json`、以及一份场景 `SKILL.md`(由 `references/scenario_template/SKILL.md.tmpl` 渲染)全部拷/写进 `examples/<scenario_name>/`,形成**可上传的自包含 skill**。
+它把子树 md、各解析脚本、codegen 提示词归到 `<输出目录>`,并生成 `plan.json`(SCoT)。
 
-## 输出物(位于 examples/<scenario_name>/)
-- `scripts/<ind>_analyzer.py` —— 生成的解析脚本(**产物①**)
-- `plan.json` —— 生成的 SCoT 执行计划(**产物②**)
-- `tree/<scenario>.md` —— 故障子树
-- `codegen_prompts/<ind>_codegen_prompt.md` —— 生成的指标提示词(可追溯/可调)
-- `scripts/data_loader.py`、`scripts/runner.py`、`references/rca_rules.md`、`SKILL.md` —— 运行所需(拷入,保证自包含)
+## 输出目录长这样
+```
+<场景产物>/
+├── plan.json                                 # SCoT 执行计划(产物①)
+├── scripts/<ind>_analyzer.py                 # 各指标解析脚本(产物②,自包含)
+├── tree/<scenario>.md                        # 故障树 md(产物③)
+└── codegen_prompts/<ind>_codegen_prompt.md   # 留痕
+```
+跑它:`python "<cs-scot-execute>/scripts/runner.py" --plan "<场景产物>/plan.json" --data <ind>=<数据文件> ...`
 
 ## 注意
-- 所有生成的提示词与脚本用**中文**;脚本 Python 3.11、函数中文注释、完善异常处理。
-- 数据 xlsx/csv 都要支持(靠 `data_loader`)。
-- 故障子树是人工编写、可能不规整的;**确定性计算放进解析脚本,模糊判断留给 RCA**。
+- 所有提示词与脚本用**中文**;脚本 Python 3.11、函数中文注释、完善异常处理、**自包含**。
+- 数据 xlsx/csv 都支持(xlsx 需 `pip install openpyxl`)。
+- 确定性计算放进解析脚本,模糊判断留给 fault-tree-rca。

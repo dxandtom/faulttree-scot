@@ -22,8 +22,8 @@
 |------|------|------|
 | `version` | 是 | 计划格式版本,当前 `"1.0"` |
 | `scenario` | 是 | 场景名 |
-| `fault_tree` | 是 | 故障子树 md 的相对路径(场景 skill 内) |
-| `indicators` | 是 | 本场景涉及的指标列表,如 `["kpi","chr"]` |
+| `fault_tree` | 是 | 故障子树 md 的相对路径(场景产物内) |
+| `indicators` | 是 | 本场景涉及的指标列表(由用户数据决定),如 `["kpi","chr"]` |
 | `steps` | 是 | 有序步骤数组,逐个执行 |
 
 ## Step kinds(v1 定义两种;`cs-scot-execute` 必须全部支持)
@@ -34,14 +34,15 @@
 ```
 - 执行语义:`<python> <run> <实际数据文件> -o <out>`。
 - `data` 用占位符 `$data.<指标名>`,执行时由调用方/harness 绑定到该指标的实际数据文件(xlsx/csv)。
-- 用途:把某指标原始数据**抽取/计算**成规范 JSON,确定性计算都在这里完成。
+- 用途:把某指标原始数据**抽取/计算**成规范 JSON,确定性计算都在这里完成。解析脚本是**自包含**的(内联读取,无外部依赖)。
 
 ### kind = `rca` —— 综合根因分析(唯一的模型判断步骤)
 ```json
-{"id":"rca","kind":"rca","tree":"tree/SA场景接入失败.md","inputs":["result/kpi.json","result/chr.json"],"rules":"references/rca_rules.md","out":"result/rca.json","desc":"综合根因分析"}
+{"id":"rca","kind":"rca","tree":"tree/SA场景接入失败.md","inputs":["result/kpi.json","result/chr.json"],"out":"result/rca.json","desc":"综合根因分析(用 fault-tree-rca 技能)"}
 ```
-- 执行语义:把 `tree` 正文 + 各 `inputs` JSON 汇总,按 `rules`(fault-tree-rca 的规则)交给 LLM,产出根因数组写到 `out`。
+- 执行语义:把 `tree` 正文 + 各 `inputs` JSON 汇总成 `result/rca_input.json`,再由 **fault-tree-rca 技能**(模型判断)产出根因数组写到 `out`。
 - 前面的 `script` 步骤都是确定性的;只有这一步是模型判断,用来吸收人工编写故障树的不规整/谬误。
+- (注:RCA 规则与契约由 fault-tree-rca 技能自带,不放在场景产物里。)
 
 ## 引用占位
 - `$data.<指标名>`:运行时绑定的该指标实际数据文件路径(xlsx 或 csv)。
@@ -56,7 +57,7 @@
   "steps": [
     {"id":"kpi","kind":"script","run":"scripts/kpi_analyzer.py","data":"$data.kpi","out":"result/kpi.json","desc":"解析 kpi 指标"},
     {"id":"chr","kind":"script","run":"scripts/chr_analyzer.py","data":"$data.chr","out":"result/chr.json","desc":"解析 chr 指标"},
-    {"id":"rca","kind":"rca","tree":"tree/SA场景接入失败.md","inputs":["result/kpi.json","result/chr.json"],"rules":"references/rca_rules.md","out":"result/rca.json","desc":"综合根因分析"}
+    {"id":"rca","kind":"rca","tree":"tree/SA场景接入失败.md","inputs":["result/kpi.json","result/chr.json"],"out":"result/rca.json","desc":"综合根因分析(用 fault-tree-rca 技能)"}
   ]
 }
 ```

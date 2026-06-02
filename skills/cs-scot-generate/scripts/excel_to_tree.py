@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""故障树 Excel → 层级 Markdown 子树。
+"""故障树 Excel → 层级 Markdown 子树(自包含,无本仓自定义依赖)。
 
 输入 Excel 的约定(沿用现网故障树导出格式):
 - 层级列:L1(Chinese)、L2(Chinese) … Ln(Chinese),每列是该层的节点名;
@@ -7,21 +7,58 @@
 - 值为"不涉及"的判断条件会被跳过。
 
 输出 Markdown:用 #/##/### 表示层级,标题下面紧跟该节点的判断条件正文。
-依赖统一的 data_loader,xlsx/csv 都能读(本脚本主要用于 xlsx)。
+
+用法(当命令行跑,不要 import):
+    python excel_to_tree.py "<故障树.xlsx>" -o "<输出.md>" \
+        --start-node "<场景名>" [--start-level 2] [--exclude-pattern "<正则>"]
+读 xlsx 需要 openpyxl(pip install openpyxl);csv 用标准库即可。
 """
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from data_loader import load_table  # noqa: E402
-
 _LEVEL_RE = re.compile(r"^L(\d+)\(Chinese\)$")
 _JUDGMENT_HEADER = "Judgment Condition(Chinese)"
+_ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
+
+
+def _read_table(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
+    """读 xlsx/csv → (表头, 行dict列表);自动编码检测。自包含。"""
+    p = Path(path)
+    if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
+        try:
+            from openpyxl import load_workbook
+        except ImportError as e:
+            raise RuntimeError("读取 xlsx 需要 openpyxl,请先 pip install openpyxl") from e
+        wb = load_workbook(p, read_only=True, data_only=True)
+        ws = wb.active
+        it = ws.iter_rows(values_only=True)
+        header = [("" if h is None else str(h)).strip() for h in next(it, [])]
+        rows: List[Dict[str, str]] = []
+        for r in it:
+            rows.append({header[i]: ("" if i >= len(r) or r[i] is None else str(r[i]))
+                         for i in range(len(header))})
+        wb.close()
+        return header, rows
+    raw = p.read_bytes()
+    text = None
+    for enc in _ENCODINGS:
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        text = raw.decode("utf-8", "ignore")
+    reader = csv.DictReader(io.StringIO(text))
+    headers = list(reader.fieldnames or [])
+    return headers, [{(k or ""): ("" if v is None else str(v)) for k, v in row.items()} for row in reader]
 
 
 def find_level_columns(headers: List[str]) -> List[Tuple[str, int]]:
@@ -53,27 +90,22 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
     col_names = [c for c, _ in level_cols]
 
     for row in rows:
-        # 读出本行从 L1 起的完整路径(跳过空层)
         full = [(row.get(c) or "").strip() for c in col_names]
         full = [v for v in full if v]
         if not full:
             continue
-        # 命中排除正则的行整行跳过
         if exclude_re and any(exclude_re.search(v) for v in full):
             continue
-        # 取判断条件("不涉及"视为无)
         judgment = None
         if judgment_col:
             jv = (row.get(judgment_col) or "").strip()
             if jv and jv != "不涉及":
                 judgment = jv
-        # 按 start_level 截断,再按 start_node 过滤
         path = full[start_level - 1:] if start_level > 1 else full
         if not path:
             continue
         if start_node and path[0] != start_node:
             continue
-        # 写入树
         cur = tree
         for i, node in enumerate(path):
             cur.setdefault(node, {})
@@ -93,7 +125,7 @@ def tree_to_markdown(tree: Dict[str, Any], lines: Optional[List[str]] = None,
     items = [(k, v) for k, v in tree.items() if k]
     for i, (name, data) in enumerate(items):
         if i > 0 and level == 1:
-            lines.append("")  # 多棵根树之间空行分隔
+            lines.append("")
         lines.append("#" * level + " " + name)
         if isinstance(data, dict) and "_judgment_" in data:
             for j in data["_judgment_"]:
@@ -108,7 +140,7 @@ def excel_to_tree_markdown(excel_path: str, output_path: Optional[str] = None,
                            start_level: Optional[int] = None, start_node: Optional[str] = None,
                            exclude_pattern: Optional[str] = None) -> str:
     """主流程:读 Excel → 建树 → 渲染 md,可选写出文件,返回 md 文本。"""
-    headers, rows = load_table(excel_path)
+    headers, rows = _read_table(excel_path)
     level_cols = find_level_columns(headers)
     if not level_cols:
         raise ValueError("未找到 Ln(Chinese) 格式的层级列,请检查 Excel 表头")
@@ -125,11 +157,15 @@ def excel_to_tree_markdown(excel_path: str, output_path: Optional[str] = None,
 
 
 def main() -> None:
+    try:  # Windows 控制台中文路径不乱码
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser(description="故障树 Excel → 层级 Markdown 子树")
     ap.add_argument("excel_path", help="故障树 Excel 路径(.xlsx)")
     ap.add_argument("-o", "--output", help="输出 md 路径")
-    ap.add_argument("--start-level", type=int, help="起始层级,从 1 开始;如 2 表示从 L2 起")
-    ap.add_argument("--start-node", help="起始节点名(配合 start-level)")
+    ap.add_argument("--start-level", type=int, help="起始层级,从 1 开始;场景常在 L2,则传 2")
+    ap.add_argument("--start-node", help="起始节点名(= 场景名);截取该场景子树,务必传")
     ap.add_argument("--exclude-pattern", help="正则;任一层级值命中则整行排除")
     args = ap.parse_args()
     try:

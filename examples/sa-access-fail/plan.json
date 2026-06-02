@@ -31,9 +31,8 @@
         "result/kpi.json",
         "result/chr.json"
       ],
-      "rules": "references/rca_rules.md",
       "out": "result/rca.json",
-      "desc": "综合根因分析"
+      "desc": "综合根因分析(用 fault-tree-rca 技能)"
     }
   ]
 }

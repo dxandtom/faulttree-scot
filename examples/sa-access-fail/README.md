@@ -1,33 +1,29 @@
 # 示例场景:SA场景接入失败(合成演示)
 
-本目录是 `cs-scot-generate` 产出的一个场景诊断 skill 示例。所有数据均为**虚构**,
-仅用于演示端到端链路与契约,不含任何真实/保密数据。
+本目录是 `cs-scot-generate` 产出的一份**场景诊断产物**(资产,不是 skill)示例。
+所有数据均为**虚构**,仅演示链路与契约,不含真实/保密数据。
 
-## 怎么来的
-由合成的故障子树 + 合成 kpi/chr 样例,经 cs-scot-generate 三级链生成:
-1. 故障子树 → `tree/SA场景接入失败.md`
-2. 元提示词 → 各指标 codegen 提示词(`codegen_prompts/`)→ 解析脚本(`scripts/*_analyzer.py`)
-3. 生成并保存 SCoT → `plan.json`
+## 产物构成(generate 的三样产物)
+- `plan.json` —— SCoT 执行计划(产物①)
+- `scripts/kpi_analyzer.py`、`scripts/chr_analyzer.py` —— 各指标解析脚本(产物②,**自包含**,内联读取、不 import 本仓模块)
+- `tree/SA场景接入失败.md` —— 故障树 md(产物③)
+- `codegen_prompts/` —— 生成各脚本所用的提示词(留痕);`fixtures/` —— 演示用假数据
 
-## 跑一遍
+## 跑一遍(用 cs-scot-execute 的执行器)
 ```bash
-python scripts/runner.py --plan plan.json \
+python ../../skills/cs-scot-execute/scripts/runner.py \
+  --plan plan.json \
   --data kpi=fixtures/kpi.csv --data chr=fixtures/chr.csv
 ```
-会产出 `result/kpi.json`、`result/chr.json`、`result/rca_input.json`。
-最后一步 RCA 是模型判断,由 agent 依据 `references/rca_rules.md` 完成 `result/rca.json`。
+产出 `result/kpi.json`、`result/chr.json`、`result/rca_input.json`;
+最后一步 RCA 由 **fault-tree-rca 技能**依据 `rca_input.json` 产出 `result/rca.json`。
 
-## 本样例数据下,各条件的判断(解析脚本算出的 `judgment`)
-- kpi:
-  - `1200 - 1100 = 100 > 0 → 成立`
-  - `N.RRC.SetupFail.NoRes = 60 > 0 → 成立`
-  - `N.NG.Setup.Fail.NoRsp = 0 > 0 → 不成立`
-- chr:
-  - `RrcReject = 4 / 总数 10 = 40.0% > 30% → 成立`
-  - `TransLink = 1 / 总数 10 = 10.0% > 20% → 不成立`
+## 本样例数据下,各条件的判断(脚本算出的 `judgment`)
+- kpi:`1200 - 1100 = 100 > 0 → 成立`;`N.RRC.SetupFail.NoRes = 60 > 0 → 成立`;`N.NG.Setup.Fail.NoRsp = 0 > 0 → 不成立`
+- chr:`RrcReject = 4 / 总数 10 = 40.0% > 30% → 成立`;`TransLink = 1 / 总数 10 = 10.0% > 20% → 不成立`
 - 注:kpi 里 `N.RRC.SetupFail.NoRes<span` 故意带 HTML 污染,演示计数器名清洗。
 
-## RCA 期望输出(示意,由模型据 rca_rules 产出)
+## RCA 期望输出(示意,由 fault-tree-rca 产出)
 ```json
 [
   {"Root_cause":"无线资源不足",
@@ -44,5 +40,4 @@ python scripts/runner.py --plan plan.json \
    ]}
 ]
 ```
-说明:每条 evidence 都讲清「规则 `condition` + 实际值 `actual` + 怎么判断 `judgment`」,
-而不是只丢一句裸条件——这样根因结论既可追溯到故障树原规则,又能看到实际数据与判断过程。
+说明:每条 evidence 都讲清「规则 `condition` + 实际值 `actual` + 怎么判断 `judgment`」。

@@ -19,13 +19,13 @@
 ```json
 {"id":"kpi","kind":"script","run":"scripts/kpi_analyzer.py","data":"$data.kpi","out":"result/kpi.json"}
 ```
-执行:`<python> <run> <绑定数据> -o <out>`。`data` 为 `$data.<指标>` 占位,运行时由 `--data <指标>=<文件>` 绑定到实际 xlsx/csv。
+执行:`<python> <run> <绑定数据> -o <out>`。`data` 为 `$data.<指标>` 占位,运行时由 `--data <指标>=<文件>` 绑定到实际 xlsx/csv。解析脚本自包含(无外部依赖)。
 
 ### `rca` —— 综合根因分析(唯一模型判断步骤)
 ```json
-{"id":"rca","kind":"rca","tree":"tree/x.md","inputs":["result/kpi.json","result/chr.json"],"rules":"references/rca_rules.md","out":"result/rca.json"}
+{"id":"rca","kind":"rca","tree":"tree/x.md","inputs":["result/kpi.json","result/chr.json"],"out":"result/rca.json"}
 ```
-执行:汇总 `tree` 正文 + 各 `inputs` JSON + `rules` → `result/rca_input.json`;再按规则产出 `out`。
+执行:汇总 `tree` 正文 + 各 `inputs` JSON → `result/rca_input.json`;再由 **fault-tree-rca 技能**依据它产出 `out`。
 
 ## 路径解析
 所有相对路径相对 `--base`(默认 `plan.json` 所在目录)解析。

@@ -5,7 +5,8 @@
 请生成一个解析 chr 数据的 Python 脚本,满足:
 
 ## 一、理解输入
-- chr 数据为表格(首行表头),含 `Time`、`DCErrType` 等字段。用 `data_loader.load_table` 读取(支持 xlsx/csv)。
+- chr 数据为表格(首行表头),含 `Time`、`DCErrType` 等字段。
+- 脚本要**自包含**:内联一个读取函数(支持 csv/xlsx + 编码检测),**不要 import 任何本仓自定义模块**。
 - 本场景故障子树涉及的 chr 判断条件:
   - `DCErrType 中 RrcReject 占比 > 30%`
   - `DCErrType 中 TransLink 占比 > 20%`
@@ -27,4 +28,4 @@
   - `hit`:是否成立。
 
 ## 五、工程要求
-- Python 3.11;参数:数据文件、`-o/--output`;复用 data_loader;中文注释;可直接运行。
+- Python 3.11;参数:数据文件、`-o/--output`;**自包含**(内联读取,不 import 本仓模块);中文注释;可直接运行。

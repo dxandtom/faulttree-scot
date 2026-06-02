@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """SCoT 执行器:按 plan.json 顺序执行各 step,支持 plan 定义的所有 kind。
 
-- kind=script: 跑某指标解析脚本(确定性),产出该指标结果 JSON。
-- kind=rca:    把子树正文 + 各指标结果 + 规则汇总成 result/rca_input.json,
-               做综合根因分析。RCA 是模型判断步骤;当前环境无可调用模型时,
-               runner 备好输入并打印待办,由所在 agent harness 依据
-               rca_rules.md 完成 result/rca.json。
+- kind=script: 跑某指标解析脚本(确定性,脚本自包含),产出该指标结果 JSON。
+- kind=rca:    把子树正文 + 各指标结果汇总成 result/rca_input.json,然后由
+               fault-tree-rca 技能(模型判断)依据它产出 result/rca.json。
 
 用法:
     runner.py --plan plan.json --data kpi=<file> --data chr=<file> [--base <dir>]
@@ -53,28 +51,31 @@ def run_script_step(step: dict, base: Path, data_map: Dict[str, str]) -> None:
 
 
 def run_rca_step(step: dict, base: Path) -> Path:
-    """执行 kind=rca 步骤:汇总输入,交给模型(或所在 agent)产出根因。"""
+    """执行 kind=rca 步骤:汇总输入,交给 fault-tree-rca 技能(模型)产出根因。"""
     tree = _resolve(base, step["tree"]).read_text(encoding="utf-8")
     inputs = {}
     for rel in step["inputs"]:
         p = _resolve(base, rel)
         inputs[Path(rel).stem] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
-    rules_p = _resolve(base, step["rules"])
-    rules = rules_p.read_text(encoding="utf-8") if rules_p.exists() else ""
 
-    rca_input = {"fault_tree_md": tree, "indicator_results": inputs, "rca_rules": rules}
+    rca_input = {"fault_tree_md": tree, "indicator_results": inputs}
     rca_input_path = _resolve(base, "result/rca_input.json")
     rca_input_path.parent.mkdir(parents=True, exist_ok=True)
     rca_input_path.write_text(json.dumps(rca_input, ensure_ascii=False, indent=2), encoding="utf-8")
 
     out = _resolve(base, step["out"])
     print(f"[rca] {step['id']}: 已汇总输入 → {rca_input_path}")
-    print(f"[rca] 这是模型判断步骤。请依据 references/rca_rules.md,基于上述输入产出 {out}。")
-    print('[rca] 输出契约: [{"Root_cause":...,"Fault_tree_path":[...],"evidence_path":[...]}]')
+    print(f"[rca] 这是模型判断步骤。请用 fault-tree-rca 技能,依据上述输入产出 {out}。")
+    print('[rca] 输出契约: [{"Root_cause":...,"Fault_tree_path":[...],'
+          '"evidence_path":[{"node":...,"condition":...,"actual":...,"judgment":...}]}]')
     return rca_input_path
 
 
 def main() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser(description="SCoT 执行器")
     ap.add_argument("--plan", required=True)
     ap.add_argument("--data", action="append", default=[],
@@ -103,7 +104,7 @@ def main() -> None:
             run_rca_step(step, base)
         else:
             raise ValueError(f"未知 step kind: {kind}(plan_schema v1 仅定义 script / rca)")
-    print("执行流程完成(script 步骤已跑;rca 若待模型完成见上方提示)。")
+    print("执行流程完成(script 步骤已跑;rca 待 fault-tree-rca 技能完成,见上方提示)。")
 
 
 if __name__ == "__main__":
