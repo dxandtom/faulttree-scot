@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 scot-generate 的中间产物打包成一个自包含的场景 skill。
+"""把 cs-scot-generate 的中间产物打包成一个自包含的场景 skill。
 
 会做:建目录、拷子树/各指标脚本/codegen 提示词、拷 data_loader/runner/rca_rules、
 生成 plan.json、由模板渲染场景 SKILL.md。产出目录可直接作为平台 skill 上传。
@@ -15,11 +15,11 @@ from pathlib import Path
 from typing import List
 
 HERE = Path(__file__).resolve()
-GEN_SKILL = HERE.parents[1]      # skills/scot-generate
+GEN_SKILL = HERE.parents[1]      # skills/cs-scot-generate
 SKILLS_ROOT = HERE.parents[2]    # skills/
 
 DEFAULT_DATA_LOADER = GEN_SKILL / "scripts" / "data_loader.py"
-DEFAULT_RUNNER = SKILLS_ROOT / "scot-execute" / "scripts" / "runner.py"
+DEFAULT_RUNNER = SKILLS_ROOT / "cs-scot-execute" / "scripts" / "runner.py"
 DEFAULT_RCA_RULES = SKILLS_ROOT / "fault-tree-rca" / "references" / "rca_rules.md"
 DEFAULT_TEMPLATE = GEN_SKILL / "references" / "scenario_template" / "SKILL.md.tmpl"
 

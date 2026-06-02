@@ -1,9 +1,9 @@
 ---
-name: scot-generate
+name: cs-scot-generate
 description: 把"故障子树 Excel + 各指标数据样例"编译成一个自包含的故障诊断场景 skill。当用户要为某网络保障场景(如 SA场景接入失败)生成诊断脚本与执行计划 SCoT、或说"生成故障树诊断 skill / 生成解析脚本 / 把这个故障树做成场景"时,务必使用本技能。产物两大件:各指标的解析脚本,以及生成并保存的 SCoT 执行计划 plan.json,最终打包成可上传平台、在独立容器里端到端跑出根因的场景 skill。
 ---
 
-# scot-generate —— 故障诊断场景 skill 生成器
+# cs-scot-generate —— 故障诊断场景 skill 生成器
 
 ## 这个 skill 干什么
 把一个**故障子树(Excel)+ 各指标数据样例**,编译成一个**自包含的场景 skill**(可上传平台、在独立容器里端到端跑出根因)。
@@ -65,7 +65,7 @@ python scripts/assemble_scenario.py \
   --indicators kpi,chr \
   --out examples/<scenario_name>
 ```
-它会把:子树 md、各指标解析脚本、`data_loader.py`、scot-execute 的 `runner.py`、fault-tree-rca 的 `rca_rules.md`、生成的 `plan.json`、以及一份场景 `SKILL.md`(由 `references/scenario_template/SKILL.md.tmpl` 渲染)全部拷/写进 `examples/<scenario_name>/`,形成**可上传的自包含 skill**。
+它会把:子树 md、各指标解析脚本、`data_loader.py`、cs-scot-execute 的 `runner.py`、fault-tree-rca 的 `rca_rules.md`、生成的 `plan.json`、以及一份场景 `SKILL.md`(由 `references/scenario_template/SKILL.md.tmpl` 渲染)全部拷/写进 `examples/<scenario_name>/`,形成**可上传的自包含 skill**。
 
 ## 输出物(位于 examples/<scenario_name>/)
 - `scripts/<ind>_analyzer.py` —— 生成的解析脚本(**产物①**)

@@ -1,9 +1,9 @@
 ---
-name: scot-execute
-description: 执行 scot-generate 产出的场景 SCoT 计划 plan.json:按顺序跑各指标解析脚本,再做综合根因分析,输出根因路径与判断依据。当用户要执行 SCoT、运行某故障诊断场景、或对一个 plan.json 跑出根因时,务必使用本技能。它通常已被打包进每个自包含场景 skill(scripts/runner.py),也可独立对任意 plan.json 使用。
+name: cs-scot-execute
+description: 执行 cs-scot-generate 产出的场景 SCoT 计划 plan.json:按顺序跑各指标解析脚本,再做综合根因分析,输出根因路径与判断依据。当用户要执行 SCoT、运行某故障诊断场景、或对一个 plan.json 跑出根因时,务必使用本技能。它通常已被打包进每个自包含场景 skill(scripts/runner.py),也可独立对任意 plan.json 使用。
 ---
 
-# scot-execute —— SCoT 计划执行器
+# cs-scot-execute —— SCoT 计划执行器
 
 按 `plan.json`(SCoT 执行计划)顺序执行各步骤。计划格式见 `references/plan_schema.md`。
 

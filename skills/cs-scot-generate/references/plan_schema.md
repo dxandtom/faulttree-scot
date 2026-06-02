@@ -1,11 +1,11 @@
 # SCoT Plan(执行计划)Schema v1.0
 
-本文件定义 `scot-generate` **产出**、`scot-execute` **消费**的 SCoT 执行计划(`plan.json`)格式。两个 skill 都遵循本契约。
+本文件定义 `cs-scot-generate` **产出**、`cs-scot-execute` **消费**的 SCoT 执行计划(`plan.json`)格式。两个 skill 都遵循本契约。
 
 ## 设计原则
 - **直线**:故障树的分支判断发生在 RCA 内部(遍历子树),不在计划层。计划只描述"按顺序解析哪些指标,最后做一次根因分析"。
 - **显式 IO**:每个 step 明确声明输入数据与输出文件,杜绝 legacy 里"生产者/消费者路径对不上"的问题。
-- **按 kind 分派**:`scot-execute` 依据 step 的 `kind` 决定怎么执行;新增 kind 只需在 execute 里加一个分支。
+- **按 kind 分派**:`cs-scot-execute` 依据 step 的 `kind` 决定怎么执行;新增 kind 只需在 execute 里加一个分支。
 
 ## 顶层结构
 ```json
@@ -26,7 +26,7 @@
 | `indicators` | 是 | 本场景涉及的指标列表,如 `["kpi","chr"]` |
 | `steps` | 是 | 有序步骤数组,逐个执行 |
 
-## Step kinds(v1 定义两种;`scot-execute` 必须全部支持)
+## Step kinds(v1 定义两种;`cs-scot-execute` 必须全部支持)
 
 ### kind = `script` —— 确定性解析脚本
 ```json

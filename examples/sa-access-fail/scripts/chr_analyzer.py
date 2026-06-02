@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[由 scot-generate 为「SA场景接入失败」生成] chr 指标解析脚本。
+"""[由 cs-scot-generate 为「SA场景接入失败」生成] chr 指标解析脚本。
 
 读取 chr 记录(表格),统计 DCErrType 分布与占比,评估本场景子树涉及的 chr 判断条件。
 每条 condition 都把 expr / values / actual / judgment / hit 算清楚,RCA 直接取用、不再重算。

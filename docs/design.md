@@ -31,7 +31,7 @@
 阶段A 生成(开发态,一次/场景)            阶段B 执行(运行态,多次/数据批次)
 ─────────────────────────────           ─────────────────────────────
 故障树 xlsx (+各指标数据样例)            场景资产 + 实际数据(xlsx/csv)
-        │ scot-generate                          │ scot-execute(harness 驱动)
+        │ cs-scot-generate                          │ cs-scot-execute(harness 驱动)
         ▼                                         ▼
 场景资产:                                顺序跑 parser_1..N → 各指标 JSON
   子树 md + 各指标解析脚本                         │
@@ -43,8 +43,8 @@
 
 | skill | 阶段 | 角色 | 备注 |
 |-------|------|------|------|
-| **scot-generate** | 生成 | 把任意故障子树编译成场景资产 | 核心难点与价值;泛化的"作坊" |
-| **scot-execute** | 执行 | 读 plan、顺序跑脚本、调 RCA | 通用、薄,harness 驱动 |
+| **cs-scot-generate** | 生成 | 把任意故障子树编译成场景资产 | 核心难点与价值;泛化的"作坊" |
+| **cs-scot-execute** | 执行 | 读 plan、顺序跑脚本、调 RCA | 通用、薄,harness 驱动 |
 | **fault-tree-rca** | 执行 | 子树 md + 各指标 JSON → 根因 + 依据 | 通用;契约写死;判断在这里 |
 
 ---
@@ -55,7 +55,7 @@
 |------|----------|
 | 生成提示词(每类指标一份) | 跨所有场景 ✅ |
 | excel→md 转换、xlsx/csv 加载器 | 跨所有场景 ✅ |
-| scot-execute、fault-tree-rca | 跨所有场景 ✅ |
+| cs-scot-execute、fault-tree-rca | 跨所有场景 ✅ |
 | **某场景的解析脚本** | **仅该场景**,但跨该场景**所有数据批次**复用(生成一次,执行多次)✅ |
 | 故障子树 md、plan | 每场景一份 |
 
@@ -98,7 +98,7 @@
 
 ---
 
-## 5. scot-generate 流水线
+## 5. cs-scot-generate 流水线
 
 1. **excel → 子树 md**(确定性,`excel_to_tree.py`)。
 2. **识别指标**:本子树涉及哪些指标(kpi/chr/…)及各自计数器/字段(LLM + 规则)。
@@ -114,7 +114,7 @@
 
 ---
 
-## 6. scot-execute(薄)
+## 6. cs-scot-execute(薄)
 
 - 读场景 plan → 逐 step:
   - `script` step:用对应解析脚本跑该指标数据 → 写出中间 JSON;
@@ -168,7 +168,7 @@
 ## 10. 待定决策(需拍板)
 
 - **A. 判断条件在哪算**:确定性算术进 parser(*推荐*)+ 结构/逻辑判断在 RCA;还是更多交给 RCA 的 LLM?
-- **B. 打包形态**:通用 `scot-execute`+`rca`(上传一次)+ 每场景资产(子树+脚本+plan)作为场景 skill(*推荐,DRY*);
+- **B. 打包形态**:通用 `cs-scot-execute`+`rca`(上传一次)+ 每场景资产(子树+脚本+plan)作为场景 skill(*推荐,DRY*);
   还是每个场景 skill 完全自包含(把 execute/rca 逻辑也内联)?——取决于平台是否支持 skill 调 skill。
 - **C. 生成在哪跑**:开发态由你跑出可上传的场景 skill(*推荐*);还是也要能在平台上当 skill 跑?
 - **D. 指标识别**:从子树自动识别(LLM)还是生成时人工指定本场景查哪些指标?

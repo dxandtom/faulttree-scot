@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[由 scot-generate 为「SA场景接入失败」生成] kpi 指标解析脚本。
+"""[由 cs-scot-generate 为「SA场景接入失败」生成] kpi 指标解析脚本。
 
 读取 kpiTree 格式数据(每行一段 JSON,含 name 与 value),清洗计数器名,
 评估本场景故障子树涉及的 kpi 判断条件。每条 condition 都把

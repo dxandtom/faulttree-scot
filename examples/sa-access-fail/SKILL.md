@@ -5,7 +5,7 @@ description: 诊断「SA场景接入失败」的故障根因。当用户报告 S
 
 # SA场景接入失败 —— 故障诊断场景 skill
 
-本 skill 由 scot-generate 自动生成,自带本场景诊断所需的子树、解析脚本与规则,平台 harness 在容器内运行即可。
+本 skill 由 cs-scot-generate 自动生成,自带本场景诊断所需的子树、解析脚本与规则,平台 harness 在容器内运行即可。
 
 ## 输入
 本场景各指标的数据文件(xlsx 或 csv):kpi、chr。

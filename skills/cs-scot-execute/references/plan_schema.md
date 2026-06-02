@@ -1,6 +1,6 @@
 # SCoT Plan(执行计划)Schema v1.0 —— 执行侧视图
 
-> 本文件与 `scot-generate/references/plan_schema.md` 保持一致(同一份契约的执行侧镜像)。`scot-execute` 依据它消费 `plan.json`。
+> 本文件与 `cs-scot-generate/references/plan_schema.md` 保持一致(同一份契约的执行侧镜像)。`cs-scot-execute` 依据它消费 `plan.json`。
 
 ## 顶层结构
 ```json

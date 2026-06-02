@@ -8,7 +8,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 诊断链路的最后一步:把"各指标已经解析好的结果"和"故障子树"放在一起,判定根因。
 
 ## 上游喂给你什么(输入契约)
-通常由 `scot-execute` 汇总在 `result/rca_input.json` 里:
+通常由 `cs-scot-execute` 汇总在 `result/rca_input.json` 里:
 - **`fault_tree_md`**:故障子树正文。`#/##/###` 表层级;每个标题下面跟着该节点的判断条件正文。**由人工编写,可能不规整、有跳跃或笔误。**
 - **`indicator_results`**:dict,键是指标名(`kpi` / `chr` / 未来任意指标),值是该指标解析脚本输出的 JSON。其中 **`conditions`** 数组每项已由脚本**确定性算好**:`expr`(判断条件逐字)、`values`(实际数值)、`actual`(实际数值文字)、`judgment`(代入比较 + 结论)、`hit`(是否成立)。
 
