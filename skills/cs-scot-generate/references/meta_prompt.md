@@ -1,51 +1,31 @@
-# 元提示词:为某个指标生成「解析脚本生成提示词」
+# 解析引擎契约(`scripts/analyzer.py` 做什么、产出什么)
 
-## 你的角色与三级链
-你是提示词工程师。给你(指标名 + 故障子树 + 该指标数据的真实表头/样例),你要产出**一份「解析脚本生成提示词」**(第 2 级)。
-你产出的提示词**直接对"写脚本的 LLM"说话**,口吻是"**请写一个解析 XX 数据的 Python 脚本,满足……**"。
+> 历史上这里是"生成解析脚本的元提示词";现已收敛为**一个通用引擎** `scripts/analyzer.py`,
+> 本文档描述它的契约。**不再每场景生成代码**——引擎看数据形态、做对应的事。
 
-## 输入(调用时注入)
-1. 指标名。 2. 故障子树(md)。 3. 该指标数据的**真实表头/结构 + 一小段真实样例**。
+## 最高铁律:只查数据 / 抽规则,绝不下判断
+引擎只产**事实 / 规则**:绝不输出 `hit`/`judgment`/`conditions`、绝不替你做"故障树匹配"、绝不发明阈值。
+是否成立、根因、以及"故障树引用了哪些字段 / 计数器",**全部由 fault-tree-rca 拿着故障树去做**。
 
-## 你产出的「解析脚本生成提示词」必须包含下列各条
+## 自动判别数据形态
+- **tabular(表格型,如 CHR)**:多列记录。逐列**数据驱动**统计(按"值"判别数值 / 类别,**不看列名**):
+  - 数值列 → count/min/max/mean;类别列 → top-N 计数 + distinct + 每个 top 值几个样例标识。
+- **catalog(目录型,如 kpiTree)**:单列、每行一段 JSON。当"规则字典":
+  - 遍历每行所有键做统计(`field_stats`);
+  - 对有 `formula`/阈值的节点抽**规则**:`formula`、`absExceptionThreshold`/`highCondition`/`lowCondition`、`unit`、`definition`,
+    并从 `formula` 正则抽 `N./L.` 原始计数器(段内可含 `-`,清洗 `<span`/`&gt;` 污染);
+  - 建 `counter_index`:计数器 → 用到它的 KPI(`name`/`kpiIndex`/`formula`/阈值)+ `usage_count`。
+  - **注意:kpiTree 记录的是"计算方式与阈值",不是实测值** —— 所以这里**没有计数器取值**。
 
-### 〇、最高铁律:脚本只"查数据",绝不"下判断"
-- 脚本**唯一职责**:把数据**忠实地查清楚、统计出来**——① 数据驱动地遍历真实字段做统计;② 把故障树引用到的计数器/字段**定向取出其值/计数**。
-- **绝不**输出 `hit`(是否成立)、`judgment`/结论、"存在 XX 原因导致失败"这类**判断或诊断**;**绝不**在脚本里构造判断条件。是否成立、根因 —— **全部由 fault-tree-rca 去做**。
-- **绝不**发明字段/阈值;**绝不**用相近字段顶替、用粗 substring 凑桶(例如不要把 `'Radio' in DCErrType` 当"无线资源失败")。报**原始分布 / 原始值**,精确比对留给 RCA。
-- 数据里没有的就如实标 `found:false` / 缺失,不编。
+## 输出 JSON(只有事实 / 规则,无判断)
+- **tabular**:`{ "indicator","kind":"tabular","summary":{total_records,columns},"field_stats":{<列>:{...}} }`
+- **catalog**:`{ "indicator","kind":"catalog","summary":{total_nodes,levels,rule_count,distinct_counters},`
+  `"field_stats":{<键>:{...}},"rules":[{id,name,kpiIndex,formula,counters,absExceptionThreshold,...}],`
+  `"counter_index":{"<计数器>":{in_kpis:[{name,kpiIndex,formula,absExceptionThreshold}],usage_count}} }`
 
-### 一、数据驱动地遍历 + 统计(通用,别写死字段)
-脚本要**自动发现数据实际有的字段**并逐字段统计(不要把字段清单写死):
-- 类别字段 → 取值分布(top-N 计数)+ 每个值附几个样例标识(如 CallID);
-- 数值字段 → count / min / max / mean(必要时分位);
-- 目录型(单列、每行一段异构 JSON,如 kpiTree)→ 逐行剥引号 `json.loads`、建 `parentId→id` 树、**遍历每行所有键**汇总有哪些字段与节点规模。
+通篇**没有** `conditions`/`hit`/`judgment`。
 
-### 二、定向提取故障树引用到的东西(只取值,不判断)
-- 把故障树条件里出现的**计数器/字段名**逐个到数据里找:找到 → 给出值/计数 + 所在列(`where`)+ 样例;没找到 → `found:false`。
-- 目录型数据(只有定义、无实测值,如 kpiTree):提取该计数器对应 KPI 的 `formula/kpiIndex/absExceptionThreshold/unit/definition`,并标"无实测值"。
-- **只摆事实,不判断它是否满足条件。**
-
-### 三、映射真实字段(别猜列名)
-先读真实表头/JSON 键,精确对应到真实列/字段;**严禁硬编码猜测的列名**。需要按 `CALLID` 等关联的就真关联,做不了就标缺失。
-
-### 四、自包含 + 形态自动判别
-内联读取函数,**自动判别**表格型 / 单列 JSON 型,兼容 xlsx + 编码自动检测;**不 import 任何本仓自定义模块**。
-
-### 五、输出 JSON(只有事实,没有判断)
-```json
-{
-  "indicator": "<指标名>",
-  "summary": { "total_records|total_nodes": <int>, "...": "..." },
-  "field_stats": { "<字段>": {"kind":"categorical","top":{"值":计数,"...":0},"distinct":<int>,"samples":{"值":["CallID",...]}} 或 {"kind":"numeric","count":N,"min":..,"max":..,"mean":..} },
-  "referenced": { "<故障树引用的计数器/字段>": {"found": true|false, "value": <数>|null, "count": <数>|null, "where":"<列/字段>", "samples":["..."], "definition": {"formula":"...","absExceptionThreshold":"...","unit":"..."}|null } }
-}
-```
-**没有 conditions / hit / judgment 字段。**
-
-### 六、工程要求 + 自检
-- Python 3.11;CLI:数据文件(位置)、`-o/--output`;**自包含**;异常处理;中文注释;路径加引号;可直接运行(xlsx 需 openpyxl)。
-- 自检:产出**全是事实**(统计值/提取值/缺失标记),**通篇没有任何"成立/不成立/根因/judgment"措辞**;合法 JSON。
-
-## 输出格式
-**只输出**那份「解析脚本生成提示词」的 Markdown 正文(对"写脚本的 LLM"说话),不要额外解释或代码块包裹。
+## 给 RCA 的提示(分工)
+- **CHR 类**条件(点名某列 / 取值)→ 用 `field_stats` 评估;
+- **话统计数器**(`N.xxx`)条件 → `counter_index`/`rules` 给定义 / 阈值 / 公式作背景,但**无实测值 → 如实判"数据不足"**;
+- 真实性高于一切:测不到就说测不到,不拿 CHR 分布替代话统阈值。

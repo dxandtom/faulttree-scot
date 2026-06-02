@@ -107,20 +107,24 @@ def main() -> None:
     work = Path(args.work) if args.work else out  # 默认 work==out,产物只此一处
     tree_rel = f"tree/{scenario}.md"
 
-    for sub in ("scripts", "tree", "codegen_prompts"):
+    for sub in ("scripts", "tree"):
         (out / sub).mkdir(parents=True, exist_ok=True)
 
     copy_into(work / "tree" / f"{scenario}.md", out / "tree" / f"{scenario}.md")
+    # 不再每场景生成代码:把同一个通用解析引擎 analyzer.py 按指标命名复制进去。
+    # 引擎自动判别数据形态(tabular/catalog),并按文件名 <ind>_analyzer 自报指标标签。
+    engine = Path(__file__).parent / "analyzer.py"
+    if not engine.exists():
+        print(f"找不到通用解析引擎: {engine}", file=sys.stderr)
+        sys.exit(2)
     for ind in indicators:
-        copy_into(work / "scripts" / f"{ind}_analyzer.py", out / "scripts" / f"{ind}_analyzer.py")
-        copy_into(work / "codegen_prompts" / f"{ind}_codegen_prompt.md",
-                  out / "codegen_prompts" / f"{ind}_codegen_prompt.md")
+        copy_into(engine, out / "scripts" / f"{ind}_analyzer.py")
 
     plan = build_plan(scenario, indicators, tree_rel)
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"已归集场景产物: {out}")
-    print(f"  plan.json(SCoT v4.0)+ scripts/*_analyzer.py + tree/{scenario}.md + codegen_prompts/")
+    print(f"  plan.json(SCoT v4.0)+ scripts/*_analyzer.py(通用引擎副本)+ tree/{scenario}.md")
     run_hint = " ".join(f"--data {ind}=<文件>" for ind in indicators)
     print(f"跑它: python <cs-scot-execute>/scripts/runner.py --plan {out}/plan.json {run_hint}")
 

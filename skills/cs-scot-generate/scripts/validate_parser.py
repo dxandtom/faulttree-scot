@@ -59,8 +59,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="验证生成的解析脚本能否产出合法 JSON")
     ap.add_argument("script")
     ap.add_argument("data")
-    ap.add_argument("--expect-keys", default="indicator,summary,field_stats,referenced",
-                    help="逗号分隔的预期顶层字段(默认 indicator,summary,field_stats,referenced)")
+    ap.add_argument("--expect-keys", default="indicator,kind,summary,field_stats",
+                    help="逗号分隔的预期顶层字段(默认 indicator,kind,summary,field_stats)")
     args = ap.parse_args()
     keys = [k.strip() for k in args.expect_keys.split(",") if k.strip()]
     ok, msg = validate(args.script, args.data, keys)

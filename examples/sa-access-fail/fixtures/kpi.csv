@@ -1,5 +1,5 @@
 KpiTreeJson
-{"name":"N.RRC.SetupAtt.Sum","value":"1200"}
-{"name":"N.RRC.SetupSucc.Sum","value":"1100"}
-{"name":"N.RRC.SetupFail.NoRes<span","value":"60"}
-{"name":"N.NG.Setup.Fail.NoRsp","value":"0"}
+{"category":"Main KPI","id":"40000","level":1,"mode":"NR","name":"接入性","neName":"接入性","parentId":"0"}
+{"absExceptionThreshold":"<90","definition":"RRC建立成功率","formula":"(\"L.RRC.ConnReq.Succ\" / \"L.RRC.ConnReq.Att\")*100","highCondition":"99.0","id":"60001","kpiIndex":"RRC Setup Success Rate","level":0,"lowCondition":"98.0","mode":"NR","name":"RRC Setup Success Rate","parentId":"40000","unit":"%"}
+{"absExceptionThreshold":"","definition":"RRC建立失败次数","formula":"\"L.RRC.ConnReq.Att\"-\"L.RRC.ConnReq.Succ\"","id":"60007","kpiIndex":"RRC Setup Failure Times","level":0,"mode":"NR","name":"RRC Setup Failure Times","parentId":"40000","unit":"times"}
+{"absExceptionThreshold":"<90","definition":"呼叫建立成功率","formula":"(\"L.RRC.ConnReq.Succ\"/\"L.RRC.ConnReq.Att\")*(\"L.S1Sig.ConnEst.Succ\"/\"L.S1Sig.ConnEst.Att\")*100","id":"60000","kpiIndex":"CSSR","level":0,"mode":"NR","name":"CSSR","parentId":"40000","unit":"%"}
