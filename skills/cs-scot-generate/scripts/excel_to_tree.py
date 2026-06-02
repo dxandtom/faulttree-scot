@@ -12,7 +12,8 @@
     python excel_to_tree.py "<故障树.xlsx>" -o "<输出.md>" --start-node "<场景名>"
 
 要点:
-- `--start-node` 会自动定位该场景名在第几层,只截取**以它为根的子树**(不必再传 --start-level)。
+- 背景业务知识:场景节点通常在 **L2**,所以 `--start-level` 默认 2,`--start-node` 在该层选具体场景;
+  万一不在 L2,会自动在其它层找到该场景名并以它为根截取(兜底)。
 - `--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`;传 `--exclude-pattern ""` 可保留全部。
 读 xlsx 需要 openpyxl(pip install openpyxl);csv 用标准库即可。
 """
@@ -31,6 +32,8 @@ _JUDGMENT_HEADER = "Judgment Condition(Chinese)"
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
 # 现网导出里常见的"自动萃取"噪声节点,默认排除(与同事产出 69KB 子树的做法一致)
 DEFAULT_EXCLUDE = r"萃取新增节点-.*"
+# 背景业务知识:场景节点通常位于第 2 层(L2)
+DEFAULT_START_LEVEL = 2
 
 
 def _read_table(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
@@ -91,11 +94,10 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                exclude_pattern: Optional[str] = None) -> Dict[str, Any]:
     """把扁平的行数据按层级列拼成嵌套树;判断条件挂到每行最深的节点上。
 
-    路径截取规则:
-    - 给了 start_node:**自动定位**它在该行路径中的位置,取"以它为根"的子路径
-      (因此不必关心场景名在第几层);该行不含 start_node 则跳过。
-    - 否则给了 start_level:从该层开始截。
-    - 都没给:用整条路径。
+    路径截取规则(给了 start_node 时):
+    - 优先在 start_level 层(默认 L2,背景业务知识)匹配场景名;
+    - 若该层不是,则在该行任意层找到 start_node 并以它为根(兜底);
+    - 都没有则跳过该行。
     """
     tree: Dict[str, Any] = {}
     exclude_re = re.compile(exclude_pattern) if exclude_pattern else None
@@ -115,9 +117,13 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                 judgment = jv
 
         if start_node:
-            if start_node not in full:
+            sl = start_level or 1
+            if len(full) >= sl and full[sl - 1] == start_node:
+                path = full[sl - 1:]                    # 优先:场景名在 L2
+            elif start_node in full:
+                path = full[full.index(start_node):]    # 兜底:在别的层找到也认
+            else:
                 continue
-            path = full[full.index(start_node):]          # 以场景名为根,自动定位层级
         elif start_level and start_level > 1:
             path = full[start_level - 1:]
         else:
@@ -183,8 +189,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="故障树 Excel → 层级 Markdown 子树")
     ap.add_argument("excel_path", help="故障树 Excel 路径(.xlsx)")
     ap.add_argument("-o", "--output", help="输出 md 路径")
-    ap.add_argument("--start-node", help="场景名;自动定位层级,截取以它为根的子树(强烈建议传)")
-    ap.add_argument("--start-level", type=int, help="(可选)未给 start-node 时,从第几层开始截")
+    ap.add_argument("--start-node", help="场景名;在 start-level 层选定该场景,截取以它为根的子树(强烈建议传)")
+    ap.add_argument("--start-level", type=int, default=DEFAULT_START_LEVEL,
+                    help=f"场景所在层级,默认 {DEFAULT_START_LEVEL}(背景业务知识:场景通常在 L2)")
     ap.add_argument("--exclude-pattern", default=DEFAULT_EXCLUDE,
                     help=f"正则;任一层级值命中则整行排除。默认 {DEFAULT_EXCLUDE!r};传 \"\" 可保留全部")
     args = ap.parse_args()

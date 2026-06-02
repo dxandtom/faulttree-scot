@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把 cs-scot-generate 的中间产物归集成一个场景的诊断产物(资产,不是 skill)。
 
-产物 = plan.json(SCoT) + scripts/<指标>_analyzer.py(自包含解析脚本)
+产物 = plan.json(真正的 SCoT 计划)+ scripts/<指标>_analyzer.py(自包含解析脚本)
        + tree/<场景>.md + codegen_prompts/(留痕)。由 cs-scot-execute 来跑。
 """
 from __future__ import annotations
@@ -15,25 +15,45 @@ from typing import List
 
 
 def build_plan(scenario: str, indicators: List[str], tree_rel: str) -> dict:
-    """生成直线 SCoT 计划:每指标一个 script 步骤 + 末尾一个 rca 步骤。"""
-    steps = []
-    for ind in indicators:
-        steps.append({
-            "id": ind, "kind": "script",
-            "run": f"scripts/{ind}_analyzer.py",
-            "data": f"$data.{ind}",
-            "out": f"result/{ind}.json",
-            "desc": f"解析 {ind} 指标",
+    """生成一份符合 SCoT plan schema 的直线计划。
+
+    - 每个指标 → 一个 kind=script 节点(跑解析脚本,产出存入 $memory.<指标>_result);
+    - 末尾 → 一个 kind=agent_skill 节点(fault-tree-rca,综合根因);
+    - 节点用 transition.next_on_success 串成直线,引用用 $input/$memory/$output。
+    """
+    nodes = []
+    for i, ind in enumerate(indicators):
+        nxt = indicators[i + 1] if i + 1 < len(indicators) else "rca"
+        nodes.append({
+            "id": ind,
+            "kind": "script",
+            "name": f"{ind}_analyzer",
+            "purpose": f"解析 {ind} 指标",
+            "inputs": {"data": f"$input.{ind}"},
+            "outputs": {"result": f"$memory.{ind}_result"},
+            "transition": {"next_on_success": nxt},
         })
-    steps.append({
-        "id": "rca", "kind": "rca",
-        "tree": tree_rel,
-        "inputs": [f"result/{ind}.json" for ind in indicators],
-        "out": "result/rca.json",
-        "desc": "综合根因分析(用 fault-tree-rca 技能)",
+    nodes.append({
+        "id": "rca",
+        "kind": "agent_skill",
+        "name": "fault-tree-rca",
+        "purpose": "综合根因分析",
+        "inputs": {"fault_tree_md": "$memory.fault_tree_md",
+                   **{ind: f"$memory.{ind}_result" for ind in indicators}},
+        "outputs": {"result": "$output.final_answer"},
+        "transition": {"end": True},
     })
-    return {"version": "1.0", "scenario": scenario, "fault_tree": tree_rel,
-            "indicators": indicators, "steps": steps}
+    return {
+        "version": "4.0",
+        "plan_id": f"plan_{scenario}",
+        "meta": {
+            "goal": f"诊断「{scenario}」的根因",
+            "success_criteria": ["输出所有成立的根因路径与逐条判断依据"],
+        },
+        "entry": indicators[0] if indicators else "rca",
+        "memory_init": {"fault_tree_md": tree_rel},
+        "nodes": nodes,
+    }
 
 
 def copy_into(src: Path, dst: Path) -> None:
@@ -75,7 +95,7 @@ def main() -> None:
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"已归集场景产物: {out}")
-    print(f"  plan.json(SCoT) + scripts/*_analyzer.py + tree/{scenario}.md + codegen_prompts/")
+    print(f"  plan.json(SCoT v4.0)+ scripts/*_analyzer.py + tree/{scenario}.md + codegen_prompts/")
     run_hint = " ".join(f"--data {ind}=<文件>" for ind in indicators)
     print(f"跑它: python <cs-scot-execute>/scripts/runner.py --plan {out}/plan.json {run_hint}")
 

@@ -1,34 +1,21 @@
-# SCoT Plan(执行计划)Schema v1.0 —— 执行侧视图
+# SCoT Plan Schema —— 执行侧视图
 
-> 本文件与 `cs-scot-generate/references/plan_schema.md` 保持一致(同一份契约的执行侧镜像)。`cs-scot-execute` 依据它消费 `plan.json`。
+> 与 `cs-scot-generate/references/plan_schema.md` 同一份契约。`plan.json` 是真正的
+> **SCoT 计划**(SCoT v4.0 的子集),`cs-scot-execute` 据此执行。
 
-## 顶层结构
-```json
-{
-  "version": "1.0",
-  "scenario": "SA场景接入失败",
-  "fault_tree": "tree/SA场景接入失败.md",
-  "indicators": ["kpi", "chr"],
-  "steps": [ /* 有序,逐个执行 */ ]
-}
-```
+## 执行模型
+1. 读 `entry` → 当前节点;用 `memory_init` 初始化工作记忆。
+2. 按 `kind` 分派当前节点:
+   - **`script`**:`name`→`scripts/<name>.py`;解析 `inputs`(`data` 解析成数据文件),
+     跑 `python scripts/<name>.py <数据> -o <临时>`,产出 JSON 按 `outputs` 写入 `$memory`。
+   - **`agent_skill`**:解析 `inputs`(`fault_tree_md` 路径读成正文,其余归到
+     `indicator_results`),备到 `result/rca_input.json`,由 `name` 指定的技能(fault-tree-rca)产出结果。
+3. 沿 `transition.next_on_success` 走到下一节点;`transition.end=true` 结束。
 
-## Step kinds(execute 必须全部支持)
-
-### `script` —— 确定性解析脚本
-```json
-{"id":"kpi","kind":"script","run":"scripts/kpi_analyzer.py","data":"$data.kpi","out":"result/kpi.json"}
-```
-执行:`<python> <run> <绑定数据> -o <out>`。`data` 为 `$data.<指标>` 占位,运行时由 `--data <指标>=<文件>` 绑定到实际 xlsx/csv。解析脚本自包含(无外部依赖)。
-
-### `rca` —— 综合根因分析(唯一模型判断步骤)
-```json
-{"id":"rca","kind":"rca","tree":"tree/x.md","inputs":["result/kpi.json","result/chr.json"],"out":"result/rca.json"}
-```
-执行:汇总 `tree` 正文 + 各 `inputs` JSON → `result/rca_input.json`;再由 **fault-tree-rca 技能**依据它产出 `out`。
-
-## 路径解析
-所有相对路径相对 `--base`(默认 `plan.json` 所在目录)解析。
+## 引用
+`$input.<key>`(由 `--data key=<文件>` 绑定)/ `$memory.<path>` / `$step.<id>.<field>` / `$output.<key>`。
+路径不存在 → `null`。
 
 ## 扩展
-新增 step kind 时:① 在本 schema 增加定义;② 在 `scripts/runner.py` 的分派里加一个分支。当前 v1 仅 `script` / `rca`。
+新增 kind / 转移特性时:① 对齐 SCoT schema;② 在 `scripts/runner.py` 的分派里加分支。
+当前实现 `script` / `agent_skill` + 直线转移。

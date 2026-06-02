@@ -3,11 +3,15 @@
 本目录是 `cs-scot-generate` 产出的一份**场景诊断产物**(资产,不是 skill)示例。
 所有数据均为**虚构**,仅演示链路与契约,不含真实/保密数据。
 
-## 产物构成(generate 的三样产物)
-- `plan.json` —— SCoT 执行计划(产物①)
-- `scripts/kpi_analyzer.py`、`scripts/chr_analyzer.py` —— 各指标解析脚本(产物②,**自包含**,内联读取、不 import 本仓模块)
-- `tree/SA场景接入失败.md` —— 故障树 md(产物③)
-- `codegen_prompts/` —— 生成各脚本所用的提示词(留痕);`fixtures/` —— 演示用假数据
+## 产物构成
+- `plan.json` —— **真正的 SCoT 计划**(v4.0:`entry` + `nodes` + `transition` + `$ref`)。
+- `scripts/kpi_analyzer.py`、`scripts/chr_analyzer.py` —— 各指标解析脚本(**自包含、精简**)。
+- `tree/SA场景接入失败.md` —— 故障树 md。
+- `codegen_prompts/` —— 生成各脚本所用提示词(留痕);`fixtures/` —— 演示用假数据。
+
+## plan.json 是怎样一份 SCoT
+直线三节点:`kpi`(script)→ `chr`(script)→ `rca`(agent_skill = fault-tree-rca);
+节点间用 `$input.kpi` / `$memory.kpi_result` / `$output.final_answer` 等引用传数据。
 
 ## 跑一遍(用 cs-scot-execute 的执行器)
 ```bash
@@ -15,8 +19,9 @@ python ../../skills/cs-scot-execute/scripts/runner.py \
   --plan plan.json \
   --data kpi=fixtures/kpi.csv --data chr=fixtures/chr.csv
 ```
-产出 `result/kpi.json`、`result/chr.json`、`result/rca_input.json`;
-最后一步 RCA 由 **fault-tree-rca 技能**依据 `rca_input.json` 产出 `result/rca.json`。
+runner 从 `entry` 出发遍历节点:跑两个 script 节点(结果存入工作记忆),到 `agent_skill`
+节点时把"故障树正文 + 各指标解析结果"汇总成 `result/rca_input.json`,交给
+**fault-tree-rca 技能**产出 `result/rca.json`。
 
 ## 本样例数据下,各条件的判断(脚本算出的 `judgment`)
 - kpi:`1200 - 1100 = 100 > 0 → 成立`;`N.RRC.SetupFail.NoRes = 60 > 0 → 成立`;`N.NG.Setup.Fail.NoRsp = 0 > 0 → 不成立`
@@ -40,4 +45,3 @@ python ../../skills/cs-scot-execute/scripts/runner.py \
    ]}
 ]
 ```
-说明:每条 evidence 都讲清「规则 `condition` + 实际值 `actual` + 怎么判断 `judgment`」。

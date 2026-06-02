@@ -1,63 +1,57 @@
-# SCoT Plan(执行计划)Schema v1.0
+# SCoT Plan Schema(本项目采用 SCoT v4.0 的子集)
 
-本文件定义 `cs-scot-generate` **产出**、`cs-scot-execute` **消费**的 SCoT 执行计划(`plan.json`)格式。两个 skill 都遵循本契约。
+`cs-scot-generate` 产出、`cs-scot-execute` 消费的 **`plan.json` 是一份真正的 SCoT 计划**,
+遵循 SCoT plan schema(见仓库 `scot_reference/plan_schema.md`)。我们只用它的**子集**:
+- 节点 `kind` 只用 `script`(跑解析脚本)和 `agent_skill`(模型判断,fault-tree-rca);
+- 转移只用直线 `transition.next_on_success` / `end`;
+- 节点间用 `$input` / `$memory` / `$step.<id>` / `$output` 引用传数据。
 
-## 设计原则
-- **直线**:故障树的分支判断发生在 RCA 内部(遍历子树),不在计划层。计划只描述"按顺序解析哪些指标,最后做一次根因分析"。
-- **显式 IO**:每个 step 明确声明输入数据与输出文件,杜绝 legacy 里"生产者/消费者路径对不上"的问题。
-- **按 kind 分派**:`cs-scot-execute` 依据 step 的 `kind` 决定怎么执行;新增 kind 只需在 execute 里加一个分支。
+这样产出的就是**合法 SCoT 计划**,既能被本项目的轻量执行器跑,也兼容真 SCoT 执行器。
 
 ## 顶层结构
 ```json
 {
-  "version": "1.0",
-  "scenario": "SA场景接入失败",
-  "fault_tree": "tree/SA场景接入失败.md",
-  "indicators": ["kpi", "chr"],
-  "steps": [ /* 见下 */ ]
+  "version": "4.0",
+  "plan_id": "plan_<场景>",
+  "meta": {"goal": "...", "success_criteria": ["..."]},
+  "entry": "<起始节点 id>",
+  "memory_init": {"fault_tree_md": "tree/<场景>.md"},
+  "nodes": [ /* 见下 */ ]
 }
 ```
+- `entry`:从哪个节点开始;`memory_init`:工作记忆初值(这里放故障树 md 路径)。
 
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `version` | 是 | 计划格式版本,当前 `"1.0"` |
-| `scenario` | 是 | 场景名 |
-| `fault_tree` | 是 | 故障子树 md 的相对路径(场景产物内) |
-| `indicators` | 是 | 本场景涉及的指标列表(由用户数据决定),如 `["kpi","chr"]` |
-| `steps` | 是 | 有序步骤数组,逐个执行 |
+## 节点(NodeSpec)
 
-## Step kinds(v1 定义两种;`cs-scot-execute` 必须全部支持)
-
-### kind = `script` —— 确定性解析脚本
+### kind = `script` —— 跑解析脚本(确定性)
 ```json
-{"id":"kpi","kind":"script","run":"scripts/kpi_analyzer.py","data":"$data.kpi","out":"result/kpi.json","desc":"解析 kpi 指标"}
+{"id":"kpi","kind":"script","name":"kpi_analyzer","purpose":"解析 kpi 指标",
+ "inputs":{"data":"$input.kpi"},
+ "outputs":{"result":"$memory.kpi_result"},
+ "transition":{"next_on_success":"chr"}}
 ```
-- 执行语义:`<python> <run> <实际数据文件> -o <out>`。
-- `data` 用占位符 `$data.<指标名>`,执行时由调用方/harness 绑定到该指标的实际数据文件(xlsx/csv)。
-- 用途:把某指标原始数据**抽取/计算**成规范 JSON,确定性计算都在这里完成。解析脚本是**自包含**的(内联读取,无外部依赖)。
+- `name` → `scripts/<name>.py`;runner 执行 `python scripts/<name>.py <inputs.data 解析出的数据文件> -o <临时>`,把产出 JSON 存到 `outputs` 指定的 `$memory` 位置。
+- `inputs.data` 用 `$input.<指标>` 占位,运行时由 `--data <指标>=<文件>` 绑定。
 
-### kind = `rca` —— 综合根因分析(唯一的模型判断步骤)
+### kind = `agent_skill` —— 模型判断(fault-tree-rca)
 ```json
-{"id":"rca","kind":"rca","tree":"tree/SA场景接入失败.md","inputs":["result/kpi.json","result/chr.json"],"out":"result/rca.json","desc":"综合根因分析(用 fault-tree-rca 技能)"}
+{"id":"rca","kind":"agent_skill","name":"fault-tree-rca","purpose":"综合根因分析",
+ "inputs":{"fault_tree_md":"$memory.fault_tree_md","kpi":"$memory.kpi_result","chr":"$memory.chr_result"},
+ "outputs":{"result":"$output.final_answer"},
+ "transition":{"end":true}}
 ```
-- 执行语义:把 `tree` 正文 + 各 `inputs` JSON 汇总成 `result/rca_input.json`,再由 **fault-tree-rca 技能**(模型判断)产出根因数组写到 `out`。
-- 前面的 `script` 步骤都是确定性的;只有这一步是模型判断,用来吸收人工编写故障树的不规整/谬误。
-- (注:RCA 规则与契约由 fault-tree-rca 技能自带,不放在场景产物里。)
+- runner 解析 inputs(`fault_tree_md` 若是 md 路径则读成正文,其余按指标名归到 `indicator_results`),
+  备到 `result/rca_input.json`,由 **fault-tree-rca 技能**依据它产出根因。
 
-## 引用占位
-- `$data.<指标名>`:运行时绑定的该指标实际数据文件路径(xlsx 或 csv)。
+## 引用命名空间
+| 前缀 | 含义 |
+|------|------|
+| `$input.<key>` | 运行时 `--data key=<文件>` 绑定的输入 |
+| `$memory.<path>` | 工作记忆(节点输出写这里、下游从这里读) |
+| `$step.<id>.<field>` | 某节点的输出字段 |
+| `$output.<key>` | 最终输出缓冲 |
 
-## 一个完整示例
-```json
-{
-  "version": "1.0",
-  "scenario": "SA场景接入失败",
-  "fault_tree": "tree/SA场景接入失败.md",
-  "indicators": ["kpi", "chr"],
-  "steps": [
-    {"id":"kpi","kind":"script","run":"scripts/kpi_analyzer.py","data":"$data.kpi","out":"result/kpi.json","desc":"解析 kpi 指标"},
-    {"id":"chr","kind":"script","run":"scripts/chr_analyzer.py","data":"$data.chr","out":"result/chr.json","desc":"解析 chr 指标"},
-    {"id":"rca","kind":"rca","tree":"tree/SA场景接入失败.md","inputs":["result/kpi.json","result/chr.json"],"out":"result/rca.json","desc":"综合根因分析(用 fault-tree-rca 技能)"}
-  ]
-}
-```
+## 暂未用到的(保持轻量,schema 兼容,需要再加)
+SCoT 还有 `llm_text` / `ask_user` / `noop` / `for_each` 等 kind,以及
+`transition.conditions` / `parallel_after` / `meta.budget` / `reflection` / `policy` 等。
+本项目是直线诊断,用不到这些,先不实现。

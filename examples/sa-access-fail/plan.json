@@ -1,38 +1,63 @@
 {
-  "version": "1.0",
-  "scenario": "SA场景接入失败",
-  "fault_tree": "tree/SA场景接入失败.md",
-  "indicators": [
-    "kpi",
-    "chr"
-  ],
-  "steps": [
+  "version": "4.0",
+  "plan_id": "plan_SA场景接入失败",
+  "meta": {
+    "goal": "诊断「SA场景接入失败」的根因",
+    "success_criteria": [
+      "输出所有成立的根因路径与逐条判断依据"
+    ]
+  },
+  "entry": "kpi",
+  "memory_init": {
+    "fault_tree_md": "tree/SA场景接入失败.md"
+  },
+  "nodes": [
     {
       "id": "kpi",
       "kind": "script",
-      "run": "scripts/kpi_analyzer.py",
-      "data": "$data.kpi",
-      "out": "result/kpi.json",
-      "desc": "解析 kpi 指标"
+      "name": "kpi_analyzer",
+      "purpose": "解析 kpi 指标",
+      "inputs": {
+        "data": "$input.kpi"
+      },
+      "outputs": {
+        "result": "$memory.kpi_result"
+      },
+      "transition": {
+        "next_on_success": "chr"
+      }
     },
     {
       "id": "chr",
       "kind": "script",
-      "run": "scripts/chr_analyzer.py",
-      "data": "$data.chr",
-      "out": "result/chr.json",
-      "desc": "解析 chr 指标"
+      "name": "chr_analyzer",
+      "purpose": "解析 chr 指标",
+      "inputs": {
+        "data": "$input.chr"
+      },
+      "outputs": {
+        "result": "$memory.chr_result"
+      },
+      "transition": {
+        "next_on_success": "rca"
+      }
     },
     {
       "id": "rca",
-      "kind": "rca",
-      "tree": "tree/SA场景接入失败.md",
-      "inputs": [
-        "result/kpi.json",
-        "result/chr.json"
-      ],
-      "out": "result/rca.json",
-      "desc": "综合根因分析(用 fault-tree-rca 技能)"
+      "kind": "agent_skill",
+      "name": "fault-tree-rca",
+      "purpose": "综合根因分析",
+      "inputs": {
+        "fault_tree_md": "$memory.fault_tree_md",
+        "kpi": "$memory.kpi_result",
+        "chr": "$memory.chr_result"
+      },
+      "outputs": {
+        "result": "$output.final_answer"
+      },
+      "transition": {
+        "end": true
+      }
     }
   ]
 }

@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""SCoT 执行器:按 plan.json 顺序执行各 step,支持 plan 定义的所有 kind。
+"""cs-scot-execute —— 轻量 SCoT 计划执行器。
 
-- kind=script: 跑某指标解析脚本(确定性,脚本自包含),产出该指标结果 JSON。
-- kind=rca:    把子树正文 + 各指标结果汇总成 result/rca_input.json,然后由
-               fault-tree-rca 技能(模型判断)依据它产出 result/rca.json。
+执行一份符合 SCoT plan schema 的 plan.json:从 entry 出发,按 transition 遍历 nodes,
+用工作记忆(working memory)+ 引用表达式($input / $memory / $step.<id> / $output)
+在节点之间传数据。
+
+支持的 node kind(SCoT schema 的子集):
+- script:      跑一个自包含解析脚本(确定性);约定脚本 CLI 为
+               `python scripts/<name>.py <数据文件> -o <输出.json>`,产出 JSON 存入 outputs。
+- agent_skill: prompt-only 技能(模型判断,如 fault-tree-rca);runner 把解析好的 inputs
+               备到 result/<id>_input.json,由所在 agent 执行该技能产出结果。
+
+保持轻量:暂不实现 budget / reflection / parallel_after / conditions 等重型特性。
 
 用法:
     runner.py --plan plan.json --data kpi=<file> --data chr=<file> [--base <dir>]
@@ -12,63 +20,127 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
+
+_TOK = re.compile(r"[^.\[\]]+|\[\d+\]")
 
 
-def _resolve(base: Path, rel: str) -> Path:
-    """相对路径按 base(默认 plan 所在目录)解析。"""
-    p = Path(rel)
-    return p if p.is_absolute() else (base / p)
+def _get_path(obj: Any, path: str) -> Any:
+    """按 a.b[0].c 在嵌套结构里取值;取不到返回 None。"""
+    cur = obj
+    for tok in _TOK.findall(path):
+        if tok.startswith("["):
+            i = int(tok[1:-1])
+            cur = cur[i] if isinstance(cur, list) and -len(cur) <= i < len(cur) else None
+        else:
+            cur = cur.get(tok) if isinstance(cur, dict) else None
+        if cur is None:
+            return None
+    return cur
 
 
-def _bind_data(data_ref: str, data_map: Dict[str, str]) -> str:
-    """把 $data.<指标> 占位绑定到 --data 传入的实际文件;也允许直接写死路径。"""
-    if data_ref.startswith("$data."):
-        key = data_ref[len("$data."):]
-        if key not in data_map:
-            raise KeyError(f"步骤需要数据 '{key}',但未通过 --data {key}=<file> 提供")
-        return data_map[key]
-    return data_ref
+def _set_path(obj: dict, path: str, value: Any) -> None:
+    """按 a.b.c 写入嵌套 dict。"""
+    parts = path.split(".")
+    cur = obj
+    for p in parts[:-1]:
+        cur = cur.setdefault(p, {})
+    cur[parts[-1]] = value
 
 
-def run_script_step(step: dict, base: Path, data_map: Dict[str, str]) -> None:
-    """执行 kind=script 步骤:跑解析脚本并校验产出。"""
-    run = _resolve(base, step["run"])
-    out = _resolve(base, step["out"])
-    out.parent.mkdir(parents=True, exist_ok=True)
-    data_path = _resolve(base, _bind_data(step["data"], data_map))
-    cmd = [sys.executable, str(run), str(data_path), "-o", str(out)]
-    print(f"[script] {step['id']}: {' '.join(cmd)}")
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if proc.returncode != 0:
-        raise RuntimeError(f"步骤 {step['id']} 失败 (exit {proc.returncode}):\n{proc.stderr[-2000:]}")
-    if not out.exists():
-        raise RuntimeError(f"步骤 {step['id']} 未产出 {out}")
-    print(f"         → {out}")
+def resolve_ref(ref: Any, ctx: Dict[str, Any]) -> Any:
+    """解析引用表达式;非 $ 引用按字面量原样返回。
+
+    支持 $input.x / $memory.x.y / $step.<id>.field / $output.x。
+    """
+    if not isinstance(ref, str):
+        return ref
+    for ns in ("input", "memory", "output"):
+        pre = f"${ns}."
+        if ref.startswith(pre):
+            return _get_path(ctx[ns], ref[len(pre):])
+    if ref.startswith("$step."):
+        nid, _, p = ref[len("$step."):].partition(".")
+        node_out = ctx["step"].get(nid, {})
+        return _get_path(node_out, p) if p else node_out
+    return ref  # 字面量
 
 
-def run_rca_step(step: dict, base: Path) -> Path:
-    """执行 kind=rca 步骤:汇总输入,交给 fault-tree-rca 技能(模型)产出根因。"""
-    tree = _resolve(base, step["tree"]).read_text(encoding="utf-8")
-    inputs = {}
-    for rel in step["inputs"]:
-        p = _resolve(base, rel)
-        inputs[Path(rel).stem] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+def resolve_inputs(inputs: dict, ctx: Dict[str, Any]) -> dict:
+    """把节点 inputs 里的每个引用都解析成实际值。"""
+    return {k: resolve_ref(v, ctx) for k, v in (inputs or {}).items()}
 
-    rca_input = {"fault_tree_md": tree, "indicator_results": inputs}
-    rca_input_path = _resolve(base, "result/rca_input.json")
-    rca_input_path.parent.mkdir(parents=True, exist_ok=True)
-    rca_input_path.write_text(json.dumps(rca_input, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    out = _resolve(base, step["out"])
-    print(f"[rca] {step['id']}: 已汇总输入 → {rca_input_path}")
-    print(f"[rca] 这是模型判断步骤。请用 fault-tree-rca 技能,依据上述输入产出 {out}。")
-    print('[rca] 输出契约: [{"Root_cause":...,"Fault_tree_path":[...],'
-          '"evidence_path":[{"node":...,"condition":...,"actual":...,"judgment":...}]}]')
-    return rca_input_path
+def store_outputs(outputs: dict, value: Any, ctx: Dict[str, Any]) -> None:
+    """把节点产出(一个 JSON 对象)按 outputs 映射写入 $memory / $output。
+
+    约定:script / agent_skill 的产出整体是一个对象;outputs 一般只有一项
+    形如 {"result": "$memory.kpi_result"},表示把整个产出存到该位置。
+    """
+    for field, target in (outputs or {}).items():
+        v = value.get(field, value) if isinstance(value, dict) and field in value else value
+        if isinstance(target, str) and target.startswith("$memory."):
+            _set_path(ctx["memory"], target[len("$memory."):], v)
+        elif isinstance(target, str) and target.startswith("$output."):
+            _set_path(ctx["output"], target[len("$output."):], v)
+
+
+def run_script_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
+    """执行 kind=script 节点:跑 scripts/<name>.py <数据> -o <tmp>,返回其 JSON 产出。"""
+    name = node.get("name") or node["id"]
+    script = base / "scripts" / f"{name}.py"
+    if not script.exists():
+        raise FileNotFoundError(f"节点 {node['id']} 的脚本不存在: {script}")
+    ins = resolve_inputs(node.get("inputs"), ctx)
+    if "data" not in ins or not ins["data"]:
+        raise ValueError(f"节点 {node['id']} 缺少已绑定的 inputs.data(用 --data <指标>=<文件> 提供)")
+    data_path = Path(ins["data"])
+    if not data_path.is_absolute():
+        data_path = base / data_path
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "out.json"
+        cmd = [sys.executable, str(script), str(data_path), "-o", str(out)]
+        print(f"[script] {node['id']}: {' '.join(cmd)}")
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if proc.returncode != 0:
+            raise RuntimeError(f"节点 {node['id']} 失败 (exit {proc.returncode}):\n{proc.stderr[-2000:]}")
+        result = json.loads(out.read_text(encoding="utf-8"))
+    store_outputs(node.get("outputs"), result, ctx)
+    return result
+
+
+def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
+    """执行 kind=agent_skill 节点:备好输入,交给该 prompt-only 技能(模型)执行。
+
+    runner 自身不调模型;它把解析好的 inputs 写到 result/<id>_input.json 并打印待办,
+    由所在 agent harness 用对应技能产出结果。对 fault-tree-rca,inputs 里的
+    fault_tree_md 若是路径会被读成正文。
+    """
+    name = node.get("name") or node["id"]
+    ins = resolve_inputs(node.get("inputs"), ctx)
+    # 约定:fault_tree_md 输入若是 .md 路径则读成正文;其余输入视为各指标解析结果
+    ft = ins.pop("fault_tree_md", None)
+    if isinstance(ft, str) and ft.lower().endswith(".md"):
+        ftp = Path(ft)
+        ftp = ftp if ftp.is_absolute() else (base / ftp)
+        if ftp.exists():
+            ft = ftp.read_text(encoding="utf-8")
+    payload = {"fault_tree_md": ft, "indicator_results": ins}
+    in_path = base / "result" / f"{node['id']}_input.json"
+    in_path.parent.mkdir(parents=True, exist_ok=True)
+    in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[agent_skill] {node['id']}: 已备好输入 → {in_path}")
+    print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能,依据该输入产出结果"
+          f"(并按 outputs 写回);RCA 的输出契约见 fault-tree-rca 技能。")
+    # 占位:实际结果由 agent 执行技能后填入;这里存一个待办标记,供下游引用不致 KeyError
+    placeholder = {"_pending_skill": name, "_input": str(in_path)}
+    store_outputs(node.get("outputs"), placeholder, ctx)
+    return placeholder
 
 
 def main() -> None:
@@ -76,10 +148,10 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="SCoT 执行器")
+    ap = argparse.ArgumentParser(description="轻量 SCoT 计划执行器")
     ap.add_argument("--plan", required=True)
     ap.add_argument("--data", action="append", default=[],
-                    help="指标数据绑定,如 --data kpi=path.csv(可多次)")
+                    help="$input 绑定,如 --data kpi=path.csv(可多次)")
     ap.add_argument("--base", help="路径解析基准目录(默认取 plan.json 所在目录)")
     args = ap.parse_args()
 
@@ -95,16 +167,40 @@ def main() -> None:
         k, v = item.split("=", 1)
         data_map[k.strip()] = v.strip()
 
-    print(f"执行计划: {plan.get('scenario')} (steps={len(plan.get('steps', []))})")
-    for step in plan.get("steps", []):
-        kind = step.get("kind")
+    nodes = {n["id"]: n for n in plan.get("nodes", [])}
+    if not nodes:
+        print("plan 里没有 nodes —— 这看起来不是 SCoT 计划", file=sys.stderr)
+        sys.exit(2)
+
+    # 工作记忆初始化(memory_init 里的引用也解析一遍)
+    ctx: Dict[str, Any] = {"input": data_map, "memory": {}, "step": {}, "output": {}}
+    for k, v in (plan.get("memory_init") or {}).items():
+        ctx["memory"][k] = resolve_ref(v, ctx)
+
+    print(f"执行 SCoT: {plan.get('plan_id') or plan.get('meta', {}).get('goal', '')} "
+          f"(version={plan.get('version')}, nodes={len(nodes)})")
+
+    cur = plan.get("entry")
+    visited = 0
+    while cur:
+        if cur not in nodes:
+            raise KeyError(f"transition 指向不存在的节点: {cur}")
+        node = nodes[cur]
+        kind = node.get("kind")
         if kind == "script":
-            run_script_step(step, base, data_map)
-        elif kind == "rca":
-            run_rca_step(step, base)
+            result = run_script_node(node, ctx, base)
+        elif kind == "agent_skill":
+            result = run_agent_skill_node(node, ctx, base)
         else:
-            raise ValueError(f"未知 step kind: {kind}(plan_schema v1 仅定义 script / rca)")
-    print("执行流程完成(script 步骤已跑;rca 待 fault-tree-rca 技能完成,见上方提示)。")
+            raise ValueError(f"节点 {cur} 的 kind={kind} 暂不支持(当前实现 script / agent_skill)")
+        ctx["step"][cur] = result
+        visited += 1
+        if visited > 1000:
+            raise RuntimeError("节点访问超过 1000,疑似 transition 成环")
+        tr = node.get("transition") or {}
+        cur = None if tr.get("end") else tr.get("next_on_success")
+
+    print("SCoT 执行流程完成(script 步骤已跑;agent_skill/RCA 待对应技能完成,见上方提示)。")
 
 
 if __name__ == "__main__":
