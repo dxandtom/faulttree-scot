@@ -9,8 +9,11 @@
 输出 Markdown:用 #/##/### 表示层级,标题下面紧跟该节点的判断条件正文。
 
 用法(当命令行跑,不要 import):
-    python excel_to_tree.py "<故障树.xlsx>" -o "<输出.md>" \
-        --start-node "<场景名>" [--start-level 2] [--exclude-pattern "<正则>"]
+    python excel_to_tree.py "<故障树.xlsx>" -o "<输出.md>" --start-node "<场景名>"
+
+要点:
+- `--start-node` 会自动定位该场景名在第几层,只截取**以它为根的子树**(不必再传 --start-level)。
+- `--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`;传 `--exclude-pattern ""` 可保留全部。
 读 xlsx 需要 openpyxl(pip install openpyxl);csv 用标准库即可。
 """
 from __future__ import annotations
@@ -26,6 +29,8 @@ from typing import Any, Dict, List, Optional, Tuple
 _LEVEL_RE = re.compile(r"^L(\d+)\(Chinese\)$")
 _JUDGMENT_HEADER = "Judgment Condition(Chinese)"
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
+# 现网导出里常见的"自动萃取"噪声节点,默认排除(与同事产出 69KB 子树的做法一致)
+DEFAULT_EXCLUDE = r"萃取新增节点-.*"
 
 
 def _read_table(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
@@ -81,10 +86,17 @@ def find_judgment_column(headers: List[str]) -> Optional[str]:
 
 
 def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
-               start_level: int = 1, start_node: Optional[str] = None,
+               start_level: Optional[int] = None, start_node: Optional[str] = None,
                judgment_col: Optional[str] = None,
                exclude_pattern: Optional[str] = None) -> Dict[str, Any]:
-    """把扁平的行数据按层级列拼成嵌套树;判断条件挂到每行最深的节点上。"""
+    """把扁平的行数据按层级列拼成嵌套树;判断条件挂到每行最深的节点上。
+
+    路径截取规则:
+    - 给了 start_node:**自动定位**它在该行路径中的位置,取"以它为根"的子路径
+      (因此不必关心场景名在第几层);该行不含 start_node 则跳过。
+    - 否则给了 start_level:从该层开始截。
+    - 都没给:用整条路径。
+    """
     tree: Dict[str, Any] = {}
     exclude_re = re.compile(exclude_pattern) if exclude_pattern else None
     col_names = [c for c, _ in level_cols]
@@ -101,11 +113,18 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
             jv = (row.get(judgment_col) or "").strip()
             if jv and jv != "不涉及":
                 judgment = jv
-        path = full[start_level - 1:] if start_level > 1 else full
+
+        if start_node:
+            if start_node not in full:
+                continue
+            path = full[full.index(start_node):]          # 以场景名为根,自动定位层级
+        elif start_level and start_level > 1:
+            path = full[start_level - 1:]
+        else:
+            path = full
         if not path:
             continue
-        if start_node and path[0] != start_node:
-            continue
+
         cur = tree
         for i, node in enumerate(path):
             cur.setdefault(node, {})
@@ -145,10 +164,10 @@ def excel_to_tree_markdown(excel_path: str, output_path: Optional[str] = None,
     if not level_cols:
         raise ValueError("未找到 Ln(Chinese) 格式的层级列,请检查 Excel 表头")
     judgment_col = find_judgment_column(headers)
-    tree = build_tree(rows, level_cols, start_level or 1, start_node, judgment_col, exclude_pattern)
+    tree = build_tree(rows, level_cols, start_level, start_node, judgment_col, exclude_pattern)
     lines = tree_to_markdown(tree)
     if not lines:
-        raise ValueError("未构建出任何节点,请检查 --start-level / --start-node / --exclude-pattern")
+        raise ValueError(f"未构建出任何节点。请确认场景名是否准确(--start-node「{start_node}」是否在故障树里)")
     md = "\n".join(lines) + "\n"
     if output_path:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -164,10 +183,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="故障树 Excel → 层级 Markdown 子树")
     ap.add_argument("excel_path", help="故障树 Excel 路径(.xlsx)")
     ap.add_argument("-o", "--output", help="输出 md 路径")
-    ap.add_argument("--start-level", type=int, help="起始层级,从 1 开始;场景常在 L2,则传 2")
-    ap.add_argument("--start-node", help="起始节点名(= 场景名);截取该场景子树,务必传")
-    ap.add_argument("--exclude-pattern", help="正则;任一层级值命中则整行排除")
+    ap.add_argument("--start-node", help="场景名;自动定位层级,截取以它为根的子树(强烈建议传)")
+    ap.add_argument("--start-level", type=int, help="(可选)未给 start-node 时,从第几层开始截")
+    ap.add_argument("--exclude-pattern", default=DEFAULT_EXCLUDE,
+                    help=f"正则;任一层级值命中则整行排除。默认 {DEFAULT_EXCLUDE!r};传 \"\" 可保留全部")
     args = ap.parse_args()
+    if not args.start_node:
+        print("[warn] 未传 --start-node,将导出整棵故障树(可能很大)。建议传场景名只截子树。",
+              file=sys.stderr)
     try:
         md = excel_to_tree_markdown(args.excel_path, args.output, args.start_level,
                                     args.start_node, args.exclude_pattern)

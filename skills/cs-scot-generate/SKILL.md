@@ -32,9 +32,8 @@ references/meta_prompt.md(元提示词,指标无关,只此一份)
 
 ## 输入
 - `fault_tree_excel`(必填):故障树 `.xlsx`。
-- `scenario_name`(必填):场景名。**它是"子树选择器"**——从大故障树里截出该场景子树(作 `--start-node`),并给产物命名。不传它,`excel_to_tree` 会把整棵大树全导出(可能上百 MB)。
+- `scenario_name`(必填):场景名。**它是"子树选择器"**——从大故障树里截出该场景子树(作 `--start-node`),并给产物命名。
 - 每种指标一份**数据**(真实数据或小样例均可;用于生成脚本 + 跑验证)。
-- (可选)`start_level`:场景节点所在层级(大树里场景常在 L2,则传 `--start-level 2`);`exclude_pattern` 等。
 
 ## 流水线(把脚本当命令行跑,**不要 import**,用绝对路径)
 约定工作目录 `<work>`。
@@ -43,15 +42,18 @@ references/meta_prompt.md(元提示词,指标无关,只此一份)
 ```bash
 python "<本skill>/scripts/excel_to_tree.py" "<fault_tree_excel>" \
   -o "<work>/tree/<scenario_name>.md" \
-  --start-node "<scenario_name>" [--start-level 2] [--exclude-pattern "<正则>"]
+  --start-node "<scenario_name>"
 ```
-> **务必带 `--start-node "<scenario_name>"`**,否则导出整棵大树。
+- `--start-node` 会**自动定位**场景名在第几层,只截取**以它为根的子树**(不必再传 `--start-level`)。
+- 默认已排除噪声节点(`--exclude-pattern` 默认 `萃取新增节点-.*`);要保留全部传 `--exclude-pattern ""`,要换规则自行传。
+- 这样出来的是**单场景的精简子树**(几十 KB 量级),不是整棵大树。**务必用本 CLI**,别自己 import 函数跑。
 
 ### 步骤 2:逐指标走三级链生成解析脚本
 对每个指标 `<ind>`:
 1. 读 `references/meta_prompt.md`,注入(子树 md + 该指标数据)→ 产出「解析脚本生成提示词」,保存 `<work>/codegen_prompts/<ind>_codegen_prompt.md`。
 2. 读上一步的 codegen 提示词,产出**自包含**解析脚本,保存 `<work>/scripts/<ind>_analyzer.py`。
-   - 自包含 = 脚本自己内联读取函数(支持 csv/xlsx + 编码检测),**不 import 任何本仓自定义模块**;确定性计算(算术/计数/占比/比较)都在脚本里完成。
+   - 自包含 = 脚本自己内联读取函数(支持 csv/xlsx + 编码检测),**不 import 任何本仓自定义模块**。
+   - **精简忠实**:脚本只抽取子树判断条件涉及的数据、只计算**子树里写明的**条件(`expr` 逐字取自子树);**不要自己发明阈值/条件**,**不要**额外做分布统计、失败分类、记录转储等子树没要求的事。综合判断与根因是 fault-tree-rca 的活。
 
 ### 步骤 3:验证每个解析脚本
 ```bash
@@ -71,13 +73,13 @@ python "<本skill>/scripts/assemble_scenario.py" \
 ```
 <场景产物>/
 ├── plan.json                                 # SCoT 执行计划(产物①)
-├── scripts/<ind>_analyzer.py                 # 各指标解析脚本(产物②,自包含)
+├── scripts/<ind>_analyzer.py                 # 各指标解析脚本(产物②,自包含、精简)
 ├── tree/<scenario>.md                        # 故障树 md(产物③)
 └── codegen_prompts/<ind>_codegen_prompt.md   # 留痕
 ```
 跑它:`python "<cs-scot-execute>/scripts/runner.py" --plan "<场景产物>/plan.json" --data <ind>=<数据文件> ...`
 
 ## 注意
-- 所有提示词与脚本用**中文**;脚本 Python 3.11、函数中文注释、完善异常处理、**自包含**。
+- 所有提示词与脚本用**中文**;脚本 Python 3.11、函数中文注释、完善异常处理、**自包含、精简**。
 - 数据 xlsx/csv 都支持(xlsx 需 `pip install openpyxl`)。
-- 确定性计算放进解析脚本,模糊判断留给 fault-tree-rca。
+- 确定性计算放进解析脚本(只算子树写明的条件),模糊/综合判断留给 fault-tree-rca。
