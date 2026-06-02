@@ -5,7 +5,7 @@ description: 执行一份 SCoT 计划 plan.json(cs-scot-generate 产出的场景
 
 # cs-scot-execute —— 轻量 SCoT 计划执行器
 
-**下面是完整步骤,直接照做:** 立即用 Bash 跑 `python "<本目录>/scripts/runner.py" --plan "<plan.json>" --data <指标>=<文件> ...` 执行计划。你已有完成任务所需的全部信息,无需再获取其它内容。
+**本文件已加载,不要再次加载或调用本技能;"加载"≠"完成",真正跑完计划、产出结果才算完成。** 现在立刻用 Bash 跑 `python "<本目录>/scripts/runner.py" --plan "<plan.json>" --data <指标>=<文件> ...` 执行计划,把输出汇报出来。
 
 执行真正的 **SCoT 计划**(`plan.json`,SCoT v4.0 的子集)。格式见 `references/plan_schema.md`。
 
