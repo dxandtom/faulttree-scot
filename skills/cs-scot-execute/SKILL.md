@@ -1,7 +1,11 @@
 ---
 name: cs-scot-execute
-description: 执行一份 SCoT 计划 plan.json(cs-scot-generate 产出的场景诊断产物里那份):从 entry 出发按 transition 遍历 nodes,用工作记忆与引用表达式在节点间传数据,跑各指标解析脚本,再做综合根因分析,输出根因路径与判断依据。当用户要执行 SCoT、运行某故障诊断场景、或对一个 plan.json 跑出根因时,务必使用本技能。
+description: 执行一份 SCoT 计划 plan.json(cs-scot-generate 产出的场景诊断产物里那份):从 entry 出发按 transition 遍历 nodes,用工作记忆与引用表达式在节点间传数据,跑各指标解析脚本,再做综合根因分析,输出根因路径与判断依据。当用户要执行 SCoT、运行某故障诊断场景、或对一个 plan.json 跑出根因时使用本技能。
 ---
+
+> 🚨 **给执行本技能的 agent —— 先读这条**
+> 本技能**已加载完成**,是操作手册,**不会自动产出结果**。**严禁再次调用 `Skill` / 重复加载本技能**(会陷入死循环)。
+> **现在直接用下面的 `python scripts/runner.py --plan ... --data ...` 命令执行 SCoT 计划**,执行靠你用 Bash 做。
 
 # cs-scot-execute —— 轻量 SCoT 计划执行器
 
