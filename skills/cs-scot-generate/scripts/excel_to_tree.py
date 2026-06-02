@@ -9,7 +9,10 @@
 输出 Markdown:用 #/##/### 表示层级,标题下面紧跟该节点的判断条件正文。
 
 用法(当命令行跑,不要 import):
-    python excel_to_tree.py "<故障树.xlsx>" -o "<输出.md>" --start-node "<场景名>"
+    python excel_to_tree.py "<故障树.xlsx>" --start-node "<场景名>"
+不带 -o 时,会把子树写到统一产物目录 <故障树所在目录>/scot产物/<场景名>/tree/<场景名>.md,
+并在末尾打印「本场景产物目录」——后续所有步骤都用它,保证产物每次落在同一处、不再到处乱存。
+也可用 -o 显式指定 md 路径、或 --out-base 改产物根目录。
 
 要点:
 - 背景业务知识:场景节点通常在 **L2**,所以 `--start-level` 默认 2,`--start-node` 在该层选具体场景;
@@ -34,6 +37,16 @@ _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
 DEFAULT_EXCLUDE = r"萃取新增节点-.*"
 # 背景业务知识:场景节点通常位于第 2 层(L2)
 DEFAULT_START_LEVEL = 2
+# 默认产物容器目录名:产物目录 = <out-base 或 xlsx 所在目录>/<容器>/<场景名>
+DEFAULT_OUT_CONTAINER = "scot产物"
+
+
+def scenario_out_dir(anchor_dir: Path, scenario: str) -> Path:
+    """统一的场景产物目录:<anchor_dir>/scot产物/<场景名>。
+
+    anchor_dir 默认取故障树 xlsx 所在目录(见 main),保证每次都落在固定、可预期的地方。
+    """
+    return Path(anchor_dir) / DEFAULT_OUT_CONTAINER / scenario
 
 
 def _read_table(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
@@ -188,7 +201,8 @@ def main() -> None:
         pass
     ap = argparse.ArgumentParser(description="故障树 Excel → 层级 Markdown 子树")
     ap.add_argument("excel_path", help="故障树 Excel 路径(.xlsx)")
-    ap.add_argument("-o", "--output", help="输出 md 路径")
+    ap.add_argument("-o", "--output", help="显式指定输出 md 路径(覆盖默认产物目录)")
+    ap.add_argument("--out-base", help="产物根目录(默认=故障树 xlsx 所在目录);产物目录 = <out-base>/scot产物/<场景名>")
     ap.add_argument("--start-node", help="场景名;在 start-level 层选定该场景,截取以它为根的子树(强烈建议传)")
     ap.add_argument("--start-level", type=int, default=DEFAULT_START_LEVEL,
                     help=f"场景所在层级,默认 {DEFAULT_START_LEVEL}(背景业务知识:场景通常在 L2)")
@@ -198,14 +212,26 @@ def main() -> None:
     if not args.start_node:
         print("[warn] 未传 --start-node,将导出整棵故障树(可能很大)。建议传场景名只截子树。",
               file=sys.stderr)
+
+    # 解析输出位置:-o 优先;否则按 <out-base 或 xlsx 所在目录>/scot产物/<场景> 自动定位(确定性)。
+    out_dir: Optional[Path] = None
+    output_path = args.output
+    if not output_path and args.start_node:
+        anchor = (Path(args.out_base).expanduser() if args.out_base
+                  else Path(args.excel_path).expanduser().resolve().parent)
+        out_dir = scenario_out_dir(anchor, args.start_node)
+        output_path = str(out_dir / "tree" / f"{args.start_node}.md")
+
     try:
-        md = excel_to_tree_markdown(args.excel_path, args.output, args.start_level,
+        md = excel_to_tree_markdown(args.excel_path, output_path, args.start_level,
                                     args.start_node, args.exclude_pattern)
     except Exception as e:  # noqa: BLE001 — CLI 边界统一兜底
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
-    if args.output:
-        print(f"已输出: {args.output}")
+    if output_path:
+        print(f"已输出子树: {output_path}")
+        if out_dir is not None:
+            print(f"本场景产物目录(后续步骤 2-4 都写到这里): {out_dir}")
     else:
         sys.stdout.write(md)
 

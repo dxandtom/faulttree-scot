@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """验证一个生成的解析脚本:用样例数据跑一遍,检查能否产出合法 JSON。
 
+解析脚本只查数据、不下判断,产出应为事实:indicator / summary / field_stats / referenced;
+**不得**出现 conditions / hit / judgment 这类判断字段(那是 fault-tree-rca 的活)。
+
 用法:
-    validate_parser.py <analyzer.py> <sample_data> [--expect-keys summary,conditions]
+    validate_parser.py <analyzer.py> <sample_data> [--expect-keys indicator,summary,field_stats,referenced]
 退出码 0 = 通过;非 0 = 失败(并打印原因,供据此修脚本)。
 """
 from __future__ import annotations
@@ -45,15 +48,19 @@ def validate(script: str, data: str, expect_keys: List[str]) -> Tuple[bool, str]
     missing = [k for k in expect_keys if k not in obj]
     if missing:
         return False, f"输出缺少顶层字段 {missing}(实际字段: {list(obj)[:20]})"
-    return True, "通过:脚本产出合法 JSON 且包含预期字段"
+    forbidden = [k for k in ("conditions", "hit", "judgment") if k in obj]
+    if forbidden:
+        return False, (f"解析脚本不得下判断,却出现了顶层字段 {forbidden}。"
+                       f"脚本只查数据(summary/field_stats/referenced),是否成立交给 fault-tree-rca。")
+    return True, "通过:脚本产出合法 JSON、含预期事实字段、且未下任何判断"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="验证生成的解析脚本能否产出合法 JSON")
     ap.add_argument("script")
     ap.add_argument("data")
-    ap.add_argument("--expect-keys", default="summary,conditions",
-                    help="逗号分隔的预期顶层字段(默认 summary,conditions)")
+    ap.add_argument("--expect-keys", default="indicator,summary,field_stats,referenced",
+                    help="逗号分隔的预期顶层字段(默认 indicator,summary,field_stats,referenced)")
     args = ap.parse_args()
     keys = [k.strip() for k in args.expect_keys.split(",") if k.strip()]
     ok, msg = validate(args.script, args.data, keys)

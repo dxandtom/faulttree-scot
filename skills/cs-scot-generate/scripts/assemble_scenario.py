@@ -13,6 +13,14 @@ import sys
 from pathlib import Path
 from typing import List
 
+# 与 excel_to_tree.py 保持一致的统一产物目录约定:<anchor>/scot产物/<场景名>
+DEFAULT_OUT_CONTAINER = "scot产物"
+
+
+def scenario_out_dir(anchor_dir: Path, scenario: str) -> Path:
+    """统一的场景产物目录:<anchor_dir>/scot产物/<场景名>。"""
+    return Path(anchor_dir) / DEFAULT_OUT_CONTAINER / scenario
+
 
 def build_plan(scenario: str, indicators: List[str], tree_rel: str) -> dict:
     """生成一份符合 SCoT plan schema 的直线计划。
@@ -57,11 +65,13 @@ def build_plan(scenario: str, indicators: List[str], tree_rel: str) -> dict:
 
 
 def copy_into(src: Path, dst: Path) -> None:
-    """拷贝单个文件,缺失则告警跳过(不阻断)。"""
+    """拷贝单个文件,缺失则告警跳过(不阻断);源与目标同一文件则免拷(work==out 的常态)。"""
     dst.parent.mkdir(parents=True, exist_ok=True)
     if not src.exists():
         print(f"  [warn] 缺少源文件,跳过: {src}", file=sys.stderr)
         return
+    if src.resolve() == dst.resolve():
+        return  # 已在目标位置,无需拷贝
     shutil.copy2(src, dst)
 
 
@@ -72,14 +82,29 @@ def main() -> None:
         pass
     ap = argparse.ArgumentParser(description="归集场景诊断产物")
     ap.add_argument("--scenario", required=True)
-    ap.add_argument("--work", required=True, help="中间产物目录(含 tree/、scripts/、codegen_prompts/)")
     ap.add_argument("--indicators", required=True, help="逗号分隔,如 kpi,chr")
-    ap.add_argument("--out", required=True, help="输出场景产物目录")
+    ap.add_argument("--out", help="场景产物目录(中间产物也在这里;默认 = <out-base 或 xlsx 所在目录>/scot产物/<场景名>)")
+    ap.add_argument("--out-base", help="产物根目录;与 --out 二选一,默认配合 --xlsx 推导")
+    ap.add_argument("--xlsx", help="故障树 xlsx 路径;省略 --out 时用它所在目录作为产物根")
+    ap.add_argument("--work", help="中间产物目录;默认与 --out 相同(work 与 out 合并为同一目录)")
     args = ap.parse_args()
 
     scenario = args.scenario
     indicators = [s.strip() for s in args.indicators.split(",") if s.strip()]
-    work, out = Path(args.work), Path(args.out)
+
+    # 统一产物目录:--out 优先;否则按 <out-base 或 xlsx 所在目录>/scot产物/<场景> 推导(与步骤1一致)。
+    if args.out:
+        out = Path(args.out)
+    else:
+        if args.out_base:
+            anchor: Path = Path(args.out_base).expanduser()
+        elif args.xlsx:
+            anchor = Path(args.xlsx).expanduser().resolve().parent
+        else:
+            print("需要 --out,或用 --xlsx/--out-base 让我推导默认产物目录", file=sys.stderr)
+            sys.exit(2)
+        out = scenario_out_dir(anchor, scenario)
+    work = Path(args.work) if args.work else out  # 默认 work==out,产物只此一处
     tree_rel = f"tree/{scenario}.md"
 
     for sub in ("scripts", "tree", "codegen_prompts"):
