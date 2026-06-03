@@ -51,3 +51,26 @@
 ## 待办 / 观察
 - 数值阈值条件(`RSRP < -120`)目前引擎只给 min/max/mean,答不了"多少条 < -120"。若要支持,需让 RCA 端按谓词计数,或引擎在投影时对被点名的数值字段额外给分位/阈值计数(仍是事实,不是判断)。
 - `docs/design.md` 仍停在旧的三级链描述,待同步到"通用引擎 + 投影 + 通用 RCA"。
+
+## 更新(v1 改版):kpiTree 是错误数据;真 kpiData 是表;可变只锁在"映射"
+> 用户确认:之前的 **kpiTree 是错的数据**(单列 JSON 的"公式字典"),真正要用的是 **kpiData——带表头的表**(58 列:`Time/Object/ObjectType/cellName` + 各 KPI/计数器列,有真实值)。
+> 于是数据形态收敛为**只有"带表头的表"**(CHR、kpiData 皆然),catalog 那套作废。
+
+**作废/删除**:`analyzer.py` 里整条 catalog 支路(`_parse_catalog`/`_analyze_catalog`/`_counters_in`/`counter_index`/`_COUNTER_RE`、`_load`/`_project` 的 catalog 分支)——都是给假 kpiTree 写的,已删。引擎纯表格化。
+
+**新发现(决定本版设计)**:真数据里**树的量与数据列名对不上是常态**——树用英文/code 名(`SUSRLastAvgRsrp`、`SA_QosFlow_Setup_Success_Rate`),列是中文(`上行RSSI均值`、`SA_QoSFlow建立成功率(22B)`)。所以:
+- 旧的"子串投影"对 kpiData **几乎全落空**(会把数据投空、害 RCA 瞎判)。
+- 本地模型实测把映射做错且**自信地编**:`SINR < 0` 被映到"语音用户数"(其实根本没有 SINR 列);`RSRP` 映到 `RSSI`(语义/单位不符)。**映射错误是静默的**:数照样算得出、结论却全错且不报错。
+
+**本版结论:可变的只该是"统计之前的映射/规整",不是统计本身。** 三段:① 装载(固定)② 映射/规整(随数据自适应、按语义、显式可审)③ 统计(固定)。统计模板可枚举、要稳;真正没法预知的是"这份表的列怎么对到树的量",那才交给模型——且**必须显式记录映射+理由,找不到就数据不足,绝不抓相关列硬顶**。
+
+**已落地(v1)**:
+- 引擎纯表格 + 数值列加**十分位 `deciles`(p0..p100)**(让 `<阈值` 条件可估)+ **`nulls`**(把 `NIL` 当缺测显式计数,绝不当类别/正常)。`NIL` 已纳入空值集。
+- 投影改**跨命名兜底**:子串命中过稀(<3 列或 <10%)→ `mode:"kept_all_fallback"` 保留全部列,映射交给 RCA 语义完成。
+- `rca_rules.md` 增"字段映射"硬规则(语义映射、找不到→数据不足、近似要标注降置信、成功率vs差值、NIL=数据不足、阈值出处、用 deciles 判数值阈值);RCA 输出 evidence 增 `mapping`/`mapping_reason`(落盘可审)。
+- 新示例 `examples/kpi-tabular/`(kpiData 形态 + 英文 code 名树)跑通:`projection=kept_all_fallback`、成功率列 `nulls:1`、无 SINR 列 → 条件2 应判数据不足。
+
+**待办(v2 候选)**:
+- 数值阈值仍是"用 deciles 估比例",非精确计数。若要精确,引入"映射规格(列+op+阈值,带理由/置信)+ 固定执行器"算精确命中数/占比(仍是事实)。
+- 旧示例 `examples/sa-access-fail/fixtures/kpi.csv` 是**废弃的假 kpiTree**,仅作历史;真形态以 `examples/kpi-tabular/` 为准。
+- `validate_rca.py` 暂未校验"映射编造"(机械难判);靠 `rca_rules.md` 硬规则 + evidence 里 `mapping_reason` 人工/二次复核。

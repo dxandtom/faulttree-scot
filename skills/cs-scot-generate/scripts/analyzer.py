@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""通用解析引擎(指标无关,自动判别数据形态)——只查数据/抽规则,绝不下判断。
+"""通用解析引擎(指标无关)——只查数据、摆事实,绝不下判断。
 
-一个脚本应对不同数据:**看数据形态,做对应的事**。
-- **tabular(表格型,如 CHR)**:逐字段数据驱动统计(数值给 min/max/mean,类别给 top-N + 样例)。
-- **catalog(目录型,如 kpiTree:单列、每行一段 JSON)**:把它当"规则字典"——
-  抽每个 KPI 的 formula / 阈值(absExceptionThreshold·highCondition·lowCondition)/ 定义,
-  并从所有 formula 里抽出 `N./L.` 原始计数器,建"计数器 → 用到它的 KPI"索引。
+所有真实数据都是**带表头的表**(CHR、kpiData 皆然),逐字段数据驱动统计:
+- 数值列(>=90% 可转数)→ count/min/max/mean + **十分位 p0..p100** + nulls;
+- 类别列 → top-N 计数 + distinct + 每个 top 值几个样例标识 + nulls。
 
-绝不输出 hit / judgment / conditions:是否成立、根因、以及"故障树引用了哪些字段/计数器"的匹配,
-全部由 fault-tree-rca 拿着故障树去做。本引擎只产**事实 / 规则**。
+绝不输出 hit / judgment / conditions:是否成立、根因、以及"故障树的量 ↔ 数据列"的映射,
+全部由 fault-tree-rca 拿着故障树去做(且映射要按**语义**、显式可审,见 rca_rules.md)。
+本引擎只产**事实**。
 
 自包含:不 import 任何本仓自定义模块。读 xlsx 需 openpyxl;csv 用标准库。
 用法:python analyzer.py <数据文件> -o <输出.json> [--indicator <标签>] [--fault-tree <故障树.md>]
-给了 --fault-tree(或脚本旁存在唯一的 ../tree/*.md)就**只保留故障树提到的字段/计数器/规则**,
-大幅压缩输出(纯按名字匹配,指标无关)。
+给了 --fault-tree(或脚本旁存在唯一的 ../tree/*.md)就尝试**只保留故障树提到的列**以压缩输出;
+但树常用英文/code 名、数据列常为中文,纯子串命中过稀时**保留全部列**,把字段↔列映射交给 RCA 语义完成。
 """
 from __future__ import annotations
 
@@ -21,17 +20,16 @@ import argparse
 import csv
 import io
 import json
-import re
 import sys
 from collections import Counter
 from pathlib import Path
 
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
-_NULLISH = {"", "na", "n/a", "null", "none", "-"}
-# 原始话统计数器:以 N./L./Q. 开头的点分名(段内可含 - _,如 L.E-RAB.SuccEst)。
-# formula 里计数器都带引号,minus 运算符紧贴引号,故不会跨引号误并。
-_COUNTER_RE = re.compile(r"[NLQ]\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*")
-_ID_CANDIDATES = ("CallID", "CALLID", "Call_Id", "id", "ID", "Index")
+# 空值/缺测标记:含 kpiData 常见的 NIL(大小写不敏感)。NIL 视为缺测,绝不当一个类别值。
+_NULLISH = {"", "na", "n/a", "null", "none", "nil", "-"}
+# 用作样例标识的列(挑第一个存在的):优先调用/小区/网元一类的标识列。
+_ID_CANDIDATES = ("CallID", "CALLID", "Call_Id", "id", "ID", "Index",
+                  "cellName", "CellName", "Object", "ObjectName", "neName", "NE")
 
 
 # ---------- 读取 ----------
@@ -45,16 +43,8 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", "ignore")
 
 
-def _strip_json_cell(s: str) -> str:
-    """CSV 里整段 JSON 常被双引号包裹、内部 "" 转义;剥掉外层引号、还原引号。"""
-    s = s.strip()
-    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-        s = s[1:-1].replace('""', '"')
-    return s
-
-
 def _load(path: str):
-    """读数据 → ('catalog', nodes) 或 ('tabular', header, rows)。自动判别形态。"""
+    """读数据 → (header, rows)。所有数据都按"带表头的表"处理。"""
     p = Path(path)
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
         try:
@@ -65,53 +55,21 @@ def _load(path: str):
         ws = wb.active
         it = ws.iter_rows(values_only=True)
         header = [("" if h is None else str(h)).strip() for h in next(it, [])]
-        raw_rows = [["" if c is None else str(c) for c in r] for r in it]
+        rows = [{header[i]: (("" if r[i] is None else str(r[i])) if i < len(r) else "")
+                 for i in range(len(header))} for r in it]
         wb.close()
-        # 单列 + 单元格是 JSON → catalog
-        if len([h for h in header if h]) <= 1:
-            nodes = _parse_catalog([r[0] for r in raw_rows if r], header)
-            if nodes:
-                return ("catalog", nodes)
-        rows = [{header[i]: (r[i] if i < len(r) else "") for i in range(len(header))} for r in raw_rows]
-        return ("tabular", header, rows)
+        return header, rows
 
     text = _decode(p.read_bytes())
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    if not lines:
-        return ("tabular", [], [])
-    # catalog 判别:表头是单个 token(无逗号),且下一行像 JSON(可能带引号)
-    first, second = lines[0].strip(), (lines[1].strip() if len(lines) > 1 else "")
-    header_is_single = ("," not in first) or first.lower().endswith("json")
-    second_is_json = _strip_json_cell(second).startswith("{")
-    if header_is_single and second_is_json:
-        nodes = _parse_catalog(lines[1:], [first])
-        if nodes:
-            return ("catalog", nodes)
     reader = csv.DictReader(io.StringIO(text))
     header = list(reader.fieldnames or [])
     rows = [{(k or ""): ("" if v is None else str(v)) for k, v in row.items()} for row in reader]
-    return ("tabular", header, rows)
-
-
-def _parse_catalog(cells, header) -> list:
-    """把"每格一段 JSON"解析成 dict 列表;非法跳过。"""
-    nodes = []
-    for c in cells:
-        s = _strip_json_cell(str(c))
-        if not s.startswith("{"):
-            continue
-        try:
-            obj = json.loads(s)
-            if isinstance(obj, dict):
-                nodes.append(obj)
-        except (json.JSONDecodeError, ValueError):
-            continue
-    return nodes
+    return header, rows
 
 
 # ---------- 通用统计 ----------
 def _to_num(v):
-    """尽量转数值(去掉末尾 %);失败返回 None。"""
+    """尽量转数值(去掉末尾 %);空值/缺测/失败返回 None。"""
     s = str(v).strip().rstrip("%")
     if s.lower() in _NULLISH:
         return None
@@ -125,28 +83,49 @@ def _nonempty(values):
     return [v for v in values if str(v).strip().lower() not in _NULLISH]
 
 
+def _pct(sorted_nums, q):
+    """sorted_nums 的第 q 百分位(线性插值);空列表返回 None。"""
+    n = len(sorted_nums)
+    if n == 0:
+        return None
+    if n == 1:
+        return sorted_nums[0]
+    pos = (n - 1) * q / 100.0
+    lo = int(pos)
+    hi = min(lo + 1, n - 1)
+    frac = pos - lo
+    return sorted_nums[lo] * (1 - frac) + sorted_nums[hi] * frac
+
+
 def _stat_values(values, samples_for=None):
-    """对一列/一键的值做统计:数值(>=90% 可转数)给摘要,否则类别给 top-N。按值判别,不看名字。"""
+    """对一列做统计:数值(>=90% 可转数)给摘要 + 十分位,否则类别给 top-N。按值判别,不看名字。
+    nulls = 该列空值/缺测(含 NIL)的条数——让"缺测"显式可见,RCA 才不会把它当"正常/不成立"。"""
+    total = len(values)
     ne = _nonempty(values)
+    nulls = total - len(ne)
     if not ne:
-        return {"kind": "empty", "count": 0}
+        return {"kind": "empty", "count": 0, "nulls": nulls}
     nums = [_to_num(v) for v in ne]
     ok = [n for n in nums if n is not None]
     if len(ok) >= max(1, int(0.9 * len(ne))):  # 绝大多数能转数 → 数值列
-        return {"kind": "numeric", "count": len(ok),
-                "min": round(min(ok), 4), "max": round(max(ok), 4),
-                "mean": round(sum(ok) / len(ok), 4)}
+        s = sorted(ok)
+        return {"kind": "numeric", "count": len(ok), "nulls": nulls,
+                "min": round(s[0], 4), "max": round(s[-1], 4),
+                "mean": round(sum(ok) / len(ok), 4),
+                # 十分位:树里 "RSRP < -120"、"成功率 < 85%" 这类阈值条件,RCA 可据此估"多少在阈值一侧"。
+                "deciles": {f"p{q}": round(_pct(s, q), 4) for q in range(0, 101, 10)}}
     cnt = Counter(str(v).strip() for v in ne)
     top = dict(cnt.most_common(20))
-    out = {"kind": "categorical", "count": len(ne), "distinct": len(cnt), "top": top}
+    out = {"kind": "categorical", "count": len(ne), "nulls": nulls,
+           "distinct": len(cnt), "top": top}
     if samples_for is not None:  # 给每个 top 值附几个样例标识
         out["samples"] = {val: samples_for(val)[:3] for val in list(top)[:8]}
     return out
 
 
-# ---------- tabular ----------
+# ---------- 表格统计 ----------
 def _analyze_tabular(header, rows, indicator) -> dict:
-    """表格型:逐列统计;不写死字段,不投影故障树(投影交给 RCA)。"""
+    """逐列统计;不写死字段,不投影故障树(投影/映射交给 RCA)。"""
     id_col = next((c for c in _ID_CANDIDATES if c in header), None)
 
     def make_sampler(col):
@@ -160,79 +139,12 @@ def _analyze_tabular(header, rows, indicator) -> dict:
         vals = [r.get(col, "") for r in rows]
         field_stats[col] = _stat_values(vals, samples_for=make_sampler(col))
     return {"indicator": indicator, "kind": "tabular",
-            "summary": {"total_records": len(rows), "columns": header},
+            "summary": {"total_records": len(rows), "columns": header,
+                        "id_column": id_col},
             "field_stats": field_stats}
 
 
-# ---------- catalog ----------
-def _clean_counter(tok: str) -> str:
-    """清洗计数器名:去 HTML 污染(末尾 <span、&gt; 等)、去首尾点。"""
-    return re.split(r"[<&]", tok)[0].strip().strip(".")
-
-
-def _counters_in(formula: str) -> list:
-    """从 formula 文本里抽出 N./L./Q. 原始计数器(去重保序、清洗)。"""
-    seen, out = set(), []
-    for m in _COUNTER_RE.findall(formula or ""):
-        c = _clean_counter(m)
-        if c and c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
-
-
-def _analyze_catalog(nodes, indicator) -> dict:
-    """目录型(kpiTree):当"规则字典"——抽 formula/阈值/定义 + 计数器索引。"""
-    # 1) 全键统计(数据驱动,别写死)
-    keys = []
-    for n in nodes:
-        for k in n:
-            if k not in keys:
-                keys.append(k)
-    field_stats = {k: _stat_values([n.get(k, "") for n in nodes]) for k in keys}
-
-    # 2) 规则:凡有 formula(或阈值)的节点,摆出它的计算方式 + 阈值 + 定义
-    def pick(n, *names):
-        for nm in names:
-            v = n.get(nm)
-            if v not in (None, ""):
-                return v
-        return None
-
-    rules, counter_index = [], {}
-    for n in nodes:
-        formula = pick(n, "formula")
-        thr = pick(n, "absExceptionThreshold")
-        if not formula and thr is None:
-            continue
-        counters = _counters_in(str(formula)) if formula else []
-        rule = {"id": n.get("id"), "name": n.get("name"),
-                "kpiIndex": n.get("kpiIndex"), "formula": formula,
-                "counters": counters,
-                "absExceptionThreshold": thr,
-                "highCondition": pick(n, "highCondition"),
-                "lowCondition": pick(n, "lowCondition"),
-                "unit": pick(n, "unit"), "definition": pick(n, "definition")}
-        rules.append({k: v for k, v in rule.items() if v not in (None, "", [])})
-        # 3) 计数器 → 用到它的 KPI 索引
-        for c in counters:
-            ent = counter_index.setdefault(c, {"in_kpis": [], "usage_count": 0})
-            ent["usage_count"] += 1
-            if len(ent["in_kpis"]) < 8:
-                ent["in_kpis"].append({"name": n.get("name"), "kpiIndex": n.get("kpiIndex"),
-                                       "formula": formula, "absExceptionThreshold": thr})
-
-    levels = sorted({str(n.get("level")) for n in nodes if n.get("level") is not None})
-    return {"indicator": indicator, "kind": "catalog",
-            "summary": {"total_nodes": len(nodes), "levels": levels,
-                        "distinct_keys": len(keys), "rule_count": len(rules),
-                        "distinct_counters": len(counter_index)},
-            "field_stats": field_stats,
-            "rules": rules,
-            "counter_index": counter_index}
-
-
-# ---------- 故障树投影(可选:只保留树提到的,压缩输出) ----------
+# ---------- 故障树投影(可选:只保留树提到的列,压缩输出) ----------
 def _auto_tree(script_path):
     """产物布局里 scripts/ 与 tree/ 是兄弟;脚本旁若恰有唯一一棵树 md,自动用它投影。"""
     d = Path(script_path).resolve().parent.parent / "tree"
@@ -244,27 +156,25 @@ def _auto_tree(script_path):
 
 
 def _project(result: dict, tree_text: str) -> dict:
-    """只保留故障树文本提到的字段/计数器/规则(纯按名字匹配,指标无关),大幅压缩。"""
+    """尝试只保留故障树文本**子串命中**的列(树写 `DCErrType`、CHR 列也叫 `DCErrType` 时有效,大幅压缩)。
+    但树常用英文/code 名(`SUSRLastAvgRsrp`),数据列常为中文(`上行RSSI均值`)——子串会几乎全落空。
+    命中过稀(<3 列或 <10%)时**保留全部列**,字段↔列映射交给 RCA 按语义显式完成,避免把数据投空、害 RCA 瞎判。"""
     def mentioned(name) -> bool:
         s = str(name or "")
         return len(s) >= 3 and s in tree_text
 
-    if result.get("kind") == "tabular":
-        fs = result.get("field_stats", {})
-        ref = {k: v for k, v in fs.items() if mentioned(k)}
+    fs = result.get("field_stats", {})
+    ref = {k: v for k, v in fs.items() if mentioned(k)}
+    if len(ref) < max(3, int(0.1 * len(fs))):  # 命中过稀 → 跨命名,保留全部
+        result["projection"] = {
+            "by": "fault_tree", "mode": "kept_all_fallback",
+            "matched_fields": len(ref), "total_fields": len(fs),
+            "note": "子串命中过少(疑似树用英文/code 名、数据列为中文等跨命名);"
+                    "已保留全部列,字段↔列映射由 RCA 按语义显式完成(须记录 mapping + 理由,找不到就数据不足)。"}
+    else:
         result["field_stats"] = ref
-        result["projection"] = {"by": "fault_tree", "kept_fields": len(ref), "total_fields": len(fs)}
-    elif result.get("kind") == "catalog":
-        ci = result.get("counter_index", {})
-        ref_ci = {k: v for k, v in ci.items() if mentioned(k)}
-        rules = result.get("rules", [])
-        ref_rules = [r for r in rules
-                     if mentioned(r.get("name")) or mentioned(r.get("kpiIndex"))
-                     or any(mentioned(c) for c in r.get("counters", []))]
-        result["counter_index"], result["rules"] = ref_ci, ref_rules
-        result["projection"] = {"by": "fault_tree",
-                                "kept_counters": len(ref_ci), "total_counters": len(ci),
-                                "kept_rules": len(ref_rules), "total_rules": len(rules)}
+        result["projection"] = {"by": "fault_tree", "mode": "substring",
+                                "kept_fields": len(ref), "total_fields": len(fs)}
     return result
 
 
@@ -281,10 +191,7 @@ def _default_indicator(script_path, data_path, override):
 
 
 def analyze(data_path: str, indicator: str) -> dict:
-    loaded = _load(data_path)
-    if loaded[0] == "catalog":
-        return _analyze_catalog(loaded[1], indicator)
-    _, header, rows = loaded
+    header, rows = _load(data_path)
     return _analyze_tabular(header, rows, indicator)
 
 
@@ -293,11 +200,11 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="通用解析引擎(只查数据/抽规则,不下判断)")
+    ap = argparse.ArgumentParser(description="通用解析引擎(只查数据、摆事实,不下判断)")
     ap.add_argument("data", help="数据文件(csv/xlsx)")
     ap.add_argument("-o", "--output", required=True)
     ap.add_argument("--indicator", help="指标标签(默认从脚本名 <ind>_analyzer 或数据文件名推断)")
-    ap.add_argument("--fault-tree", help="故障树 md;给了就只保留树提到的字段/计数器/规则(大幅压缩);"
+    ap.add_argument("--fault-tree", help="故障树 md;给了就尝试只保留树提到的列(命中过稀则保留全部);"
                                          "默认自动探测脚本旁唯一的 ../tree/*.md")
     args = ap.parse_args()
     indicator = _default_indicator(__file__, args.data, args.indicator)
@@ -309,7 +216,7 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     proj = result.get("projection")
-    extra = f" 投影按故障树:{proj}" if proj else ""
+    extra = f" 投影按故障树:{proj.get('mode')}" if proj else ""
     print(f"[analyzer] indicator={indicator} kind={result.get('kind')}{extra} → {out}")
 
 

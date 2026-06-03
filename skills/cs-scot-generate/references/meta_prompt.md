@@ -1,34 +1,33 @@
 # 解析引擎契约(`scripts/analyzer.py` 做什么、产出什么)
 
 > 历史上这里是"生成解析脚本的元提示词";现已收敛为**一个通用引擎** `scripts/analyzer.py`,
-> 本文档描述它的契约。**不再每场景生成代码**——引擎看数据形态、做对应的事。
+> 本文档描述它的契约。**不再每场景生成代码**——引擎把每份数据按表统计、只摆事实。
 
 ## 最高铁律:只查数据 / 抽规则,绝不下判断
 引擎只产**事实 / 规则**:绝不输出 `hit`/`judgment`/`conditions`、绝不替你做"故障树匹配"、绝不发明阈值。
 是否成立、根因、以及"故障树引用了哪些字段 / 计数器",**全部由 fault-tree-rca 拿着故障树去做**。
 
-## 自动判别数据形态
-- **tabular(表格型,如 CHR)**:多列记录。逐列**数据驱动**统计(按"值"判别数值 / 类别,**不看列名**):
-  - 数值列 → count/min/max/mean;类别列 → top-N 计数 + distinct + 每个 top 值几个样例标识。
-- **catalog(目录型,如 kpiTree)**:单列、每行一段 JSON。当"规则字典":
-  - 遍历每行所有键做统计(`field_stats`);
-  - 对有 `formula`/阈值的节点抽**规则**:`formula`、`absExceptionThreshold`/`highCondition`/`lowCondition`、`unit`、`definition`,
-    并从 `formula` 正则抽 `N./L.` 原始计数器(段内可含 `-`,清洗 `<span`/`&gt;` 污染);
-  - 建 `counter_index`:计数器 → 用到它的 KPI(`name`/`kpiIndex`/`formula`/阈值)+ `usage_count`。
-  - **注意:kpiTree 记录的是"计算方式与阈值",不是实测值** —— 所以这里**没有计数器取值**。
+## 数据都是"带表头的表"(CHR、kpiData 皆然)
+逐列**数据驱动**统计(按"值"判别数值 / 类别,**不看列名**):
+- **数值列**(>=90% 可转数)→ `count`/`min`/`max`/`mean` + **十分位 `deciles`(p0..p100)** + `nulls`。
+  - 十分位让"`RSRP < -120`、`成功率 < 85%`"这类阈值条件可判(RCA 据分位估"多少落在阈值一侧")。
+- **类别列** → `top-N` 计数 + `distinct` + 每个 top 值几个样例标识 + `nulls`。
+- **`nulls`**:该列空值/缺测条数,**含 `NIL`**(大小写不敏感);NIL 永远当缺测,绝不当一个类别值——
+  让"没测到"显式可见,RCA 才不会把缺测误当"正常/不成立"。
 
-## 输出 JSON(只有事实 / 规则,无判断)
-- **tabular**:`{ "indicator","kind":"tabular","summary":{total_records,columns},"field_stats":{<列>:{...}} }`
-- **catalog**:`{ "indicator","kind":"catalog","summary":{total_nodes,levels,rule_count,distinct_counters},`
-  `"field_stats":{<键>:{...}},"rules":[{id,name,kpiIndex,formula,counters,absExceptionThreshold,...}],`
-  `"counter_index":{"<计数器>":{in_kpis:[{name,kpiIndex,formula,absExceptionThreshold}],usage_count}} }`
+## 输出 JSON(只有事实,无判断)
+`{ "indicator","kind":"tabular","summary":{total_records,columns,id_column},"field_stats":{<列>:{...}} }`
 
-通篇**没有** `conditions`/`hit`/`judgment`。
+通篇**没有** `conditions`/`hit`/`judgment`/`mapping`——是否成立、以及"树的量 ↔ 哪个列"的**语义映射**全是 RCA 的活。
 
 ## 按故障树投影(可选,压缩输出)
-给 `--fault-tree <md>`(或脚本旁存在唯一的 `../tree/*.md` → 自动探测)时,只保留**故障树文本提到的**字段 / 计数器 / 规则,并加 `projection` 元信息(`kept_*`/`total_*`)。**纯按名字匹配、指标无关**——把动辄数千条的全量输出压到树真正引用的那几项。RCA 看到的就是投影后的精简事实。
+给 `--fault-tree <md>`(或脚本旁唯一的 `../tree/*.md` → 自动探测)时,尝试只保留**故障树文本子串命中**的列,并加 `projection` 元信息。
+- 树写 `DCErrType`、CHR 列也叫 `DCErrType` 时有效,把上百列压到树引用的那几列(`mode:"substring"`)。
+- 但树常用英文/code 名(`SUSRLastAvgRsrp`),数据列常为中文(`上行RSSI均值`)——子串会几乎全落空。
+  命中过稀(<3 列或 <10%)时**保留全部列**(`mode:"kept_all_fallback"`),字段↔列映射交给 RCA 按语义显式完成,
+  **绝不把数据投空、害 RCA 瞎判**。
 
 ## 给 RCA 的提示(分工)
-- **CHR 类**条件(点名某列 / 取值)→ 用 `field_stats` 评估;
-- **话统计数器**(`N.xxx`)条件 → `counter_index`/`rules` 给定义 / 阈值 / 公式作背景,但**无实测值 → 如实判"数据不足"**;
-- 真实性高于一切:测不到就说测不到,不拿 CHR 分布替代话统阈值。
+- 解析端只摆事实(各列分布 / 数值摘要 + 十分位 + nulls),**不下判断、不做映射**。
+- "树的量 ↔ 数据列"映射、阈值代入、是否成立,全是 RCA 的活,且映射要**按语义、显式、可审**(见 `fault-tree-rca/references/rca_rules.md`)。
+- 真实性高于一切:**没有就是没有**——树要的列找不到、或单元格是 NIL → 如实"数据不足",绝不抓相关列硬顶。
