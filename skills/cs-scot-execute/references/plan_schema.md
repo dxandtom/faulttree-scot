@@ -8,8 +8,10 @@
 2. 按 `kind` 分派当前节点:
    - **`script`**:`name`→`scripts/<name>.py`;解析 `inputs`(`data` 解析成数据文件),
      跑 `python scripts/<name>.py <数据> -o <临时>`,产出 JSON 按 `outputs` 写入 `$memory`。
-   - **`agent_skill`**:解析 `inputs`(`fault_tree_md` 路径读成正文,其余归到
-     `indicator_results`),备到 `result/rca_input.json`,由 `name` 指定的技能(fault-tree-rca)产出结果。
+   - **`condition_eval`**:跑同目录 `eval_conditions.py`(+ `validate_conditions.py` 自检),
+     按 `inputs.conditions`(绑定文件)+ `inputs.data`(各源 `$input`)算出 `condition_facts` 存入 `$memory`。
+   - **`agent_skill`**:模型步骤,**可重入**。带 `produces`(如 `conditions.json` / `result/rca.json`):
+     产物已存在 → 载入续跑;不存在 → 备好 `result/<id>_input.json`、打印待办、**暂停**(产出后重跑同一命令续上)。
 3. 沿 `transition.next_on_success` 走到下一节点;`transition.end=true` 结束。
 
 ## 引用

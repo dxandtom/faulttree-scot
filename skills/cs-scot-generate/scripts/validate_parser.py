@@ -31,7 +31,8 @@ def validate(script: str, data: str, expect_keys: List[str]) -> Tuple[bool, str]
         out = Path(td) / "out.json"
         cmd = [sys.executable, str(script_p), str(data_p), "-o", str(out)]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
+                                  encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return False, "脚本运行超时(>120s)"
         if proc.returncode != 0:

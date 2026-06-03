@@ -20,11 +20,12 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 1. 从 `entry` 节点开始,用 `memory_init` 初始化工作记忆;
 2. 按节点 `kind` 分派:
    - **`script`**:`name`→`scripts/<name>.py`,解析 `inputs.data`→数据文件,跑脚本,产出 JSON 按 `outputs` 写入 `$memory`;
-   - **`agent_skill`**:把解析好的 inputs(故障树读成正文 + 各指标结果)备到 `result/rca_input.json`,由 `name` 指定的技能(**fault-tree-rca**)产出结果;
+   - **`condition_eval`**:跑 `eval_conditions.py`(+ `validate_conditions.py`),按绑定 `conditions.json` + 各源数据算出 `condition_facts` 存入 `$memory`;
+   - **`agent_skill`**(模型步骤,**可重入**):带 `produces` 的产物已存在 → 载入续跑;否则备好 `result/<id>_input.json`、打印待办、**暂停**——你产出后**重跑同一命令**即从此处续上(如 `bind_conditions`→`conditions.json`、`rca`→`result/rca.json`);
 3. 沿 `transition.next_on_success` 前进,`end=true` 结束;
 4. 节点间数据全靠 `$input`/`$memory`/`$step`/`$output` 引用传递。
 
-未定义的 kind 会直接报错(避免静默跳过)。
+未定义的 kind 会直接报错(避免静默跳过)。典型链:`各 analyzer(script)`→`bind_conditions(agent)`→`eval_conditions`→`rca(agent)`。
 
 ## 逐条件绑定与求值(诊断的"会变"部分,进 RCA 之前)
 故障树条件五花八门(阈值/差值/字段匹配/占比TopN/信令流程/特征分析/人工…,见 fault-tree-rca 的 A–J 分类),

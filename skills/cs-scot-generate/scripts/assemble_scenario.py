@@ -23,30 +23,53 @@ def scenario_out_dir(anchor_dir: Path, scenario: str) -> Path:
 
 
 def build_plan(scenario: str, indicators: List[str], tree_rel: str) -> dict:
-    """生成一份符合 SCoT plan schema 的直线计划。
+    """生成一份符合 SCoT plan schema 的直线计划(含逐条件绑定层)。
 
-    - 每个指标 → 一个 kind=script 节点(跑解析脚本,产出存入 $memory.<指标>_result);
-    - 末尾 → 一个 kind=agent_skill 节点(fault-tree-rca,综合根因);
-    - 节点用 transition.next_on_success 串成直线,引用用 $input/$memory/$output。
+    流程:各指标 analyzer(script,产概览事实)→ bind_conditions(agent,看树+概览产 conditions.json)
+         → eval_conditions(condition_eval,按绑定+原始数据算 condition_facts)→ fault-tree-rca(agent,裁决)。
+    runner 可重入:跑到 agent 步骤会备好输入并停下,产出后重跑自动续上。
     """
     nodes = []
     for i, ind in enumerate(indicators):
-        nxt = indicators[i + 1] if i + 1 < len(indicators) else "rca"
+        nxt = indicators[i + 1] if i + 1 < len(indicators) else "bind_conditions"
         nodes.append({
             "id": ind,
             "kind": "script",
             "name": f"{ind}_analyzer",
-            "purpose": f"解析 {ind} 指标",
+            "purpose": f"解析 {ind} 指标(概览事实:列清单 + 数值摘要/十分位 + nulls)",
             "inputs": {"data": f"$input.{ind}"},
             "outputs": {"result": f"$memory.{ind}_result"},
             "transition": {"next_on_success": nxt},
         })
     nodes.append({
+        "id": "bind_conditions",
+        "kind": "agent_skill",
+        "name": "bind-conditions",
+        "purpose": "看故障树 + 各源概览,逐条件产出 A–J 绑定 conditions.json(选内核/对哪列/变换/路由/阈值;对不上标数据不足)",
+        "produces": "conditions.json",
+        "guide": "cs-scot-execute 技能的 references/condition_binding_schema.md",
+        "inputs": {"fault_tree_md": "$memory.fault_tree_md",
+                   **{ind: f"$memory.{ind}_result" for ind in indicators}},
+        "outputs": {"conditions": "$memory._conditions_authored"},
+        "transition": {"next_on_success": "eval_conditions"},
+    })
+    nodes.append({
+        "id": "eval_conditions",
+        "kind": "condition_eval",
+        "purpose": "按绑定 + 各源原始数据,算出每条件事实 condition_facts.json(只产事实,自带 validate 自检)",
+        "inputs": {"conditions": "conditions.json",
+                   "data": {ind: f"$input.{ind}" for ind in indicators}},
+        "outputs": {"result": "$memory.condition_facts"},
+        "transition": {"next_on_success": "rca"},
+    })
+    nodes.append({
         "id": "rca",
         "kind": "agent_skill",
         "name": "fault-tree-rca",
-        "purpose": "综合根因分析",
+        "produces": "result/rca.json",
+        "purpose": "综合根因分析(消费 condition_facts:字面命中只是输入,最终成立/不成立/数据不足由你裁决)",
         "inputs": {"fault_tree_md": "$memory.fault_tree_md",
+                   "condition_facts": "$memory.condition_facts",
                    **{ind: f"$memory.{ind}_result" for ind in indicators}},
         "outputs": {"result": "$output.final_answer"},
         "transition": {"end": True},
@@ -58,7 +81,7 @@ def build_plan(scenario: str, indicators: List[str], tree_rel: str) -> dict:
             "goal": f"诊断「{scenario}」的根因",
             "success_criteria": ["输出所有成立的根因路径与逐条判断依据"],
         },
-        "entry": indicators[0] if indicators else "rca",
+        "entry": indicators[0] if indicators else "bind_conditions",
         "memory_init": {"fault_tree_md": tree_rel},
         "nodes": nodes,
     }

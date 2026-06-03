@@ -94,7 +94,7 @@
 `Common:` 自动剥前缀命中;第22行 D 组合跨源→合取1 true 但合取2/3 缺列→整体诚实数据不足;RSRP 不在本表→数据不足不顶 RSSI;B 差值缺原始计数→数据不足;NIL 计入 nulls 不当不成立。
 
 **待办(v3 候选)**:
-- 把 bind→eval→validate 接进 `plan.json`/`runner.py`(目前是 execute 技能里手动三步,实验够用)。
+- ✅ 已接进 `plan.json`/`runner.py`:plan 含 `各analyzer→bind_conditions→eval_conditions→rca`,runner 加 `condition_eval` 节点 + agent 步骤**可重入**(`produces` 产物存在则载入续跑,否则备输入、暂停,产出后重跑续上);并修了 Windows 下 `subprocess(text=True)` 用 gbk 解码 UTF-8/中文输出的崩溃(`validate_parser`/`runner` 都加 `encoding="utf-8"`)。真实数据三源(chr/kpi/信令)实测 plan 链正确;Linux 端三趟重入跑通。
 - F(配置)/H(信令)需对应数据源(配置导出/trace)才出实判,现状无源→诚实数据不足。
 - 变换词汇不够用时按需扩(或加受控表达式 hook);I 类更复杂的逐用户关联(TA+TMSI 联合)目前用 `row_threshold`/`all_same`/`all_null` 覆盖常见形态。
 - 跨多次运行复用/回归:再加"按树+表头格式哈希"冻结缓存(用户:先不做)。
