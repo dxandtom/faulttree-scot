@@ -39,13 +39,32 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", "ignore")
 
 
-def load_table(path: str):
-    """读 csv/xlsx → (header, rows[list[dict]])。"""
+def list_sheets(path: str):
+    """xlsx 的页签名列表;csv 返回 []。多页签数据(如信令)用它发现各页签。"""
     p = Path(path)
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
         from openpyxl import load_workbook
         wb = load_workbook(p, read_only=True, data_only=True)
-        ws = wb.active
+        names = list(wb.sheetnames)
+        wb.close()
+        return names
+    return []
+
+
+def load_table(path: str, sheet=None):
+    """读 csv/xlsx → (header, rows[list[dict]])。xlsx 多页签:sheet 给页签名选表,不给则活动页。"""
+    p = Path(path)
+    if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
+        from openpyxl import load_workbook
+        wb = load_workbook(p, read_only=True, data_only=True)
+        if sheet is not None:
+            if sheet not in wb.sheetnames:
+                avail = list(wb.sheetnames)
+                wb.close()
+                raise ValueError(f"页签「{sheet}」不存在;可用页签:{avail}")
+            ws = wb[sheet]
+        else:
+            ws = wb.active
         it = ws.iter_rows(values_only=True)
         header = [("" if h is None else str(h)).strip() for h in next(it, [])]
         rows = [{header[i]: (("" if r[i] is None else str(r[i])) if i < len(r) else "")

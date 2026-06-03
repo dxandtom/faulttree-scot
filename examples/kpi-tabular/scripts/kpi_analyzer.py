@@ -78,12 +78,21 @@ def main():
     ap.add_argument("-o", "--output", required=True)
     ap.add_argument("--indicator", default=INDICATOR)
     args = ap.parse_args()
-    table = load_table(args.data)
-    sources = {INDICATOR: table}
+    # 多页签 xlsx:条件用 source=<页签名> 指到某页签;不指=活动页(键 INDICATOR)。
+    sources = {INDICATOR: load_table(args.data)}
+
+    def _table(name):
+        if name and name not in sources:
+            sources[name] = load_table(args.data, sheet=name)
+        return sources.get(name or INDICATOR, sources[INDICATOR])
+
     conds = []
     for c in CONDITIONS:
+        _table(c.get("source"))
+        for sub in (c.get("sub") or []):
+            _table(sub.get("source"))
         if c.get("mode") == "custom" and c.get("id") in CUSTOM:
-            fact = CUSTOM[c["id"]](table)
+            fact = CUSTOM[c["id"]](_table(c.get("source")))
         else:
             fact = evaluate_binding(c, sources, c.get("source", INDICATOR))
         meta = {k: c[k] for k in ("id", "node", "condition_text", "class", "mapping_reason") if k in c}

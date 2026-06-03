@@ -43,8 +43,20 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", "ignore")
 
 
-def _load(path: str):
-    """读数据 → (header, rows)。所有数据都按"带表头的表"处理。"""
+def _sheets(path: str):
+    """xlsx 页签名列表;csv → []。"""
+    p = Path(path)
+    if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
+        from openpyxl import load_workbook
+        wb = load_workbook(p, read_only=True, data_only=True)
+        names = list(wb.sheetnames)
+        wb.close()
+        return names
+    return []
+
+
+def _load(path: str, sheet=None):
+    """读数据 → (header, rows)。xlsx 多页签:sheet 给页签名选表,不给则活动页。"""
     p = Path(path)
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
         try:
@@ -52,7 +64,7 @@ def _load(path: str):
         except ImportError as e:
             raise RuntimeError("读取 xlsx 需要 openpyxl,请先 pip install openpyxl") from e
         wb = load_workbook(p, read_only=True, data_only=True)
-        ws = wb.active
+        ws = wb[sheet] if (sheet is not None and sheet in wb.sheetnames) else wb.active
         it = ws.iter_rows(values_only=True)
         header = [("" if h is None else str(h)).strip() for h in next(it, [])]
         rows = [{header[i]: (("" if r[i] is None else str(r[i])) if i < len(r) else "")
@@ -190,8 +202,8 @@ def _default_indicator(script_path, data_path, override):
     return Path(data_path).stem
 
 
-def analyze(data_path: str, indicator: str) -> dict:
-    header, rows = _load(data_path)
+def analyze(data_path: str, indicator: str, sheet=None) -> dict:
+    header, rows = _load(data_path, sheet)
     return _analyze_tabular(header, rows, indicator)
 
 
@@ -206,9 +218,23 @@ def main() -> None:
     ap.add_argument("--indicator", help="指标标签(默认从脚本名 <ind>_analyzer 或数据文件名推断)")
     ap.add_argument("--fault-tree", help="故障树 md;给了就尝试只保留树提到的列(命中过稀则保留全部);"
                                          "默认自动探测脚本旁唯一的 ../tree/*.md")
+    ap.add_argument("--sheet", help="xlsx 指定页签名(多页签数据用);不给且多页签 → 只列各页签的列(轻量)")
     args = ap.parse_args()
     indicator = _default_indicator(__file__, args.data, args.indicator)
-    result = analyze(args.data, indicator)
+    sheets = _sheets(args.data)
+    if len(sheets) > 1 and not args.sheet:
+        # 多页签且未指定:轻量列出每个页签的列 + 行数(不跑全量统计,免输出爆炸);
+        # 模型据此发现页签,再 --sheet <名> 看某页签详情,并在条件里用 source=<页签名> 指过去。
+        briefs = [{"name": s, "total_records": len(_load(args.data, s)[1]),
+                   "columns": _load(args.data, s)[0]} for s in sheets]
+        result = {"indicator": indicator, "kind": "multisheet_overview", "sheets": briefs,
+                  "note": "多页签:此为各页签列清单;某页签详情用 --sheet <名>;条件里 source=<页签名> 指过去。"}
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[analyzer] indicator={indicator} 多页签({len(sheets)}):{[b['name'] for b in briefs]} → {out}")
+        return
+    result = analyze(args.data, indicator, args.sheet)
     tree_path = args.fault_tree or _auto_tree(__file__)
     if tree_path and Path(tree_path).exists():
         result = _project(result, _decode(Path(tree_path).read_bytes()))
