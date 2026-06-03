@@ -19,27 +19,12 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 ## 执行模型(真 SCoT)
 1. 从 `entry` 节点开始,用 `memory_init` 初始化工作记忆;
 2. 按节点 `kind` 分派:
-   - **`script`**:`name`→`scripts/<name>.py`,解析 `inputs.data`→数据文件,跑脚本,产出 JSON 按 `outputs` 写入 `$memory`;
-   - **`condition_eval`**:跑 `eval_conditions.py`(+ `validate_conditions.py`),按绑定 `conditions.json` + 各源数据算出 `condition_facts` 存入 `$memory`;
-   - **`agent_skill`**(模型步骤,**可重入**):带 `produces` 的产物已存在 → 载入续跑;否则备好 `result/<id>_input.json`、打印待办、**暂停**——你产出后**重跑同一命令**即从此处续上(如 `bind_conditions`→`conditions.json`、`rca`→`result/rca.json`);
+   - **`script`**:`name`→`scripts/<name>.py`(generate 生成的逐条件分析脚本),解析 `inputs.data`→数据文件,跑脚本,产出该源**逐条件事实** JSON 按 `outputs` 写入 `$memory`;
+   - **`agent_skill`**:把解析好的 inputs(故障树读成正文 + 各源逐条件事实)备到 `result/rca_input.json`,由 `name` 指定的技能(**fault-tree-rca**)产出结果;
 3. 沿 `transition.next_on_success` 前进,`end=true` 结束;
 4. 节点间数据全靠 `$input`/`$memory`/`$step`/`$output` 引用传递。
 
-未定义的 kind 会直接报错(避免静默跳过)。典型链:`各 analyzer(script)`→`bind_conditions(agent)`→`eval_conditions`→`rca(agent)`。
-
-## 逐条件绑定与求值(诊断的"会变"部分,进 RCA 之前)
-故障树条件五花八门(阈值/差值/字段匹配/占比TopN/信令流程/特征分析/人工…,见 fault-tree-rca 的 A–J 分类),
-数据列名/格式更千变万化。**不写死、也不每次重写统计逻辑**:A–J 每类的统计逻辑已**固化测过**在
-`scripts/condition_kernels.py`;**你(模型)运行时只做"绑定"**——看故障树 + 各数据源真实表头/样本,
-为每条条件产出 `conditions.json`(选哪个类别内核、对哪列、剥前缀/缩放等变换、路由到哪个源、阈值;**对不上就标数据不足**)。
-契约见 `references/condition_binding_schema.md`。然后跑:
-```bash
-python scripts/eval_conditions.py --conditions conditions.json --data kpi=<kpi> --data chr=<chr> -o result/condition_facts.json
-python scripts/validate_conditions.py result/condition_facts.json   # 机械自检:没解析到列却给判断 → 报错
-```
-- 先用 `<ind>_analyzer.py` 跑出各源**概览事实**(列清单 + 数值摘要/十分位 + nulls),据此对列、定阈值;
-- `condition_facts.json` 每条带 provenance(命中哪列、怎么命中、nulls)+ `predicate_satisfied`(**仅字面比较**);
-- 把 `condition_facts.json`(+ 概览)交给 **fault-tree-rca** 做**最终裁决**:语义是否真等(RSRP≠RSSI 要降置信)、数据不足传播、路径回溯。
+未定义的 kind 会直接报错(避免静默跳过)。典型链:`各 <指标>_analyzer(script,快)`→`rca(agent_skill,唯一模型步骤,慢)`。**统计已在生成脚本里算好,execute 不再加工数据。**
 
 ## 输出
 - `script` 节点产出存入 `$memory`(不单独落盘);

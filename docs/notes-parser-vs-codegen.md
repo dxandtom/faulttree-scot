@@ -93,8 +93,21 @@
 **已验证(`examples/kpi-tabular/`)**:真实英文表头(带 `Common:` 前缀)+ 8 条绑定跑通,ok=4/数据不足=3/人工=1,校验通过:
 `Common:` 自动剥前缀命中;第22行 D 组合跨源→合取1 true 但合取2/3 缺列→整体诚实数据不足;RSRP 不在本表→数据不足不顶 RSSI;B 差值缺原始计数→数据不足;NIL 计入 nulls 不当不成立。
 
-**待办(v3 候选)**:
-- ✅ 已接进 `plan.json`/`runner.py`:plan 含 `各analyzer→bind_conditions→eval_conditions→rca`,runner 加 `condition_eval` 节点 + agent 步骤**可重入**(`produces` 产物存在则载入续跑,否则备输入、暂停,产出后重跑续上);并修了 Windows 下 `subprocess(text=True)` 用 gbk 解码 UTF-8/中文输出的崩溃(`validate_parser`/`runner` 都加 `encoding="utf-8"`)。真实数据三源(chr/kpi/信令)实测 plan 链正确;Linux 端三趟重入跑通。
-- F(配置)/H(信令)需对应数据源(配置导出/trace)才出实判,现状无源→诚实数据不足。
-- 变换词汇不够用时按需扩(或加受控表达式 hook);I 类更复杂的逐用户关联(TA+TMSI 联合)目前用 `row_threshold`/`all_same`/`all_null` 覆盖常见形态。
-- 跨多次运行复用/回归:再加"按树+表头格式哈希"冻结缓存(用户:先不做)。
+> **注意:v2 把统计放在 execute 运行时,已被 v3 修正(见下)。**
+
+## 更新(v3 修正):统计放回 generate 生成的脚本;execute 只跑脚本 + 末尾 RCA
+> 用户指正:v2 把 A–J 内核 + 绑定 + eval 塞进 execute,职责糊了——execute 该"只执行脚本、直接拿到统计好的数据",
+> 统计代码应在 **generate** 里生成。形态 = **预制 A–J 模板 + 模型按数据决定:能直接套就套、模板不够用才在其上改**(折中,逐条件由模型判)。
+
+**最终架构**:
+- **generate(编译)**:`condition_kernels.py`(A–J 模板库)+ `analyzer.py`(概览)搬到 `cs-scot-generate/scripts`;assemble 把模板库拷进产物、为每指标写**待填骨架** `<ind>_analyzer.py`;模型看概览+树,按 `condition_binding_schema.md` 填 `CONDITIONS`(默认套模板 `evaluate_binding`,不够用才写 `CUSTOM` 函数);步骤3 用真实数据真跑 + `validate_conditions.py` 自检(custom 写崩当场暴露)。
+- **execute(只跑)**:`runner.py` 退回纯 `script + agent_skill` 单趟——按序跑各 `<ind>_analyzer.py`(快,直接吐该源逐条件事实)→ 末尾一次 `fault-tree-rca`(慢,唯一模型步)。删了 execute 里的 `condition_eval`/可重入/`eval_conditions.py`。
+- **plan**:`各<ind>_analyzer(script)→rca(agent_skill)`(回到直线)。跨源组合的合取项分填各源脚本,AND/OR 由 RCA 合。
+- **保留**:Windows 下 `subprocess(text=True)` 的 gbk 解码崩溃修复(`encoding="utf-8"`);列解析机械化 + 三条诚实铁律;custom 逃生口由步骤3真跑兜底。
+
+**已验证**:`examples/kpi-tabular/scripts/kpi_analyzer.py`(3 条套模板 + 1 条 custom「同列极差>10」)单跑 4/4 ok、校验通过;assemble→填脚本→reverted runner 端到端跑通(`kpi(script)→rca` 单趟,RCA 输入含逐条件事实)。
+
+**待办**:
+- F(配置)/H(信令)需对应数据源才出实判,无源→诚实数据不足。
+- 模板词汇/custom 之外更复杂的 I 类(TA+TMSI 联合)按需扩。
+- `validate_parser.py` 仍按旧"概览"字段校验;**条件脚本改用 `validate_conditions.py` 校验**。

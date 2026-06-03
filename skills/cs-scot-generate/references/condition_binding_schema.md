@@ -1,20 +1,13 @@
-# 逐条件绑定契约(`conditions.json`)——LLM 每次运行产出
+# 逐条件绑定契约——generate 时填进 `<ind>_analyzer.py` 的 `CONDITIONS`
 
-诊断的"会变"部分**只在这里**:运行时 LLM 看**故障树条件 + 各数据源的真实表头/样本**,为每条条件产出一个**绑定**:
-选哪个**类别内核**(A–J,统计逻辑已在 `scripts/condition_kernels.py` 固化测过)、对哪列、做什么处理变换、
-路由到哪个数据源、阈值多少;**对不上就老实标数据不足**。然后:
-```bash
-python scripts/eval_conditions.py --conditions conditions.json --data kpi=k.csv --data chr=c.csv -o condition_facts.json
-python scripts/validate_conditions.py condition_facts.json    # 机械自检:揪"没解析到列却给判断"
-```
-内核只产**事实**(算出的量 + provenance + `predicate_satisfied` 的**字面**比较);
-`成立/不成立/数据不足` 的**最终裁决 + 路径回溯 + 语义是否真等(如 RSRP≠RSSI 要降置信)** 仍由 `fault-tree-rca` 做。
+诊断的"会变"部分**只在这里**:generate 时模型看**故障树条件 + 各源真实表头/样本**(先用 `analyzer.py` 出概览),
+为每条判据写一个**绑定**:选哪个**类别内核**(A–J,统计逻辑已在 `condition_kernels.py` 固化测过)、对哪列、
+做什么处理变换、路由到哪个源、阈值多少;**对不上就老实标数据不足**。绑定平铺进对应源脚本的 `CONDITIONS` 列表。
 
-## 顶层结构
-```json
-{ "scenario": "场景名",
-  "conditions": [ { 一条绑定 }, ... ] }
-```
+脚本跑起来对每条 `evaluate_binding(绑定, {源:表}, 源)` → 事实(算出的量 + provenance + `predicate_satisfied` 的**字面**比较);
+`成立/不成立/数据不足` 的**最终裁决 + 路径回溯 + 语义是否真等(RSRP≠RSSI 要降置信)** 仍由 `fault-tree-rca` 做。
+
+**默认套模板;模板不够用**(如"同列极差"这种内核没有的算法)**才给该条加 `"mode":"custom"`,在脚本 `CUSTOM` 里按 id 写返回 fact 的函数**——会在 generate 步骤3 拿真实数据真跑、出错即暴露。
 
 ## 一条绑定的公共字段
 | 字段 | 说明 |
@@ -54,4 +47,5 @@ python scripts/validate_conditions.py condition_facts.json    # 机械自检:揪
 2. **NIL/空 = 缺测**,计入 `nulls`,**不当"不成立"、不当 0**。
 3. **路由要诚实**:树的量在别的源(如 RSRP 在 CHR 不在 KPI)→ 写清 `mapping_reason` 并标数据不足/换源,**不拿本源相近列顶**(别重蹈 `SINR→语音用户数`)。
 
-> 真实例子见 `examples/kpi-tabular/conditions.json` + 跑出来的 `condition_facts.json`。
+> 真实例子见 `examples/kpi-tabular/scripts/kpi_analyzer.py`(填好的 `CONDITIONS` + 一条 `custom`)。
+> 跨源组合:把各合取项填进**各自源**的脚本,AND/OR 留给 RCA 合(单脚本只见一个源)。

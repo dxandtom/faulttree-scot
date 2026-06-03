@@ -2,7 +2,7 @@
 
 `cs-scot-generate` 产出、`cs-scot-execute` 消费的 **`plan.json` 是一份真正的 SCoT 计划**,
 遵循 SCoT plan schema(见仓库 `scot_reference/plan_schema.md`)。我们只用它的**子集**:
-- 节点 `kind` 用 `script`(跑解析脚本)、`condition_eval`(逐条件绑定求值)、`agent_skill`(模型步骤:绑定 / RCA);
+- 节点 `kind` 只用 `script`(跑生成的逐条件分析脚本)和 `agent_skill`(模型判断,fault-tree-rca);
 - 转移只用直线 `transition.next_on_success` / `end`;
 - 节点间用 `$input` / `$memory` / `$step.<id>` / `$output` 引用传数据。
 
@@ -43,23 +43,9 @@
 - runner 解析 inputs(`fault_tree_md` 若是 md 路径则读成正文,其余按指标名归到 `indicator_results`),
   备到 `result/rca_input.json`,由 **fault-tree-rca 技能**依据它产出根因。
 
-### kind = `condition_eval` —— 逐条件绑定求值(确定性)
-```json
-{"id":"eval_conditions","kind":"condition_eval","purpose":"按绑定+各源数据算 condition_facts",
- "inputs":{"conditions":"conditions.json","data":{"kpi":"$input.kpi","chr":"$input.chr"}},
- "outputs":{"result":"$memory.condition_facts"},
- "transition":{"next_on_success":"rca"}}
-```
-- runner 跑同目录 `eval_conditions.py --conditions <inputs.conditions> --data <源>=<文件>… -o result/condition_facts.json`(再跑 `validate_conditions.py` 自检),把事实存入 `$memory`。
-- `inputs.conditions` 是绑定文件(相对产物目录),由上一步 `bind_conditions` 产出。
-
-### agent_skill 可重入(`produces`)
-agent_skill 节点可带 `"produces":"<产物路径>"`(如 `conditions.json` / `result/rca.json`):
-- 产物**已存在** → runner 载入它、继续;
-- **不存在** → 备好 `result/<id>_input.json`、打印待办、**暂停整条计划**;你产出后**重跑同一命令**即从此处续上。
-
 ## 典型流水线(本项目)
-`各指标 analyzer(script)` → `bind_conditions(agent_skill, produces conditions.json)` → `eval_conditions(condition_eval)` → `rca(agent_skill, produces result/rca.json)`。
+`各 <指标>_analyzer(script,读表→逐条件统计)` → `rca(agent_skill,唯一模型步骤)`。
+script 节点跑的是 generate 生成的逐条件分析脚本,直接产出该源逐条件事实;execute 不再加工数据。
 
 ## 引用命名空间
 | 前缀 | 含义 |

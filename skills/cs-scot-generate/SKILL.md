@@ -15,13 +15,12 @@ description: 把故障树(Excel)+ 若干指标数据编译成场景诊断产物:
 > - 输入路径可能带空格、括号、中文(如 `EnhancedExcelDataExport (7).xlsx`),命令里**整条路径务必加引号**。
 > - 产物是数据/资产(交给执行器 cs-scot-execute 去跑),不是可执行程序。
 
-## 核心:一个通用解析引擎(不再每场景写代码)
-不为每个场景/指标重新写脚本,而是复用同一个**通用解析引擎** `scripts/analyzer.py`(契约见 `references/meta_prompt.md`)。
-所有真实数据都是**带表头的表**(CHR、kpiData 皆然),引擎逐列数据驱动统计:
-- **数值列** → count/min/max/mean + **十分位(p0..p100)** + nulls(让阈值条件可判、NIL 缺测可见);
-- **类别列** → top-N + distinct + 样例标识 + nulls。
+## 核心:按 A–J 模板生成"逐条件分析脚本"(generate 编译、execute 只跑)
+故障树条件分 **A–J 十类**(阈值/差值/字段匹配/组合/占比TopN/配置/日志/信令/特征/人工)。统计逻辑已**预制成测过的内核库** `scripts/condition_kernels.py`;generate 时**你按真实数据,为每个指标填一份"逐条件分析脚本" `<ind>_analyzer.py`**——读表 → 逐条件统计 → 输出事实。
+- 默认**直接套模板**(`evaluate_binding`:选类别、对哪列、阈值/变换;组前缀 `Common:` 自动剥);
+- 仅当数据格式特殊、模板不够用时,才为个别条件写 `custom` 函数(会在步骤3拿真实数据真跑、出错即暴露)。
 
-引擎**只产事实,绝不下判断、也不做"树的量↔列"映射**;映射(按语义、显式、可审)、是否成立、根因,全部交给 `fault-tree-rca`。步骤 2 只是把引擎按指标命名复制进产物,**你无需手写任何解析代码**。
+这样**generate 产出"读表+统计"的代码;execute 只按序跑脚本(快)+ 末尾一次 RCA(慢)**。是否成立/路径回溯/跨源组合,交给 `fault-tree-rca`。绑定字段与 A–J 参数见 `references/condition_binding_schema.md`;先用 `analyzer.py` 看各源真实列(概览:列清单+数值摘要/十分位+nulls)。
 
 ## 输入
 - 故障树 `.xlsx`(绝对路径)。
@@ -45,24 +44,34 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<�
 - **不带 `-o`**:子树写到 `<OUT>/tree/<场景名>.md`,并打印「本场景产物目录: `<OUT>`」——**记住这个 `<OUT>`,步骤 2-4 都用它**。
 - 场景默认在 L2(`--start-level` 默认 2);`--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`。出来应是几十 KB 的单场景子树。
 
-### 步骤 2:归集产物(复制通用引擎 + 生成真 SCoT 计划)
+### 步骤 2:归集产物(拷模板库 + 写待填脚本骨架 + 生成 SCoT 计划)
 ```bash
 python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
-它把通用引擎 `analyzer.py` 按指标复制为 `<OUT>/scripts/<ind>_analyzer.py`,并产出 `plan.json`(真 SCoT v4.0:`entry`+`nodes`+`transition`+`$ref`)。`--out` 用步骤 1 打印的 `<OUT>`。**你无需手写任何解析代码。** 格式见 `references/plan_schema.md`。
+它把 A–J 模板库 `condition_kernels.py`、概览引擎 `analyzer.py`、绑定契约拷进 `<OUT>/scripts/`,为每个指标写一份**待填骨架** `<ind>_analyzer.py`,并产出 `plan.json`(`各<ind>_analyzer(script)→rca(agent_skill)`)。`--out` 用步骤 1 打印的 `<OUT>`。格式见 `references/plan_schema.md`。
 
-### 步骤 3:验证每个解析脚本能跑通该数据
+### 步骤 2.5(关键的一步):为每个 `<ind>_analyzer.py` 填 `CONDITIONS`
+先看各源真实列,再把故障树每条判据填进对应源脚本:
 ```bash
-python "<本目录>/scripts/validate_parser.py" "<OUT>/scripts/<ind>_analyzer.py" "<该指标数据>"
+python "<OUT>/scripts/analyzer.py" "<该指标数据>" -o /tmp/<ind>_overview.json   # 概览:看真实列名/分布
 ```
-要求正常退出、产出合法**事实** JSON(`indicator/kind/summary/field_stats`,catalog 另含 `rules/counter_index`)、且不含 `hit/judgment/conditions`。不过多半是编码/格式问题,按报错排查。
+按 `references/condition_binding_schema.md`,把判据**路由到对应源**、填进该源脚本的 `CONDITIONS`(选 A–J 类、对哪列〔裸名即可〕、阈值/变换;对不上标数据不足)。**默认套模板,非改不可才写 `custom`**。跨源的组合各源分别出子事实,AND/OR 留给 RCA 合。
+
+### 步骤 3:用真实数据验证每个生成脚本
+```bash
+python "<OUT>/scripts/<ind>_analyzer.py" "<该指标数据>" -o /tmp/<ind>.json
+python "<本目录>/scripts/validate_conditions.py" /tmp/<ind>.json
+```
+脚本要正常跑出逐条件事实(`indicator/source/summary/conditions`);校验器揪"没解析到列却给判断、数据不足缺理由"。custom 写崩了/形状不对,在这步就暴露。
 
 ## 输出目录(就是 `<OUT>`)
 ```
 <OUT>/                                       # = <故障树目录>/scot产物/<场景名>/
 ├── plan.json                              # SCoT 计划(产物①)
-├── scripts/<ind>_analyzer.py              # 通用解析引擎副本(产物②)
+├── scripts/<ind>_analyzer.py              # 逐条件分析脚本(模型填 CONDITIONS,产物②)
+├── scripts/condition_kernels.py           # A–J 模板库(脚本 import 它)
+├── scripts/condition_binding_schema.md    # 绑定契约 + analyzer.py 概览引擎
 └── tree/<场景>.md                          # 故障树 md(产物③)
 ```
 跑它:`python "<cs-scot-execute 目录>/scripts/runner.py" --plan "<OUT>/plan.json" --data <ind>=<数据文件> ...`

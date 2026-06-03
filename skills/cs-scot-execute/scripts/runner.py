@@ -30,14 +30,6 @@ from typing import Any, Dict
 _TOK = re.compile(r"[^.\[\]]+|\[\d+\]")
 
 
-class _Pause(Exception):
-    """到达一个还没产出的 agent 步骤:备好输入、打印待办、暂停整条计划(产出后重跑可续)。"""
-    def __init__(self, node_id: str, todo: str):
-        super().__init__(node_id)
-        self.node_id = node_id
-        self.todo = todo
-
-
 def _get_path(obj: Any, path: str) -> Any:
     """按 a.b[0].c 在嵌套结构里取值;取不到返回 None。"""
     cur = obj
@@ -124,25 +116,15 @@ def run_script_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
 
 
 def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
-    """执行 kind=agent_skill 节点(模型步骤,**可重入**)。
+    """执行 kind=agent_skill 节点:备好输入,交给该 prompt-only 技能(模型)执行。
 
-    - 若 node.produces 指定的产物已存在 → 载入它、继续(重跑时自动续上);
-    - 否则 → 把解析好的输入备到 result/<id>_input.json,打印待办,抛 _Pause 暂停整条计划。
-    约定:fault_tree_md 输入若是 .md 路径会被读成正文;其余输入归到 indicator_results。
+    runner 自身不调模型;它把解析好的 inputs 写到 result/<id>_input.json 并打印待办,
+    由所在 agent harness 用对应技能产出结果。对 fault-tree-rca,inputs 里的
+    fault_tree_md 若是路径会被读成正文。
     """
     name = node.get("name") or node["id"]
-    produces = node.get("produces")
-    prod = (base / produces) if produces else None
-    if prod is not None and prod.exists():
-        try:
-            result = json.loads(prod.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            result = {"_artifact": str(prod)}
-        store_outputs(node.get("outputs"), result, ctx)
-        print(f"[agent_skill] {node['id']}: 已载入既有产物 {prod} → 继续")
-        return result
-
     ins = resolve_inputs(node.get("inputs"), ctx)
+    # 约定:fault_tree_md 输入若是 .md 路径则读成正文;其余输入视为各指标解析结果
     ft = ins.pop("fault_tree_md", None)
     if isinstance(ft, str) and ft.lower().endswith(".md"):
         ftp = Path(ft)
@@ -153,54 +135,13 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
     in_path = base / "result" / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    lines = [f"[agent_skill] {node['id']}: 模型步骤,用「{name}」技能。",
-             f"  输入已备好 → {in_path}"]
-    if node.get("guide"):
-        lines.append(f"  参照契约 → {node['guide']}")
-    if produces:
-        lines.append(f"  产出请写到 → {prod}")
-    lines.append("  (indicator_results 含各源概览/上游事实;按技能契约产出后写到上面的产出路径)")
-    raise _Pause(node["id"], "\n".join(lines))
-
-
-def run_condition_eval_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
-    """执行 kind=condition_eval 节点:跑同目录的 eval_conditions.py(+ validate_conditions.py),
-    把逐条件事实存入 $memory。inputs.conditions=绑定文件(相对 base);inputs.data={源名: $input.<源>}。"""
-    raw = node.get("inputs") or {}
-    conditions = resolve_ref(raw.get("conditions"), ctx)
-    if not conditions:
-        raise ValueError(f"节点 {node['id']} 缺少 inputs.conditions")
-    cpath = Path(conditions)
-    cpath = cpath if cpath.is_absolute() else (base / cpath)
-    if not cpath.exists():
-        raise FileNotFoundError(
-            f"节点 {node['id']}: 绑定文件不存在 {cpath}(应由上一步 bind_conditions 产出后再重跑)")
-    sdir = Path(__file__).resolve().parent
-    out = base / "result" / "condition_facts.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, str(sdir / "eval_conditions.py"), "--conditions", str(cpath)]
-    for k, v in (raw.get("data") or {}).items():
-        p = resolve_ref(v, ctx)
-        if not p:
-            continue
-        pp = Path(p)
-        pp = pp if pp.is_absolute() else (base / pp)
-        cmd += ["--data", f"{k}={pp}"]
-    cmd += ["-o", str(out)]
-    print(f"[condition_eval] {node['id']}: {' '.join(cmd)}")
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
-                          encoding="utf-8", errors="replace")
-    if proc.stdout:
-        print(proc.stdout.strip())
-    if proc.returncode != 0:
-        raise RuntimeError(f"节点 {node['id']} eval 失败 (exit {proc.returncode}):\n{proc.stderr[-2000:]}")
-    vproc = subprocess.run([sys.executable, str(sdir / "validate_conditions.py"), str(out)],
-                           capture_output=True, text=True, encoding="utf-8", errors="replace")
-    print("[validate_conditions]", (vproc.stdout or vproc.stderr or "").strip())
-    result = json.loads(out.read_text(encoding="utf-8"))
-    store_outputs(node.get("outputs"), result, ctx)
-    return result
+    print(f"[agent_skill] {node['id']}: 已备好输入 → {in_path}")
+    print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能,依据该输入产出结果"
+          f"(并按 outputs 写回);RCA 的输出契约见 fault-tree-rca 技能。")
+    # 占位:实际结果由 agent 执行技能后填入;这里存一个待办标记,供下游引用不致 KeyError
+    placeholder = {"_pending_skill": name, "_input": str(in_path)}
+    store_outputs(node.get("outputs"), placeholder, ctx)
+    return placeholder
 
 
 def main() -> None:
@@ -242,32 +183,25 @@ def main() -> None:
 
     cur = plan.get("entry")
     visited = 0
-    try:
-        while cur:
-            if cur not in nodes:
-                raise KeyError(f"transition 指向不存在的节点: {cur}")
-            node = nodes[cur]
-            kind = node.get("kind")
-            if kind == "script":
-                result = run_script_node(node, ctx, base)
-            elif kind == "condition_eval":
-                result = run_condition_eval_node(node, ctx, base)
-            elif kind == "agent_skill":
-                result = run_agent_skill_node(node, ctx, base)
-            else:
-                raise ValueError(f"节点 {cur} 的 kind={kind} 暂不支持(script / condition_eval / agent_skill)")
-            ctx["step"][cur] = result
-            visited += 1
-            if visited > 1000:
-                raise RuntimeError("节点访问超过 1000,疑似 transition 成环")
-            tr = node.get("transition") or {}
-            cur = None if tr.get("end") else tr.get("next_on_success")
-    except _Pause as pause:
-        print("\n" + pause.todo)
-        print(f"\n[暂停] 计划停在「{pause.node_id}」等你产出;完成后**重跑同一条命令**即可从此处继续。")
-        return
+    while cur:
+        if cur not in nodes:
+            raise KeyError(f"transition 指向不存在的节点: {cur}")
+        node = nodes[cur]
+        kind = node.get("kind")
+        if kind == "script":
+            result = run_script_node(node, ctx, base)
+        elif kind == "agent_skill":
+            result = run_agent_skill_node(node, ctx, base)
+        else:
+            raise ValueError(f"节点 {cur} 的 kind={kind} 暂不支持(当前实现 script / agent_skill)")
+        ctx["step"][cur] = result
+        visited += 1
+        if visited > 1000:
+            raise RuntimeError("节点访问超过 1000,疑似 transition 成环")
+        tr = node.get("transition") or {}
+        cur = None if tr.get("end") else tr.get("next_on_success")
 
-    print("SCoT 执行流程完成。")
+    print("SCoT 执行流程完成(script 步骤已跑;agent_skill/RCA 待对应技能完成,见上方提示)。")
 
 
 if __name__ == "__main__":
