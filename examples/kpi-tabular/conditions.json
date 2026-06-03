@@ -1,0 +1,66 @@
+{
+  "scenario": "SA场景接入失败(片段示例:演示 A–J 绑定 + 跨源 + 诚实数据不足)",
+  "conditions": [
+    {
+      "id": "第22行-合取1", "node": "NSA加扇区成功率低",
+      "condition_text": "NSA_SgNB addition Success Rate < 0.99",
+      "class": "A", "source": "kpi",
+      "mapping_reason": "本表列 'Common:NSA_SgNB addition Success Rate',剥组前缀 Common: 后语义一致;聚合取均值",
+      "column": "NSA_SgNB addition Success Rate", "op": "<", "threshold": 0.99,
+      "scope": "aggregate", "agg": "mean"
+    },
+    {
+      "id": "第22行", "node": "NSA加扇区失败-无线无资源",
+      "condition_text": "NSA_SgNB addition Success Rate < 0.99 AND NSA_SgNB Addition Prep Fail times > 0 AND N.NsaDc.SgNB.Add.Fail.Radio.NoRes > 0",
+      "class": "D", "source": "kpi", "combine": "AND",
+      "mapping_reason": "合取1在本KPI表;合取2/3(Prep Fail times、N.NsaDc...NoRes)本表没有→各自数据不足→整体无法确证(不可只凭合取1就成立)",
+      "sub": [
+        {"class": "A", "column": "NSA_SgNB addition Success Rate", "op": "<", "threshold": 0.99, "scope": "aggregate", "agg": "mean"},
+        {"class": "A", "column": "NSA_SgNB Addition Prep Fail times", "op": ">", "threshold": 0},
+        {"class": "A", "column": "N.NsaDc.SgNB.Add.Fail.Radio.NoRes", "op": ">", "threshold": 0}
+      ]
+    },
+    {
+      "id": "第78行", "node": "弱覆盖",
+      "condition_text": "SUSRLastAvgRsrp < -120",
+      "class": "A", "source": "kpi",
+      "mapping_reason": "RSRP 是每用户量(在 CHR/L2UserChr,需 /100),本KPI表无;本表只有 N.UL.RSSI.Avg(RSSI≠RSRP、且取值非dBm)→不顶替,判数据不足",
+      "column": "SUSRLastAvgRsrp", "op": "<", "threshold": -120, "scope": "count_rows"
+    },
+    {
+      "id": "第9行", "node": "上下文建立有失败",
+      "condition_text": "N.UECntx.Est.Att - N.UECntx.Est.Succ > 0",
+      "class": "B", "source": "kpi",
+      "mapping_reason": "需原始计数 Att/Succ;本表只有各类成功率、无这两个原始计数→无法算差值→数据不足",
+      "minuend": ["N.UECntx.Est.Att"], "subtrahend": ["N.UECntx.Est.Succ"], "op": ">", "threshold": 0
+    },
+    {
+      "id": "成功率阈值", "node": "QoSFlow建立成功率低",
+      "condition_text": "SA_QosFlow Setup Success Rate < 85",
+      "class": "A", "source": "kpi",
+      "mapping_reason": "列 'Common:SA_QosFlow Setup Success Rate(22B)';单位为百分数(0–100),阈值85;按行计满足数(NIL 行计入 nulls、不当不成立)",
+      "column": "SA_QosFlow Setup Success Rate(22B)", "op": "<", "threshold": 85, "scope": "count_rows"
+    },
+    {
+      "id": "第134行", "node": "PDU会话建立失败-GTPU错误",
+      "condition_text": "CHR中 DCInnerCause 为 RrcReject(示例:用 chr.csv 的 DCErrType 演示字段匹配)",
+      "class": "C", "source": "chr",
+      "mapping_reason": "chr.csv 有列 DCErrType;精确匹配取值 RrcReject",
+      "column": "DCErrType", "equals": ["RrcReject"], "match": "exact"
+    },
+    {
+      "id": "第86行", "node": "异常释放TOP1占比",
+      "condition_text": "统计异常释放中 TOP1 占比 > 70%",
+      "class": "E", "source": "chr",
+      "mapping_reason": "真实应按 UeCapabilityInex 分组,fixture 无该列→此处用 DCErrType 演示 TopN 占比形态(真实数据里换成能力列)",
+      "group_by": "DCErrType", "op": ">", "threshold": 0.7
+    },
+    {
+      "id": "第88行", "node": "外接友商天线",
+      "condition_text": "人工确认:prru 上外接友商天线导致 UE 无响应",
+      "class": "J", "source": null,
+      "mapping_reason": "需现场确认,自动指标不可判",
+      "note": "需一线现场确认外接天线情况"
+    }
+  ]
+}

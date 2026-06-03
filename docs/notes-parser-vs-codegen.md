@@ -74,3 +74,27 @@
 - 数值阈值仍是"用 deciles 估比例",非精确计数。若要精确,引入"映射规格(列+op+阈值,带理由/置信)+ 固定执行器"算精确命中数/占比(仍是事实)。
 - 旧示例 `examples/sa-access-fail/fixtures/kpi.csv` 是**废弃的假 kpiTree**,仅作历史;真形态以 `examples/kpi-tabular/` 为准。
 - `validate_rca.py` 暂未校验"映射编造"(机械难判);靠 `rca_rules.md` 硬规则 + evidence 里 `mapping_reason` 人工/二次复核。
+
+## 更新(v2 落地):A–J 内核模板 + 运行时 LLM 绑定(每次生成)
+> 真实故障树条件分 **A–J 十类**(阈值/差值/字段匹配/组合/占比TopN/配置/日志/信令流程/特征分析/人工)。
+> E/H/I 几乎每条是定制小程序(嵌套路径、分组键、`156*TA/2`、`/100`、版本分支)——**纯固定模板覆盖不了**;
+> 真实 KPI 表头还带 `Common:`/`Voice:`/`Interference:` 组前缀,且很多条件根本不在 KPI 表(在 CHR/trace/配置/日志)。
+> 用户拍板:**先每次运行生成**;形态=**预制按类统计模板 + LLM 按具体数据生成绑定/处理**。
+
+**架构(三段,可变只锁在中间)**:① 装载(固定)② **绑定/规整(运行时 LLM 生成)** ③ 统计(A–J 预制内核,固定测过)。
+- A–J 内核固化在 `cs-scot-execute/scripts/condition_kernels.py`(把占比TopN/差值/阈值计数/字段匹配这些**易错逻辑**测一次、稳定);
+- LLM 运行时只产**绑定** `conditions.json`(选类别内核、对哪列、剥前缀/`scale`变换、路由到哪个源、阈值;对不上标数据不足),契约见 `cs-scot-execute/references/condition_binding_schema.md`;
+- `eval_conditions.py` 执行 → `condition_facts.json`(只产事实 + provenance + **字面** `predicate_satisfied`);`validate_conditions.py` 机械揪"没解析到列却给判断";`成立/不成立`最终裁决仍归 RCA。
+- **列解析机械化**:精确→剥组前缀→归一化唯一→嵌套末段;解析不到/歧义→`resolved_column:null`+数据不足,**绝不挑相近列顶**(防 `SINR→语音用户数`)。
+- **处理变换=固定词汇**(`scale`/`abs`/`neg`/`round`),不放任意代码;真需要再扩词汇或加受控 hook(暂未开)。
+
+**为何不放任意 codegen**:`SINR→语音用户数` 那类**静默错**会从"映射错"变成"生成代码错",更难发现。所以生成物(绑定)落盘可见 + 过 `validate_conditions` + RCA 复核;统计逻辑本身用测过的内核,不每次重写。
+
+**已验证(`examples/kpi-tabular/`)**:真实英文表头(带 `Common:` 前缀)+ 8 条绑定跑通,ok=4/数据不足=3/人工=1,校验通过:
+`Common:` 自动剥前缀命中;第22行 D 组合跨源→合取1 true 但合取2/3 缺列→整体诚实数据不足;RSRP 不在本表→数据不足不顶 RSSI;B 差值缺原始计数→数据不足;NIL 计入 nulls 不当不成立。
+
+**待办(v3 候选)**:
+- 把 bind→eval→validate 接进 `plan.json`/`runner.py`(目前是 execute 技能里手动三步,实验够用)。
+- F(配置)/H(信令)需对应数据源(配置导出/trace)才出实判,现状无源→诚实数据不足。
+- 变换词汇不够用时按需扩(或加受控表达式 hook);I 类更复杂的逐用户关联(TA+TMSI 联合)目前用 `row_threshold`/`all_same`/`all_null` 覆盖常见形态。
+- 跨多次运行复用/回归:再加"按树+表头格式哈希"冻结缓存(用户:先不做)。

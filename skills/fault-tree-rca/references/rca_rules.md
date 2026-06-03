@@ -7,6 +7,9 @@
 - **fault_tree_md**:故障子树(`#/##/###` 层级,标题下是该节点的判断条件;人工编写、可能不规整)。
 - **indicator_results**:dict,键是指标名,值是该指标已解析好的**事实**(只有数据、没有判断):每个字段/项的真实分布、数值摘要或取值。
   - 注意:有的指标提供的是**定义/规则**(某量怎么算、阈值是多少),而**不是实测值**。**定义不是测量。**
+- 可能还收到 **`condition_facts`**(execute 端逐条件求值的产物):每条带 `class`/`mapping_reason`/`fact`,
+  `fact.predicate_satisfied` 是**仅在解析到的列上做的字面比较**、`fact.status` 可能是 `insufficient_data`/`manual`。
+  - 这是**输入证据,不是最终结论**:你仍要 ① 看 `mapping_reason` 判**语义是否真等**(如 RSRP 顶 RSSI、单位不符 → 降置信/数据不足,别因 `predicate_satisfied:true` 就当成立);② `status:insufficient_data/manual` → 该节点判"数据不足";③ 做路径回溯与数据不足传播。**字面为真 ≠ 该条件成立。**
 
 ## 核心:一个通用判定法则(不分指标)
 对故障树**每条判断条件**,照此走:

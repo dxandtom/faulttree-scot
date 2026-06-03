@@ -26,6 +26,20 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 
 未定义的 kind 会直接报错(避免静默跳过)。
 
+## 逐条件绑定与求值(诊断的"会变"部分,进 RCA 之前)
+故障树条件五花八门(阈值/差值/字段匹配/占比TopN/信令流程/特征分析/人工…,见 fault-tree-rca 的 A–J 分类),
+数据列名/格式更千变万化。**不写死、也不每次重写统计逻辑**:A–J 每类的统计逻辑已**固化测过**在
+`scripts/condition_kernels.py`;**你(模型)运行时只做"绑定"**——看故障树 + 各数据源真实表头/样本,
+为每条条件产出 `conditions.json`(选哪个类别内核、对哪列、剥前缀/缩放等变换、路由到哪个源、阈值;**对不上就标数据不足**)。
+契约见 `references/condition_binding_schema.md`。然后跑:
+```bash
+python scripts/eval_conditions.py --conditions conditions.json --data kpi=<kpi> --data chr=<chr> -o result/condition_facts.json
+python scripts/validate_conditions.py result/condition_facts.json   # 机械自检:没解析到列却给判断 → 报错
+```
+- 先用 `<ind>_analyzer.py` 跑出各源**概览事实**(列清单 + 数值摘要/十分位 + nulls),据此对列、定阈值;
+- `condition_facts.json` 每条带 provenance(命中哪列、怎么命中、nulls)+ `predicate_satisfied`(**仅字面比较**);
+- 把 `condition_facts.json`(+ 概览)交给 **fault-tree-rca** 做**最终裁决**:语义是否真等(RSRP≠RSSI 要降置信)、数据不足传播、路径回溯。
+
 ## 输出
 - `script` 节点产出存入 `$memory`(不单独落盘);
 - `agent_skill`(RCA)节点:`result/rca_input.json`(汇总输入)→ 由 fault-tree-rca 产出 `result/rca.json`。

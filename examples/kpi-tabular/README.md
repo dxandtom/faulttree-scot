@@ -1,25 +1,36 @@
-# 示例:kpiData(带表头的表)+ 跨命名映射
+# 示例:kpiData(真实表头)+ A–J 逐条件绑定/求值
 
-演示 v1 改版后的真实数据形态:**kpiData 是带表头的表**(中文列名 + 真实值),而故障树条件常用**英文/code 名**——名字对不上是常态。本例刻意复现三个难点。
+演示运行时流程:**A–J 统计内核已固化**,LLM 看故障树+真实数据产出**绑定** `conditions.json`,
+执行器算出**事实**,校验器揪"静默编造",再交 RCA 裁决。
 
 ## 文件
-- `fixtures/kpiData.csv`:8 行、2 个小区(CellA 正常 / CellB 异常),中文列名取自真实脱敏图例。
-  - 故意**没有 SINR 列**;`SA_QoSFlow建立成功率(22B)` 有一个 `NIL`;`上行RSSI均值` 取值 `0.01/154.555`(明显不是 dBm)。
-- `tree/示例-接入与干扰.md`:用英文 code 名写的三条条件(弱覆盖 RSRP、干扰 RSRP+SINR、QoSFlow 成功率)。
+- `fixtures/kpiData.csv`:6 行、2 个小区,**真实英文表头(带 `Common:`/`Voice:`/`Interference:` 组前缀)**,取自真实脱敏表头;
+  含一个 `NIL`、`N.UL.RSSI.Avg` 取值 `0.01/154.555`(明显非 dBm)。
+- `conditions.json`:手写的绑定(模拟 LLM 运行时产出),覆盖 A/B/C/D/E/J 与跨源、缺列、缺计数。
+- `tree/示例-接入与干扰.md`:用英文 code 名写的条件(配合 analyzer 的"跨命名投影兜底"演示)。
 
-## 跑
+## 跑(逐条件绑定/求值)
 ```bash
-python skills/cs-scot-generate/scripts/analyzer.py \
-  examples/kpi-tabular/fixtures/kpiData.csv -o /tmp/kpi_facts.json \
-  --fault-tree examples/kpi-tabular/tree/示例-接入与干扰.md
+python skills/cs-scot-execute/scripts/eval_conditions.py \
+  --conditions examples/kpi-tabular/conditions.json \
+  --data kpi=examples/kpi-tabular/fixtures/kpiData.csv \
+  --data chr=examples/sa-access-fail/fixtures/chr.csv \
+  -o /tmp/condition_facts.json
+python skills/cs-scot-execute/scripts/validate_conditions.py /tmp/condition_facts.json
 ```
 
-## 预期(事实层,引擎只摆事实)
-- `projection.mode = kept_all_fallback`:树是英文名、列是中文 → 子串投影全落空 → **保留全部列**,映射交给 RCA。
-- `SA_QoSFlow建立成功率(22B)`:`nulls:1`(NIL 当缺测,不当类别);十分位 p0=79.5、p30≈84.4 → "<85%" 可判。
-- `上行RSSI均值`:十分位 0.01~154.555 → 一眼非 dBm。
+## 预期(8 条:ok=4 / 数据不足=3 / 人工=1,校验通过)
+- **第22行-合取1(A)**:`Common:` 被机械剥前缀命中(`stripped_prefix`),均值 0.974 < 0.99 → `predicate_satisfied:true`。
+- **第22行(D 组合 AND)**:合取1 true、合取2/3 本表无 → 数据不足 → 整体 `insufficient_data`(**不可只凭合取1判成立**)。
+- **第78行 RSRP(A)**:`SUSRLastAvgRsrp` 不在本表 → 数据不足,`resolved_column:null`,**没顶到 `N.UL.RSSI.Avg`**。
+- **第9行(B 差值)**:无原始计数 Att/Succ → "无法算差值"数据不足。
+- **成功率阈值(A count_rows)**:`Common:` 命中,`nulls:1`(NIL 计缺测),5 行有效里 2 行 <85。
+- **C/E/J**:DCErrType 精确匹配 4 命中;TopN 占比 0.5(<0.7→false);人工确认 `manual`。
 
-## RCA 应当怎么判(判断层,见 `skills/fault-tree-rca/references/rca_rules.md`)
-- **弱覆盖 `RSRP < -120`**:数据只有 `上行RSSI均值`(RSSI≠RSRP、且取值非 dBm)→ 映射须标注差异、判**数据不足/低置信**,不可当干净"不成立"。
-- **干扰 `... AND SINR < 0`**:**没有 SINR 列** → **数据不足**;**绝不**把 SINR 顶到"语音用户数"(本地模型曾犯此错)。
-- **QoSFlow `成功率 < 85%`**:映射到 `SA_QoSFlow建立成功率(22B)`(语义一致)→ CellB 多个时段 <85% 可判**成立**;`NIL` 那行判该行**数据不足**。
+## 概览事实(analyzer,辅助对列/定阈值)
+```bash
+python skills/cs-scot-generate/scripts/analyzer.py \
+  examples/kpi-tabular/fixtures/kpiData.csv -o /tmp/kpi_overview.json \
+  --fault-tree examples/kpi-tabular/tree/示例-接入与干扰.md
+```
+英文树名 vs 中文/前缀列名 → 子串投影落空 → `kept_all_fallback` 保留全部列;数值列带十分位 + nulls。
