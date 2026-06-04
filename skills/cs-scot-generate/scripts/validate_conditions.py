@@ -42,9 +42,11 @@ def main() -> int:
         # 数据不足 / 列没解析到,却给了判断 → 编造
         if st == "insufficient_data" and pred is not None:
             problems.append(f"[无中生有]「{cid}」数据不足却给了 predicate_satisfied={pred!r}")
-        if st == "ok" and pred is not None and f.get("resolved_column") is None \
-                and "resolved_columns" not in f and "sub_facts" not in f and cls != "E":
-            problems.append(f"[无中生有]「{cid}」没解析到列却给了 predicate_satisfied={pred!r}")
+        # 各内核"解析到了什么"的痕迹字段(A/F/I:resolved_column;B:resolved_columns;D:sub_facts;
+        # H:msg_column;E:group_by)。一个都没有却给了判断,才算无中生有。
+        _prov = ("resolved_column", "resolved_columns", "sub_facts", "msg_column", "group_by")
+        if st == "ok" and pred is not None and not any(f.get(k) is not None for k in _prov):
+            problems.append(f"[无中生有]「{cid}」没解析到任何列/痕迹却给了 predicate_satisfied={pred!r}")
         if st == "insufficient_data" and not f.get("reason"):
             problems.append(f"[缺理由]「{cid}」数据不足但没写 reason")
         if pred is not None and not isinstance(pred, bool):
