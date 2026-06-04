@@ -386,8 +386,15 @@ _KERNELS = {"A": k_threshold, "B": k_difference, "C": k_match, "E": k_proportion
 
 
 def evaluate_binding(b, sources, source_name):
-    """按 b['class'] 分派到对应内核;D 递归,J 人工,无源/未知类别 → 数据不足。"""
+    """按 b['class'] 分派到对应内核;D 递归,J 人工,无源/未知类别 → 数据不足。
+    若绑定带 `decision`(模型生成时已判本条无法机械评估)→ 直接按该判定出 status,**不跑内核、不给判断**。"""
     cls = str(b.get("class", "")).upper()
+    decided = b.get("decision")
+    if decided in ("insufficient_data", "manual", "not_applicable"):
+        return {"class": cls or "?",
+                "status": "manual" if decided == "manual" else "insufficient_data",
+                "predicate_satisfied": None, "declared": True, "resolved_column": None,
+                "reason": b.get("mapping_reason") or b.get("reason") or f"模型判定:{decided}"}
     if cls == "J" or b.get("manual"):
         return k_manual(b)
     if cls == "D":
