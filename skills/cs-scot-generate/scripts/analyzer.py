@@ -55,6 +55,20 @@ def _sheets(path: str):
     return []
 
 
+def _multisheet_brief(path: str):
+    """一次打开工作簿,逐页签只取表头 + 行数(不把每页整张读进内存,概览要快)。"""
+    from openpyxl import load_workbook
+    wb = load_workbook(path, read_only=True, data_only=True)
+    briefs = []
+    for s in wb.sheetnames:
+        it = wb[s].iter_rows(values_only=True)
+        header = [("" if h is None else str(h)).strip() for h in next(it, [])]
+        n = sum(1 for _ in it)  # 只数行,不建 dict
+        briefs.append({"name": s, "total_records": n, "columns": header})
+    wb.close()
+    return briefs
+
+
 def _load(path: str, sheet=None):
     """读数据 → (header, rows)。xlsx 多页签:sheet 给页签名选表,不给则活动页。"""
     p = Path(path)
@@ -225,8 +239,7 @@ def main() -> None:
     if len(sheets) > 1 and not args.sheet:
         # 多页签且未指定:轻量列出每个页签的列 + 行数(不跑全量统计,免输出爆炸);
         # 模型据此发现页签,再 --sheet <名> 看某页签详情,并在条件里用 source=<页签名> 指过去。
-        briefs = [{"name": s, "total_records": len(_load(args.data, s)[1]),
-                   "columns": _load(args.data, s)[0]} for s in sheets]
+        briefs = _multisheet_brief(args.data)
         result = {"indicator": indicator, "kind": "multisheet_overview", "sheets": briefs,
                   "note": "多页签:此为各页签列清单;某页签详情用 --sheet <名>;条件里 source=<页签名> 指过去。"}
         out = Path(args.output)
