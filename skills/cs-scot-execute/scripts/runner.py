@@ -126,16 +126,44 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
     ins = resolve_inputs(node.get("inputs"), ctx)
     # 约定:fault_tree_md 输入若是 .md 路径则读成正文;其余输入视为各指标解析结果
     ft = ins.pop("fault_tree_md", None)
+    md_path = None
     if isinstance(ft, str) and ft.lower().endswith(".md"):
-        ftp = Path(ft)
-        ftp = ftp if ftp.is_absolute() else (base / ftp)
-        if ftp.exists():
-            ft = ftp.read_text(encoding="utf-8")
-    payload = {"fault_tree_md": ft, "indicator_results": ins}
+        md_path = Path(ft)
+        md_path = md_path if md_path.is_absolute() else (base / md_path)
+
+    # 有权威 index → 剪成"局部子树"(把事实挂到节点上)替代整棵 md,压缩 RCA 上下文;
+    # node_id 覆盖不足或剪枝失败 → 回退完整 md(老行为)。
+    payload, tree_note = None, ""
+    idx_path = md_path.with_suffix(".tree_index.json") if md_path else None
+    if idx_path and idx_path.exists():
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from tree_prune import prune
+            pr = prune(json.loads(idx_path.read_text(encoding="utf-8")), ins)
+            total = sum(len((r or {}).get("conditions", [])) for r in ins.values())
+            mapped = total - pr["coverage"].get("facts_without_node_id", 0)
+            if total > 0 and mapped >= 0.5 * total:
+                payload = {"fault_tree": {"scenario": pr["scenario"], "root": pr["root"],
+                                          "pruned_nodes": pr["pruned_nodes"]},
+                           "unmapped_facts": pr["unmapped"], "tree_issues": pr["coverage"]}
+                cov = pr["coverage"]
+                tree_note = (f"  已用局部子树:保留 {cov['kept_nodes']}/{cov['total_nodes']} 节点;"
+                             f"未覆盖条件节点 {len(cov['uncovered_condition_nodes'])}、"
+                             f"孤儿 node_id {len(cov['orphan_node_ids'])}(见 tree_issues)。")
+            else:
+                tree_note = f"  [info] node_id 覆盖不足(mapped {mapped}/{total}),回退完整子树。"
+        except Exception as e:  # noqa: BLE001
+            tree_note = f"  [warn] 剪枝失败,回退完整子树: {e}"
+    if payload is None:  # 回退:完整 md + 全量 indicator_results
+        ft_text = md_path.read_text(encoding="utf-8") if (md_path and md_path.exists()) else ft
+        payload = {"fault_tree_md": ft_text, "indicator_results": ins}
+
     in_path = base / "result" / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[agent_skill] {node['id']}: 已备好输入 → {in_path}")
+    if tree_note:
+        print(tree_note)
     print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能,依据该输入产出结果,"
           f"写到 {in_path.parent / 'rca.json'}(契约见 fault-tree-rca 技能)。")
     print("  注意:result/ 目录已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"

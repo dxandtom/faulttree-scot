@@ -25,12 +25,14 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import json
 import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 _LEVEL_RE = re.compile(r"^L(\d+)\(Chinese\)$")
+_CODE_RE = re.compile(r"^L(\d+) Code$")
 _JUDGMENT_HEADER = "Judgment Condition(Chinese)"
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
 # 现网导出里常见的"自动萃取"噪声节点,默认排除(与同事产出 69KB 子树的做法一致)
@@ -101,6 +103,48 @@ def find_judgment_column(headers: List[str]) -> Optional[str]:
     return None
 
 
+def find_code_columns(headers: List[str]) -> Dict[int, str]:
+    """从表头找出 "Ln Code" 稳定编码列,返回 {层级: 列名}。"""
+    out: Dict[int, str] = {}
+    for h in headers:
+        m = _CODE_RE.match((h or "").strip())
+        if m:
+            out[int(m.group(1))] = h
+    return out
+
+
+def _clean_text(s: Optional[str]) -> str:
+    """清掉常见 HTML 转义,便于阅读/判断。"""
+    return (s or "").replace("&amp;", "&").replace("&gt;", ">").replace("&lt;", "<").strip()
+
+
+def _split_judgment(cell: Optional[str]) -> Tuple[Optional[str], Dict[str, str]]:
+    """把判断条件单元格拆成 (方法正文, 数据源dict)。数据源用于路由提示。"""
+    text = _clean_text(cell)
+    if not text:
+        return None, {}
+    src: Dict[str, str] = {}
+    for m in re.finditer(r"数据源[（(]([^）)]+)[）)]\s*[:：]\s*([^\n]+)", text):
+        src[m.group(1).strip()] = m.group(2).strip()
+    mm = re.search(r"判断方法\s*[:：]?\s*", text)
+    if mm:
+        method = text[mm.end():].strip()
+    else:  # 没有"判断方法"标记:去掉数据源行,剩下的当方法
+        method = re.sub(r"数据源[（(][^）)]+[）)]\s*[:：][^\n]*\n?", "", text).strip()
+    return (method or None), src
+
+
+def _infer_combine(method: Optional[str]) -> Optional[str]:
+    """从方法正文粗略推断本节点多条判据的组合关系;拿不准给 unknown,交模型判。"""
+    if not method:
+        return None
+    if re.search(r"(满足.{0,6}(一个|其一|任一|其中一)|任选其一|至少一)", method):
+        return "OR"
+    if re.search(r"(同时满足|需同时|均满足|且|&)", method):
+        return "AND"
+    return "unknown"
+
+
 def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                start_level: Optional[int] = None, start_node: Optional[str] = None,
                judgment_col: Optional[str] = None,
@@ -155,6 +199,71 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
     return tree
 
 
+def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
+                code_cols: Dict[int, str], start_level: Optional[int], start_node: Optional[str],
+                judgment_col: Optional[str], exclude_pattern: Optional[str]) -> Dict[str, Any]:
+    """与 build_tree 同样的截取规则,但产出**扁平权威 index**(给压缩/RCA 用):
+    每个节点 = 稳定 id(L-Code 链,缺则用名字链)+ name/parent/level/condition/combine/data_source/pass_through。
+    """
+    exclude_re = re.compile(exclude_pattern) if exclude_pattern else None
+    nodes: Dict[str, Any] = {}
+    root_id: Optional[str] = None
+    for row in rows:
+        triples: List[Tuple[int, str, str]] = []  # (层级, 名字, 编码)
+        for col, lvl in level_cols:
+            nm = (row.get(col) or "").strip()
+            if not nm:
+                continue
+            cd = (row.get(code_cols.get(lvl, "")) or "").strip()
+            triples.append((lvl, nm, cd))
+        if not triples:
+            continue
+        names = [t[1] for t in triples]
+        if exclude_re and any(exclude_re.search(n) for n in names):
+            continue
+        judgment = None
+        if judgment_col:
+            jv = (row.get(judgment_col) or "").strip()
+            if jv and jv != "不涉及":
+                judgment = jv
+        # 截取(镜像 build_tree)
+        if start_node:
+            sl = start_level or 1
+            if len(triples) >= sl and triples[sl - 1][1] == start_node:
+                path = triples[sl - 1:]
+            elif start_node in names:
+                path = triples[names.index(start_node):]
+            else:
+                continue
+        elif start_level and start_level > 1:
+            path = triples[start_level - 1:]
+        else:
+            path = triples
+        if not path:
+            continue
+        parent_id, id_parts = None, []
+        for j, (lvl, nm, cd) in enumerate(path):
+            id_parts.append(cd or nm)            # 优先编码,缺则名字
+            nid = "/".join(id_parts)
+            node = nodes.setdefault(nid, {"name": nm, "parent": parent_id, "level": lvl,
+                                          "children": [], "condition": None, "combine": None,
+                                          "data_source": {}, "pass_through": True})
+            if parent_id and nid not in nodes[parent_id]["children"]:
+                nodes[parent_id]["children"].append(nid)
+            if j == 0:
+                root_id = nid
+            if j == len(path) - 1 and judgment:
+                method, src = _split_judgment(judgment)
+                if method:
+                    node["condition"] = (node["condition"] + "\n" + method) if node["condition"] else method
+                    node["combine"] = _infer_combine(node["condition"])
+                    node["pass_through"] = False
+                if src:
+                    node["data_source"].update(src)
+            parent_id = nid
+    return {"scenario": start_node, "root": root_id, "nodes": nodes}
+
+
 def tree_to_markdown(tree: Dict[str, Any], lines: Optional[List[str]] = None,
                      level: int = 1) -> List[str]:
     """把嵌套树渲染成 #/##/### 层级 Markdown,判断条件紧跟在标题下。"""
@@ -183,14 +292,20 @@ def excel_to_tree_markdown(excel_path: str, output_path: Optional[str] = None,
     if not level_cols:
         raise ValueError("未找到 Ln(Chinese) 格式的层级列,请检查 Excel 表头")
     judgment_col = find_judgment_column(headers)
+    code_cols = find_code_columns(headers)
     tree = build_tree(rows, level_cols, start_level, start_node, judgment_col, exclude_pattern)
     lines = tree_to_markdown(tree)
     if not lines:
         raise ValueError(f"未构建出任何节点。请确认场景名是否准确(--start-node「{start_node}」是否在故障树里)")
     md = "\n".join(lines) + "\n"
+    # 同时产权威 index(给压缩/RCA;Code 链当稳定 id),写在 md 旁边
+    index = build_index(rows, level_cols, code_cols, start_level, start_node, judgment_col, exclude_pattern)
     if output_path:
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(output_path).write_text(md, encoding="utf-8")
+        outp = Path(output_path)
+        outp.parent.mkdir(parents=True, exist_ok=True)
+        outp.write_text(md, encoding="utf-8")
+        outp.with_suffix(".tree_index.json").write_text(
+            json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
     return md
 
 
@@ -230,6 +345,7 @@ def main() -> None:
         sys.exit(1)
     if output_path:
         print(f"已输出子树: {output_path}")
+        print(f"已输出权威 index(压缩/RCA 用): {Path(output_path).with_suffix('.tree_index.json')}")
         if out_dir is not None:
             print(f"本场景产物目录(后续步骤 2-4 都写到这里): {out_dir}")
     else:

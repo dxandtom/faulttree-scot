@@ -111,3 +111,22 @@
 - F(配置)/H(信令)需对应数据源才出实判,无源→诚实数据不足。
 - 模板词汇/custom 之外更复杂的 I 类(TA+TMSI 联合)按需扩。
 - `validate_parser.py` 仍按旧"概览"字段校验;**条件脚本改用 `validate_conditions.py` 校验**。
+
+## 更新(v4):局部子树压缩 + 疑似根因档 + tree_issues
+> 背景:真实跑一次 RCA 慢(~9min)且不稳——模型对着 69KB 整树 + 全量事实,容易过度上报根因,被 `validate_rca` 反复打回,甚至**编假节点("测试""干扰排查")凑路径**。两个目标:① 压上下文(快、稳、可包装);② 给模型"疑似"出口(用泛化,别死磕)。
+
+**压缩(权威局部子树)**:
+- `excel_to_tree.py` 多产 `tree/<场景>.tree_index.json`:用 `Ln Code` 当**稳定 node_id** + 父子 + 逐字条件 + AND/OR 提示(从判法文字启发式抽,拿不准给 `unknown`)+ 数据源 + `pass_through`(无条件节点如"测试")。
+- 生成脚本每条 `CONDITIONS` 带 **`node_id`**;事实里因此带 node_id。
+- `cs-scot-execute/scripts/tree_prune.py`:`index + 各源事实 → 局部子树`(保留有事实的节点 + 祖先,把事实挂到节点上)+ 覆盖报告。**只做结构剪枝,不下判断。**
+- `runner.py` 在备 RCA 输入时:有 `tree_index` 就剪枝、把 `fault_tree`(局部子树,含事实)+ `tree_issues` + `unmapped_facts` 写进 `rca_input`,**替代 69KB 整树**;`node_id` 覆盖 <50% 或剪枝失败 → **回退完整 md**(老行为)。实测 e2e:整树→3 节点局部子树,事实挂在节点上。
+- **防造假**:RCA 只能引用 `pruned_nodes` 里真实节点;绑定填了不存在的 id → `orphan_node_ids`(tree_issues)。
+
+**疑似根因档(模型自分类 + 机器只兜结构底线)**:
+- RCA 输出四档:`rca_result`(确证:路径全成立)/ `probable_causes`(疑似:无不成立、有数据不足、叶子有强证据;模型给 `confidence` + `caveats` 含有效样本量)/ `undetermined` / 排除(有不成立)。
+- `validate_rca.py`:只兜结构——`rca_result` 含数据不足/不成立 → 揪出(**建设性提示:挪去 probable/excluded,别凑路径、别造节点**);`probable_causes` 只拦"不成立"(数据不足是疑似正常特征,放行)。**不卡强度/排序(那是模型泛化)。** 不再"报错逼重写到死"——给了合法出口,重生成变成自我归位。
+- `tree_issues`:`uncovered_condition_nodes`(漏绑/无源)、`orphan_node_ids`(填错节点)——顺带帮人改树/补数据。
+
+**配套修的**:`decision:insufficient_data/manual`(模型判不了一句声明、不跑内核);H 内核加 `where`(消息**且携带** cause=X,治过宽误报);多页签 xlsx(`load_table(sheet=)` + `analyzer --sheet` + 概览列页签);懒加载 + decision/J 不读数据(满屏数据不足的脚本几乎零 IO);`validate_conditions` 认全内核痕迹字段(H 的 `msg_column` 等,修误报);runner 提示 result/ 已建好别 mkdir + Windows 路径别以 `\` 结尾(治执行卡死)。
+
+**测**:excel_to_tree index、tree_prune(含孤儿/未覆盖)、validate_rca 四档好坏例、端到端(assemble→填 node_id→runner 出局部子树)全过;kpi-tabular 示例(无 index)走回退路径仍 4/4。

@@ -10,6 +10,10 @@
 - 多数情况下每个指标的结果是**逐条件事实**:`{indicator,source,summary,conditions:[{id,node,condition_text,class,mapping_reason,fact}]}`,
   `fact.predicate_satisfied` 是**仅在解析到的列上做的字面比较**、`fact.status` 可能是 `insufficient_data`/`manual`。
   - 这是**输入证据,不是最终结论**:你仍要 ① 看 `mapping_reason` 判**语义是否真等**(如 RSRP 顶 RSSI、单位不符 → 降置信/数据不足,别因 `predicate_satisfied:true` 就当成立);② `status:insufficient_data/manual` → 该节点判"数据不足";③ **跨源组合**(同一判据的合取项分散在不同指标结果里)由你 AND/OR 合;④ 路径回溯与数据不足传播。**字面为真 ≠ 该条件成立。**
+- 上下文可能已被**压缩成局部子树**:这时给的是 `fault_tree`(只含相关节点的 `pruned_nodes`——每个节点把它的事实挂在 `facts` 里,另有 `condition`/`combine`/`pass_through`/`data_source`)+ `tree_issues`(覆盖报告)+ `unmapped_facts`(没挂上节点的事实)。没有 index 时退回 `fault_tree_md` 完整子树。**两种形态,判定法则一样。**
+  - `pass_through:true` 的节点(无判断条件,如汇总节点、"测试")**永不阻断路径**,judgment 写"中间节点,无独立条件"。
+  - `combine` 是该节点多条判据的组合提示(`AND`/`OR`/`unknown`);`unknown` 就按语义判。
+  - **node_id 权威**:`Fault_tree_path` 只用 `pruned_nodes` 里真实存在的节点;`tree_issues.orphan_node_ids`/`unmapped_facts` 是绑定填错节点的信号,别据此硬判。
 
 ## 核心:一个通用判定法则(不分指标)
 对故障树**每条判断条件**,照此走:
@@ -37,27 +41,41 @@
    "X < 阈值" 这类:用 deciles 估"有多少落在阈值一侧"(如阈值低于 `p0` → 基本无一命中;介于 `p20~p30` → 约两三成命中),
    并在 `actual` 写明你引用了哪些分位数;**够不够判一条成立由你按比例决定,但所引用的数必须逐字来自事实**。
 
-## 路径与根因
-- 一条路径从叶子回溯到根,**路径上每个带判断条件的节点都"成立"**,才算一条根因。
-- 只要有**一个**节点"**不成立**" → 该路径不是根因。
-- 只要有**一个**节点"**数据不足**" → 该路径**未判定**,**不算根因**,归入 `undetermined`(别把它当根因报)。
-- 没有任何一条完全成立的路径 → `rca_result` 为 `[]`。**数据到哪就报到哪,绝不硬编根因。**
+## 路径分档:confirmed / probable / undetermined / excluded
+一条候选 = 从某叶子回溯到根的路径;**路径上每个带条件的节点都要"成立"**才是确证根因。按路径上节点的状态分档:
+- 每个带条件节点都**成立** → **confirmed**(进 `rca_result`)。
+- 有任一节点**不成立** → **excluded**(连疑似都不是,不报;可在文字里一句"已排除")。
+- **无"不成立"、但有节点"数据不足",且叶子/关键节点有正向证据** → **probable(疑似)**(进 `probable_causes`)。
+- 其余(数据不足、且没什么正向证据) → **undetermined**。
 
-## undetermined(诚实的"不知道"也要讲清楚)
-路径卡在"数据不足"时,在 `undetermined` 写明:卡在哪个节点、缺哪个量(X)、以及你**实际看到的相关事实**——但这些事实只是**观察**,必须**明确标注"非根因、路径未完整验证"**。观察归观察,**绝不升格成根因**。
+**只有这几条状态线是硬的(confirmed 必须全成立;有不成立就 excluded);其余全靠你判断:**
+- **哪些够格的路值得报"疑似"、信心多高(high/medium/low)、怎么排序、写什么 caveat —— 你说了算**(用你的泛化能力)。机器不卡强度。
+- **疑似必须诚实披露**:卡在哪个节点(数据不足)、叶子证据是什么 + **有效样本量/空值比例**(如"96% 满足,但仅 1814/20496 非空")、为什么仍只是"疑似"。
+- **绝不为了凑 confirmed 编节点/改路径**:路径只能用真实存在的节点;有数据不足节点就老实放 probable,**别造"测试""xx排查"之类不存在的节点把路凑完整**。
+- **疑似 ≠ 确证**:别把疑似说成"已定位根因";它是"证据强、但路径未闭合(上游缺数据)"。
+
+> 自检 `validate_rca.py` 只兜结构底线:`rca_result` 里若有路径含"数据不足/不成立"节点会被揪出。**它报错时,把那条挪进 `probable_causes`(或 excluded),而不是去把路径凑完整、更不是造假节点**——这是给你的建设性提示,别和它较劲。
+
+## tree_issues(顺带把子树的毛病报出来)
+输入带 `tree_issues` 时,在输出 `tree_issues` 字段**原样带出、可补充**:`uncovered_condition_nodes`(有条件却没人绑/无数据源的节点)、`orphan_node_ids`(绑定填了不存在的节点)。这是给人改故障树/补数据的线索,**不影响根因判定**。
 
 ## 输出契约
 ```json
-[ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
-   "evidence_path":[{"node":"…","condition":"<逐字取自故障树>",
-     "mapping":"<树的量 X → 命中的数据列名;没有就写'无对应列'>",
-     "mapping_reason":"<为何这么对/语义或单位差异/为何判数据不足>",
-     "actual":"<逐字引用事实的真实值(可引 deciles/nulls 等);没有就写'事实中无此值'>",
-     "judgment":"<你现在代入算:成立/不成立/数据不足>"}]} ]
+{
+  "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
+     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字取自故障树>",
+        "mapping":"<树的量 X → 命中的数据列;没有写'无对应列'>","mapping_reason":"<为何这么对/差异/为何数据不足>",
+        "actual":"<逐字引用事实(可引 deciles/nulls);没有写'事实中无此值'>","judgment":"成立/不成立/数据不足"}]} ],
+  "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low",
+     "blocked_at":"<路径上数据不足的节点>","caveats":"<有效样本量/空值比例/语义近似等>",
+     "support":"<叶子证据>","evidence_path":[ …同上结构… ]} ],
+  "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…(仅观察,非根因)"]} ],
+  "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }
+}
 ```
-- 无判断条件的中间节点:`condition`/`actual` 置空,`judgment` 注明"路径中间节点,无独立判断条件"。
-- `rca_result` 为 `[]` 时,另给 `undetermined`。
-- **口径一致**:文字总结必须和落盘 JSON 一致——`rca_result` 是 `[]` 就别说"发现了 N 条根因";把"数据不足/不成立"的节点当根因列出来,就是硬找。
+- 每条 evidence 把 **条件 + 实际值 + 判断** 写全;`pass_through` 中间节点注明"无独立条件"。
+- **口径一致**:文字总结必须和 JSON 一致——`rca_result` 是 `[]` 就别说"发现了 N 条根因";疑似就叫疑似。
+- `rca_result` 为 `[]` **很正常**(上游话统/信令缺数据时);**强证据放 `probable_causes`,别硬塞 `rca_result`、更别造节点凑路径**。
 
 ## 一句话
-事实是别人查好的;你只做"拿故障树比对、如实判定"。**要 X 没 X 就数据不足,有数据不足就不算根因——绝不用旁证硬顶、绝不无中生有。**
+事实是别人查好的;你只做"拿故障树比对、如实判定"。**全成立才算确证根因;有不成立就排除;强证据但上游缺数据 → 老实归"疑似"(带 caveat);其余数据不足。绝不用旁证硬顶、绝不造节点凑路径、绝不无中生有。**

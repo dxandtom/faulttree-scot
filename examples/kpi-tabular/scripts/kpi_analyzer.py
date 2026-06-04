@@ -100,7 +100,7 @@ def main():
             for sub in (c.get("sub") or []):
                 _table(sub.get("source"))
             fact = evaluate_binding(c, sources, c.get("source", INDICATOR))
-        meta = {k: c[k] for k in ("id", "node", "condition_text", "class", "mapping_reason") if k in c}
+        meta = {k: c[k] for k in ("id", "node", "node_id", "condition_text", "class", "mapping_reason") if k in c}
         conds.append({**meta, "fact": fact})
     ok = sum(1 for x in conds if x["fact"].get("status") == "ok")
     insuf = sum(1 for x in conds if x["fact"].get("status") == "insufficient_data")

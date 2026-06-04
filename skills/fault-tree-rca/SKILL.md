@@ -13,8 +13,9 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 
 ## 上游喂给你什么(输入契约)
 通常由 `cs-scot-execute` 汇总在 `result/rca_input.json` 里:
-- **`fault_tree_md`**:故障子树正文。`#/##/###` 表层级;每个标题下跟着该节点的判断条件。**人工编写,可能不规整、有跳跃或笔误。**
-- **`indicator_results`**:dict,键是指标名(**任意、不固定**),值是该指标已解析好的**事实**(**只有数据、没有判断**):各字段/项的真实分布、数值摘要或取值。
+- **`fault_tree_md`**:故障子树正文(`#/##/###` 层级 + 条件)。**人工编写,可能不规整。** —— 或:
+- **`fault_tree`(压缩形态)**:`pruned_nodes`(只含相关节点,每个把事实挂在 `facts` 里 + `condition`/`combine`/`pass_through`/`node_id`),另带 `tree_issues`(覆盖报告)、`unmapped_facts`。两种形态法则一样;`pass_through` 节点不阻断路径;`node_id` 权威、别造不存在的节点。
+- **`indicator_results`**(完整形态时):dict,键是指标名(**任意、不固定**),值是该指标已解析好的**事实**(**只有数据、没有判断**):各字段/项的真实分布、数值摘要或取值。
   - 有的指标给的是**定义/规则**(某量怎么算、阈值多少),**不是实测值**。**定义不是测量。**
   - **解析端不下判断、也不替你做匹配;判断全是你的活。**
 
@@ -29,26 +30,26 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 **三条铁律(最重要)**:
 1. **只用真实事实,绝不顶替**:`actual` 逐字引用事实里的真实值;禁止引入事实里没有的数字;**条件要 X 就不能拿相关的 Y 算个数顶成"X 成立"**("有定义/有旁证"≠"成立");**精确匹配**(差一个字符即没命中)。
 2. **要 X 却拿不到 X 的实测值 → 该条件"数据不足"**,不得当成立或不成立。
-3. **路径上每个带条件的节点都"成立"才算根因**;任一节点"数据不足/不成立"→ 该路径不算根因,归 `undetermined`;**没有完全成立的路径就如实输出 `[]` + undetermined,绝不硬凑编根因**。
+3. **四档分流**(详见 rca_rules.md):路径每个带条件节点都成立 → **确证根因**`rca_result`;有节点不成立 → **排除**;无不成立但有"数据不足"且叶子有强证据 → **疑似**`probable_causes`(带 confidence + caveat,**别凑路径、别造节点**);其余 → `undetermined`。**`rca_result` 为 `[]` 很正常(上游缺话统/信令时),强证据放疑似。**
 
-> 聚合数据里可能并存多种失败模式 → 多根因合理,但**每个都要完整证实**,并**去重 + 按支持度排序**。
-> **口径一致**:文字总结必须和落盘 `rca.json` 一致——`[]`/数据不足 就**别**说"发现了 N 条根因";把"数据不足"的节点当根因列出来,就是硬找。
+> 聚合数据里可能并存多种失败模式 → 多根因/多疑似合理,但**确证的要完整证实、疑似的要标 caveat**,并**去重 + 排序**。
+> **口径一致**:文字总结必须和落盘 `rca.json` 一致——`rca_result` 是 `[]` 就**别**说"发现 N 条根因";疑似就叫疑似。
 
 ## 自检(机械兜底,推荐每次跑)
-产出后跑 `python "<本技能目录>/scripts/validate_rca.py" result/rca.json`:它会揪出**自相矛盾**(某节点说"无实测/未找到/数据不足"却 judged 成立)和**假根因**(根因路径里含"数据不足/不成立"节点)。报错就改,别交不合格的。
+产出后跑 `python "<本技能目录>/scripts/validate_rca.py" result/rca.json`:它只兜结构底线——揪 `rca_result` 里的**自相矛盾**和**假根因**(含数据不足/不成立节点),以及 `probable_causes` 里混入的**不成立**节点。**它报错的修法是把那条挪去 probable/excluded,不是凑路径、不是造节点。** 强度/排序它不管,那是你的判断。
 
 ## 输出契约
 ```json
-[
-  {"Root_cause":"根因节点名称",
-   "Fault_tree_path":["父节点1","父节点2","根因节点"],
-   "support":"主要支持:<取自事实的命中计数/样例>",
-   "evidence_path":[
-     {"node":"父节点1","condition":"<逐字判断条件>","actual":"<逐字引用事实的真实值;没有就写'事实中无此值'>","judgment":"<代入比较 → 成立/不成立/数据不足>"}
-   ]}
-]
+{
+  "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
+     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实;没有写'事实中无此值'>","judgment":"成立/不成立/数据不足"}]} ],
+  "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low",
+     "blocked_at":"<数据不足的节点>","caveats":"<有效样本量/空值比例/语义近似>","support":"<叶子证据>","evidence_path":[…]} ],
+  "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…(仅观察,非根因)"]} ],
+  "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }
+}
 ```
-每条 evidence 必须把 **规则(`condition`)+ 实际值(`actual`)+ 判断与结论(`judgment`)** 写全,不能只写一句裸条件。`rca_result` 为 `[]` 时另给 `undetermined`(卡在哪、缺哪个量、相关观察并标注"非根因")。
+每条 evidence 把 **条件 + 实际值 + 判断** 写全。详细分档/字段见 `references/rca_rules.md`。
 
 ## 分工(重要)
 - **解析端只把数据查清楚摆出来**(事实),**不下任何判断、不做故障树匹配**。
