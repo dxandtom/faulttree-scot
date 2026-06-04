@@ -31,7 +31,7 @@
 | **E** | 占比/TopN | `group_by`,`filter`:{column,equals/contains},`op`,`threshold` | `top1`/`top1_ratio` |
 | **F** | 配置检查 | `param`,`equals` | 需配置数据源;无→数据不足 |
 | **G** | 日志匹配 | `column`(日志文本列),`contains`:[码/串…] | 同 C(子串) |
-| **H** | 信令流程 | `msg_column`,`key`(会话/callid),`has`:[消息…],`lacks`:[消息…] | 需 trace 数据源;无→数据不足 |
+| **H** | 信令流程 | `msg_column`,`key`(会话/callid),`has`:[消息…],`lacks`:[消息…],`where`:{column,equals/contains}(或其列表;同一行须满足全部,表达"某消息**且携带** cause=X") | `matched_sessions`;需 trace;无→数据不足 |
 | **I** | 特征分析 | `feature`/`column`,`metric`(`row_threshold`/`all_same`/`all_null`),`op`,`threshold`,`transforms` | TA 距离 `156*TA/2`=`scale:78`;`/100`=`scale:0.01` |
 | **J** | 人工确认 | `note` | `status:"manual"`,不给判断 |
 

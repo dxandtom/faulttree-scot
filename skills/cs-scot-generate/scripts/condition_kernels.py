@@ -333,18 +333,49 @@ def k_config(table, b, cls="F"):
 
 # ---------- H:信令流程 ----------
 def k_signaling(table, b, cls="H"):
+    """会话级信令判定:按 key 分组,看每个会话的消息集合是否满足 has/lacks;
+    可选 where:要求会话里**存在一行**同时满足若干"列=值"约束(如"FAIL 且携带 cause=X")。
+    where 写法:单个 {column, equals|contains} 或其列表(列表内所有约束须落在同一行)。"""
     header, rows = table
     msgcol, _ = resolve_column(header, b.get("msg_column", "")) if b.get("msg_column") else (None, "")
     if not msgcol:
         return _insuf(cls, "无信令/消息数据源(需 trace 记录、含消息类型列 msg_column)", resolved_column=None)
     key, _ = resolve_column(header, b.get("key", "")) if b.get("key") else (None, "")
     has, lacks = set(b.get("has") or []), set(b.get("lacks") or [])
-    groups = defaultdict(set)
+
+    # 解析 where:行级约束(同一行须满足全部),会话存在这样一行才算满足
+    where = b.get("where")
+    constraints = []
+    if where:
+        for cst in (where if isinstance(where, list) else [where]):
+            wc, _ = resolve_column(header, cst.get("column", ""))
+            if not wc:
+                return _insuf(cls, f"where 未找到列「{cst.get('column')}」", resolved_column=None)
+            vals = [str(v).strip() for v in (cst.get("contains") or cst.get("equals") or [])]
+            constraints.append((wc, vals, "contains" if cst.get("contains") else "exact"))
+
+    def _row_ok(r):
+        for wc, vals, mode in constraints:
+            v = str(r.get(wc, "")).strip()
+            if not (any(t in v for t in vals) if mode == "contains" else v in vals):
+                return False
+        return True
+
+    groups = {}  # key -> {"msgs": set, "where_ok": bool}
     for r in rows:
-        groups[str(r.get(key, "")).strip() if key else "_all"].add(str(r.get(msgcol, "")).strip())
-    matched = sum(1 for ms in groups.values() if has <= ms and not (lacks & ms))
-    return {"class": cls, "status": "ok", "key": key, "msg_column": msgcol, "groups": len(groups),
-            "matched_sessions": matched, "predicate_satisfied": matched > 0}
+        k = str(r.get(key, "")).strip() if key else "_all"
+        g = groups.setdefault(k, {"msgs": set(), "where_ok": not constraints})
+        g["msgs"].add(str(r.get(msgcol, "")).strip())
+        if constraints and not g["where_ok"] and _row_ok(r):
+            g["where_ok"] = True
+
+    matched = sum(1 for g in groups.values()
+                  if has <= g["msgs"] and not (lacks & g["msgs"]) and g["where_ok"])
+    out = {"class": cls, "status": "ok", "key": key, "msg_column": msgcol, "groups": len(groups),
+           "matched_sessions": matched, "predicate_satisfied": matched > 0}
+    if constraints:
+        out["where"] = [{"column": wc, "values": vals, "match": mode} for wc, vals, mode in constraints]
+    return out
 
 
 # ---------- I:特征分析 ----------
