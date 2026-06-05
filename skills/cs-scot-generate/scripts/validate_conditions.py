@@ -52,6 +52,16 @@ def main() -> int:
         if pred is not None and not isinstance(pred, bool):
             problems.append(f"[越权判定]「{cid}」predicate_satisfied 应为布尔,实际 {pred!r}")
 
+    # 软告警(不致命):多条不同判据绑到同一(列,op,阈值)→ 疑似"通用代理",损泛化
+    from collections import Counter
+    key_count = Counter()
+    for c in doc.get("conditions", []):
+        f = c.get("fact") or {}
+        col = f.get("resolved_column")
+        if col and f.get("status") == "ok":
+            key_count[(col, f.get("op"), f.get("threshold"))] += 1
+    proxies = [(k, n) for k, n in key_count.items() if n >= 5]
+
     if problems:
         print(f"不合格:发现 {len(problems)} 处问题:")
         for p in problems:
@@ -60,6 +70,9 @@ def main() -> int:
               "J 类用 manual;成立/不成立的最终裁决留给 fault-tree-rca。")
         return 1
 
+    for (col, op, thr), n in proxies:
+        print(f"⚠ 告警:{n} 条绑定共用「列={col} {op} {thr}」——疑似把多条不同判据塞给同一通用指标"
+              f"(语义错+恒成立+丢泛化)。对不上专属量的应 decision:insufficient_data。")
     s = doc.get("summary", {})
     print(f"通过:{s.get('total','?')} 条事实无静默编造(ok={s.get('ok')} "
           f"数据不足={s.get('insufficient_data')} 人工={s.get('manual')})。")

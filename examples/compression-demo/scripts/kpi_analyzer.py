@@ -13,7 +13,7 @@ from condition_kernels import load_table, evaluate_binding  # noqa: E402
 INDICATOR = "kpi"
 
 CONDITIONS = [
-    {"id": "kpi_qos", "node": "QoS建立失败", "node_id": "A01/A0101",
+    {"id": "kpi_qos", "node": "QoS建立失败", "node_id": "n2",
      "condition_text": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0", "class": "B",
      "minuend": ["N.QosFlow.Est.Att"], "subtrahend": ["N.QosFlow.Est.Succ"], "op": ">", "threshold": 0,
      "mapping_reason": "需原始计数 Att/Succ;kpi 只有成功率、无原始计数 → 数据不足"},

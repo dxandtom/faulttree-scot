@@ -14,12 +14,12 @@ from condition_kernels import load_table, evaluate_binding  # noqa: E402
 INDICATOR = "chr"
 
 CONDITIONS = [
-    {"id": "chr_干扰", "node": "干扰导致", "node_id": "A01/A0101/A010101",
+    {"id": "chr_干扰", "node": "干扰导致", "node_id": "n3",
      "condition_text": "CHR DCErrType 为 RNL_Unspecified 且 RelSinr < 0", "class": "D", "combine": "AND",
      "mapping_reason": "需同时满足:RNL_Unspecified(C 字段匹配)+ RelSinr<0(A 阈值计数)",
      "sub": [{"class": "C", "column": "ErrType", "equals": ["RNL_Unspecified"], "match": "exact"},
              {"class": "A", "column": "RelSinr", "op": "<", "threshold": 0, "scope": "count_rows"}]},
-    {"id": "chr_弱覆盖", "node": "弱覆盖", "node_id": "A01/A0101/A010102",
+    {"id": "chr_弱覆盖", "node": "弱覆盖", "node_id": "n4",
      "condition_text": "CHR RelRsrp < -120", "class": "A",
      "column": "RelRsrp", "op": "<", "threshold": -120, "scope": "count_rows",
      "mapping_reason": "弱覆盖:RelRsrp<-120 的行数"},

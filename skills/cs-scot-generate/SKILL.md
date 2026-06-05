@@ -57,7 +57,8 @@ python "<本目录>/scripts/assemble_scenario.py" \
 ```bash
 python "<OUT>/scripts/analyzer.py" "<该指标数据>" -o /tmp/<ind>_overview.json   # 概览:看真实列名/分布
 ```
-按 `references/condition_binding_schema.md`,把判据**路由到对应源**、填进该源脚本的 `CONDITIONS`(选 A–J 类、对哪列〔裸名即可〕、阈值/变换;对不上标 `decision:insufficient_data`)。**每条都填 `node_id`**(取自 `tree_index.json`)——RCA 靠它把事实挂回树、并把上下文压成局部子树。**默认套模板,非改不可才写 `custom`**。跨源的组合各源分别出子事实,AND/OR 留给 RCA 合。
+按 `references/condition_binding_schema.md`,把判据**路由到对应源**、填进该源脚本的 `CONDITIONS`(选 A–J 类、对哪列〔裸名即可〕、阈值/变换;对不上标 `decision:insufficient_data`)。**每条都填 `node_id`**(取自 `tree_index.json` 里的短 id `nN`)——RCA 靠它把事实挂回树、并把上下文压成局部子树。**默认套模板,非改不可才写 `custom`**。跨源的组合各源分别出子事实,AND/OR 留给 RCA 合。
+> **泛化第一(重要)**:绑定按**格式+语义**,别被这次数据带偏。**树要的计数器不在本源列里 → `decision:insufficient_data` 或换源,绝不降级成"成功率<1"之类的通用代理、绝不把多条判据塞给同一列**(语义错+恒成立+丢泛化)。一次生成要能反复执行不同数据。
 
 ### 步骤 3:用真实数据验证每个生成脚本
 ```bash

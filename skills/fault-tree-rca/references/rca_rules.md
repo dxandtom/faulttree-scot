@@ -10,10 +10,11 @@
 - 多数情况下每个指标的结果是**逐条件事实**:`{indicator,source,summary,conditions:[{id,node,condition_text,class,mapping_reason,fact}]}`,
   `fact.predicate_satisfied` 是**仅在解析到的列上做的字面比较**、`fact.status` 可能是 `insufficient_data`/`manual`。
   - 这是**输入证据,不是最终结论**:你仍要 ① 看 `mapping_reason` 判**语义是否真等**(如 RSRP 顶 RSSI、单位不符 → 降置信/数据不足,别因 `predicate_satisfied:true` 就当成立);② `status:insufficient_data/manual` → 该节点判"数据不足";③ **跨源组合**(同一判据的合取项分散在不同指标结果里)由你 AND/OR 合;④ 路径回溯与数据不足传播。**字面为真 ≠ 该条件成立。**
-- 上下文可能已被**压缩成局部子树**:这时给的是 `fault_tree`(只含相关节点的 `pruned_nodes`——每个节点把它的事实挂在 `facts` 里,另有 `condition`/`combine`/`pass_through`/`data_source`)+ `tree_issues`(覆盖报告)+ `unmapped_facts`(没挂上节点的事实)。没有 index 时退回 `fault_tree_md` 完整子树。**两种形态,判定法则一样。**
-  - `pass_through:true` 的节点(无判断条件,如汇总节点、"测试")**永不阻断路径**,judgment 写"中间节点,无独立条件"。
-  - `combine` 是该节点多条判据的组合提示(`AND`/`OR`/`unknown`);`unknown` 就按语义判。
-  - **node_id 权威**:`Fault_tree_path` 只用 `pruned_nodes` 里真实存在的节点;`tree_issues.orphan_node_ids`/`unmapped_facts` 是绑定填错节点的信号,别据此硬判。
+- 上下文可能已被**压缩成局部子树**:`fault_tree` 含 `outline`(`id→{name,parent,status}` 紧凑导航,**很小**)+ `pruned_nodes`(相关节点,事实挂在 `facts` 里,另有 `condition`/`combine`/`pass_through`/`data_source`)+ `tree_issues` + `unmapped_facts`。没有 index 时退回 `fault_tree_md`。**两种形态法则一样。**
+  - **⚠ 输入可能很大:别一次性把整个 rca_input 读进上下文(会超长报错)。** 先看 `outline` 把握全局,再**按分支用工具只取相关 `pruned_nodes[id]`** 的条件+事实。
+  - `outline.status`(`hold/fail/insufficient/pass/uncovered`)只是**粗导航**——仍要按 `pruned_nodes` 的条件+事实**重判**。
+  - node_id 是短 id(`nN`);`pass_through:true` 节点(汇总/"测试")**永不阻断路径**;`combine` 是 `AND/OR/unknown` 提示。
+  - **node_id 权威**:`Fault_tree_path` 只用 `pruned_nodes` 里真实节点;`tree_issues.orphan_node_ids`/`unmapped_facts` 是绑定填错的信号,别据此硬判。
 
 ## 核心:一个通用判定法则(不分指标)
 对故障树**每条判断条件**,照此走:

@@ -32,8 +32,40 @@ def _facts_by_node(results: dict) -> dict:
     return m
 
 
+_FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "value",
+              "matched", "count_satisfied", "ratio", "top1", "top1_ratio",
+              "matched_sessions", "nulls", "op", "threshold")
+
+
+def _slim_fact(entry: dict) -> dict:
+    """精简一条事实:去掉与节点重复的 condition_text、截断 mapping_reason,只留关键结果字段。"""
+    f = entry.get("fact") or {}
+    out = {"id": entry.get("id"), "indicator": entry.get("indicator")}
+    if entry.get("mapping_reason"):
+        out["mapping_reason"] = entry["mapping_reason"][:140]
+    out.update({k: f[k] for k in _FACT_KEEP if k in f})
+    return out
+
+
+def _coarse(entry_list, pass_through) -> str:
+    """给 outline 用的粗状态(仅导航,RCA 仍重判):pass/hold/fail/insufficient/uncovered。"""
+    if pass_through:
+        return "pass"
+    if not entry_list:
+        return "uncovered"
+    pairs = [((e.get("fact") or {}).get("status"), (e.get("fact") or {}).get("predicate_satisfied"))
+             for e in entry_list]
+    if any(s == "ok" and p is True for s, p in pairs):
+        return "hold"
+    if any(s == "ok" and p is False for s, p in pairs):
+        return "fail"
+    if any(s in ("insufficient_data", "manual") for s, _ in pairs):
+        return "insufficient"
+    return "?"
+
+
 def prune(index: dict, results: dict) -> dict:
-    """index + 各源事实 → 剪枝后的局部子树 + 覆盖报告。"""
+    """index + 各源事实 → 剪枝后的局部子树 + 覆盖报告。瘦身:outline(导航)+ 精简事实。"""
     nodes = index.get("nodes", {})
     facts = _facts_by_node(results)
 
@@ -46,25 +78,27 @@ def prune(index: dict, results: dict) -> dict:
     if index.get("root"):
         keep.add(index["root"])
 
-    pruned = {}
+    pruned, outline = {}, {}
     for nid in keep:
         n = nodes[nid]
+        ent = facts.get(nid, [])
         rec = {k: n.get(k) for k in
                ("name", "parent", "level", "condition", "combine", "data_source", "pass_through")}
-        if facts.get(nid):
-            rec["facts"] = facts[nid]
+        if ent:
+            rec["facts"] = [_slim_fact(e) for e in ent]
         pruned[nid] = rec
+        outline[nid] = {"name": n.get("name"), "parent": n.get("parent"),
+                        "status": _coarse(ent, n.get("pass_through"))}
 
     uncovered = [{"id": nid, "name": n.get("name"), "condition": (n.get("condition") or "")[:100]}
                  for nid, n in nodes.items() if not n.get("pass_through") and nid not in facts]
     orphans = sorted(k for k in facts if k != "__no_node_id__" and k not in nodes)
-    # 没挂上任何真实节点的事实(没填 node_id 的 + 引用了不存在节点的)——别静默丢,带给 RCA
     unmapped = list(facts.get("__no_node_id__", []))
     for oid in orphans:
         unmapped.extend(facts[oid])
 
     return {"scenario": index.get("scenario"), "root": index.get("root"),
-            "pruned_nodes": pruned, "unmapped": unmapped,
+            "outline": outline, "pruned_nodes": pruned, "unmapped": unmapped,
             "coverage": {"total_nodes": len(nodes), "kept_nodes": len(pruned),
                          "uncovered_condition_nodes": uncovered,
                          "orphan_node_ids": orphans,

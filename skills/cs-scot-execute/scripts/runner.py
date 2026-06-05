@@ -144,12 +144,16 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
             mapped = total - pr["coverage"].get("facts_without_node_id", 0)
             if total > 0 and mapped >= 0.5 * total:
                 payload = {"fault_tree": {"scenario": pr["scenario"], "root": pr["root"],
-                                          "pruned_nodes": pr["pruned_nodes"]},
+                                          "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
                            "unmapped_facts": pr["unmapped"], "tree_issues": pr["coverage"]}
                 cov = pr["coverage"]
+                md_text = md_path.read_text(encoding="utf-8") if (md_path and md_path.exists()) else ""
+                before = len(json.dumps({"fault_tree_md": md_text, "indicator_results": ins}, ensure_ascii=False))
+                after = len(json.dumps(payload, ensure_ascii=False))
+                saved = f"(省 {100 * (1 - after / before):.0f}%)" if before else ""
                 tree_note = (f"  已用局部子树:保留 {cov['kept_nodes']}/{cov['total_nodes']} 节点;"
-                             f"未覆盖条件节点 {len(cov['uncovered_condition_nodes'])}、"
-                             f"孤儿 node_id {len(cov['orphan_node_ids'])}(见 tree_issues)。")
+                             f"上下文 压缩前(完整树+全量事实)~{before} → 压缩后 ~{after} 字符 {saved};"
+                             f"未覆盖 {len(cov['uncovered_condition_nodes'])}、孤儿 {len(cov['orphan_node_ids'])}。")
             else:
                 tree_note = f"  [info] node_id 覆盖不足(mapped {mapped}/{total}),回退完整子树。"
         except Exception as e:  # noqa: BLE001
@@ -168,6 +172,8 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
           f"写到 {in_path.parent / 'rca.json'}(契约见 fault-tree-rca 技能)。")
     print("  注意:result/ 目录已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"
           "且别让带引号的路径以反斜杠结尾(`...\\\"` 会让 shell 一直等闭合引号而卡住)。")
+    print("  ⚠ 输入可能很大:**别一次性把整个 rca_input.json 读进上下文**(会超长报错)。"
+          "先读 `fault_tree.outline`(id→名字→粗状态,很小)把握全局,再**按分支用 python 只提取相关 `pruned_nodes[id]`**。")
     # 占位:实际结果由 agent 执行技能后填入;这里存一个待办标记,供下游引用不致 KeyError
     placeholder = {"_pending_skill": name, "_input": str(in_path)}
     store_outputs(node.get("outputs"), placeholder, ctx)

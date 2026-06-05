@@ -208,6 +208,12 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
     exclude_re = re.compile(exclude_pattern) if exclude_pattern else None
     nodes: Dict[str, Any] = {}
     root_id: Optional[str] = None
+    short_map: Dict[str, str] = {}  # code-chain → 短稳定 id(n1,n2,…),同一节点跨行一致
+
+    def _short(chain: str) -> str:
+        if chain not in short_map:
+            short_map[chain] = "n" + str(len(short_map) + 1)
+        return short_map[chain]
     for row in rows:
         triples: List[Tuple[int, str, str]] = []  # (层级, 名字, 编码)
         for col, lvl in level_cols:
@@ -244,10 +250,11 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
         parent_id, id_parts = None, []
         for j, (lvl, nm, cd) in enumerate(path):
             id_parts.append(cd or nm)            # 优先编码,缺则名字
-            nid = "/".join(id_parts)
+            chain = "/".join(id_parts)
+            nid = _short(chain)                  # 短稳定 id,避免 UUID 链超长(原编码存 code)
             node = nodes.setdefault(nid, {"name": nm, "parent": parent_id, "level": lvl,
-                                          "children": [], "condition": None, "combine": None,
-                                          "data_source": {}, "pass_through": True})
+                                          "code": chain, "children": [], "condition": None,
+                                          "combine": None, "data_source": {}, "pass_through": True})
             if parent_id and nid not in nodes[parent_id]["children"]:
                 nodes[parent_id]["children"].append(nid)
             if j == 0:
