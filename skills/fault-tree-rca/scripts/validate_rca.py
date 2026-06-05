@@ -63,7 +63,13 @@ def main() -> int:
 
     confirmed = _confirmed(doc)
     probables = doc.get("probable_causes", []) if isinstance(doc, dict) else []
+    undet = doc.get("undetermined", []) if isinstance(doc, dict) else []
     problems = []
+
+    # 空诊断:三档全空 = 啥也没说,不合格(没根因也要在 undetermined 写清卡在哪、缺什么、看到啥)
+    if not confirmed and not probables and not undet:
+        problems.append("[空诊断] rca_result / probable_causes / undetermined 全空——"
+                        "就算没有根因,也必须在 undetermined 写清:卡在哪个节点、缺哪个量、看到哪些观察(标注非根因)。")
 
     for rc in confirmed:
         if not isinstance(rc, dict):

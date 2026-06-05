@@ -35,8 +35,11 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 > 聚合数据里可能并存多种失败模式 → 多根因/多疑似合理,但**确证的要完整证实、疑似的要标 caveat**,并**去重 + 排序**。
 > **口径一致**:文字总结必须和落盘 `rca.json` 一致——`rca_result` 是 `[]` 就**别**说"发现 N 条根因";疑似就叫疑似。
 
+## 输入很大时:别一次性读,用导航助手
+`scripts/rca_query.py <result/rca_input.json>`:`--outline`(全局粗状态)/ `--holding`(有"成立"事实的候选节点+根→叶路径)/ `--node nX`(某分支整条路径的条件+事实)。**按分支取,据此判**——别把整个 rca_input 读进上下文(会超长报错),也别自己写脚本硬算 RCA。
+
 ## 自检(机械兜底,推荐每次跑)
-产出后跑 `python "<本技能目录>/scripts/validate_rca.py" result/rca.json`:它只兜结构底线——揪 `rca_result` 里的**自相矛盾**和**假根因**(含数据不足/不成立节点),以及 `probable_causes` 里混入的**不成立**节点。**它报错的修法是把那条挪去 probable/excluded,不是凑路径、不是造节点。** 强度/排序它不管,那是你的判断。
+产出后跑 `python "<本技能目录>/scripts/validate_rca.py" result/rca.json`:它只兜结构底线——揪 `rca_result` 里的**自相矛盾**和**假根因**、`probable_causes` 里混入的**不成立**节点,以及**空诊断**(三档全空:没根因也必须在 `undetermined` 写清卡在哪、缺什么)。**报错的修法是挪档/补 undetermined,不是凑路径、不是造节点。**
 
 ## 输出契约
 ```json
