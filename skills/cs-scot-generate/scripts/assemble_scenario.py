@@ -39,10 +39,11 @@ INDICATOR = "__IND__"
 
 # ===== 模型填这里:本场景路由到「__IND__」源的条件 =====
 # 每条 = 公共字段(id/node/node_id/condition_text/class/mapping_reason)+ 该类内核参数(见 schema)。
-# node_id 取自 tree/<场景>.tree_index.json 里的节点 id(Code 链);填上它,RCA 才能把事实挂回树做路径。
+# node_id = tree/<场景>.tree_index.json 里该节点的 **key(形如 nN,短、推荐)** 或其 `code` 字段(两者都认)。
+# 必填:RCA 靠它把事实挂回树做路径回溯。**别填节点名、别瞎拼。**
 # 默认直接套模板;模板不够用时给该条加 "mode":"custom",并在 CUSTOM 里按 id 写返回 fact 的函数。
 CONDITIONS = [
-    # {"id": "第N行", "node": "RNL异常", "node_id": "A01/A0101/A010101", "condition_text": "<逐字树条件>",
+    # {"id": "第N行", "node": "RNL异常", "node_id": "n12", "condition_text": "<逐字树条件>",
     #  "class": "A", "column": "...", "op": "<", "threshold": 0.99, "scope": "aggregate", "agg": "mean",
     #  "mapping_reason": "为何这么对/为何数据不足"},
 ]

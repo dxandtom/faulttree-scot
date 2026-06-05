@@ -20,15 +20,18 @@ from collections import defaultdict
 from pathlib import Path
 
 
-def _facts_by_node(results: dict) -> dict:
-    """{node_id: [该节点的所有事实条目]};没有 node_id 的归到 __no_node_id__。"""
+def _facts_by_node(results: dict, alias: dict) -> dict:
+    """{规范node_id: [该节点的所有事实条目]};node_id 用 alias 解析(认 nN key 或 code 两种);
+    没填 node_id 的归 __no_node_id__,解析不到真实节点的留原值(后续判为孤儿)。"""
     m = defaultdict(list)
     for ind_name, res in (results or {}).items():
         for c in (res or {}).get("conditions", []):
             entry = {"indicator": ind_name, "id": c.get("id"), "class": c.get("class"),
                      "condition_text": c.get("condition_text"),
                      "mapping_reason": c.get("mapping_reason"), "fact": c.get("fact")}
-            m[c.get("node_id") or "__no_node_id__"].append(entry)
+            raw = c.get("node_id")
+            nid = alias.get(raw, raw) if raw else "__no_node_id__"
+            m[nid].append(entry)
     return m
 
 
@@ -67,7 +70,13 @@ def _coarse(entry_list, pass_through) -> str:
 def prune(index: dict, results: dict) -> dict:
     """index + 各源事实 → 剪枝后的局部子树 + 覆盖报告。瘦身:outline(导航)+ 精简事实。"""
     nodes = index.get("nodes", {})
-    facts = _facts_by_node(results)
+    # 别名表:节点 key(nN)和 code 都指向同一节点 → 绑定填哪个 node_id 都能挂上
+    alias = {}
+    for nid, n in nodes.items():
+        alias[nid] = nid
+        if n.get("code"):
+            alias[n["code"]] = nid
+    facts = _facts_by_node(results, alias)
 
     keep = set()
     for nid in [k for k in facts if k in nodes]:        # 有事实的真实节点
