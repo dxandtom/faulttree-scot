@@ -1,0 +1,26 @@
+{
+  "version": "4.0",
+  "plan_id": "plan_接入失败示例",
+  "meta": {
+    "goal": "诊断「接入失败示例」的根因(压缩示例)",
+    "success_criteria": ["输出确证/疑似根因路径与逐节点依据"]
+  },
+  "entry": "chr",
+  "memory_init": {"fault_tree_md": "tree/接入失败示例.md"},
+  "nodes": [
+    {"id": "chr", "kind": "script", "name": "chr_analyzer",
+     "purpose": "读 chr 数据,逐条件统计",
+     "inputs": {"data": "$input.chr"}, "outputs": {"result": "$memory.chr_result"},
+     "transition": {"next_on_success": "kpi"}},
+    {"id": "kpi", "kind": "script", "name": "kpi_analyzer",
+     "purpose": "读 kpi 数据,逐条件统计",
+     "inputs": {"data": "$input.kpi"}, "outputs": {"result": "$memory.kpi_result"},
+     "transition": {"next_on_success": "rca"}},
+    {"id": "rca", "kind": "agent_skill", "name": "fault-tree-rca",
+     "purpose": "综合根因分析(消费局部子树 + 事实)",
+     "inputs": {"fault_tree_md": "$memory.fault_tree_md",
+                "chr": "$memory.chr_result", "kpi": "$memory.kpi_result"},
+     "outputs": {"result": "$output.final_answer"},
+     "transition": {"end": true}}
+  ]
+}

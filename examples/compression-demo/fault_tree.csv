@@ -1,0 +1,11 @@
+L1 Code,L1(Chinese),L2 Code,L2(Chinese),L3 Code,L3(Chinese),L4 Code,L4(Chinese),Judgment Condition(Chinese)
+A,接入,A01,接入失败示例,A0101,QoS建立失败,,,"数据源（5G）：话统
+判断方法：N.QosFlow.Est.Att - N.QosFlow.Est.Succ &gt; 0"
+A,接入,A01,接入失败示例,A0101,QoS建立失败,A010101,干扰导致,"数据源（5G）：内部CHR
+判断方法：需同时满足:
+1、CHR DCErrType 为 RNL_Unspecified
+2、RelSinr &lt; 0"
+A,接入,A01,接入失败示例,A0101,QoS建立失败,A010102,弱覆盖,"数据源（5G）：内部CHR
+判断方法：CHR RelRsrp &lt; -120"
+A,接入,A01,接入失败示例,A0101,QoS建立失败,A010103,License受限,"数据源（5G）：一键式DBG日志
+判断方法：DBG日志 CU_UEM_LOG_CODE(0x133D)"

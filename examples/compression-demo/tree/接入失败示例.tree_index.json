@@ -1,0 +1,70 @@
+{
+  "scenario": "接入失败示例",
+  "root": "A01",
+  "nodes": {
+    "A01": {
+      "name": "接入失败示例",
+      "parent": null,
+      "level": 2,
+      "children": [
+        "A01/A0101"
+      ],
+      "condition": null,
+      "combine": null,
+      "data_source": {},
+      "pass_through": true
+    },
+    "A01/A0101": {
+      "name": "QoS建立失败",
+      "parent": "A01",
+      "level": 3,
+      "children": [
+        "A01/A0101/A010101",
+        "A01/A0101/A010102",
+        "A01/A0101/A010103"
+      ],
+      "condition": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0",
+      "combine": "unknown",
+      "data_source": {
+        "5G": "话统"
+      },
+      "pass_through": false
+    },
+    "A01/A0101/A010101": {
+      "name": "干扰导致",
+      "parent": "A01/A0101",
+      "level": 4,
+      "children": [],
+      "condition": "需同时满足:\n1、CHR DCErrType 为 RNL_Unspecified\n2、RelSinr < 0",
+      "combine": "AND",
+      "data_source": {
+        "5G": "内部CHR"
+      },
+      "pass_through": false
+    },
+    "A01/A0101/A010102": {
+      "name": "弱覆盖",
+      "parent": "A01/A0101",
+      "level": 4,
+      "children": [],
+      "condition": "CHR RelRsrp < -120",
+      "combine": "unknown",
+      "data_source": {
+        "5G": "内部CHR"
+      },
+      "pass_through": false
+    },
+    "A01/A0101/A010103": {
+      "name": "License受限",
+      "parent": "A01/A0101",
+      "level": 4,
+      "children": [],
+      "condition": "DBG日志 CU_UEM_LOG_CODE(0x133D)",
+      "combine": "unknown",
+      "data_source": {
+        "5G": "一键式DBG日志"
+      },
+      "pass_through": false
+    }
+  }
+}

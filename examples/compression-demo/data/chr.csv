@@ -1,0 +1,7 @@
+CallID,ErrType,RelRsrp,RelSinr
+1,RNL_Unspecified,-95,-3
+2,RNL_Unspecified,-100,-1
+3,RNL_Unspecified,-98,-5
+4,Normal,-90,5
+5,RNL_Unspecified,-105,-2
+6,Normal,-88,8
