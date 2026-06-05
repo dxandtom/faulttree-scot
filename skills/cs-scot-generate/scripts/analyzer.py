@@ -233,6 +233,9 @@ def main() -> None:
     ap.add_argument("--fault-tree", help="故障树 md;给了就尝试只保留树提到的列(命中过稀则保留全部);"
                                          "默认自动探测脚本旁唯一的 ../tree/*.md")
     ap.add_argument("--sheet", help="xlsx 指定页签名(多页签数据用);不给且多页签 → 只列各页签的列(轻量)")
+    ap.add_argument("--lean", action="store_true",
+                    help="精简概览:只留列名/量纲(min/max/mean)/类别取值,砍掉十分位+样例。"
+                         "填 CONDITIONS 用这些足矣,读得更快、上下文更小,不影响正确性。")
     args = ap.parse_args()
     indicator = _default_indicator(__file__, args.data, args.indicator)
     sheets = _sheets(args.data)
@@ -251,11 +254,18 @@ def main() -> None:
     tree_path = args.fault_tree or _auto_tree(__file__)
     if tree_path and Path(tree_path).exists():
         result = _project(result, _decode(Path(tree_path).read_bytes()))
+    if args.lean:  # 精简:砍十分位+样例(绑定用不到),保留列名/量纲/类别取值
+        for v in result.get("field_stats", {}).values():
+            if isinstance(v, dict):
+                v.pop("deciles", None)
+                v.pop("samples", None)
+        result["lean"] = True
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     proj = result.get("projection")
-    extra = f" 投影按故障树:{proj.get('mode')}" if proj else ""
+    extra = (" 投影按故障树:" + proj.get("mode")) if proj else ""
+    extra += " lean" if args.lean else ""
     print(f"[analyzer] indicator={indicator} kind={result.get('kind')}{extra} → {out}")
 
 
