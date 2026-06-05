@@ -42,7 +42,7 @@ def _slim_fact(entry: dict) -> dict:
     f = entry.get("fact") or {}
     out = {"id": entry.get("id"), "indicator": entry.get("indicator")}
     if entry.get("mapping_reason"):
-        out["mapping_reason"] = entry["mapping_reason"][:140]
+        out["mapping_reason"] = entry["mapping_reason"][:100]
     out.update({k: f[k] for k in _FACT_KEEP if k in f})
     return out
 
@@ -82,13 +82,16 @@ def prune(index: dict, results: dict) -> dict:
     for nid in keep:
         n = nodes[nid]
         ent = facts.get(nid, [])
-        rec = {k: n.get(k) for k in
-               ("name", "parent", "level", "condition", "combine", "data_source", "pass_through")}
+        rec = {"name": n.get("name"), "parent": n.get("parent")}   # 只留必要字段(去掉 level/data_source)
+        for k in ("condition", "combine"):
+            if n.get(k):                                            # 稀疏:有才写
+                rec[k] = n[k]
+        if n.get("pass_through"):
+            rec["pass_through"] = True
         if ent:
             rec["facts"] = [_slim_fact(e) for e in ent]
         pruned[nid] = rec
-        outline[nid] = {"name": n.get("name"), "parent": n.get("parent"),
-                        "status": _coarse(ent, n.get("pass_through"))}
+        outline[nid] = _coarse(ent, n.get("pass_through"))          # outline 只存状态(name/parent 去 pruned_nodes 取)
 
     uncovered = [{"id": nid, "name": n.get("name"), "condition": (n.get("condition") or "")[:100]}
                  for nid, n in nodes.items() if not n.get("pass_through") and nid not in facts]

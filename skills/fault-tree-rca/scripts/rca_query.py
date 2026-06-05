@@ -72,8 +72,9 @@ def main() -> None:
     nodes, outline = _fault_tree(data)
 
     if args.outline:
-        for nid, o in outline.items():
-            print(f"{nid}\t{str(o.get('status')):<12}\t{o.get('name')}\t(parent={o.get('parent')})")
+        for nid, status in outline.items():
+            n = nodes.get(nid, {})
+            print(f"{nid}\t{str(status):<12}\t{n.get('name')}\t(parent={n.get('parent')})")
     elif args.holding:
         hold = _holding(nodes)
         print(f"# {len(hold)} 个有'成立'事实的候选节点(逐个用 --node 看整条路径再判):")

@@ -251,9 +251,9 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
         for j, (lvl, nm, cd) in enumerate(path):
             id_parts.append(cd or nm)            # 优先编码,缺则名字
             chain = "/".join(id_parts)
-            nid = _short(chain)                  # 短稳定 id,避免 UUID 链超长(原编码存 code)
+            nid = _short(chain)                  # 短稳定 id,避免 UUID 链超长
             node = nodes.setdefault(nid, {"name": nm, "parent": parent_id, "level": lvl,
-                                          "code": chain, "children": [], "condition": None,
+                                          "code": cd or None, "children": [], "condition": None,
                                           "combine": None, "data_source": {}, "pass_through": True})
             if parent_id and nid not in nodes[parent_id]["children"]:
                 nodes[parent_id]["children"].append(nid)
