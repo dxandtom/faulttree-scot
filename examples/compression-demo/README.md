@@ -24,11 +24,11 @@ python skills/cs-scot-execute/scripts/runner.py --plan examples/compression-demo
 ```
 
 ## 你会看到
-runner 打印 **「已用局部子树:保留 4/5 节点;未覆盖条件节点 1」**,并把 `result/rca_input.json` 写成**局部子树**(不是整棵 md):
+runner 打印 **「已用局部子树:保留 4/5 节点;未覆盖条件节点 1」**,并把局部子树写到 `result/rca_input.json`(运行时产物,已 gitignore;**committed 示范见 `sample_output/rca_input.json`**):
 - `fault_tree.pruned_nodes`:接入失败示例(过路)、QoS建立失败(挂 `数据不足` 事实)、干扰导致(挂 `成立` 事实)、弱覆盖(挂 `不成立` 事实);**License受限被剪掉**(无事实),但进了 `tree_issues.uncovered_condition_nodes`。
 - 没有 `fault_tree_md`(整树没进上下文)。
 
-`result/rca.json` 是一份**示范产出**(展示终态,真实由 RCA 模型生成):
+`sample_output/rca.json` 是一份**示范产出**(展示终态;真实由 RCA 模型生成、写到 `result/rca.json`):
 - `rca_result: []` —— 没有确证根因(每条路径都卡在 `QoS建立失败` 数据不足)。
 - `probable_causes: [干扰导致]` —— 叶子证据强,但上游数据不足 → **疑似**(带 `confidence` + `caveats` 含有效样本量)。
 - `弱覆盖` —— `不成立`,**排除**(不报)。
@@ -36,7 +36,7 @@ runner 打印 **「已用局部子树:保留 4/5 节点;未覆盖条件节点 1�
 
 跑校验应通过(疑似含"数据不足"节点是允许的;无"不成立"混入):
 ```bash
-python skills/fault-tree-rca/scripts/validate_rca.py examples/compression-demo/result/rca.json
+python skills/fault-tree-rca/scripts/validate_rca.py examples/compression-demo/sample_output/rca.json
 ```
 
 ## 要点

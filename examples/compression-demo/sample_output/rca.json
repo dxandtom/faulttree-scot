@@ -1,0 +1,31 @@
+{
+  "rca_result": [],
+  "probable_causes": [
+    {
+      "Root_cause": "干扰导致",
+      "Fault_tree_path": ["接入失败示例", "QoS建立失败", "干扰导致"],
+      "confidence": "medium",
+      "blocked_at": "QoS建立失败",
+      "caveats": "干扰证据强,但上游「QoS建立失败」需 N.QosFlow.Est.Att-Succ 原始计数、kpi 无 → 路径未闭合;有效样本仅 6 行",
+      "support": "CHR:DCErrType=RNL_Unspecified 命中 4 条,且 RelSinr<0 命中 4 行(D 组合 AND 成立)",
+      "evidence_path": [
+        {"node": "接入失败示例", "node_id": "A01", "condition": "(无独立条件)",
+         "actual": "-", "judgment": "中间节点,无独立条件"},
+        {"node": "QoS建立失败", "node_id": "A01/A0101",
+         "condition": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0",
+         "actual": "kpi 无 N.QosFlow.Est.Att/Succ 原始计数列", "judgment": "数据不足"},
+        {"node": "干扰导致", "node_id": "A01/A0101/A010101",
+         "condition": "DCErrType=RNL_Unspecified 且 RelSinr<0",
+         "actual": "RNL_Unspecified 命中 4 条;RelSinr<0 命中 4 行", "judgment": "成立"}
+      ]
+    }
+  ],
+  "undetermined": [],
+  "excluded_note": "弱覆盖(A01/A0101/A010102):RelRsrp<-120 命中 0 行 → 不成立,已排除",
+  "tree_issues": {
+    "uncovered_condition_nodes": [
+      {"id": "A01/A0101/A010103", "name": "License受限", "condition": "DBG日志 CU_UEM_LOG_CODE(0x133D)(无对应数据源)"}
+    ],
+    "orphan_node_ids": []
+  }
+}

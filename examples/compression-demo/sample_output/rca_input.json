@@ -1,0 +1,160 @@
+{
+  "fault_tree": {
+    "scenario": "接入失败示例",
+    "root": "A01",
+    "pruned_nodes": {
+      "A01/A0101": {
+        "name": "QoS建立失败",
+        "parent": "A01",
+        "level": 3,
+        "condition": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0",
+        "combine": "unknown",
+        "data_source": {
+          "5G": "话统"
+        },
+        "pass_through": false,
+        "facts": [
+          {
+            "indicator": "kpi",
+            "id": "kpi_qos",
+            "class": "B",
+            "condition_text": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0",
+            "mapping_reason": "需原始计数 Att/Succ;kpi 只有成功率、无原始计数 → 数据不足",
+            "fact": {
+              "class": "B",
+              "status": "insufficient_data",
+              "reason": "缺原始计数列:['N.QosFlow.Est.Att', 'N.QosFlow.Est.Succ'](只有成功率/无原始计数 → 无法算差值)",
+              "resolved_column": null,
+              "missing": [
+                "N.QosFlow.Est.Att",
+                "N.QosFlow.Est.Succ"
+              ]
+            }
+          }
+        ]
+      },
+      "A01/A0101/A010101": {
+        "name": "干扰导致",
+        "parent": "A01/A0101",
+        "level": 4,
+        "condition": "需同时满足:\n1、CHR DCErrType 为 RNL_Unspecified\n2、RelSinr < 0",
+        "combine": "AND",
+        "data_source": {
+          "5G": "内部CHR"
+        },
+        "pass_through": false,
+        "facts": [
+          {
+            "indicator": "chr",
+            "id": "chr_干扰",
+            "class": "D",
+            "condition_text": "CHR DCErrType 为 RNL_Unspecified 且 RelSinr < 0",
+            "mapping_reason": "需同时满足:RNL_Unspecified(C 字段匹配)+ RelSinr<0(A 阈值计数)",
+            "fact": {
+              "class": "D",
+              "status": "ok",
+              "combine": "AND",
+              "predicate_satisfied": true,
+              "reason": null,
+              "sub_facts": [
+                {
+                  "class": "C",
+                  "status": "ok",
+                  "resolved_column": "ErrType",
+                  "resolve": "exact",
+                  "match": "exact",
+                  "targets": [
+                    "RNL_Unspecified"
+                  ],
+                  "matched": 4,
+                  "nulls": 0,
+                  "samples": [
+                    "1",
+                    "2",
+                    "3"
+                  ],
+                  "predicate_satisfied": true
+                },
+                {
+                  "class": "A",
+                  "status": "ok",
+                  "resolved_column": "RelSinr",
+                  "resolve": "exact",
+                  "n_rows": 6,
+                  "nulls": 0,
+                  "valid": 6,
+                  "op": "<",
+                  "threshold": 0,
+                  "transforms": [],
+                  "scope": "count_rows",
+                  "count_satisfied": 4,
+                  "ratio": 0.6667,
+                  "predicate_satisfied": true
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "A01/A0101/A010102": {
+        "name": "弱覆盖",
+        "parent": "A01/A0101",
+        "level": 4,
+        "condition": "CHR RelRsrp < -120",
+        "combine": "unknown",
+        "data_source": {
+          "5G": "内部CHR"
+        },
+        "pass_through": false,
+        "facts": [
+          {
+            "indicator": "chr",
+            "id": "chr_弱覆盖",
+            "class": "A",
+            "condition_text": "CHR RelRsrp < -120",
+            "mapping_reason": "弱覆盖:RelRsrp<-120 的行数",
+            "fact": {
+              "class": "A",
+              "status": "ok",
+              "resolved_column": "RelRsrp",
+              "resolve": "exact",
+              "n_rows": 6,
+              "nulls": 0,
+              "valid": 6,
+              "op": "<",
+              "threshold": -120,
+              "transforms": [],
+              "scope": "count_rows",
+              "count_satisfied": 0,
+              "ratio": 0.0,
+              "predicate_satisfied": false
+            }
+          }
+        ]
+      },
+      "A01": {
+        "name": "接入失败示例",
+        "parent": null,
+        "level": 2,
+        "condition": null,
+        "combine": null,
+        "data_source": {},
+        "pass_through": true
+      }
+    }
+  },
+  "unmapped_facts": [],
+  "tree_issues": {
+    "total_nodes": 5,
+    "kept_nodes": 4,
+    "uncovered_condition_nodes": [
+      {
+        "id": "A01/A0101/A010103",
+        "name": "License受限",
+        "condition": "DBG日志 CU_UEM_LOG_CODE(0x133D)"
+      }
+    ],
+    "orphan_node_ids": [],
+    "facts_without_node_id": 0
+  }
+}
