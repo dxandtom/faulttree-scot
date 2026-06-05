@@ -68,7 +68,10 @@ def main():
     def _table(name):
         key = name or INDICATOR
         if key not in sources:
-            sources[key] = load_table(args.data, sheet=(None if key == INDICATOR else key))
+            try:
+                sources[key] = load_table(args.data, sheet=(None if key == INDICATOR else key))
+            except Exception:                 # 页签不存在/读取失败 → 空表,该条自然数据不足,不崩
+                sources[key] = ([], [])
         return sources[key]
 
     conds = []

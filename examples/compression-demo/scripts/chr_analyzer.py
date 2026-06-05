@@ -42,7 +42,10 @@ def main():
     def _table(name):
         key = name or INDICATOR
         if key not in sources:
-            sources[key] = load_table(args.data, sheet=(None if key == INDICATOR else key))
+            try:
+                sources[key] = load_table(args.data, sheet=(None if key == INDICATOR else key))
+            except Exception:
+                sources[key] = ([], [])
         return sources[key]
 
     conds = []
