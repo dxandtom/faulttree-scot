@@ -69,7 +69,7 @@ python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o /tmp/<ind>_over
 python "<OUT>/scripts/<ind>_analyzer.py" "<该指标数据>" -o /tmp/<ind>.json
 python "<本目录>/scripts/validate_conditions.py" /tmp/<ind>.json
 ```
-脚本要正常跑出逐条件事实(`indicator/source/summary/conditions`);校验器揪"没解析到列却给判断、数据不足缺理由"。custom 写崩了/形状不对,在这步就暴露。
+脚本要正常跑出逐条件事实(`indicator/source/summary/conditions`);校验器揪"没解析到列却给判断、数据不足缺理由",并机械逮代理三类:**`[流程不匹配]`(如 UEContext 条件绑了 RRC 率)/ `[建立配掉线]` / `[子因配总率]`(`.FailEst.` 子因绑了总成功率)**。**校验器报"不合格"= 那条多半是代理 → 按提示改成 `decision:insufficient_data` 或换列/换源、重跑,别带病往下走。** custom 写崩了/形状不对,在这步也暴露。
 
 ## 输出目录(就是 `<OUT>`)
 ```
