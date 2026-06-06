@@ -59,6 +59,7 @@
 
 **✅ 合法重述(该用,不是代理)**:节点级"**整体有没有失败**"(`某流程 Att−Succ>0`)→ 若本源有**该流程自己、且同事件**的成功率列,**直接用它**(A 类,`op <`,阈值=100 或按量纲)——这只是把"差值>0"换成代数等价的"成功率<100",**同一个量、同一件事**。例:`RRC建立失败 ↔ SA_RRC Setup Success Rate`、`NgSig建立失败 ↔ SA_NgSig Setup Success Rate`、`QosFlow建立失败 ↔ SA_QosFlow Setup Success Rate`。
 > **怎么算"同一件事":看该列度量什么(建立 vs 掉线、哪个流程),别看名字。** 反例:`上下文建立失败(N.UECntx.Est.Att−Succ>0)` 想要 UEContext 的**建立**成功率,但本源只有 `SA UEContext Drop Rate`(**掉线**率 = 建立成功**之后**才发生,异于建立失败)→ **仍 `insufficient_data`**。名字像 ≠ 同一件事。
+> **机械自检(绑率前两条都过)**:① 计数器流程段 vs 列名流程词**逐字相同**(`N.UECntx`→UEContext、`N.RRC`→RRC、`N.NGSig`→NgSig、`N.QosFlow.Est`→QosFlow);② 计数器**不含** `.FailEst.`/`.Fail<原因>`(含=特定子因)。任一不过 → `insufficient_data`(或 C 类查错误码字段)。
 
 **❌ 代理(禁)**,只指这三种:
 - **拿通用/异流程的率去顶"特定失败子因"**:`N.QosFlow.FailEst.RNL>0` / 安全模式失败 / PUCCH失败 / AMF失败… 是**专属子原因**,总成功率分不出来(成功率<100% ≠ "是 RNL"),对不上就 `insufficient_data`,**绝不**拿 `SA_RRC Setup Success Rate` 之类去凑。

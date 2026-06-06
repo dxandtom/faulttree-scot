@@ -42,10 +42,18 @@ INDICATOR = "__IND__"
 # node_id = tree/<场景>.tree_index.json 里该节点的 **key(形如 nN,短、推荐)** 或其 `code` 字段(两者都认)。
 # 必填:RCA 靠它把事实挂回树做路径回溯。**别填节点名、别瞎拼。**
 # 默认直接套模板;模板不够用时给该条加 "mode":"custom",并在 CUSTOM 里按 id 写返回 fact 的函数。
+#
+# 【把"Att-Succ>0 / 有没有失败"绑到现成成功率列前,两条硬规则必须都过】
+#  (1) 同流程:计数器流程段必须和列名里的流程词**逐字对上**——
+#      N.UECntx<->UEContext率、N.RRC<->RRC率、N.NGSig<->NgSig率、N.QosFlow.Est<->QosFlow率。
+#      流程对不上(如 UEContext建立失败 配 SA_RRC率)= 代理,禁。
+#      注意 UEContext 常只有 *Drop Rate*(掉线!=建立)→ UEContext建立类一律 decision:insufficient_data。
+#  (2) 非子因:计数器含 .FailEst.<原因> / .Fail<原因>(如 N.QosFlow.FailEst.RNL)= 特定失败子因,
+#      成功率分不出子因 → 永不可用率重述;改用 C 类查错误码字段,或 decision:insufficient_data。
 CONDITIONS = [
-    # {"id": "第N行", "node": "RNL异常", "node_id": "n12", "condition_text": "<逐字树条件>",
-    #  "class": "A", "column": "...", "op": "<", "threshold": 0.99, "scope": "aggregate", "agg": "mean",
-    #  "mapping_reason": "为何这么对/为何数据不足"},
+    # {"id": "第N行", "node": "RRC建立失败", "node_id": "n12", "condition_text": "<逐字树条件>",
+    #  "class": "A", "column": "SA_RRC Setup Success Rate", "op": "<", "threshold": 100, "scope": "aggregate", "agg": "mean",
+    #  "mapping_reason": "同流程重述:RRC建立失败<->RRC成功率<100(或:为何数据不足)"},
 ]
 
 # 仅当模板不够用时:按条件 id 写自定义统计,返回与内核同形的 fact(含 status / predicate_satisfied 等)。
