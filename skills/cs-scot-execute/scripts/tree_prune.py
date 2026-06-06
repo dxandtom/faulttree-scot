@@ -91,7 +91,15 @@ def prune(index: dict, results: dict) -> dict:
     for nid in keep:
         n = nodes[nid]
         ent = facts.get(nid, [])
-        rec = {"name": n.get("name"), "parent": n.get("parent")}   # 只留必要字段(去掉 level/data_source)
+        rec = {"name": n.get("name"), "parent": n.get("parent"), "level": n.get("level")}
+        ch = n.get("children") or []
+        if ch:                                                      # 非叶子:RCA 据此知道"这不是根因、下面还有更深的因"
+            unc = [c for c in ch if c in nodes and not nodes[c].get("pass_through")
+                   and c not in facts and nodes[c].get("condition")]
+            if unc:                                                 # 带条件却没人绑的子节点 = 还没查到的叶子因
+                rec["uncovered_children"] = unc
+        else:
+            rec["is_leaf"] = True
         for k in ("condition", "combine"):
             if n.get(k):                                            # 稀疏:有才写
                 rec[k] = n[k]

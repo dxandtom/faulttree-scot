@@ -10,7 +10,7 @@
 - 多数情况下每个指标的结果是**逐条件事实**:`{indicator,source,summary,conditions:[{id,node,condition_text,class,mapping_reason,fact}]}`,
   `fact.predicate_satisfied` 是**仅在解析到的列上做的字面比较**、`fact.status` 可能是 `insufficient_data`/`manual`。
   - 这是**输入证据,不是最终结论**:你仍要 ① 看 `mapping_reason` 判**语义是否真等**(如 RSRP 顶 RSSI、单位不符 → 降置信/数据不足,别因 `predicate_satisfied:true` 就当成立);② `status:insufficient_data/manual` → 该节点判"数据不足";③ **跨源组合**(同一判据的合取项分散在不同指标结果里)由你 AND/OR 合;④ 路径回溯与数据不足传播。**字面为真 ≠ 该条件成立。**
-- 上下文可能已被**压缩成局部子树**:`fault_tree` 含 `outline`(`id→{name,parent,status}` 紧凑导航,**很小**)+ `pruned_nodes`(相关节点,事实挂在 `facts` 里,另有 `condition`/`combine`/`pass_through`/`data_source`)+ `tree_issues` + `unmapped_facts`。没有 index 时退回 `fault_tree_md`。**两种形态法则一样。**
+- 上下文可能已被**压缩成局部子树**:`fault_tree` 含 `outline`(`id→粗状态` 紧凑导航,**很小**)+ `pruned_nodes`(相关节点:`name/parent/level`、事实挂在 `facts` 里,另有 `condition`/`combine`/`pass_through`、**`is_leaf`(是不是叶子)/`uncovered_children`(下面带条件却没人绑的子因)**)+ `tree_issues` + `unmapped_facts`。没有 index 时退回 `fault_tree_md`。**两种形态法则一样。**
   - **⚠ 输入可能很大:别一次性把整个 rca_input 读进上下文(会超长报错)。** 用导航助手 `scripts/rca_query.py <rca_input.json>` 按需取:`--outline`(全局)/ `--holding`(有"成立"事实的候选节点 + 各自根→叶路径)/ `--node nX`(某分支整条路径的条件+事实)。据此判、拼路径,**别自己写脚本硬算**。
   - `outline.status`(`hold/fail/insufficient/pass/uncovered`)只是**粗导航**——仍要按 `pruned_nodes` 的条件+事实**重判**。
   - node_id 是短 id(`nN`);`pass_through:true` 节点(汇总/"测试")**永不阻断路径**;`combine` 是 `AND/OR/unknown` 提示。
@@ -44,9 +44,10 @@
 
 ## 路径分档:confirmed / probable / undetermined / excluded
 一条候选 = 从某叶子回溯到根的路径;**路径上每个带条件的节点都要"成立"**才是确证根因。按路径上节点的状态分档:
-- 每个带条件节点都**成立** → **confirmed**(进 `rca_result`)。
+- **终点必须是叶子**(`is_leaf`):**确证根因只能落在叶子节点**(最具体那层)。**成立的中间节点 ≠ 根因**——中间节点(无 `is_leaf`、或带 `uncovered_children`)即便自己"成立"(如 `QosFlow建立失败` 率<100),也只说明"失败落在这一支、根因还在它下面没查到" → 判 **probable / undetermined 并写明"已定位到该层、叶子因待定"**,**绝不进 `rca_result`**。
+- 叶子 + 路径上每个带条件节点都**成立** → **confirmed**(进 `rca_result`)。
 - 有任一节点**不成立** → **excluded**(连疑似都不是,不报;可在文字里一句"已排除")。
-- **无"不成立"、但有节点"数据不足",且叶子/关键节点有正向证据** → **probable(疑似)**(进 `probable_causes`)。
+- **无"不成立"、但有节点"数据不足"(含上面"成立中间节点、叶子因没数据"那种),且叶子/关键节点有正向证据** → **probable(疑似)**(进 `probable_causes`)。
 - 其余(数据不足、且没什么正向证据) → **undetermined**。
 
 **只有这几条状态线是硬的(confirmed 必须全成立;有不成立就 excluded);其余全靠你判断:**

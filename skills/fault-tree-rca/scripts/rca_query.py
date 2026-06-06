@@ -57,6 +57,14 @@ def _fact_brief(f: dict) -> str:
     return f"[{f.get('indicator')}/{f.get('id')}] {kv}" + (f"  ◂{mr}" if mr else "")
 
 
+def _leafmark(n: dict) -> str:
+    """叶子 / 中间节点 标注——确证根因只能落在叶子;中间节点成立但下有未覆盖因 → 别当确证。"""
+    if n.get("is_leaf"):
+        return "叶子"
+    unc = n.get("uncovered_children") or []
+    return "中间节点·非叶子" + (f";下有未覆盖子因 {unc}" if unc else "")
+
+
 def main() -> None:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -78,10 +86,13 @@ def main() -> None:
     elif args.holding:
         hold = _holding(nodes)
         print(f"# {len(hold)} 个有'成立'事实的候选节点(逐个用 --node 看整条路径再判):")
+        print("# 确证根因必须落在【叶子】且整条路径成立;中间节点成立但下有未覆盖/数据不足子因")
+        print("#   → 只能判'已定位到该层、叶子因待定'(probable/undetermined),别当确证。")
         for nid in hold:
             path = _path_to_root(nodes, nid)
             names = " → ".join(nodes.get(p, {}).get("name", "?") for p in reversed(path))
-            print(f"{nid} | {nodes[nid].get('name')}\n  根→叶: {names}\n  ids: {list(reversed(path))}")
+            print(f"{nid} | {nodes[nid].get('name')}  «{_leafmark(nodes[nid])}»"
+                  f"\n  根→叶: {names}\n  ids: {list(reversed(path))}")
     elif args.node:
         nid = args.node
         if nid not in nodes:
@@ -90,7 +101,8 @@ def main() -> None:
         print(f"=== 节点 {nid} 的'根→叶'路径:每个节点的条件+事实(judging 你来)===")
         for p in reversed(_path_to_root(nodes, nid)):
             n = nodes[p]
-            print(f"\n[{p}] {n.get('name')}  (combine={n.get('combine')}, pass_through={n.get('pass_through')})")
+            print(f"\n[{p}] {n.get('name')}  (L{n.get('level')}, {_leafmark(n)}, "
+                  f"combine={n.get('combine')}, pass_through={n.get('pass_through')})")
             if n.get("condition"):
                 print(f"  条件: {n['condition'][:220]}")
             for f in n.get("facts", []):

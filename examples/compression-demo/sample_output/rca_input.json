@@ -3,52 +3,17 @@
     "scenario": "接入失败示例",
     "root": "n1",
     "outline": {
+      "n4": "fail",
       "n3": "hold",
-      "n2": "insufficient",
       "n1": "pass",
-      "n4": "fail"
+      "n2": "insufficient"
     },
     "pruned_nodes": {
-      "n3": {
-        "name": "干扰导致",
-        "parent": "n2",
-        "condition": "需同时满足:\n1、CHR DCErrType 为 RNL_Unspecified\n2、RelSinr < 0",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "chr_干扰",
-            "indicator": "chr",
-            "mapping_reason": "需同时满足:RNL_Unspecified(C 字段匹配)+ RelSinr<0(A 阈值计数)",
-            "class": "D",
-            "status": "ok",
-            "predicate_satisfied": true
-          }
-        ]
-      },
-      "n2": {
-        "name": "QoS建立失败",
-        "parent": "n1",
-        "condition": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "kpi_qos",
-            "indicator": "kpi",
-            "mapping_reason": "需原始计数 Att/Succ;kpi 只有成功率、无原始计数 → 数据不足",
-            "class": "B",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
-      "n1": {
-        "name": "接入失败示例",
-        "parent": null,
-        "pass_through": true
-      },
       "n4": {
         "name": "弱覆盖",
         "parent": "n2",
+        "level": 4,
+        "is_leaf": true,
         "condition": "CHR RelRsrp < -120",
         "combine": "unknown",
         "facts": [
@@ -65,6 +30,50 @@
             "nulls": 0,
             "op": "<",
             "threshold": -120
+          }
+        ]
+      },
+      "n3": {
+        "name": "干扰导致",
+        "parent": "n2",
+        "level": 4,
+        "is_leaf": true,
+        "condition": "需同时满足:\n1、CHR DCErrType 为 RNL_Unspecified\n2、RelSinr < 0",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "chr_干扰",
+            "indicator": "chr",
+            "mapping_reason": "需同时满足:RNL_Unspecified(C 字段匹配)+ RelSinr<0(A 阈值计数)",
+            "class": "D",
+            "status": "ok",
+            "predicate_satisfied": true
+          }
+        ]
+      },
+      "n1": {
+        "name": "接入失败示例",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "n2": {
+        "name": "QoS建立失败",
+        "parent": "n1",
+        "level": 3,
+        "uncovered_children": [
+          "n5"
+        ],
+        "condition": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "kpi_qos",
+            "indicator": "kpi",
+            "mapping_reason": "需原始计数 Att/Succ;kpi 只有成功率、无原始计数 → 数据不足",
+            "class": "B",
+            "status": "insufficient_data",
+            "resolved_column": null
           }
         ]
       }
