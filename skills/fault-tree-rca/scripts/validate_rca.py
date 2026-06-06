@@ -51,6 +51,10 @@ def _evidence(rc):
 
 
 def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     if len(sys.argv) < 2:
         print("用法:python validate_rca.py <rca.json>", file=sys.stderr)
         return 2

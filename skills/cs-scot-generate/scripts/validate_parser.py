@@ -57,6 +57,10 @@ def validate(script: str, data: str, expect_keys: List[str]) -> Tuple[bool, str]
 
 
 def main() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser(description="验证生成的解析脚本能否产出合法 JSON")
     ap.add_argument("script")
     ap.add_argument("data")
