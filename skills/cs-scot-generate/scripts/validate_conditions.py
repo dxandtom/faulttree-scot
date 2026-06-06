@@ -12,11 +12,55 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
+# ---- 代理"必要条件"自检:只逮"任何语义下都错"的三类;绝不判"语义是否相等"(那是模型的活、写在 mapping_reason 可审) ----
+_PROC_ALIAS = {"uecntx": "uecontext", "uecontext": "uecontext", "rrc": "rrc",
+               "ngsig": "ngsig", "ngsignaling": "ngsig", "qosflow": "qosflow",
+               "pdusession": "pdusession", "paging": "paging"}
+_KNOWN_PROCS = ("uecontext", "rrc", "ngsig", "qosflow", "pdusession", "paging")
+
+
+def _counter_proc(text):
+    """条件正文里 N.<Proc>. / L.<Proc>. 的流程段 → 规范名(认得才返回,认不得返回 None,绝不误伤)。"""
+    for m in re.finditer(r"\b[NL]\.([A-Za-z]+)\.", text or ""):
+        p = _PROC_ALIAS.get(re.sub(r"[^a-z0-9]", "", m.group(1).lower()))
+        if p:
+            return p
+    return None
+
+
+def _col_proc(col):
+    """列名里出现的已知流程关键词 → 规范名(认不得返回 None)。"""
+    norm = re.sub(r"[^a-z0-9]", "", (col or "").lower())
+    return next((p for p in _KNOWN_PROCS if p in norm), None)
+
+
+def _is_rate_col(col):
+    return bool(col) and ("rate" in col.lower() or "率" in col)
+
+
+def _is_subcause(text):
+    """计数器含 .FailEst.<原因> / .Fail<原因> = 特定失败子因。"""
+    return bool(re.search(r"\.Fail(Est)?\.[A-Za-z]", text or ""))
+
+
+def _is_setup_cond(text):
+    return bool(text and (re.search(r"\.Est\.|\.ConnEst\.|Setup", text) or "建立" in text))
+
+
+def _is_drop_col(col):
+    c = (col or "").lower()
+    return "drop" in c or "abnorm" in c or "release" in c or "掉线" in (col or "")
+
 
 def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     if len(sys.argv) < 2:
         print("用法:python validate_conditions.py <condition_facts.json>", file=sys.stderr)
         return 2
@@ -51,6 +95,17 @@ def main() -> int:
             problems.append(f"[缺理由]「{cid}」数据不足但没写 reason")
         if pred is not None and not isinstance(pred, bool):
             problems.append(f"[越权判定]「{cid}」predicate_satisfied 应为布尔,实际 {pred!r}")
+
+        # 代理三类必要条件(只逮"任何语义下都错"的):流程不匹配 / 建立配掉线 / 子因配总率
+        ct, col = c.get("condition_text") or "", f.get("resolved_column")
+        if st == "ok" and _is_rate_col(col):
+            cp, lp = _counter_proc(ct), _col_proc(col)
+            if cp and lp and cp != lp:
+                problems.append(f"[流程不匹配]「{cid}」条件计数器流程={cp},却绑到 {lp} 流程的率列「{col}」——不同流程不能互代,改数据不足或换源")
+            if _is_setup_cond(ct) and _is_drop_col(col):
+                problems.append(f"[建立配掉线]「{cid}」建立类条件绑到掉线/异常释放率列「{col}」——建立≠掉线,数据不足")
+            if _is_subcause(ct):
+                problems.append(f"[子因配总率]「{cid}」特定失败子因(.FailEst.)绑到总率列「{col}」——总率分不出子因,改 C 类查错误码字段或数据不足")
 
     # 软告警(不致命):多条不同判据绑到同一(列,op,阈值)→ 疑似"通用代理",损泛化
     from collections import Counter

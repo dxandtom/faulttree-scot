@@ -369,6 +369,17 @@ def k_signaling(table, b, cls="H"):
         if constraints and not g["where_ok"] and _row_ok(r):
             g["where_ok"] = True
 
+    # 兜底:has 里的消息名若在整列里从未出现过 → 多半是消息名写错(或本数据无此流程),
+    # 不是"真没失败"。别默默给 predicate=False,改判数据不足、把真实词汇样例摆出来。
+    all_msgs = set().union(*(g["msgs"] for g in groups.values())) if groups else set()
+    unknown_has = sorted(t for t in has if t not in all_msgs)
+    if unknown_has:
+        sample = sorted(v for v in all_msgs if v)[:15]
+        return _insuf(cls, f"has 里的消息名在 msg_column 从未出现:{unknown_has}——疑似消息名与数据词汇不符,"
+                           f"或本数据无此流程(非'真没失败')。msg_column 实际取值样例:{sample}",
+                      resolved_column=msgcol, msg_column=msgcol,
+                      unknown_messages=unknown_has, msg_vocab_sample=sample)
+
     matched = sum(1 for g in groups.values()
                   if has <= g["msgs"] and not (lacks & g["msgs"]) and g["where_ok"])
     out = {"class": cls, "status": "ok", "key": key, "msg_column": msgcol, "groups": len(groups),
