@@ -167,7 +167,10 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[agent_skill] {node['id']}: 已备好输入 → {in_path}")
     if tree_note:
+        comp = in_path.parent / "_compression.txt"
+        comp.write_text(tree_note.strip() + "\n", encoding="utf-8")
         print(tree_note)
+        print(f"  ↑ 压缩统计已落盘 → {comp}(终端把它折叠了也能去这文件看)")
     print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能,依据该输入产出结果,"
           f"写到 {in_path.parent / 'rca.json'}(契约见 fault-tree-rca 技能)。")
     print("  注意:result/ 目录已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"
