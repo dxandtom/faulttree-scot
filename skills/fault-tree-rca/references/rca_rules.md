@@ -76,6 +76,7 @@
 }
 ```
 - 每条 evidence 把 **条件 + 实际值 + 判断** 写全;`pass_through` 中间节点注明"无独立条件"。
+- **给人看的字段用名字、别用 id**:`Root_cause`/`support`/`caveats`/`blocked_at`/`reason`/`observed` 一律写节点**名字**(必要时"名字(nN)"),**绝不只写裸 `nXX`**——人读报告不该还得去翻 tree 文件查 id 对应哪个节点。只有 `evidence_path` 里 `node_id` 填 nN(同条目 `node` 填名字),各司其职。
 - **口径一致**:文字总结必须和 JSON 一致——`rca_result` 是 `[]` 就别说"发现了 N 条根因";疑似就叫疑似。
 - `rca_result` 为 `[]` **很正常**(上游话统/信令缺数据时);**强证据放 `probable_causes`,别硬塞 `rca_result`、更别造节点凑路径**。
 
