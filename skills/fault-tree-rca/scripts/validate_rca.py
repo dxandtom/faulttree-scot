@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """RCA 输出诚实性自检(指标无关、机械兜底)。
 
-只兜**结构底线**,不碰强度/排序(那是模型判断)。扫 rca.json:
-- **rca_result(确证根因)**:
-  1. 自相矛盾——某节点 judgment 判"成立"却又承认"无实测/数据不足/事实中无";
-  2. 假根因——路径里含"数据不足/不成立"节点(确证要求路径每个带条件节点都成立)。
-     → 修法是**把该条挪进 probable_causes(数据不足)或 excluded(不成立)**,
-       **不是去把路径凑完整、更不是造不存在的节点**。
-- **probable_causes(疑似)**:只拦"**不成立**"节点(那应 excluded);"数据不足"是疑似的正常特征,放行。
+只兜**结构底线 + 诚实**,不碰强度/排序/你怀疑什么(那是模型判断)。分档严格度不同:
+- **rca_result(确证根因)**:严。揪 ① 自相矛盾(判"成立"却又承认拿不到数据);
+  ② 假根因(路径含"数据不足/不成立"节点);③ 缺路径(没 evidence_path)。
+- **probable_causes(疑似)**:松——路径含"数据不足"**甚至"不成立"**节点都**放行**(那正是疑似该体现的泛化),
+  只查 ④ 有没有把理由说清(`blocked_at`/`caveats` + `support`/`evidence`)。
+- **任何档**:⑤ 给"无事实/未覆盖"节点编一个"成立" = 伪造,揪(需传 rca_input.json 才能核对)。
+- ⑥ 空诊断(三档全空)。
 
-用法:python validate_rca.py <rca.json>   # 不合格 → 退出码 1
+用法:python validate_rca.py <rca.json> [rca_input.json]   # 不合格 → 退出码 1
+     (带上 rca_input.json 才能做"成立必须有事实"的伪造核对)
 """
 from __future__ import annotations
 
@@ -22,8 +23,6 @@ MISSING = ("无实测", "未找到", "找不到", "不存在", "事实中无", "
            "未提供", "无法验证", "无法判定", "缺数据", "缺少", "数据不足")
 # 确证根因路径里不允许出现的"未完整成立"标记
 NOT_PROVEN = ("数据不足", "不成立", "部分成立", "未判定", "无法验证", "无法判定")
-# 疑似路径里不允许出现的"判否"标记(数据不足在疑似里是允许的,故不含)
-FAIL = ("不成立", "部分成立")
 
 
 def _is_clean_hold(judgment: str) -> bool:
@@ -31,7 +30,7 @@ def _is_clean_hold(judgment: str) -> bool:
     return "成立" in j and not any(m in j for m in NOT_PROVEN)
 
 
-def _tag(judgment: str, tags) -> str | None:
+def _tag(judgment: str, tags):
     j = judgment or ""
     return next((t for t in tags if t in j), None)
 
@@ -50,13 +49,49 @@ def _evidence(rc):
     return rc.get("evidence_path") or rc.get("evidence") or [] if isinstance(rc, dict) else []
 
 
+def _holding_map(input_path):
+    """从 rca_input.json 的 pruned_nodes 读 {node_id: (是否 pass_through, 是否有成立事实)};
+    读不到 / 无 pruned_nodes(退回 md 形态)→ None,跳过伪造核对。"""
+    try:
+        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+    except Exception:
+        return None
+    if not pruned:
+        return None
+    out = {}
+    for nid, n in pruned.items():
+        hold = any((f.get("status") == "ok" and f.get("predicate_satisfied") is True)
+                   for f in (n.get("facts") or []))
+        out[nid] = (bool(n.get("pass_through")), hold)
+    return out
+
+
+def _check_fabrication(rc, tier, hold_map, problems):
+    """任何档:判'成立'的节点必须在局部子树里真有成立事实(pass_through 例外)。"""
+    if hold_map is None:
+        return
+    name = rc.get("Root_cause") or rc.get("root_cause") or f"(未命名{tier})"
+    for node in _evidence(rc):
+        if not isinstance(node, dict) or not _is_clean_hold(str(node.get("judgment", ""))):
+            continue
+        nid = node.get("node_id")
+        if nid not in hold_map:   # 不在局部子树里就不强判(避免误伤)
+            continue
+        pass_through, hold = hold_map[nid]
+        if not pass_through and not hold:
+            problems.append(
+                f"[伪造成立] {tier}「{name}」/节点「{node.get('node', nid)}」判'成立',"
+                f"但局部子树里它没有任何'成立'事实(也非 pass_through)→ 别给没数据的节点编成立")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
     if len(sys.argv) < 2:
-        print("用法:python validate_rca.py <rca.json>", file=sys.stderr)
+        print("用法:python validate_rca.py <rca.json> [rca_input.json]", file=sys.stderr)
         return 2
     p = Path(sys.argv[1])
     try:
@@ -64,22 +99,27 @@ def main() -> int:
     except (OSError, json.JSONDecodeError) as e:
         print(f"无法读取/解析 {p}: {e}", file=sys.stderr)
         return 2
+    hold_map = _holding_map(sys.argv[2]) if len(sys.argv) >= 3 else None
 
     confirmed = _confirmed(doc)
     probables = doc.get("probable_causes", []) if isinstance(doc, dict) else []
     undet = doc.get("undetermined", []) if isinstance(doc, dict) else []
     problems = []
 
-    # 空诊断:三档全空 = 啥也没说,不合格(没根因也要在 undetermined 写清卡在哪、缺什么、看到啥)
+    # ⑥ 空诊断:三档全空 = 啥也没说
     if not confirmed and not probables and not undet:
         problems.append("[空诊断] rca_result / probable_causes / undetermined 全空——"
-                        "就算没有根因,也必须在 undetermined 写清:卡在哪个节点、缺哪个量、看到哪些观察(标注非根因)。")
+                        "就算没有根因,也必须在 undetermined 写清:卡在哪个节点、缺哪个量、看到哪些观察。")
 
+    # 确证根因:严(①自相矛盾 ②假根因 ③缺路径 ⑤伪造)
     for rc in confirmed:
         if not isinstance(rc, dict):
             continue
         name = rc.get("Root_cause") or rc.get("root_cause") or "(未命名根因)"
-        for node in _evidence(rc):
+        ev = _evidence(rc)
+        if not ev:
+            problems.append(f"[缺路径] 确证根因「{name}」没有 evidence_path——确证必须把根→叶整条路径、每节点的条件/实际值/判断摆出来")
+        for node in ev:
             if not isinstance(node, dict):
                 continue
             judg, actual, nname = str(node.get("judgment", "")), str(node.get("actual", "")), node.get("node", "?")
@@ -89,30 +129,30 @@ def main() -> int:
             if tag:
                 problems.append(
                     f"[假根因] 确证根因「{name}」路径含'{tag}'节点「{nname}」"
-                    f"→ 把它挪进 probable_causes(数据不足)或 excluded(不成立),别凑路径、别造节点")
+                    f"→ 挪进 probable_causes 或 excluded,别凑路径、别造节点")
+        _check_fabrication(rc, "确证根因", hold_map, problems)
 
+    # 疑似:松——只查 ④理由齐不齐 + ⑤有没有伪造成立;路径含 不成立/数据不足 一律放行
     for rc in probables:
         if not isinstance(rc, dict):
             continue
         name = rc.get("Root_cause") or "(未命名疑似)"
-        for node in _evidence(rc):
-            if not isinstance(node, dict):
-                continue
-            tag = _tag(str(node.get("judgment", "")), FAIL)
-            if tag:
-                problems.append(
-                    f"[疑似越界] 疑似「{name}」路径含'{tag}'节点「{node.get('node', '?')}」"
-                    f"→ 有不成立节点应归 excluded(不报),不是疑似")
+        if not (rc.get("blocked_at") or rc.get("caveats")):
+            problems.append(f"[疑似缺理由] 疑似「{name}」没说清为什么只是疑似——必须写 `blocked_at`(卡在哪个节点)或 `caveats`(为何不确定)")
+        if not (rc.get("support") or _evidence(rc)):
+            problems.append(f"[疑似缺证据] 疑似「{name}」既无 `support` 也无 `evidence_path`——疑似也得摆出支撑它的正向证据")
+        _check_fabrication(rc, "疑似", hold_map, problems)
 
     if problems:
         print(f"不合格:发现 {len(problems)} 处问题:")
         for pr in problems:
             print("  - " + pr)
-        print("\n修法:确证根因必须路径全成立;有'数据不足'节点→挪 probable_causes(疑似,带 caveat),"
-              "有'不成立'节点→excluded(不报)。**绝不把路径凑完整、绝不造不存在的节点。**")
+        print("\n修法:确证根因要路径全成立 + 摆出 evidence_path;疑似可含'数据不足/不成立'节点,"
+              "但要写清 blocked_at/caveats/support;任何'成立'都得有真事实。**别凑路径、别造节点、别给没数据的节点判成立。**")
         return 1
 
-    print(f"通过:确证根因 {len(confirmed)} 条(全成立、无矛盾)、疑似 {len(probables)} 条(无不成立节点)。")
+    note = "(已用 rca_input 核对'成立'有事实)" if hold_map is not None else "(未带 rca_input,跳过伪造核对)"
+    print(f"通过:确证根因 {len(confirmed)} 条(路径全成立)、疑似 {len(probables)} 条(理由齐备){note}。")
     return 0
 
 

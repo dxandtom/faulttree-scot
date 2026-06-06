@@ -39,7 +39,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 `scripts/rca_query.py <result/rca_input.json>`:`--outline`(全局粗状态)/ `--holding`(有"成立"事实的候选节点+根→叶路径)/ `--node nX`(某分支整条路径的条件+事实)。**按分支取,据此判**——别把整个 rca_input 读进上下文(会超长报错),也别自己写脚本硬算 RCA。
 
 ## 自检(机械兜底,推荐每次跑)
-产出后跑 `python "<本技能目录>/scripts/validate_rca.py" result/rca.json`:它只兜结构底线——揪 `rca_result` 里的**自相矛盾**和**假根因**、`probable_causes` 里混入的**不成立**节点,以及**空诊断**(三档全空:没根因也必须在 `undetermined` 写清卡在哪、缺什么)。**报错的修法是挪档/补 undetermined,不是凑路径、不是造节点。**
+产出后跑 `python "<本技能目录>/scripts/validate_rca.py" result/rca.json result/rca_input.json`:对 **confirmed 严**(自相矛盾/假根因/缺路径),对 **probable 松**(只查理由齐不齐:`blocked_at`/`caveats`/`support`),**任何档**给"无事实"节点判"成立"→揪(伪造),外加**空诊断**。**报错就挪档/补理由,不是凑路径、不是造节点。**(带上 `rca_input.json` 才能核对"成立有事实"。)
 
 ## 输出契约
 ```json
