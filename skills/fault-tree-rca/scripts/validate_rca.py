@@ -63,12 +63,15 @@ def _holding_map(input_path):
     for nid, n in pruned.items():
         hold = any((f.get("status") == "ok" and f.get("predicate_satisfied") is True)
                    for f in (n.get("facts") or []))
-        out[nid] = (bool(n.get("pass_through")), hold)
+        cond = n.get("condition") or ""
+        has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond   # 根/分组节点(无条件进入)不算"有真条件"
+        out[nid] = (bool(n.get("pass_through")), hold, has_cond)
     return out
 
 
 def _check_fabrication(rc, tier, hold_map, problems):
-    """任何档:判'成立'的节点必须在局部子树里真有成立事实(pass_through 例外)。"""
+    """任何档:判'成立'的节点,若它**有真条件**却在局部子树里没有成立事实 = 伪造
+    (pass_through / 无条件的根·分组节点判成立是结构性的,放行)。"""
     if hold_map is None:
         return
     name = rc.get("Root_cause") or rc.get("root_cause") or f"(未命名{tier})"
@@ -78,11 +81,11 @@ def _check_fabrication(rc, tier, hold_map, problems):
         nid = node.get("node_id")
         if nid not in hold_map:   # 不在局部子树里就不强判(避免误伤)
             continue
-        pass_through, hold = hold_map[nid]
-        if not pass_through and not hold:
+        pass_through, hold, has_cond = hold_map[nid]
+        if has_cond and not pass_through and not hold:
             problems.append(
                 f"[伪造成立] {tier}「{name}」/节点「{node.get('node', nid)}」判'成立',"
-                f"但局部子树里它没有任何'成立'事实(也非 pass_through)→ 别给没数据的节点编成立")
+                f"但它有判断条件、局部子树里却没有任何'成立'事实(也非 pass_through)→ 别给没数据的节点编成立")
 
 
 def main() -> int:

@@ -107,6 +107,13 @@ def main() -> int:
             if _is_subcause(ct):
                 problems.append(f"[子因配总率]「{cid}」特定失败子因(.FailEst.)绑到总率列「{col}」——总率分不出子因,改 C 类查错误码字段或数据不足")
 
+        # 丢了区分量:condition_text 提到 RSRP/SINR 等无线量,这条却是单一 A/C 类、绑到非无线列、无 D 类组合
+        #   → 多半把"X 且 弱覆盖/干扰"绑成了裸 X(丢区分条件、会恒成立、几个不同节点一起命中)。
+        if st == "ok" and col and str(cls).upper() in ("A", "C") and not c.get("sub"):
+            _radio = ("rsrp", "sinr", "rsrq", "rssi")
+            if any(k in ct.lower() for k in _radio) and not any(k in col.lower() for k in _radio):
+                problems.append(f"[丢了区分量]「{cid}」条件正文提到 RSRP/SINR 等无线量,绑定却只查了「{col}」——多半把'X 且 弱覆盖/干扰'绑成裸 X(丢区分条件、恒成立)。改 D 类组合(连无线量一起绑)或 decision:insufficient_data")
+
     # 软告警(不致命):多条不同判据绑到同一(列,op,阈值)→ 疑似"通用代理",损泛化
     from collections import Counter
     key_count = Counter()

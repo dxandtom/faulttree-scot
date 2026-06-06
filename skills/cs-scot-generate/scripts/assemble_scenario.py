@@ -50,6 +50,9 @@ INDICATOR = "__IND__"
 #      注意 UEContext 常只有 *Drop Rate*(掉线!=建立)→ UEContext建立类一律 decision:insufficient_data。
 #  (2) 非子因:计数器含 .FailEst.<原因> / .Fail<原因>(如 N.QosFlow.FailEst.RNL)= 特定失败子因,
 #      成功率分不出子因 → 永不可用率重述;改用 C 类查错误码字段,或 decision:insufficient_data。
+#  (3) 别丢区分量:树条件是"A 且 B"(如 DCErrType=RNL_Unspecified **且** RSRP<-120)、本源只能查 A →
+#      别绑裸 A(丢了 B、会恒成立、几个不同节点一起命中);要么 D 类组合(把 B 一起绑)、要么 insufficient。
+# decision:insufficient_data 时**不要再填 class**(尤其别填 J;J 是"人工确认 manual",不是数据不足)。
 CONDITIONS = [
     # {"id": "第N行", "node": "RRC建立失败", "node_id": "n12", "condition_text": "<逐字树条件>",
     #  "class": "A", "column": "SA_RRC Setup Success Rate", "op": "<", "threshold": 100, "scope": "aggregate", "agg": "mean",
