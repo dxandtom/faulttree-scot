@@ -1,12 +1,13 @@
 # 安装指南(FaultTree-SCoT skills)
 
 ## 这是什么
-把本仓 `skills/` 下的**三个 skill** 安装(拷贝或软链)到外层 harness 的 skills 目录,
+把本仓 `skills/` 下的**四个 skill** 安装(拷贝或软链)到外层 harness 的 skills 目录,
 让 Claude Code / OpenClaw 等能加载它们:
 
 - **cs-scot-generate** — 把故障树 Excel 编译成场景诊断 skill(生成解析脚本 + SCoT 计划)
 - **cs-scot-execute** — 按 `plan.json` 顺序执行 SCoT 计划
 - **fault-tree-rca** — 综合根因分析
+- **cs-scot-benchmark** — 对 generate 产物跑基准(压缩/稳定/可复现/护栏),出报告 txt
 
 > 注:这三个是**工具 skill**。用 `cs-scot-generate` 为某场景生成出来的"场景 skill"
 > (如 `examples/sa-access-fail/`)是另外单独上传/使用的,不由本脚本安装。
@@ -48,7 +49,7 @@ pip install openpyxl
 ## 验证
 ```bash
 ls ~/.claude/skills/
-# 应看到:cs-scot-generate/  cs-scot-execute/  fault-tree-rca/
+# 应看到:cs-scot-generate/  cs-scot-execute/  fault-tree-rca/  cs-scot-benchmark/
 ```
 跑一个现成的场景示例(`examples/sa-access-fail/` 是已生成好的场景 skill):
 ```bash
@@ -66,7 +67,8 @@ python scripts/runner.py --plan plan.json \
 ```bash
 rm -rf ~/.claude/skills/cs-scot-generate \
        ~/.claude/skills/cs-scot-execute \
-       ~/.claude/skills/fault-tree-rca
+       ~/.claude/skills/fault-tree-rca \
+       ~/.claude/skills/cs-scot-benchmark
 ```
 (若是 `--link` 安装,只删软链,不影响源仓。)
 

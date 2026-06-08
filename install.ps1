@@ -7,7 +7,7 @@ param(
 )
 
 # FaultTree-SCoT skills installer (quick copy) — Windows PowerShell 版。
-# 把本仓 skills\ 下的三个 skill 拷贝(或 -Link 软链)到 harness 的 skills 目录。
+# 把本仓 skills\ 下的四个 skill 拷贝(或 -Link 软链)到 harness 的 skills 目录。
 #   用法:
 #     .\install.ps1                    # 拷贝到 ~\.claude\skills(默认)
 #     .\install.ps1 -Link              # 软链(需开发者模式或管理员)
@@ -31,7 +31,7 @@ if (-not $Target) {
 $Source = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SkillsSrc = Join-Path $Source "skills"
 $Mode = if ($Link) { "link" } else { "copy" }
-$Dirs = @("cs-scot-generate", "cs-scot-execute", "fault-tree-rca")
+$Dirs = @("cs-scot-generate", "cs-scot-execute", "fault-tree-rca", "cs-scot-benchmark")
 
 Write-Step "source:  $SkillsSrc"
 Write-Step "target:  $Target"
@@ -78,6 +78,6 @@ foreach ($d in $Dirs) {
 }
 
 Write-Host ""
-Write-Step "DONE. 已安装 3 个 skill 到:$Target"
-Write-Host "  - cs-scot-generate / cs-scot-execute / fault-tree-rca"
+Write-Step "DONE. 已安装 4 个 skill 到:$Target"
+Write-Host "  - cs-scot-generate / cs-scot-execute / fault-tree-rca / cs-scot-benchmark"
 Write-Host "依赖:仅 Python 标准库;读取 .xlsx 需 openpyxl(csv 开箱即用): pip install openpyxl"
