@@ -113,9 +113,37 @@ def find_code_columns(headers: List[str]) -> Dict[int, str]:
     return out
 
 
+# HTML 标签白名单(只删这些已知标签,避免把条件里的 < > 比较运算符当成标签吃掉)
+_HTML_TAG = re.compile(
+    r"</?(?:span|div|p|a|br|hr|img|h[1-6]|table|thead|tbody|tr|td|th|ul|ol|li|"
+    r"b|i|u|s|em|strong|font|sub|sup|blockquote|pre|code|section|article|center)\b[^>]*>",
+    re.IGNORECASE)
+_MD_IMG = re.compile(r"!\[[^\]]*\]\([^)]*\)")          # markdown 图片
+_HTML_ENTITIES = (("&nbsp;", " "), ("&quot;", '"'), ("&#39;", "'"), ("&apos;", "'"),
+                  ("&ldquo;", "“"), ("&rdquo;", "”"), ("&mdash;", "—"),
+                  ("&ndash;", "–"), ("&hellip;", "…"), ("&copy;", "©"),
+                  ("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&"))
+# pass-through 判据标记:这些不是"真条件",节点应判 pass_through(无条件进入),不当条件
+_PASSTHROUGH_JUDGMENTS = {"不涉及", "无条件进入", "无条件", "无判断", "无判断条件"}
+
+
 def _clean_text(s: Optional[str]) -> str:
-    """清掉常见 HTML 转义,便于阅读/判断。"""
-    return (s or "").replace("&amp;", "&").replace("&gt;", ">").replace("&lt;", "<").strip()
+    """清掉 HTML 标签/图片/转义实体;**保留 < > 比较运算符**,便于阅读/判断。"""
+    s = s or ""
+    s = _MD_IMG.sub("", s)            # 先去 markdown 图片
+    s = _HTML_TAG.sub("", s)          # 去 HTML 标签(白名单,先于实体解码,避免误吃运算符)
+    for k, v in _HTML_ENTITIES:       # 再解码实体(&gt;→> 等;此时已无真标签)
+        s = s.replace(k, v)
+    s = re.sub(r"[ \t ]+", " ", s)        # 多空格/不换行空格 → 单空格(不动换行)
+    s = re.sub(r"[ \t]*\n[ \t]*", "\n", s)     # 去每行首尾空白
+    s = re.sub(r"\n{3,}", "\n\n", s)           # 3+ 连续空行 → 1 个空行
+    return s.strip()
+
+
+def _is_skip_judgment(jv: Optional[str]) -> bool:
+    """该判断单元格是否应跳过(不当真条件):空、或 pass-through 标记(不涉及/无条件进入…)。"""
+    t = _clean_text(jv).rstrip("。.;；、, ")
+    return (not t) or t in _PASSTHROUGH_JUDGMENTS
 
 
 def _split_judgment(cell: Optional[str]) -> Tuple[Optional[str], Dict[str, str]]:
@@ -170,8 +198,8 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
         judgment = None
         if judgment_col:
             jv = (row.get(judgment_col) or "").strip()
-            if jv and jv != "不涉及":
-                judgment = jv
+            if not _is_skip_judgment(jv):
+                judgment = _clean_text(jv)          # md 也清洗(去 HTML/图片、保留运算符)
 
         if start_node:
             sl = start_level or 1
@@ -230,8 +258,8 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
         judgment = None
         if judgment_col:
             jv = (row.get(judgment_col) or "").strip()
-            if jv and jv != "不涉及":
-                judgment = jv
+            if not _is_skip_judgment(jv):
+                judgment = jv                       # 原文交给 _split_judgment(内部 _clean_text)
         # 截取(镜像 build_tree)
         if start_node:
             sl = start_level or 1
