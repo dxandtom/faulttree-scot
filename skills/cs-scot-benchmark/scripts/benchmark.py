@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -144,6 +145,86 @@ def _guard_selftest(vc_path, vr_path, tmp):
     return lines, bad_caught, bad_total, good_pass, good_total
 
 
+def _node_path(nodes, nid):
+    path, seen, cur = [], set(), nid
+    while cur and cur in nodes and cur not in seen:
+        seen.add(cur); path.append(nodes[cur].get("name")); cur = nodes[cur].get("parent")
+    return tuple(reversed(path))
+
+
+def verify_conversion(index, md_text, excel_path):
+    """转换质量:结构一致性 + 整洁度(残留 HTML/图片/空条件/测试名);给 --excel 再和原表逐节点对账。"""
+    nodes = index.get("nodes", {})
+    lines, problems = [], 0
+    # 结构一致性
+    struct = []
+    for nid, n in nodes.items():
+        p = n.get("parent")
+        if p is not None and p not in nodes:
+            struct.append(f"{nid}.parent 缺失")
+        elif p is not None and (n.get("level") or 0) != (nodes[p].get("level") or 0) + 1:
+            struct.append(f"{nid} 层级断裂")
+        seen, cur = set(), nid
+        while cur and cur in nodes:
+            if cur in seen:
+                struct.append(f"{nid} 成环"); break
+            seen.add(cur); cur = nodes[cur].get("parent")
+    lines.append(f"  结构一致性: 节点 {len(nodes)};父子/层级/无环 "
+                 + ("✓" if not struct else f"✗ {len(struct)} 处({'; '.join(struct[:3])})"))
+    problems += len(struct)
+    # 整洁度
+    tagre = re.compile(r"<[a-zA-Z/][^>]*>")
+    html = [n["name"] for n in nodes.values() if n.get("condition") and tagre.search(n["condition"])]
+    img = [n["name"] for n in nodes.values() if n.get("condition") and re.search(r"!\[|https?://|<img", n["condition"], re.I)]
+    empty = [n["name"] for n in nodes.values() if (not n.get("pass_through")) and not (n.get("condition") or "").strip()]
+    testn = [n["name"] for n in nodes.values() if re.search(r"萃取新增节点|测试", n.get("name") or "")]
+    lines.append(f"  整洁度: 残留HTML标签 {len(html)}、图片/链接 {len(img)}、空条件判定节点 {len(empty)}、测试节点名 {len(testn)}")
+    if html:
+        lines.append(f"    HTML 残留(示例): {html[:2]}")
+    problems += len(html) + len(img) + len(empty)
+    if md_text:
+        mdt = len(tagre.findall(md_text))
+        lines.append(f"  md 文本残留 HTML 标签: {mdt} 处")
+        problems += mdt
+    # 节点对账(需 Excel)
+    if excel_path:
+        try:
+            ext = _sibling("cs-scot-generate", "excel_to_tree.py", None)
+            sys.path.insert(0, str(ext.parent))
+            from excel_to_tree import _read_table, find_level_columns, DEFAULT_EXCLUDE
+            headers, rows = _read_table(excel_path)
+            lvl = find_level_columns(headers)
+            scen = index.get("scenario")
+            exre = re.compile(DEFAULT_EXCLUDE) if DEFAULT_EXCLUDE else None
+            expected = set()
+            for row in rows:
+                nms = [(row.get(c) or "").strip() for c, _ in lvl]
+                nms = [x for x in nms if x]
+                if not nms or (exre and any(exre.search(x) for x in nms)):
+                    continue
+                if scen in nms:
+                    path = tuple(nms[nms.index(scen):])
+                    for k in range(1, len(path) + 1):
+                        expected.add(path[:k])
+            idxp = {_node_path(nodes, nid) for nid in nodes}
+            dropped, extra = expected - idxp, idxp - expected
+            lines.append(f"  节点对账(vs Excel): Excel 子树 {len(expected)}、index {len(idxp)};"
+                         f"匹配 {len(expected & idxp)}、漏 {len(dropped)}、多 {len(extra)}")
+            if dropped:
+                lines.append(f"    漏(Excel有/index无,示例): {['/'.join(p) for p in list(dropped)[:2]]}")
+            if extra:
+                lines.append(f"    多(index有/Excel无,示例): {['/'.join(p) for p in list(extra)[:2]]}")
+            problems += len(dropped) + len(extra)
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"  节点对账: 跳过(读 Excel/对账失败: {e})")
+    else:
+        lines.append("  节点对账: 未给 --excel,跳过(只做结构+整洁度;给 --excel 才能和原表逐节点对账)")
+    ok = (problems == 0)
+    tail = "、与原表完全对账" if (excel_path and ok) else ""
+    lines.append(f"  结论: {('✓ 转换干净、结构一致' + tail) if ok else '⚠ 见上,有残留/不一致/漏多,建议用最新转换器重生成'}")
+    return lines, ok
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -154,6 +235,7 @@ def main() -> int:
     ap.add_argument("--data", action="append", default=[], help="指标=数据文件(可多次),指标对应 <指标>_analyzer.py")
     ap.add_argument("--runs", type=int, default=3, help="确定性链路重跑次数(默认3)")
     ap.add_argument("-o", "--output", help="报告 txt(默认 <produce>/benchmark_report.txt)")
+    ap.add_argument("--excel", help="原始故障树 Excel/csv 路径(给了才做'与原表逐节点对账';不给只做结构+整洁度)")
     ap.add_argument("--tree-prune"); ap.add_argument("--validate-conditions"); ap.add_argument("--validate-rca")
     args = ap.parse_args()
 
@@ -293,9 +375,13 @@ def main() -> int:
     guard_ok = (bc == bt and gp == gt and bt > 0)
     L.append(f"  结论: {'✓ 护栏对已知坏例 100% 拦截、好例 100% 放行' if guard_ok else '⚠ 见上,护栏有漏/误杀'}")
 
+    L.append("\n【5. 转换质量(故障树→子树)】")
+    vlines, verify_ok = verify_conversion(index, md_text, args.excel)
+    L.extend(vlines)
+
     L.append("\n" + "=" * 64)
-    verdict = all([bool(t1) and t1.get("saved", 0) >= 0, all_ok, all_repro, guard_ok])
-    L.append(f"总评: {'✓ 四项基准均达标' if verdict else '⚠ 部分项需关注(见各条结论)'}")
+    verdict = all([bool(t1) and t1.get("saved", 0) >= 0, all_ok, all_repro, guard_ok, verify_ok])
+    L.append(f"总评: {'✓ 五项基准均达标' if verdict else '⚠ 部分项需关注(见各条结论)'}")
     L.append("注:本基准只证明 省/稳/可复现/诚实,**不证明诊断准确率**(无 ground truth);准确率需另用合成故障注入评测。")
     L.append("=" * 64)
 
