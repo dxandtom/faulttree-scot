@@ -16,8 +16,9 @@ import json
 import sys
 from pathlib import Path
 
-_FACT_KEYS = ("status", "predicate_satisfied", "matched", "value", "count_satisfied",
-              "ratio", "top1", "top1_ratio", "matched_sessions", "resolved_column", "reason")
+_FACT_KEYS = ("status", "predicate_satisfied", "matched", "total", "ratio", "top",
+              "value", "count_satisfied", "top1", "top1_ratio", "matched_sessions",
+              "lacks_never_seen", "resolved_column", "reason")
 
 
 def _fault_tree(data: dict):

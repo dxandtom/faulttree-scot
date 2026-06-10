@@ -223,7 +223,7 @@ def k_difference(table, b, cls="B"):
     if b.get("scope") == "count_rows":
         cnt = sum(1 for v in per if _cmp(v, op, thr))
         fact.update(scope="count_rows", count_satisfied=cnt, ratio=round(cnt / len(per), 4),
-                    predicate_satisfied=cnt > 0)
+                    predicate_satisfied=cnt >= b.get("require", 1))
     else:
         agg = b.get("agg", "sum")
         value = _agg(per, agg)
@@ -244,21 +244,25 @@ def k_match(table, b, cls="C"):
     norm = (lambda x: str(x).strip().lower()) if ci else (lambda x: str(x).strip())
     tnorm = [norm(t) for t in targets]
     idc = _id_col(header)
-    matched, nulls, samples = 0, 0, []
+    matched, nulls, samples, dist = 0, 0, [], Counter()
     for i, r in enumerate(rows):
         v = r.get(col, "")
         if _is_null(v):
             nulls += 1
             continue
+        dist[str(v).strip()] += 1                       # 同列取值分布(给 RCA 判分量/主次)
         nv = norm(v)
         hit = any(t in nv for t in tnorm) if mode == "contains" else (nv in tnorm)
         if hit:
             matched += 1
             if len(samples) < 3:
                 samples.append(str(r.get(idc)) if idc else f"row#{i}")
+    total = sum(dist.values())                          # 纳入统计的非空行数 = 占比分母
     return {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
-            "match": mode, "targets": targets, "matched": matched, "nulls": nulls,
-            "samples": samples, "predicate_satisfied": matched >= b.get("require", 1)}
+            "match": mode, "targets": targets, "matched": matched, "total": total,
+            "ratio": round(matched / total, 4) if total else None, "nulls": nulls,
+            "top": dist.most_common(5), "samples": samples,
+            "predicate_satisfied": matched >= b.get("require", 1)}
 
 
 # ---------- D:多条件组合 ----------
@@ -327,7 +331,9 @@ def k_config(table, b, cls="F"):
     if not vals:
         return _insuf(cls, "参数列无值")
     exp = str(b.get("equals"))
+    matched = sum(1 for v in vals if v == exp)
     return {"class": cls, "status": "ok", "resolved_column": col, "resolve": how, "expected": b.get("equals"),
+            "n": len(vals), "matched": matched, "ratio": round(matched / len(vals), 4),
             "distinct_values": list(dict.fromkeys(vals))[:5], "predicate_satisfied": all(v == exp for v in vals)}
 
 
@@ -384,6 +390,11 @@ def k_signaling(table, b, cls="H"):
                   if has <= g["msgs"] and not (lacks & g["msgs"]) and g["where_ok"])
     out = {"class": cls, "status": "ok", "key": key, "msg_column": msgcol, "groups": len(groups),
            "matched_sessions": matched, "predicate_satisfied": matched > 0}
+    # lacks 里的消息名若整列从未出现 → lacks 约束恒成立、退化成"只要有 has 就命中" → 可能假阳性。
+    # 不改判定(免得压掉真信号),但标注出来,让 RCA 对这条"成立"降置信、写进 caveat。
+    unknown_lacks = sorted(t for t in lacks if t not in all_msgs)
+    if unknown_lacks:
+        out["lacks_never_seen"] = unknown_lacks
     if constraints:
         out["where"] = [{"column": wc, "values": vals, "match": mode} for wc, vals, mode in constraints]
     return out

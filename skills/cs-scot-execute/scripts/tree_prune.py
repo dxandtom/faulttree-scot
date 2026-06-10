@@ -36,8 +36,8 @@ def _facts_by_node(results: dict, alias: dict) -> dict:
 
 
 _FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "value",
-              "matched", "count_satisfied", "ratio", "top1", "top1_ratio",
-              "matched_sessions", "nulls", "op", "threshold")
+              "matched", "total", "ratio", "top", "count_satisfied", "top1", "top1_ratio",
+              "matched_sessions", "lacks_never_seen", "nulls", "op", "threshold")
 
 
 def _slim_fact(entry: dict) -> dict:
@@ -110,7 +110,7 @@ def prune(index: dict, results: dict) -> dict:
         pruned[nid] = rec
         outline[nid] = _coarse(ent, n.get("pass_through"))          # outline 只存状态(name/parent 去 pruned_nodes 取)
 
-    uncovered = [{"id": nid, "name": n.get("name"), "condition": (n.get("condition") or "")[:100]}
+    uncovered = [{"id": nid, "name": n.get("name"), "condition": (n.get("condition") or "")[:60]}
                  for nid, n in nodes.items() if not n.get("pass_through") and nid not in facts]
     orphans = sorted(k for k in facts if k != "__no_node_id__" and k not in nodes)
     unmapped = list(facts.get("__no_node_id__", []))
