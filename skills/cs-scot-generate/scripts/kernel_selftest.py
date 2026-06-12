@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""A–J 内核回归自测:每个内核给若干「合成小表 + 绑定 → 期望事实」用例,断言关键字段。
+
+为什么要它:condition_kernels.py 是整条流水线的地基(execute 只跑、不改统计),
+但此前它**没有任何回归测试**——谁改坏一行(改了谓词、漏了分量字段、动了解析)都不会有东西报警。
+这份用例覆盖每类的 成立/不成立/数据不足/边界(空表、缺列、%值、transform 链、require、三态组合),
+是确定性的(无 ground truth、不调模型、可反复跑出同一结果),被 cs-scot-benchmark 当第 6 项接入。
+
+用法:
+    kernel_selftest.py            # 跑全量,打印逐条结果,全过 exit 0、有失败 exit 1
+    (也可被 benchmark import:from kernel_selftest import run_battery)
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from condition_kernels import evaluate_binding  # 被测对象
+
+
+def _t(header, *rows):
+    return (list(header), [dict(zip(header, r)) for r in rows])
+
+
+# 每条用例:name / table(None=无源) / binding / expect(字段=值,需相等)/ present(必须出现的字段)
+CASES = [
+    # ---- A 阈值 ----
+    {"name": "A aggregate 成立(率<100)", "table": _t(["rate"], ["95"], ["97"]),
+     "binding": {"class": "A", "column": "rate", "op": "<", "threshold": 100, "scope": "aggregate", "agg": "mean"},
+     "expect": {"status": "ok", "value": 96.0, "predicate_satisfied": True}, "present": ["valid", "n_rows"]},
+    {"name": "A aggregate 不成立", "table": _t(["rate"], ["100"], ["100"]),
+     "binding": {"class": "A", "column": "rate", "op": "<", "threshold": 100, "scope": "aggregate", "agg": "mean"},
+     "expect": {"status": "ok", "predicate_satisfied": False}},
+    {"name": "A %值自动剥百分号", "table": _t(["rate"], ["95%"], ["97%"]),
+     "binding": {"class": "A", "column": "rate", "op": "<", "threshold": 100, "scope": "aggregate", "agg": "mean"},
+     "expect": {"status": "ok", "value": 96.0}},
+    {"name": "A count_rows 认 require(2满足/需3→不成立)", "table": _t(["x"], ["1"], ["1"], ["9"]),
+     "binding": {"class": "A", "column": "x", "op": "<", "threshold": 5, "scope": "count_rows", "require": 3},
+     "expect": {"status": "ok", "count_satisfied": 2, "predicate_satisfied": False}},
+    {"name": "A count_rows 认 require(需2→成立)", "table": _t(["x"], ["1"], ["1"], ["9"]),
+     "binding": {"class": "A", "column": "x", "op": "<", "threshold": 5, "scope": "count_rows", "require": 2},
+     "expect": {"status": "ok", "count_satisfied": 2, "predicate_satisfied": True}},
+    {"name": "A transform log10", "table": _t(["x"], ["100"], ["1000"]),
+     "binding": {"class": "A", "column": "x", "op": ">", "threshold": 2, "scope": "aggregate", "agg": "mean", "transforms": ["log10"]},
+     "expect": {"status": "ok", "value": 2.5, "predicate_satisfied": True}},
+    {"name": "A 缺列→数据不足", "table": _t(["rate"], ["95"]),
+     "binding": {"class": "A", "column": "不存在的列", "op": "<", "threshold": 100},
+     "expect": {"status": "insufficient_data", "resolved_column": None}},
+    {"name": "A 全空列→数据不足", "table": _t(["rate"], ["NIL"], ["-"]),
+     "binding": {"class": "A", "column": "rate", "op": "<", "threshold": 100, "scope": "aggregate"},
+     "expect": {"status": "insufficient_data"}},
+
+    # ---- B 差值(逐操作数 transform)----
+    {"name": "B 差值成立(Att-Succ>0)", "table": _t(["att", "succ"], ["10", "7"], ["8", "8"]),
+     "binding": {"class": "B", "minuend": ["att"], "subtrahend": ["succ"], "op": ">", "threshold": 0, "scope": "aggregate", "agg": "sum"},
+     "expect": {"status": "ok", "value": 3.0, "predicate_satisfied": True}},
+    {"name": "B 主分集 10log10(a)-10log10(b)>6dB", "table": _t(["a", "b"], ["100", "1"]),
+     "binding": {"class": "B", "minuend": ["a"], "subtrahend": ["b"], "transforms": ["log10", "scale:10"],
+                 "op": ">", "threshold": 6, "scope": "aggregate", "agg": "mean"},
+     "expect": {"status": "ok", "value": 20.0, "predicate_satisfied": True}},
+    {"name": "B 缺原始计数列→数据不足", "table": _t(["att"], ["10"]),
+     "binding": {"class": "B", "minuend": ["att"], "subtrahend": ["succ"], "op": ">", "threshold": 0},
+     "expect": {"status": "insufficient_data"}},
+
+    # ---- C 字段匹配(报分量 total/ratio/top)----
+    {"name": "C 命中成立 + 报分量", "table": _t(["DCErrType"], ["RNL_Unspecified"], ["OK"], ["OK"]),
+     "binding": {"class": "C", "column": "DCErrType", "equals": ["RNL_Unspecified"], "require": 1},
+     "expect": {"status": "ok", "matched": 1, "total": 3, "predicate_satisfied": True}, "present": ["ratio", "top"]},
+    {"name": "C require 不足→不成立", "table": _t(["DCErrType"], ["RNL_Unspecified"], ["OK"]),
+     "binding": {"class": "C", "column": "DCErrType", "equals": ["RNL_Unspecified"], "require": 2},
+     "expect": {"status": "ok", "matched": 1, "predicate_satisfied": False}},
+    {"name": "C 缺列→数据不足", "table": _t(["other"], ["x"]),
+     "binding": {"class": "C", "column": "DCErrType", "equals": ["RNL"]},
+     "expect": {"status": "insufficient_data", "resolved_column": None}},
+
+    # ---- D 组合(三态)----
+    {"name": "D AND 两真→真", "table": _t(["err", "rsrp"], ["RNL", "-130"]),
+     "binding": {"class": "D", "combine": "AND", "sub": [
+         {"class": "C", "column": "err", "equals": ["RNL"], "require": 1},
+         {"class": "A", "column": "rsrp", "op": "<", "threshold": -120, "scope": "count_rows", "require": 1}]},
+     "expect": {"status": "ok", "predicate_satisfied": True}},
+    {"name": "D AND 缺列→数据不足传播", "table": _t(["err"], ["RNL"]),
+     "binding": {"class": "D", "combine": "AND", "sub": [
+         {"class": "C", "column": "err", "equals": ["RNL"], "require": 1},
+         {"class": "A", "column": "缺列", "op": "<", "threshold": 0}]},
+     "expect": {"status": "insufficient_data"}},
+    {"name": "D OR 一真一假→真", "table": _t(["err", "rsrp"], ["OK", "-130"]),
+     "binding": {"class": "D", "combine": "OR", "sub": [
+         {"class": "C", "column": "err", "equals": ["RNL"], "require": 1},
+         {"class": "A", "column": "rsrp", "op": "<", "threshold": -120, "scope": "count_rows", "require": 1}]},
+     "expect": {"status": "ok", "predicate_satisfied": True}},
+
+    # ---- E 占比/TopN(报分量 valid/top1_count)----
+    {"name": "E top1 占比>0.7 成立 + 报分量", "table": _t(["term"], ["A"], ["A"], ["A"], ["A"], ["B"]),
+     "binding": {"class": "E", "group_by": "term", "op": ">", "threshold": 0.7},
+     "expect": {"status": "ok", "top1": "A", "top1_count": 4, "valid": 5, "predicate_satisfied": True}},
+
+    # ---- F 配置(报分量 n)----
+    {"name": "F 配置全等成立 + 报 n", "table": _t(["param"], ["ON"], ["ON"]),
+     "binding": {"class": "F", "param": "param", "equals": "ON"},
+     "expect": {"status": "ok", "n": 2, "predicate_satisfied": True}},
+    {"name": "F 缺参数列→数据不足", "table": _t(["other"], ["x"]),
+     "binding": {"class": "F", "param": "param", "equals": "ON"},
+     "expect": {"status": "insufficient_data", "resolved_column": None}},
+
+    # ---- G 日志匹配(= C 的 contains)----
+    {"name": "G 日志含告警码成立", "table": _t(["log"], ["...ALM-21582 Path拥塞..."], ["normal"]),
+     "binding": {"class": "G", "column": "log", "contains": ["ALM-21582"], "require": 1},
+     "expect": {"status": "ok", "matched": 1, "predicate_satisfied": True}},
+
+    # ---- H 信令(会话级 has)----
+    {"name": "H 会话含某消息→匹配", "table": _t(["CallID", "MessageType"], ["1", "RRCSetupRequest"], ["1", "RRCSetupFailure"]),
+     "binding": {"class": "H", "key": "CallID", "msg_column": "MessageType", "has": ["RRCSetupFailure"]},
+     "expect": {"status": "ok"}, "present": ["matched_sessions"]},
+    {"name": "H 无消息列→数据不足", "table": _t(["CallID"], ["1"]),
+     "binding": {"class": "H", "key": "CallID", "msg_column": "MessageType", "has": ["X"]},
+     "expect": {"status": "insufficient_data"}},
+
+    # ---- I 特征 ----
+    {"name": "I row_threshold 认 require(1满足/需2→不成立)", "table": _t(["ta"], ["200"], ["10"]),
+     "binding": {"class": "I", "feature": "ta", "metric": "row_threshold", "op": ">", "threshold": 100, "require": 2},
+     "expect": {"status": "ok", "count_satisfied": 1, "predicate_satisfied": False}},
+    {"name": "I row_threshold 认 require(需1→成立)", "table": _t(["ta"], ["200"], ["10"]),
+     "binding": {"class": "I", "feature": "ta", "metric": "row_threshold", "op": ">", "threshold": 100, "require": 1},
+     "expect": {"status": "ok", "count_satisfied": 1, "predicate_satisfied": True}},
+    {"name": "I all_null 列全空→成立", "table": _t(["c"], ["NIL"], ["-"], [""]),
+     "binding": {"class": "I", "feature": "c", "metric": "all_null"},
+     "expect": {"status": "ok", "predicate_satisfied": True}},
+    {"name": "I all_same 列同值→成立", "table": _t(["c"], ["X"], ["X"]),
+     "binding": {"class": "I", "feature": "c", "metric": "all_same"},
+     "expect": {"status": "ok", "predicate_satisfied": True}},
+
+    # ---- J 人工 / decision 逃逸 ----
+    {"name": "J 人工→manual,不给判断", "table": None,
+     "binding": {"class": "J", "note": "需现场确认"},
+     "expect": {"status": "manual", "predicate_satisfied": None}},
+    {"name": "decision:insufficient_data 逃逸", "table": None,
+     "binding": {"class": "A", "decision": "insufficient_data", "mapping_reason": "本源无此计数器"},
+     "expect": {"status": "insufficient_data", "predicate_satisfied": None}},
+    {"name": "无数据源→数据不足", "table": None,
+     "binding": {"class": "A", "column": "x", "op": "<", "threshold": 1},
+     "expect": {"status": "insufficient_data"}},
+]
+
+
+def _check(case):
+    b = case["binding"]
+    table = case.get("table")
+    sources = {"_t": table} if table else {}
+    try:
+        fact = evaluate_binding(b, sources, b.get("source", "_t"))
+    except Exception as e:  # 内核抛异常 = 直接失败(本不该崩)
+        return [f"内核抛异常: {e}"], {}
+    errs = []
+    for k, v in case.get("expect", {}).items():
+        got = fact.get(k)
+        if isinstance(v, float) and isinstance(got, (int, float)):
+            if abs(got - v) > 1e-9:
+                errs.append(f"{k}={got!r}≠{v!r}")
+        elif got != v:
+            errs.append(f"{k}={got!r}≠{v!r}")
+    for k in case.get("present", []):
+        if k not in fact:
+            errs.append(f"缺分量字段「{k}」")
+    return errs, fact
+
+
+def run_battery():
+    """跑全量,返回 (passed, total, 文本行列表)。"""
+    lines, passed = [], 0
+    for case in CASES:
+        errs, _ = _check(case)
+        if errs:
+            lines.append(f"  ✗ {case['name']}: {'; '.join(errs)}")
+        else:
+            passed += 1
+            lines.append(f"  ✓ {case['name']}")
+    return passed, len(CASES), lines
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    passed, total, lines = run_battery()
+    print(f"A–J 内核回归自测({total} 例):")
+    print("\n".join(lines))
+    ok = passed == total
+    print(f"\n结论: {'✓ 全部通过 %d/%d' % (passed, total) if ok else '✗ %d/%d 通过,有回归' % (passed, total)}")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

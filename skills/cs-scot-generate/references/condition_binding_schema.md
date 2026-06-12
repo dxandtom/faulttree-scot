@@ -33,8 +33,10 @@
 | **F** | 配置检查 | `param`,`equals` | 需配置数据源;无→数据不足 |
 | **G** | 日志匹配 | `column`(日志文本列),`contains`:[码/串…] | 同 C(子串) |
 | **H** | 信令流程 | `msg_column`,`key`(会话/callid),`has`:[消息…],`lacks`:[消息…],`where`:{column,equals/contains}(或其列表;同一行须满足全部,表达"某消息**且携带** cause=X") | `matched_sessions`;需 trace;无→数据不足 |
-| **I** | 特征分析 | `feature`/`column`,`metric`(`row_threshold`/`all_same`/`all_null`),`op`,`threshold`,`transforms` | TA 距离 `156*TA/2`=`scale:78`;`/100`=`scale:0.01` |
+| **I** | 特征分析 | `feature`/`column`,`metric`(`row_threshold`/`all_same`/`all_null`),`op`,`threshold`,`require`(默认1),`transforms` | TA 距离 `156*TA/2`=`scale:78`;`/100`=`scale:0.01` |
 | **J** | 人工确认 | `note` | `status:"manual"`,不给判断 |
+
+> **标签 = 路由分类,不是 N 个互斥实现**:A–J 对齐的是**故障树的说话方式**(树写"日志"→G、"配置"→F、"特征"→I),方便选型;底层原语共享——**G 就是 C**(同一匹配内核)、F≈C 的"全等"版、I 的 `row_threshold`≈A 的 `count_rows`。所以遇到"日志/配置/特征"别硬塞进 C/A,**按树的措辞选标签**;也别去"合并去重"它们,标签稳定才好绑。`require`:A/B/I 的 `count_rows`/`row_threshold` 统一为"满足行数 ≥ require 才算成立"(默认1)。
 
 ## 处理变换词汇(`transforms`,固定可审,别写任意代码)
 `scale:<f>`(乘,如 `/100`→`scale:0.01`)、`abs`、`neg`、`round:<n>`、`log10`(量级/对数标度条件用;x≤0 无对数 → 该值当缺测/null,不编值)。
@@ -43,6 +45,11 @@
 ## 列解析(机械,绑定写错也不乱配)
 精确 → 剥组前缀后精确 → 归一化(去前缀/空格/大小写)唯一 → 嵌套路径(`A->B->C`)取末段。
 **解析不到或有歧义 → 数据不足,`resolved_column:null`,绝不挑个相近列顶替。**
+
+## A 的 `agg` 选择(避免"逐周期率"被无加权平均带偏)
+`agg:mean` 是**无加权**平均:对"逐小时成功率"列求 mean ≠ 总体率(各小时样本量不同)。
+**树条件多半要的是"存在劣化时段"** → 优先 `scope:count_rows`(数有几个周期越线)而非 `aggregate+mean`;
+确需整体水平再用 `mean`,并知道它没按样本量加权(内核不持有原始样本量,无法加权)。
 
 ## 多页签 xlsx(如信令)
 一个数据文件多个页签(NG/UU/汇总…,schema 各异)。**`source` 字段填页签名**即指到该页签;不填=活动页。

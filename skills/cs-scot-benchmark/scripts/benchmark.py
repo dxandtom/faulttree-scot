@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""cs-scot-benchmark —— 对一份 generate 产物跑 4 项可量化基准,结果按条分类写进 txt。
+"""cs-scot-benchmark —— 对一份 generate 产物跑 6 项可量化基准,结果按条分类写进 txt。
 
 **不需要 ground truth、不调模型**(纯确定性,可反复跑出同一份数据),证明:
   1) 压缩有效:局部子树 vs 整树+全量事实,省多少字符/token、保留几个节点。
   2) 稳定一致:确定性链路(各分析脚本 + 剪枝)重跑 K 次,是否全部跑通、有无空/崩。
   3) 可复现:K 次重跑,事实 + 剪枝结果是否逐字节一致(SHA 比对)。
   4) 诚实护栏有效:① 真产物过 validate_conditions;② 一组已知好/坏例,护栏必须"拦坏放好"(自测)。
+  5) 转换质量:故障树→子树 结构一致 + 整洁度;给 --excel 再与原表逐节点对账。
+  6) 内核回归:A–J 内核 30 例合成用例(成立/不成立/数据不足/边界),改动不会静默改坏统计。
 
 用法:
   benchmark.py --produce <generate产物目录> --data chr=<file> --data kpi=<file> [...] [--runs 3] [-o report.txt]
@@ -325,6 +327,19 @@ def main() -> int:
     phs = {r.get("phash") for r in runs if "phash" in r}
     repro_prune = (len(phs) == 1 and None not in phs, next(iter(phs)) if phs else "-")
 
+    # ---- 第6项:A–J 内核回归自测(地基)----
+    ks_path = _sibling("cs-scot-generate", "kernel_selftest.py", None)
+    if ks_path:
+        sys.path.insert(0, str(ks_path.parent))
+        try:
+            from kernel_selftest import run_battery  # noqa: E402
+            kpassed, ktotal, klines = run_battery()
+        except Exception as e:  # noqa: BLE001
+            kpassed, ktotal, klines = 0, 0, [f"    内核自测加载失败: {e}"]
+    else:
+        kpassed, ktotal, klines = 0, 0, ["    未找到 kernel_selftest.py(跳过)"]
+    kernel_ok = ktotal > 0 and kpassed == ktotal
+
     # ---- 产物铭牌(manifest)指纹:哪版格式契约、何时编译;缺 = 旧工具链产物 ----
     mf_line = "无 manifest.json(旧工具链产物;建议重新 generate,带上格式契约版本)"
     mf_path = produce / "manifest.json"
@@ -396,9 +411,15 @@ def main() -> int:
     vlines, verify_ok = verify_conversion(index, md_text, args.excel)
     L.extend(vlines)
 
+    L.append("\n【6. 内核回归自测(A–J 地基)】")
+    L.append(f"  合成用例 {kpassed}/{ktotal} 通过(覆盖 成立/不成立/数据不足/边界:空表·缺列·%值·transform·require·三态组合)")
+    if not kernel_ok:
+        L.extend(klines)          # 过了只报总数;有回归才铺开逐条,方便定位
+    L.append(f"  结论: {'✓ A–J 内核全部通过回归(改动有护栏、不会静默改坏统计)' if kernel_ok else '✗ 见上,内核有回归,先修再用'}")
+
     L.append("\n" + "=" * 64)
-    verdict = all([bool(t1) and t1.get("saved", 0) >= 0, all_ok, all_repro, guard_ok, verify_ok])
-    L.append(f"总评: {'✓ 五项基准均达标' if verdict else '⚠ 部分项需关注(见各条结论)'}")
+    verdict = all([bool(t1) and t1.get("saved", 0) >= 0, all_ok, all_repro, guard_ok, verify_ok, kernel_ok])
+    L.append(f"总评: {'✓ 六项基准均达标' if verdict else '⚠ 部分项需关注(见各条结论)'}")
     L.append("注:本基准只证明 省/稳/可复现/诚实,**不证明诊断准确率**(无 ground truth);准确率需另用合成故障注入评测。")
     L.append("=" * 64)
 

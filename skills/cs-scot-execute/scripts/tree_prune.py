@@ -37,6 +37,7 @@ def _facts_by_node(results: dict, alias: dict) -> dict:
 
 _FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "value",
               "matched", "total", "ratio", "top", "count_satisfied", "top1", "top1_ratio",
+              "top1_count", "valid", "n", "n_rows", "filtered_n", "distinct",
               "matched_sessions", "lacks_never_seen", "nulls", "op", "threshold")
 
 

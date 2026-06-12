@@ -422,7 +422,7 @@ def k_feature(table, b, cls="I"):
         return {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
                 "transforms": b.get("transforms") or [], "op": op, "threshold": thr,
                 "valid": len(vals), "nulls": nulls, "count_satisfied": cnt,
-                "ratio": round(cnt / len(vals), 4), "predicate_satisfied": cnt > 0}
+                "ratio": round(cnt / len(vals), 4), "predicate_satisfied": cnt >= b.get("require", 1)}
     raw = [r.get(col, "") for r in rows]
     if metric == "all_null":
         return {"class": cls, "status": "ok", "resolved_column": col, "metric": metric,
