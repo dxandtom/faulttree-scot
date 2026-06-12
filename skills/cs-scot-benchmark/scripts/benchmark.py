@@ -325,11 +325,28 @@ def main() -> int:
     phs = {r.get("phash") for r in runs if "phash" in r}
     repro_prune = (len(phs) == 1 and None not in phs, next(iter(phs)) if phs else "-")
 
+    # ---- 产物铭牌(manifest)指纹:哪版格式契约、何时编译;缺 = 旧工具链产物 ----
+    mf_line = "无 manifest.json(旧工具链产物;建议重新 generate,带上格式契约版本)"
+    mf_path = produce / "manifest.json"
+    if mf_path.exists():
+        try:
+            mf = json.loads(mf_path.read_text(encoding="utf-8"))
+            mf_line = f"格式契约 v{mf.get('product_format_version')} · 生成于 {mf.get('generated_at')}"
+            asm = _sibling("cs-scot-generate", "assemble_scenario.py", None)
+            if asm:
+                sys.path.insert(0, str(asm.parent))
+                from assemble_scenario import PRODUCT_FORMAT_VERSION  # noqa: E402
+                if mf.get("product_format_version") != PRODUCT_FORMAT_VERSION:
+                    mf_line += f"  ⚠ ≠ 当前工具链 v{PRODUCT_FORMAT_VERSION},建议重新 generate"
+        except Exception as e:  # noqa: BLE001
+            mf_line = f"manifest.json 读取失败({e})"
+
     # ---- 写报告 ----
     L = []
     L.append("=" * 64)
     L.append("cs-scot 产物基准报告(无 ground truth · 纯确定性)")
     L.append(f"产物   : {produce}")
+    L.append(f"铭牌   : {mf_line}")
     L.append(f"时间   : {time.strftime('%Y-%m-%d %H:%M:%S')}")
     L.append(f"重跑   : {args.runs} 次   指标: {', '.join(indicators)}")
     L.append("=" * 64)

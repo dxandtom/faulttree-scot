@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import shutil
 import sys
@@ -15,6 +16,10 @@ from typing import List
 
 # 与 excel_to_tree.py 保持一致的统一产物目录约定:<anchor>/scot产物/<场景名>
 DEFAULT_OUT_CONTAINER = "scot产物"
+
+# 产物格式契约版本(写进出厂铭牌 manifest.json):**只在改动使旧产物与新执行器不兼容时才 +1**
+# (修 bug、改文案不动它)。bump 时同步 bump cs-scot-execute/scripts/runner.py 的 EXPECTED_PRODUCT_FORMAT。
+PRODUCT_FORMAT_VERSION = 1
 
 # 每个指标一份"逐条件分析脚本"的骨架:模型在 generate 时按 A–J 模板填 CONDITIONS。
 # 默认直接套预制内核(evaluate_binding);模板不够用时,模型才为个别条件写 custom。
@@ -231,8 +236,15 @@ def main() -> None:
     plan = build_plan(scenario, indicators, tree_rel)
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # 出厂铭牌:这批产物由哪版格式契约、何时编译。execute/benchmark 启动时比对,旧产物只告警不阻断。
+    manifest = {"product_format_version": PRODUCT_FORMAT_VERSION,
+                "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "scenario": scenario, "indicators": indicators, "tree": tree_rel}
+    (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
     print(f"已归集场景产物: {out}")
-    print(f"  plan.json(SCoT v4.0)+ scripts/condition_kernels.py(A–J 模板库)"
+    print(f"  plan.json(SCoT v4.0)+ manifest.json(产物铭牌,格式契约 v{PRODUCT_FORMAT_VERSION})"
+          f"+ scripts/condition_kernels.py(A–J 模板库)"
           f"+ scripts/<指标>_analyzer.py(待填骨架)+ tree/{scenario}.md")
     if scaffolded:
         print(f"\n下一步(generate 的关键一步):为 {scaffolded} 各自的 <指标>_analyzer.py 填 CONDITIONS——")

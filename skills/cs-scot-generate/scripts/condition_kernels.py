@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import operator
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -94,7 +95,8 @@ def _num(v):
 
 def _apply_transforms(x, transforms):
     """对一个数值应用处理变换词汇(LLM 在绑定里声明,固定可审):
-    scale:<f>(乘,如 /100 写 scale:0.01、156*TA/2 写 scale:78)、abs、neg、round:<n>。"""
+    scale:<f>(乘,如 /100 写 scale:0.01、156*TA/2 写 scale:78)、abs、neg、round:<n>、
+    log10(x≤0 无对数 → 当缺测/null,不编值)。"""
     if x is None:
         return None
     for t in transforms or []:
@@ -106,6 +108,10 @@ def _apply_transforms(x, transforms):
             x = -x
         elif t.startswith("round:"):
             x = round(x, int(t.split(":", 1)[1]))
+        elif t == "log10":
+            if x <= 0:
+                return None
+            x = math.log10(x)
     return x
 
 

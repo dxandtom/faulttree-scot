@@ -75,6 +75,7 @@ python "<本目录>/scripts/validate_conditions.py" /tmp/<ind>.json
 ```
 <OUT>/                                       # = <故障树目录>/scot产物/<场景名>/
 ├── plan.json                              # SCoT 计划(产物①)
+├── manifest.json                          # 产物铭牌:格式契约版本+生成时间(execute/benchmark 启动比对,旧产物只告警)
 ├── scripts/<ind>_analyzer.py              # 逐条件分析脚本(模型填 CONDITIONS,产物②)
 ├── scripts/condition_kernels.py           # A–J 模板库(脚本 import 它)
 ├── scripts/condition_binding_schema.md    # 绑定契约 + analyzer.py 概览引擎

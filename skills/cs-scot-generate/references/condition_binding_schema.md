@@ -37,7 +37,7 @@
 | **J** | 人工确认 | `note` | `status:"manual"`,不给判断 |
 
 ## 处理变换词汇(`transforms`,固定可审,别写任意代码)
-`scale:<f>`(乘,如 `/100`→`scale:0.01`)、`abs`、`neg`、`round:<n>`。
+`scale:<f>`(乘,如 `/100`→`scale:0.01`)、`abs`、`neg`、`round:<n>`、`log10`(量级/对数标度条件用;x≤0 无对数 → 该值当缺测/null,不编值)。
 **组前缀**(`Common:`/`Voice:`/`Interference:`)由列解析器**机械剥离**(按首个冒号),绑定里 `column` 写**裸名**即可命中。
 
 ## 列解析(机械,绑定写错也不乱配)

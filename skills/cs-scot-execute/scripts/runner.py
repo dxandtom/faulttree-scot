@@ -29,6 +29,30 @@ from typing import Any, Dict
 
 _TOK = re.compile(r"[^.\[\]]+|\[\d+\]")
 
+# 产物格式契约:执行器"认识"的版本。与 cs-scot-generate/scripts/assemble_scenario.py 的
+# PRODUCT_FORMAT_VERSION 成对维护——产物结构有破坏性变化时两边一起 +1。比对只告警不阻断(知情,不是门禁)。
+EXPECTED_PRODUCT_FORMAT = 1
+
+
+def check_product_format(base: Path) -> None:
+    """读产物铭牌 manifest.json,与执行器期望的格式契约版本比对;缺失/不一致只打告警。"""
+    mf = base / "manifest.json"
+    if not mf.exists():
+        print(f"[warn] 产物缺 manifest.json(由旧版工具链生成,早于格式契约 v{EXPECTED_PRODUCT_FORMAT})——"
+              "字段/语义可能与当前执行器对不上;建议用最新 cs-scot-generate 重新生成产物。")
+        return
+    try:
+        ver = json.loads(mf.read_text(encoding="utf-8")).get("product_format_version")
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] manifest.json 读取失败({e}),按旧产物对待;建议重新 generate。")
+        return
+    if ver == EXPECTED_PRODUCT_FORMAT:
+        return
+    hint = ("产物较旧 → 用最新 cs-scot-generate 重新生成"
+            if isinstance(ver, int) and ver < EXPECTED_PRODUCT_FORMAT
+            else "产物比执行器新 → 升级 cs-scot-* skills 再执行")
+    print(f"[warn] 产物格式契约 v{ver} ≠ 执行器期望 v{EXPECTED_PRODUCT_FORMAT}:{hint}。不阻断,但字段可能对不上。")
+
 
 def _get_path(obj: Any, path: str) -> Any:
     """按 a.b[0].c 在嵌套结构里取值;取不到返回 None。"""
@@ -197,6 +221,7 @@ def main() -> None:
 
     plan_path = Path(args.plan).resolve()
     base = Path(args.base).resolve() if args.base else plan_path.parent
+    check_product_format(base)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
 
     data_map: Dict[str, str] = {}
