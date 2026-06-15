@@ -1,0 +1,542 @@
+{
+  "scenario": "real_sub_上下文_中",
+  "root": "n3",
+  "nodes": {
+    "n29": {
+      "name": "L4节点_007",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_007",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n39": {
+      "name": "L5节点_022",
+      "parent": "n35",
+      "level": 5,
+      "code": "CODE_L5节点_022",
+      "children": [],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n23": {
+      "name": "L5节点_015",
+      "parent": "n21",
+      "level": 5,
+      "code": "CODE_L5节点_015",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n22": {
+      "name": "L5节点_014",
+      "parent": "n21",
+      "level": 5,
+      "code": "CODE_L5节点_014",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n14": {
+      "name": "L5节点_007",
+      "parent": "n13",
+      "level": 5,
+      "code": "CODE_L5节点_007",
+      "children": [],
+      "condition": null,
+      "combine": null,
+      "data_source": {},
+      "pass_through": true
+    },
+    "n34": {
+      "name": "L4节点_011",
+      "parent": "n32",
+      "level": 4,
+      "code": "CODE_L4节点_011",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n46": {
+      "name": "L4节点_018",
+      "parent": "n42",
+      "level": 4,
+      "code": "CODE_L4节点_018",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n28": {
+      "name": "L4节点_006",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_006",
+      "children": [],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n40": {
+      "name": "L4节点_013",
+      "parent": "n32",
+      "level": 4,
+      "code": "CODE_L4节点_013",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n35": {
+      "name": "L4节点_012",
+      "parent": "n32",
+      "level": 4,
+      "code": "CODE_L4节点_012",
+      "children": [
+        "n36",
+        "n37",
+        "n38",
+        "n39"
+      ],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n15": {
+      "name": "L5节点_008",
+      "parent": "n13",
+      "level": 5,
+      "code": "CODE_L5节点_008",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n38": {
+      "name": "L5节点_021",
+      "parent": "n35",
+      "level": 5,
+      "code": "CODE_L5节点_021",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n33": {
+      "name": "L4节点_010",
+      "parent": "n32",
+      "level": 4,
+      "code": "CODE_L4节点_010",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n9": {
+      "name": "L5节点_004",
+      "parent": "n5",
+      "level": 5,
+      "code": "CODE_L5节点_004",
+      "children": [],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n21": {
+      "name": "L4节点_004",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_004",
+      "children": [
+        "n22",
+        "n23",
+        "n24",
+        "n25"
+      ],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n6": {
+      "name": "L5节点_001",
+      "parent": "n5",
+      "level": 5,
+      "code": "CODE_L5节点_001",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n4": {
+      "name": "L3节点_001",
+      "parent": "n3",
+      "level": 3,
+      "code": "CODE_L3节点_001",
+      "children": [
+        "n5",
+        "n12",
+        "n13",
+        "n21",
+        "n26",
+        "n28",
+        "n29",
+        "n30",
+        "n31"
+      ],
+      "condition": null,
+      "combine": "OR",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n17": {
+      "name": "L5节点_010",
+      "parent": "n13",
+      "level": 5,
+      "code": "CODE_L5节点_010",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n26": {
+      "name": "L4节点_005",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_005",
+      "children": [
+        "n27"
+      ],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n42": {
+      "name": "L3节点_003",
+      "parent": "n3",
+      "level": 3,
+      "code": "CODE_L3节点_003",
+      "children": [
+        "n43",
+        "n44",
+        "n45",
+        "n46"
+      ],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n13": {
+      "name": "L4节点_003",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_003",
+      "children": [
+        "n14",
+        "n15",
+        "n16",
+        "n17",
+        "n18",
+        "n19",
+        "n20"
+      ],
+      "condition": null,
+      "combine": "OR",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n44": {
+      "name": "L4节点_016",
+      "parent": "n42",
+      "level": 4,
+      "code": "CODE_L4节点_016",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n43": {
+      "name": "L4节点_015",
+      "parent": "n42",
+      "level": 4,
+      "code": "CODE_L4节点_015",
+      "children": [],
+      "condition": null,
+      "combine": "OR",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n18": {
+      "name": "L5节点_011",
+      "parent": "n13",
+      "level": 5,
+      "code": "CODE_L5节点_011",
+      "children": [],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n5": {
+      "name": "L4节点_001",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_001",
+      "children": [
+        "n6",
+        "n7",
+        "n8",
+        "n9",
+        "n10",
+        "n11"
+      ],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n20": {
+      "name": "L5节点_013",
+      "parent": "n13",
+      "level": 5,
+      "code": "CODE_L5节点_013",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n30": {
+      "name": "L4节点_008",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_008",
+      "children": [],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n41": {
+      "name": "L4节点_014",
+      "parent": "n32",
+      "level": 4,
+      "code": "CODE_L4节点_014",
+      "children": [],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n8": {
+      "name": "L5节点_003",
+      "parent": "n5",
+      "level": 5,
+      "code": "CODE_L5节点_003",
+      "children": [],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n27": {
+      "name": "L5节点_018",
+      "parent": "n26",
+      "level": 5,
+      "code": "CODE_L5节点_018",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n7": {
+      "name": "L5节点_002",
+      "parent": "n5",
+      "level": 5,
+      "code": "CODE_L5节点_002",
+      "children": [],
+      "condition": null,
+      "combine": "AND",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n32": {
+      "name": "L3节点_002",
+      "parent": "n3",
+      "level": 3,
+      "code": "CODE_L3节点_002",
+      "children": [
+        "n33",
+        "n34",
+        "n35",
+        "n40",
+        "n41"
+      ],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n25": {
+      "name": "L5节点_017",
+      "parent": "n21",
+      "level": 5,
+      "code": "CODE_L5节点_017",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n12": {
+      "name": "L4节点_002",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_002",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n11": {
+      "name": "L5节点_006",
+      "parent": "n5",
+      "level": 5,
+      "code": "CODE_L5节点_006",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n10": {
+      "name": "L5节点_005",
+      "parent": "n5",
+      "level": 5,
+      "code": "CODE_L5节点_005",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n19": {
+      "name": "L5节点_012",
+      "parent": "n13",
+      "level": 5,
+      "code": "CODE_L5节点_012",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n16": {
+      "name": "L5节点_009",
+      "parent": "n13",
+      "level": 5,
+      "code": "CODE_L5节点_009",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n3": {
+      "name": "L2节点_002",
+      "parent": null,
+      "level": 2,
+      "code": "CODE_L2节点_002",
+      "children": [
+        "n4",
+        "n32",
+        "n42"
+      ],
+      "condition": null,
+      "combine": null,
+      "data_source": {},
+      "pass_through": true
+    },
+    "n37": {
+      "name": "L5节点_020",
+      "parent": "n35",
+      "level": 5,
+      "code": "CODE_L5节点_020",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n36": {
+      "name": "L5节点_019",
+      "parent": "n35",
+      "level": 5,
+      "code": "CODE_L5节点_019",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n24": {
+      "name": "L5节点_016",
+      "parent": "n21",
+      "level": 5,
+      "code": "CODE_L5节点_016",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n45": {
+      "name": "L4节点_017",
+      "parent": "n42",
+      "level": 4,
+      "code": "CODE_L4节点_017",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    },
+    "n31": {
+      "name": "L4节点_009",
+      "parent": "n4",
+      "level": 4,
+      "code": "CODE_L4节点_009",
+      "children": [],
+      "condition": null,
+      "combine": "unknown",
+      "data_source": {},
+      "pass_through": false
+    }
+  }
+}

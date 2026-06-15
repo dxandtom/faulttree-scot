@@ -1,0 +1,52 @@
+{
+  "scenario": "real_sub_上下文_中__probable",
+  "tree": "real_sub_上下文_中",
+  "tree_nodes": 44,
+  "category": "probable",
+  "truth": {
+    "root_cause_node_id": "n5",
+    "root_cause_name": "QoS Flow建立成功率低",
+    "tier": "probable",
+    "must_not_report": [
+      "n35",
+      "n36"
+    ]
+  },
+  "node_states": {
+    "n4": "hold",
+    "n5": "hold",
+    "n10": "insuf",
+    "n36": "hold",
+    "n35": "fail",
+    "n11": "fail"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [
+      {
+        "Root_cause": "QoS Flow建立成功率低",
+        "blocked_at": "叶子因(数据不足)",
+        "caveats": "叶子因数据不足,已定位到该层、叶子待定",
+        "support": "中间层判据成立",
+        "evidence_path": [
+          {
+            "node": "TOP1终端型号集中",
+            "node_id": "n4",
+            "condition": "失败会话按 TerminalType 分组,TOP1 占比 > 50%",
+            "actual": "TOP1=BrandX-Model9 占比 0.72",
+            "judgment": "成立"
+          },
+          {
+            "node": "QoS Flow建立成功率低",
+            "node_id": "n5",
+            "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
+            "actual": "SA_QoSFlow_Est_SuccRate(%)=90.2",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

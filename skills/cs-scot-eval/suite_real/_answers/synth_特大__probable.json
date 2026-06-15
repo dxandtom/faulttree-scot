@@ -1,0 +1,60 @@
+{
+  "scenario": "synth_特大__probable",
+  "tree": "synth_特大",
+  "tree_nodes": 320,
+  "category": "probable",
+  "truth": {
+    "root_cause_node_id": "s92",
+    "root_cause_name": "GPS失锁/时钟告警",
+    "tier": "probable",
+    "must_not_report": [
+      "s39",
+      "s132"
+    ]
+  },
+  "node_states": {
+    "s7": "hold",
+    "s25": "hold",
+    "s92": "hold",
+    "s287": "insuf",
+    "s132": "hold",
+    "s39": "fail",
+    "s100": "fail"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [
+      {
+        "Root_cause": "GPS失锁/时钟告警",
+        "blocked_at": "叶子因(数据不足)",
+        "caveats": "叶子因数据不足,已定位到该层、叶子待定",
+        "support": "中间层判据成立",
+        "evidence_path": [
+          {
+            "node": "邻区漏配",
+            "node_id": "s7",
+            "condition": "配置核查:存在漏配的同频邻区关系(命中)",
+            "actual": "ConfigDiff 命中 5/5",
+            "judgment": "成立"
+          },
+          {
+            "node": "GTP-U路径故障告警",
+            "node_id": "s25",
+            "condition": "告警日志存在「ALM-25952 GTPU路径故障」",
+            "actual": "AlarmLog 命中 4/4",
+            "judgment": "成立"
+          },
+          {
+            "node": "GPS失锁/时钟告警",
+            "node_id": "s92",
+            "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
+            "actual": "AlarmLog 命中 2/2",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

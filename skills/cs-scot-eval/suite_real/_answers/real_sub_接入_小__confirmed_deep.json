@@ -1,0 +1,58 @@
+{
+  "scenario": "real_sub_接入_小__confirmed_deep",
+  "tree": "real_sub_接入_小",
+  "tree_nodes": 27,
+  "category": "confirmed",
+  "truth": {
+    "root_cause_node_id": "n50",
+    "root_cause_name": "QoS Flow建立成功率低",
+    "tier": "confirmed",
+    "must_not_report": [
+      "n68",
+      "n69",
+      "n68",
+      "n70"
+    ]
+  },
+  "node_states": {
+    "n48": "hold",
+    "n50": "hold",
+    "n69": "hold",
+    "n68": "fail",
+    "n70": "hold",
+    "n51": "fail",
+    "n52": "fail",
+    "n53": "insuf",
+    "n54": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "QoS Flow建立成功率低",
+        "Fault_tree_path": [
+          "UE上下文建立成功率低",
+          "QoS Flow建立成功率低"
+        ],
+        "evidence_path": [
+          {
+            "node": "UE上下文建立成功率低",
+            "node_id": "n48",
+            "condition": "SA_UECntx_Est_SuccRate(%) < 99",
+            "actual": "SA_UECntx_Est_SuccRate(%)=93.8",
+            "judgment": "成立"
+          },
+          {
+            "node": "QoS Flow建立成功率低",
+            "node_id": "n50",
+            "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
+            "actual": "SA_QoSFlow_Est_SuccRate(%)=90.2",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "scenario": "synth_特大__confirmed_shallow",
+  "tree": "synth_特大",
+  "tree_nodes": 320,
+  "category": "confirmed",
+  "truth": {
+    "root_cause_node_id": "s100",
+    "root_cause_name": "NG接口/AMF信令建立失败",
+    "tier": "confirmed",
+    "must_not_report": [
+      "s39",
+      "s132"
+    ]
+  },
+  "node_states": {
+    "s7": "hold",
+    "s28": "hold",
+    "s100": "hold",
+    "s132": "hold",
+    "s39": "fail",
+    "s101": "fail",
+    "s103": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "NG接口/AMF信令建立失败",
+        "Fault_tree_path": [
+          "邻区漏配",
+          "射频单元驻波比异常告警",
+          "NG接口/AMF信令建立失败"
+        ],
+        "evidence_path": [
+          {
+            "node": "邻区漏配",
+            "node_id": "s7",
+            "condition": "配置核查:存在漏配的同频邻区关系(命中)",
+            "actual": "ConfigDiff 命中 5/5",
+            "judgment": "成立"
+          },
+          {
+            "node": "射频单元驻波比异常告警",
+            "node_id": "s28",
+            "condition": "告警日志存在「ALM-26529 射频单元驻波比异常」",
+            "actual": "AlarmLog 命中 3/3",
+            "judgment": "成立"
+          },
+          {
+            "node": "NG接口/AMF信令建立失败",
+            "node_id": "s100",
+            "condition": "SA_NGSig_Conn_SuccRate(%) < 99.5",
+            "actual": "SA_NGSig_Conn_SuccRate(%)=95.1",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

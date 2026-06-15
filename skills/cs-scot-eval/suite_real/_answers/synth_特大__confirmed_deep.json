@@ -1,0 +1,76 @@
+{
+  "scenario": "synth_特大__confirmed_deep",
+  "tree": "synth_特大",
+  "tree_nodes": 320,
+  "category": "confirmed",
+  "truth": {
+    "root_cause_node_id": "s287",
+    "root_cause_name": "有RRCSetupRequest无RRCSetupComplete",
+    "tier": "confirmed",
+    "must_not_report": [
+      "s39",
+      "s132",
+      "s39",
+      "s133"
+    ]
+  },
+  "node_states": {
+    "s7": "hold",
+    "s25": "hold",
+    "s92": "hold",
+    "s287": "hold",
+    "s132": "hold",
+    "s39": "fail",
+    "s133": "hold",
+    "s100": "fail",
+    "s101": "fail",
+    "s103": "insuf",
+    "s105": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "有RRCSetupRequest无RRCSetupComplete",
+        "Fault_tree_path": [
+          "邻区漏配",
+          "GTP-U路径故障告警",
+          "GPS失锁/时钟告警",
+          "有RRCSetupRequest无RRCSetupComplete"
+        ],
+        "evidence_path": [
+          {
+            "node": "邻区漏配",
+            "node_id": "s7",
+            "condition": "配置核查:存在漏配的同频邻区关系(命中)",
+            "actual": "ConfigDiff 命中 5/5",
+            "judgment": "成立"
+          },
+          {
+            "node": "GTP-U路径故障告警",
+            "node_id": "s25",
+            "condition": "告警日志存在「ALM-25952 GTPU路径故障」",
+            "actual": "AlarmLog 命中 4/4",
+            "judgment": "成立"
+          },
+          {
+            "node": "GPS失锁/时钟告警",
+            "node_id": "s92",
+            "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
+            "actual": "AlarmLog 命中 2/2",
+            "judgment": "成立"
+          },
+          {
+            "node": "有RRCSetupRequest无RRCSetupComplete",
+            "node_id": "s287",
+            "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
+            "actual": "命中会话 41 个",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

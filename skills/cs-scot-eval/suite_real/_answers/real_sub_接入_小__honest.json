@@ -1,0 +1,37 @@
+{
+  "scenario": "real_sub_接入_小__honest",
+  "tree": "real_sub_接入_小",
+  "tree_nodes": 27,
+  "category": "honest_insufficient",
+  "truth": {
+    "root_cause_node_id": null,
+    "root_cause_name": null,
+    "tier": "undetermined",
+    "must_not_report": [
+      "n50",
+      "n69",
+      "n70",
+      "n71",
+      "n72",
+      "n51"
+    ]
+  },
+  "node_states": {
+    "n50": "insuf",
+    "n69": "insuf",
+    "n70": "insuf",
+    "n71": "insuf",
+    "n72": "insuf",
+    "n51": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [],
+    "undetermined": [
+      {
+        "note": "无闭合成立路径,数据不足/条件不成立,未定位到根因"
+      }
+    ],
+    "tree_issues": {}
+  }
+}

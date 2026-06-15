@@ -1,0 +1,52 @@
+{
+  "scenario": "real_sub_接入_小__probable",
+  "tree": "real_sub_接入_小",
+  "tree_nodes": 27,
+  "category": "probable",
+  "truth": {
+    "root_cause_node_id": "n68",
+    "root_cause_name": "小区不可用告警",
+    "tier": "probable",
+    "must_not_report": [
+      "n48",
+      "n50"
+    ]
+  },
+  "node_states": {
+    "n67": "hold",
+    "n68": "hold",
+    "n69": "insuf",
+    "n50": "hold",
+    "n48": "fail",
+    "n51": "fail"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [
+      {
+        "Root_cause": "小区不可用告警",
+        "blocked_at": "叶子因(数据不足)",
+        "caveats": "叶子因数据不足,已定位到该层、叶子待定",
+        "support": "中间层判据成立",
+        "evidence_path": [
+          {
+            "node": "射频单元驻波比异常告警",
+            "node_id": "n67",
+            "condition": "告警日志存在「ALM-26529 射频单元驻波比异常」",
+            "actual": "AlarmLog 命中 3/3",
+            "judgment": "成立"
+          },
+          {
+            "node": "小区不可用告警",
+            "node_id": "n68",
+            "condition": "告警日志存在「ALM-25888 小区不可用」",
+            "actual": "AlarmLog 命中 2/2",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

@@ -1,0 +1,221 @@
+{
+  "fault_tree": {
+    "scenario": "real_sub_接入_小",
+    "root": "n47",
+    "outline": {
+      "n52": "insufficient",
+      "n48": "?",
+      "n49": "pass",
+      "n47": "pass",
+      "n50": "?",
+      "n64": "?",
+      "n51": "?"
+    },
+    "pruned_nodes": {
+      "n52": {
+        "name": "Msg2响应比例低",
+        "parent": "n48",
+        "level": 4,
+        "is_leaf": true,
+        "condition": "RAR_Resp_Rate(%) < 90",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n52_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "n48": {
+        "name": "UE上下文建立成功率低",
+        "parent": "n47",
+        "level": 3,
+        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n48_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 99.95,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "n49": {
+        "name": "L4节点_019",
+        "parent": "n48",
+        "level": 4,
+        "pass_through": true
+      },
+      "n47": {
+        "name": "L2节点_003",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "n50": {
+        "name": "QoS Flow建立成功率低",
+        "parent": "n49",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n50_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
+            "value": 90.2,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "n64": {
+        "name": "AMF过载拒绝占比高",
+        "parent": "n47",
+        "level": 3,
+        "is_leaf": true,
+        "condition": "NgRanCause=amf-overload 占比 ≥ 20%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n64_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "C",
+            "status": "ok",
+            "resolved_column": "NgRanCause",
+            "matched": 140,
+            "total": 500,
+            "ratio": 0.28,
+            "top": [
+              [
+                "amf-overload",
+                140
+              ],
+              [
+                "normal",
+                330
+              ]
+            ]
+          }
+        ]
+      },
+      "n51": {
+        "name": "PRACH随机接入成功率低",
+        "parent": "n48",
+        "level": 4,
+        "is_leaf": true,
+        "condition": "RACH_Setup_SuccRate(%) < 95",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n51_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "resolved_column": "RACH_Setup_SuccRate(%)",
+            "value": 98.9,
+            "op": "<",
+            "threshold": 95.0
+          }
+        ]
+      }
+    }
+  },
+  "unmapped_facts": [],
+  "tree_issues": {
+    "total_nodes": 27,
+    "kept_nodes": 7,
+    "uncovered_condition_nodes": [
+      {
+        "id": "n53",
+        "name": "L4节点_022"
+      },
+      {
+        "id": "n69",
+        "name": "L5节点_025"
+      },
+      {
+        "id": "n65",
+        "name": "L3节点_006"
+      },
+      {
+        "id": "n72",
+        "name": "L5节点_028"
+      },
+      {
+        "id": "n57",
+        "name": "L4节点_026"
+      },
+      {
+        "id": "n68",
+        "name": "L4节点_033"
+      },
+      {
+        "id": "n66",
+        "name": "L4节点_032"
+      },
+      {
+        "id": "n62",
+        "name": "L4节点_030"
+      },
+      {
+        "id": "n56",
+        "name": "L4节点_025"
+      },
+      {
+        "id": "n67",
+        "name": "L3节点_007"
+      },
+      {
+        "id": "n61",
+        "name": "L4节点_029"
+      },
+      {
+        "id": "n55",
+        "name": "L4节点_024"
+      },
+      {
+        "id": "n70",
+        "name": "L5节点_026"
+      },
+      {
+        "id": "n71",
+        "name": "L5节点_027"
+      },
+      {
+        "id": "n73",
+        "name": "L4节点_034"
+      },
+      {
+        "id": "n63",
+        "name": "L4节点_031"
+      },
+      {
+        "id": "n58",
+        "name": "L4节点_027"
+      },
+      {
+        "id": "n54",
+        "name": "L4节点_023"
+      }
+    ],
+    "orphan_node_ids": [],
+    "facts_without_node_id": 0
+  }
+}

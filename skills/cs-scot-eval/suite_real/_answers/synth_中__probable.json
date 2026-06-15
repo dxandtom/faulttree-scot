@@ -1,0 +1,52 @@
+{
+  "scenario": "synth_中__probable",
+  "tree": "synth_中",
+  "tree_nodes": 95,
+  "category": "probable",
+  "truth": {
+    "root_cause_node_id": "s7",
+    "root_cause_name": "UECapabilityEnquiry无回复",
+    "tier": "probable",
+    "must_not_report": [
+      "s12",
+      "s49"
+    ]
+  },
+  "node_states": {
+    "s2": "hold",
+    "s7": "hold",
+    "s31": "insuf",
+    "s49": "hold",
+    "s12": "fail",
+    "s24": "fail"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [
+      {
+        "Root_cause": "UECapabilityEnquiry无回复",
+        "blocked_at": "叶子因(数据不足)",
+        "caveats": "叶子因数据不足,已定位到该层、叶子待定",
+        "support": "中间层判据成立",
+        "evidence_path": [
+          {
+            "node": "切换成功率低",
+            "node_id": "s2",
+            "condition": "NR_HO_SuccRate(%) < 95",
+            "actual": "NR_HO_SuccRate(%)=80.1",
+            "judgment": "成立"
+          },
+          {
+            "node": "UECapabilityEnquiry无回复",
+            "node_id": "s7",
+            "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
+            "actual": "命中会话 12 个",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "scenario": "real_SA接入失败__excluded",
+  "tree": "real_SA接入失败",
+  "tree_nodes": 178,
+  "category": "excluded",
+  "truth": {
+    "root_cause_node_id": null,
+    "root_cause_name": null,
+    "tier": "excluded",
+    "must_not_report": []
+  },
+  "node_states": {
+    "n10": "fail",
+    "n11": "fail",
+    "n116": "fail",
+    "n117": "fail",
+    "n118": "fail",
+    "n119": "fail"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [],
+    "undetermined": [
+      {
+        "note": "无闭合成立路径,数据不足/条件不成立,未定位到根因"
+      }
+    ],
+    "tree_issues": {}
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "scenario": "real_SA接入失败__fp_heavy",
+  "tree": "real_SA接入失败",
+  "tree_nodes": 178,
+  "category": "false_positive_resist",
+  "truth": {
+    "root_cause_node_id": "n11",
+    "root_cause_name": "RRC建立尝试与成功数差>0",
+    "tier": "confirmed",
+    "must_not_report": [
+      "n115",
+      "n116",
+      "n115",
+      "n117",
+      "n115",
+      "n118",
+      "n115",
+      "n119"
+    ]
+  },
+  "node_states": {
+    "n3": "hold",
+    "n4": "hold",
+    "n5": "hold",
+    "n11": "hold",
+    "n116": "hold",
+    "n115": "fail",
+    "n117": "hold",
+    "n118": "hold",
+    "n119": "hold",
+    "n10": "fail",
+    "n100": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "RRC建立尝试与成功数差>0",
+        "Fault_tree_path": [
+          "RegistrationRequest无Accept",
+          "PRACH随机接入成功率低",
+          "无线链路失败RNL占比高",
+          "RRC建立尝试与成功数差>0"
+        ],
+        "evidence_path": [
+          {
+            "node": "RegistrationRequest无Accept",
+            "node_id": "n3",
+            "condition": "信令:有 RegistrationRequest 但无 RegistrationAccept",
+            "actual": "命中会话 18 个",
+            "judgment": "成立"
+          },
+          {
+            "node": "PRACH随机接入成功率低",
+            "node_id": "n4",
+            "condition": "RACH_Setup_SuccRate(%) < 95",
+            "actual": "RACH_Setup_SuccRate(%)=78.6",
+            "judgment": "成立"
+          },
+          {
+            "node": "无线链路失败RNL占比高",
+            "node_id": "n5",
+            "condition": "CHR DCErrType=RNL_RadioLinkFailure 占比 ≥ 20%",
+            "actual": "DCErrType 命中 343/1000(占比 0.343)",
+            "judgment": "成立"
+          },
+          {
+            "node": "RRC建立尝试与成功数差>0",
+            "node_id": "n11",
+            "condition": "N.RRC.ConnReq.Att − N.RRC.ConnReq.Succ > 0",
+            "actual": "N.RRC.ConnReq.Att−N.RRC.ConnReq.Succ=1240",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

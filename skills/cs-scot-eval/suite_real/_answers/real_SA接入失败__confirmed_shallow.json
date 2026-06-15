@@ -1,0 +1,44 @@
+{
+  "scenario": "real_SA接入失败__confirmed_shallow",
+  "tree": "real_SA接入失败",
+  "tree_nodes": 178,
+  "category": "confirmed",
+  "truth": {
+    "root_cause_node_id": "n175",
+    "root_cause_name": "RRC建立尝试与成功数差>0",
+    "tier": "confirmed",
+    "must_not_report": [
+      "n5",
+      "n10"
+    ]
+  },
+  "node_states": {
+    "n175": "hold",
+    "n10": "hold",
+    "n5": "fail",
+    "n100": "fail",
+    "n101": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "RRC建立尝试与成功数差>0",
+        "Fault_tree_path": [
+          "RRC建立尝试与成功数差>0"
+        ],
+        "evidence_path": [
+          {
+            "node": "RRC建立尝试与成功数差>0",
+            "node_id": "n175",
+            "condition": "N.RRC.ConnReq.Att − N.RRC.ConnReq.Succ > 0",
+            "actual": "N.RRC.ConnReq.Att−N.RRC.ConnReq.Succ=1240",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

@@ -1,76 +1,36 @@
 #!/usr/bin/env python3
-"""真实大树故障注入 —— 在【真实拓扑】上合成事实埋根因,测 RCA 在大树上的导航/推理准确率。
+"""多树故障注入 —— 在多棵不同大小的真实/合成拓扑上合成事实埋根因,测 RCA 大树推理准确率。
 
-为什么不用 toy 树:5 个节点人一眼看穿,证明不了"大树会不会乱"。这里直接用脱敏后的**真实 178 节点树**,
-把根因埋在深处,周围撒"事实成立但路径断了"的诱饵 + 一堆不成立/数据不足的噪声 —— 模型必须在几十上百
-节点里**追出唯一闭合的那条路径**,这才是 1231819×182736 那种"算不出就错"的考题。
+要点:
+- **多棵树**(trees/ 下:真实树 + 其子树 + 合成树,~27~320 节点)→ 出"准确率 vs 规模"。
+- **不带 predicate_satisfied**:事实只给实际值(成功率/占比/告警数/会话数…)+ 判据带阈值,
+  **逼模型自己判 condition 成立/不成立**,而不是读字面布尔。(注:真实生产输入是带 predicate 的,
+  这里刻意抽掉做更硬的考。)
+- 每棵树**自动**生成 6 类场景(确证深/浅、疑似、抗假阳、诚实、排除),埋因+诱饵+噪声确定性选取。
+- 答案(truth + 满分参考 + 埋下的逐节点状态 node_states)放 _answers/,做题时勿读。
 
-做法(条件已脱敏为 null,所以这里测的是【导航/结构推理】,不是条件判数据):
-  按 spec 给节点合成事实(路径节点成立 / 诱饵叶子成立但父断 / 噪声不成立或数据不足)→ prune 成局部子树
-  → 写 suite_real/<场景>/result/rca_input.json + gold.json(truth) + reference_rca.json。
-之后:模型逐场景做 RCA 写 rca.json → score_accuracy.py 打分。
-
-用法: python inject_on_tree.py [--tree <real.tree_index.json>] [--out <suite_real>]
+用法: python inject_on_tree.py   (先跑 make_trees.py 备好 trees/)
 """
 from __future__ import annotations
 
 import argparse
 import copy
 import json
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_TREE = HERE.parent / "real_trees" / "SA接入失败.tree_index.json"
+TREES = HERE.parent / "trees"
 DEFAULT_OUT = HERE.parent / "suite_real"
-SOURCES = ["kpi", "chr", "sig"]
-
-# 注入规格(引用真实 node_id;深度/诱饵数/类别各异)。target=埋的根因叶子;decoys=诱饵叶子(成立但路径会被断)。
-SPECS = [
-    {"name": "R01_confirmed_L6_deep", "category": "confirmed", "target": "n6",
-     "decoys": ["n121"], "noise_fail": ["n12", "n51"], "noise_insuf": ["n43", "n164"]},
-    {"name": "R02_confirmed_L6_other", "category": "confirmed", "target": "n121",
-     "decoys": ["n6", "n72"], "noise_fail": ["n85", "n175"], "noise_insuf": ["n50"]},
-    {"name": "R03_confirmed_L4_mid", "category": "confirmed", "target": "n164",
-     "decoys": ["n50"], "noise_fail": ["n12"], "noise_insuf": ["n39", "n137"]},
-    {"name": "R04_confirmed_via_passthrough", "category": "confirmed", "target": "n50",
-     "decoys": ["n39"], "noise_fail": ["n51", "n66"], "noise_insuf": ["n6"]},
-    {"name": "R05_probable_leaf_insuf", "category": "probable", "target": "n11",
-     "decoys": ["n50"], "noise_fail": ["n12"], "noise_insuf": ["n121"]},
-    {"name": "R06_false_positive_heavy", "category": "false_positive_resist", "target": "n39",
-     "decoys": ["n6", "n121", "n50", "n72"], "noise_fail": ["n85"], "noise_insuf": ["n137"]},
-    {"name": "R07_honest_all_insuf", "category": "honest_insufficient", "target": None,
-     "decoys": [], "noise_fail": ["n12", "n51"], "noise_insuf": ["n6", "n39", "n121", "n164"]},
-    {"name": "R08_confirmed_L5", "category": "confirmed", "target": "n72",
-     "decoys": ["n135"], "noise_fail": ["n164"], "noise_insuf": ["n50"]},
-    {"name": "R09_excluded_all_fail", "category": "excluded", "target": None,
-     "decoys": [], "noise_fail": ["n6", "n39", "n50", "n72", "n164"], "noise_insuf": []},
-    {"name": "R10_confirmed_L6_c", "category": "confirmed", "target": "n135",
-     "decoys": ["n6", "n164"], "noise_fail": ["n12"], "noise_insuf": ["n39"]},
-]
-
-
-def path_to_root(nodes, nid):
-    p = [nid]
-    while nodes[p[-1]].get("parent"):
-        p.append(nodes[p[-1]]["parent"])
-    return list(reversed(p))                       # 根→叶
-
-
-def nearest_break(nodes, decoy, on_path: set):
-    """诱饵叶子到根路径上,**最近的、不在目标路径上、非 pass_through** 的祖先 → 在此断路。"""
-    for anc in reversed(path_to_root(nodes, decoy)[:-1]):   # 叶→根,跳过自身
-        if anc not in on_path and not nodes[anc].get("pass_through"):
-            return anc
-    return None
-
+SOURCES = ["kpi", "chr", "sig", "alarm", "cfg"]
 
 _CMP = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b, ">": lambda a, b: a > b,
         ">=": lambda a, b: a >= b, "==": lambda a, b: a == b}
 
-# ── 业务"人设"池:真实 5G SA 接入失败域的判据 + 具体事实值。每个 = 一种可判的根因/中间因。
-# 让每个节点稳定挂一个人设(按 node_id 定),RCA 要【拿实际值判 condition 成不成立】再导航,
-# 不是读 predicate 标志位。hold=值明显满足条件、fail=明显不满足、insuf=该源缺失。
+# ── 业务"人设"池(真实 5G SA 接入失败域):name=因 / cond=判据(带阈值)/ 事实值。
+# 每节点稳定挂一个;hold=值明显满足、fail=明显不满足、insuf=该源缺失。模型须拿值判 cond,再导航。
 PERSONAS = [
+    # —— 成功率/比率阈值类(num: 值 op 阈值)——
     {"name": "RRC连接建立成功率低", "cls": "A", "kind": "num", "col": "SA_RRC_ConnSetup_SuccRate(%)",
      "cond": "SA_RRC_ConnSetup_SuccRate(%) < 98", "op": "<", "thr": 98.0, "hold_v": 91.4, "fail_v": 99.7,
      "insuf": "本次无小时粒度KPI该成功率计数器"},
@@ -86,28 +46,55 @@ PERSONAS = [
     {"name": "PRACH随机接入成功率低", "cls": "A", "kind": "num", "col": "RACH_Setup_SuccRate(%)",
      "cond": "RACH_Setup_SuccRate(%) < 95", "op": "<", "thr": 95.0, "hold_v": 78.6, "fail_v": 98.9,
      "insuf": "无RACH话统"},
+    {"name": "Msg2响应比例低", "cls": "A", "kind": "num", "col": "RAR_Resp_Rate(%)",
+     "cond": "RAR_Resp_Rate(%) < 90", "op": "<", "thr": 90.0, "hold_v": 61.2, "fail_v": 97.4, "insuf": "无MAC层话统"},
+    {"name": "PDCP上行丢包率高", "cls": "A", "kind": "num", "col": "PDCP_UL_LossRate(%)",
+     "cond": "PDCP_UL_LossRate(%) > 1", "op": ">", "thr": 1.0, "hold_v": 6.7, "fail_v": 0.08, "insuf": "无PDCP丢包话统"},
+    {"name": "RLC重传率高", "cls": "A", "kind": "num", "col": "RLC_Retx_Rate(%)",
+     "cond": "RLC_Retx_Rate(%) > 10", "op": ">", "thr": 10.0, "hold_v": 23.5, "fail_v": 2.1, "insuf": "无RLC话统"},
+    {"name": "弱覆盖采样占比高", "cls": "A", "kind": "num", "col": "弱覆盖采样占比 RSRP<-110(%)",
+     "cond": "RSRP<-110 的采样占比 > 15%", "op": ">", "thr": 15.0, "hold_v": 38.4, "fail_v": 2.1,
+     "insuf": "无MR/MDT测量,无法判覆盖"},
+    {"name": "上行干扰偏高", "cls": "A", "kind": "num", "col": "PUSCH_RSSI(dBm)",
+     "cond": "PUSCH_RSSI > -105 dBm(底噪抬升)", "op": ">", "thr": -105.0, "hold_v": -96.5, "fail_v": -117.8,
+     "insuf": "无上行干扰话统"},
+    {"name": "SSB SINR低", "cls": "A", "kind": "num", "col": "SSB_SINR(dB)",
+     "cond": "SSB_SINR < 0 dB", "op": "<", "thr": 0.0, "hold_v": -4.3, "fail_v": 12.6, "insuf": "无SINR测量"},
+    {"name": "切换成功率低", "cls": "A", "kind": "num", "col": "NR_HO_SuccRate(%)",
+     "cond": "NR_HO_SuccRate(%) < 95", "op": "<", "thr": 95.0, "hold_v": 80.1, "fail_v": 99.2, "insuf": "无切换话统"},
+    # —— 计数器差(B)——
     {"name": "RRC建立尝试与成功数差>0", "cls": "B", "kind": "num", "col": "N.RRC.ConnReq.Att−N.RRC.ConnReq.Succ",
      "cond": "N.RRC.ConnReq.Att − N.RRC.ConnReq.Succ > 0", "op": ">", "thr": 0, "hold_v": 1240, "fail_v": 0,
      "insuf": "无RRC原始计数器(只有成功率)"},
+    {"name": "NGSig建立尝试与成功数差>0", "cls": "B", "kind": "num", "col": "N.NGSig.Est.Att−N.NGSig.Est.Succ",
+     "cond": "N.NGSig.Est.Att − N.NGSig.Est.Succ > 0", "op": ">", "thr": 0, "hold_v": 588, "fail_v": 0,
+     "insuf": "无NG原始计数器"},
+    # —— 错误码/原因占比(propmatch: 占比≥阈值)——
     {"name": "NAS鉴权失败占比高", "cls": "C", "kind": "propmatch", "col": "ReleaseCause", "min_ratio": 0.2,
      "cond": "CHR ReleaseCause 含 NAS_Authentication_Failure 且占比 ≥ 20%",
      "hold": (286, 1000, [["NAS_Authentication_Failure", 286], ["normal_release", 671]]),
-     "fail": (7, 1000, [["normal_release", 962], ["NAS_Authentication_Failure", 7]]),
-     "insuf": "本次CHR未携带释放原因字段"},
+     "fail": (7, 1000, [["normal_release", 962], ["NAS_Authentication_Failure", 7]]), "insuf": "本次CHR未携带释放原因字段"},
     {"name": "无线链路失败RNL占比高", "cls": "C", "kind": "propmatch", "col": "DCErrType", "min_ratio": 0.2,
      "cond": "CHR DCErrType=RNL_RadioLinkFailure 占比 ≥ 20%",
      "hold": (343, 1000, [["RNL_RadioLinkFailure", 343], ["NORMAL", 540]]),
-     "fail": (11, 1000, [["NORMAL", 980], ["RNL_RadioLinkFailure", 11]]),
-     "insuf": "无CHR DCErrType字段"},
-    {"name": "传输资源不可用", "cls": "C", "kind": "propmatch", "col": "NgRanCause", "min_ratio": 0.2,
+     "fail": (11, 1000, [["NORMAL", 980], ["RNL_RadioLinkFailure", 11]]), "insuf": "无CHR DCErrType字段"},
+    {"name": "传输资源不可用占比高", "cls": "C", "kind": "propmatch", "col": "NgRanCause", "min_ratio": 0.2,
      "cond": "NgRanCause=transport-resource-unavailable 占比 ≥ 20%",
      "hold": (198, 600, [["transport-resource-unavailable", 198], ["normal", 380]]),
-     "fail": (3, 600, [["normal", 590], ["transport-resource-unavailable", 3]]),
-     "insuf": "无NGAP原因码记录"},
-    {"name": "AMF过载拒绝", "cls": "C", "kind": "propmatch", "col": "NgRanCause", "min_ratio": 0.2,
+     "fail": (3, 600, [["normal", 590], ["transport-resource-unavailable", 3]]), "insuf": "无NGAP原因码记录"},
+    {"name": "AMF过载拒绝占比高", "cls": "C", "kind": "propmatch", "col": "NgRanCause", "min_ratio": 0.2,
      "cond": "NgRanCause=amf-overload 占比 ≥ 20%",
      "hold": (140, 500, [["amf-overload", 140], ["normal", 330]]),
      "fail": (1, 500, [["normal", 495], ["amf-overload", 1]]), "insuf": "无AMF侧拒绝原因"},
+    {"name": "RRC拒绝(拥塞)占比高", "cls": "C", "kind": "propmatch", "col": "RrcRejectCause", "min_ratio": 0.15,
+     "cond": "RRCReject 原因=congestion 占比 ≥ 15%",
+     "hold": (220, 800, [["congestion", 220], ["normal", 510]]),
+     "fail": (5, 800, [["normal", 770], ["congestion", 5]]), "insuf": "无RRC拒绝原因统计"},
+    {"name": "注册失败(PLMN不允许)占比高", "cls": "C", "kind": "propmatch", "col": "RegRejectCause", "min_ratio": 0.2,
+     "cond": "Registration Reject=PLMN-not-allowed 占比 ≥ 20%",
+     "hold": (132, 400, [["PLMN-not-allowed", 132], ["ok", 240]]),
+     "fail": (2, 400, [["ok", 390], ["PLMN-not-allowed", 2]]), "insuf": "无注册结果记录"},
+    # —— 告警存在(exist: 命中≥1)——
     {"name": "射频单元驻波比异常告警", "cls": "G", "kind": "exist", "col": "AlarmLog",
      "cond": "告警日志存在「ALM-26529 射频单元驻波比异常」",
      "hold": (3, 3, [["ALM-26529 射频单元驻波比异常", 3]]), "fail": (0, 1, []), "insuf": "本次无告警日志源"},
@@ -120,22 +107,41 @@ PERSONAS = [
     {"name": "GTP-U路径故障告警", "cls": "G", "kind": "exist", "col": "AlarmLog",
      "cond": "告警日志存在「ALM-25952 GTPU路径故障」",
      "hold": (4, 4, [["ALM-25952 GTPU路径故障", 4]]), "fail": (0, 1, []), "insuf": "本次无告警日志源"},
+    {"name": "GPS失锁/时钟告警", "cls": "G", "kind": "exist", "col": "AlarmLog",
+     "cond": "告警日志存在「ALM-26262 时钟参考源异常」",
+     "hold": (2, 2, [["ALM-26262 时钟参考源异常", 2]]), "fail": (0, 1, []), "insuf": "本次无告警日志源"},
+    {"name": "传输承载链路告警", "cls": "G", "kind": "exist", "col": "AlarmLog",
+     "cond": "告警日志存在「ALM-25885 BBU CPRI接口异常」",
+     "hold": (1, 1, [["ALM-25885 BBU CPRI接口异常", 1]]), "fail": (0, 1, []), "insuf": "本次无告警日志源"},
+    {"name": "License受限告警", "cls": "G", "kind": "exist", "col": "AlarmLog",
+     "cond": "告警日志存在「ALM-26818 License不足」",
+     "hold": (1, 1, [["ALM-26818 License不足", 1]]), "fail": (0, 1, []), "insuf": "本次无告警日志源"},
+    # —— 信令会话(sess)——
     {"name": "会话缺SecurityModeComplete", "cls": "H", "kind": "sess", "hold_s": 27,
      "cond": "信令:会话内出现 SecurityModeCommand 但缺 SecurityModeComplete", "insuf": "无信令trace(detailInfo页签)"},
     {"name": "有RRCSetupRequest无RRCSetupComplete", "cls": "H", "kind": "sess", "hold_s": 41,
      "cond": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete", "insuf": "无信令trace(detailInfo页签)"},
+    {"name": "RegistrationRequest无Accept", "cls": "H", "kind": "sess", "hold_s": 18,
+     "cond": "信令:有 RegistrationRequest 但无 RegistrationAccept", "insuf": "无NAS信令trace"},
+    {"name": "UECapabilityEnquiry无回复", "cls": "H", "kind": "sess", "hold_s": 12,
+     "cond": "信令:UECapabilityEnquiry 后无 UECapabilityInformation", "insuf": "无信令trace"},
+    # —— 占比/TopN(prop)——
     {"name": "TOP1终端型号集中", "cls": "E", "kind": "prop", "col": "TerminalType",
      "cond": "失败会话按 TerminalType 分组,TOP1 占比 > 50%",
      "top1": "BrandX-Model9", "op": ">", "thr": 0.5, "hold_r": 0.72, "fail_r": 0.16, "insuf": "无终端型号字段"},
     {"name": "单小区接入失败占比高", "cls": "E", "kind": "prop", "col": "NRCellID",
      "cond": "失败会话按 NRCellID 分组,TOP1 小区占比 > 60%",
      "top1": "CellID-0x1A3F", "op": ">", "thr": 0.6, "hold_r": 0.81, "fail_r": 0.22, "insuf": "无小区维度CHR"},
-    {"name": "弱覆盖采样占比高", "cls": "A", "kind": "num", "col": "弱覆盖采样占比 RSRP<-110(%)",
-     "cond": "RSRP<-110 的采样占比 > 15%", "op": ">", "thr": 15.0, "hold_v": 38.4, "fail_v": 2.1,
-     "insuf": "无MR/MDT测量,无法判覆盖"},
-    {"name": "上行干扰偏高", "cls": "A", "kind": "num", "col": "PUSCH_RSSI(dBm)",
-     "cond": "PUSCH_RSSI > -105 dBm(底噪抬升)", "op": ">", "thr": -105.0, "hold_v": -96.5, "fail_v": -117.8,
-     "insuf": "无上行干扰话统"},
+    {"name": "单频点失败集中", "cls": "E", "kind": "prop", "col": "ARFCN",
+     "cond": "失败会话按 ARFCN 分组,TOP1 频点占比 > 50%",
+     "top1": "627264", "op": ">", "thr": 0.5, "hold_r": 0.66, "fail_r": 0.19, "insuf": "无频点字段"},
+    # —— 配置核查(F→当作 num/exist 类:这里用 exist 形式表示"配置不一致命中")——
+    {"name": "TAC配置不一致", "cls": "F", "kind": "exist", "col": "ConfigDiff",
+     "cond": "配置核查:小区 TAC 与核心网规划不一致(命中)",
+     "hold": (1, 1, [["TAC_mismatch: 计划=10010 实际=10086", 1]]), "fail": (0, 1, []), "insuf": "无配置基线导出,无法核查"},
+    {"name": "邻区漏配", "cls": "F", "kind": "exist", "col": "ConfigDiff",
+     "cond": "配置核查:存在漏配的同频邻区关系(命中)",
+     "hold": (5, 5, [["missing_nbr", 5]]), "fail": (0, 1, []), "insuf": "无邻区配置导出"},
 ]
 
 
@@ -145,7 +151,7 @@ def _persona_map(nodes: dict) -> dict:
 
 
 def _fact(persona: dict, state: str) -> dict:
-    """按人设+状态出"内核同形"的事实。predicate 与判据语义一致:阈值/占比/存在/信令各按各的判。"""
+    """按人设+状态出事实——**不含 predicate_satisfied**(只给实际值,逼模型自己判)。"""
     cls = persona["cls"]
     if state == "insuf":
         return {"class": cls, "status": "insufficient_data", "resolved_column": None, "reason": persona["insuf"]}
@@ -153,26 +159,23 @@ def _fact(persona: dict, state: str) -> dict:
     k = persona["kind"]
     if k == "num":
         v = persona["hold_v"] if hold else persona["fail_v"]
-        return {"class": cls, "status": "ok", "resolved_column": persona["col"], "op": persona["op"],
-                "threshold": persona["thr"], "value": v, "predicate_satisfied": _CMP[persona["op"]](v, persona["thr"])}
+        return {"class": cls, "status": "ok", "resolved_column": persona["col"],
+                "op": persona["op"], "threshold": persona["thr"], "value": v}
     if k in ("propmatch", "exist"):
         m, tot, top = persona["hold"] if hold else persona["fail"]
-        ratio = round(m / tot, 3) if tot else 0.0
-        pred = (ratio >= persona["min_ratio"]) if k == "propmatch" else (m >= 1)
-        return {"class": cls, "status": "ok", "resolved_column": persona["col"], "matched": m, "total": tot,
-                "ratio": ratio, "top": top, "predicate_satisfied": pred}
+        f = {"class": cls, "status": "ok", "resolved_column": persona["col"], "matched": m, "total": tot, "top": top}
+        if k == "propmatch":
+            f["ratio"] = round(m / tot, 3) if tot else 0.0
+            f["min_ratio"] = persona["min_ratio"]
+        return f
     if k == "sess":
-        s = persona["hold_s"] if hold else 0
-        return {"class": cls, "status": "ok", "resolved_column": "MessageType", "matched_sessions": s,
-                "predicate_satisfied": s >= 1}
-    r = persona["hold_r"] if hold else persona["fail_r"]   # prop(E)
+        return {"class": cls, "status": "ok", "resolved_column": "MessageType",
+                "matched_sessions": persona["hold_s"] if hold else 0}
     return {"class": cls, "status": "ok", "group_by": persona["col"], "top1": persona["top1"],
-            "top1_ratio": r, "op": persona["op"], "threshold": persona["thr"],
-            "predicate_satisfied": _CMP[persona["op"]](r, persona["thr"])}
+            "top1_ratio": persona["hold_r"] if hold else persona["fail_r"], "op": persona["op"], "threshold": persona["thr"]}
 
 
 def _actual_str(persona: dict) -> str:
-    """给 reference 的 evidence_path 写一个像样的"实际值"。"""
     f = _fact(persona, "hold")
     if "value" in f:
         return f"{persona['col']}={f['value']}"
@@ -180,15 +183,78 @@ def _actual_str(persona: dict) -> str:
         return f"命中会话 {f['matched_sessions']} 个"
     if "top1_ratio" in f:
         return f"TOP1={persona['top1']} 占比 {f['top1_ratio']}"
-    return f"{persona['col']} 命中 {f['matched']}/{f['total']}(占比 {f['ratio']})"
+    return f"{persona['col']} 命中 {f['matched']}/{f['total']}" + (f"(占比 {f['ratio']})" if "ratio" in f else "")
+
+
+def path_to_root(nodes, nid):
+    p = [nid]
+    while nodes[p[-1]].get("parent"):
+        p.append(nodes[p[-1]]["parent"])
+    return list(reversed(p))
+
+
+def nearest_break(nodes, decoy, on_path):
+    for anc in reversed(path_to_root(nodes, decoy)[:-1]):
+        if anc not in on_path and not nodes[anc].get("pass_through"):
+            return anc
+    return None
+
+
+def auto_specs(tree):
+    """每棵树确定性地生成 6 类场景:埋因/诱饵/噪声都从真实叶子里挑,无随机。"""
+    nodes, root = tree["nodes"], tree["root"]
+    leaves = [n for n in sorted(nodes) if not nodes[n]["children"] and not nodes[n].get("pass_through")]
+    if len(leaves) < 3:
+        return []
+
+    def l2(n):
+        p = n
+        while nodes[p].get("parent") and nodes[p]["parent"] != root:
+            p = nodes[p]["parent"]
+        return p
+
+    deep = sorted(leaves, key=lambda n: (-nodes[n]["level"], n))
+    shallow = sorted(leaves, key=lambda n: (nodes[n]["level"], n))
+
+    def decoys(tgt, k):
+        b = l2(tgt)
+        return [l for l in deep if l2(l) != b and l != tgt][:k]
+
+    def noise(excl, kf, ki):
+        pool = [l for l in leaves if l not in excl]
+        return pool[:kf], pool[kf:kf + ki]
+
+    specs = []
+    t = deep[0]
+    dc = decoys(t, 2); nf, ni = noise(set([t]) | set(dc), 2, 2)
+    specs.append({"kind": "confirmed_deep", "category": "confirmed", "target": t, "decoys": dc,
+                  "noise_fail": nf, "noise_insuf": ni})
+    t = shallow[0]
+    if t != deep[0]:
+        dc = decoys(t, 1); nf, ni = noise(set([t]) | set(dc), 1, 1)
+        specs.append({"kind": "confirmed_shallow", "category": "confirmed", "target": t, "decoys": dc,
+                      "noise_fail": nf, "noise_insuf": ni})
+    t = deep[1] if len(deep) > 1 else deep[0]
+    dc = decoys(t, 4); nf, ni = noise(set([t]) | set(dc), 1, 1)
+    specs.append({"kind": "fp_heavy", "category": "false_positive_resist", "target": t, "decoys": dc,
+                  "noise_fail": nf, "noise_insuf": ni})
+    cand = [l for l in deep if nodes[l].get("parent") and not nodes[nodes[l]["parent"]].get("pass_through")]
+    if cand:
+        t = cand[0]; dc = decoys(t, 1); nf, ni = noise(set([t]) | set(dc), 1, 0)
+        specs.append({"kind": "probable", "category": "probable", "target": t, "decoys": dc,
+                      "noise_fail": nf, "noise_insuf": ni})
+    specs.append({"kind": "honest", "category": "honest_insufficient", "target": None, "decoys": [],
+                  "noise_fail": [], "noise_insuf": deep[:6]})
+    specs.append({"kind": "excluded", "category": "excluded", "target": None, "decoys": [],
+                  "noise_fail": deep[:6], "noise_insuf": []})
+    return specs
 
 
 def build(spec, tree):
     nodes = tree["nodes"]
-    pmap = _persona_map(nodes)                     # 每个节点稳定挂一个真实业务人设
-    state = {}                                     # nid -> hold/fail/insuf
-    truth = {"root_cause_node_id": None, "root_cause_name": None,
-             "tier": "undetermined", "must_not_report": []}
+    pmap = _persona_map(nodes)
+    state = {}
+    truth = {"root_cause_node_id": None, "root_cause_name": None, "tier": "undetermined", "must_not_report": []}
 
     def set_path_hold(leaf):
         for p in path_to_root(nodes, leaf):
@@ -198,28 +264,23 @@ def build(spec, tree):
     cat = spec["category"]
     if cat in ("confirmed", "false_positive_resist"):
         tgt = spec["target"]
-        set_path_hold(tgt)
-        state[tgt] = "hold"
+        set_path_hold(tgt); state[tgt] = "hold"
         truth.update(root_cause_node_id=tgt, root_cause_name=pmap[tgt]["name"], tier="confirmed")
     elif cat == "probable":
-        leaf = spec["target"]
-        mid = nodes[leaf]["parent"]
+        leaf = spec["target"]; mid = nodes[leaf]["parent"]
         while mid and nodes[mid].get("pass_through"):
             mid = nodes[mid]["parent"]
-        set_path_hold(mid)                         # 中间层闭合
-        state[leaf] = "insuf"                       # 叶子数据不足 → 只能疑似
+        set_path_hold(mid); state[leaf] = "insuf"
         truth.update(root_cause_node_id=mid, root_cause_name=pmap[mid]["name"], tier="probable")
-    else:                                          # honest_insufficient / excluded:无闭合路径
+    else:
         truth.update(tier=("undetermined" if cat == "honest_insufficient" else "excluded"))
 
     on_path = {k for k, v in state.items() if v == "hold"}
-    # 诱饵:叶子成立,但其路径在最近的非路径祖先处断开 → 不许被报成根因
     for d in spec.get("decoys", []):
         state[d] = "hold"
         brk = nearest_break(nodes, d, on_path)
         if brk:
-            state[brk] = "fail"
-            truth["must_not_report"].append(brk)
+            state[brk] = "fail"; truth["must_not_report"].append(brk)
         truth["must_not_report"].append(d)
     for d in spec.get("noise_fail", []):
         state.setdefault(d, "fail")
@@ -228,7 +289,6 @@ def build(spec, tree):
     if cat in ("honest_insufficient", "excluded"):
         truth["must_not_report"] = [k for k, v in state.items() if v in ("hold", "insuf")]
 
-    # 工作副本:给有事实的节点叠上真实业务人设(名字+判据+事实)。脱敏后原 condition 为 null,这里补真判据。
     widx = copy.deepcopy(tree)
     results = {}
     for i, (nid, st) in enumerate(sorted(state.items())):
@@ -237,16 +297,14 @@ def build(spec, tree):
         widx["nodes"][nid]["condition"] = p["cond"]
         src = SOURCES[i % len(SOURCES)]
         results.setdefault(src, {"indicator": src, "source": src, "conditions": [], "summary": {}})
-        results[src]["conditions"].append({
-            "id": f"{nid}_b", "node_id": nid, "node": p["name"],
-            "condition_text": p["cond"], "class": p["cls"],
-            "mapping_reason": "合成注入(真实业务判据)", "fact": _fact(p, st)})
+        results[src]["conditions"].append({"id": f"{nid}_b", "node_id": nid, "node": p["name"],
+                                           "condition_text": p["cond"], "class": p["cls"],
+                                           "mapping_reason": "合成注入(真实业务判据)", "fact": _fact(p, st)})
     for r in results.values():
         cs = r["conditions"]
         r["summary"] = {"total": len(cs), "ok": sum(c["fact"]["status"] == "ok" for c in cs),
-                        "insufficient_data": sum(c["fact"]["status"] == "insufficient_data" for c in cs),
-                        "manual": 0}
-    return widx, results, truth
+                        "insufficient_data": sum(c["fact"]["status"] == "insufficient_data" for c in cs), "manual": 0}
+    return widx, results, truth, state
 
 
 def build_reference(truth, nodes):
@@ -256,8 +314,7 @@ def build_reference(truth, nodes):
 
     def ep_for(path):
         return [{"node": pmap[p]["name"], "node_id": p, "condition": pmap[p]["cond"],
-                 "actual": _actual_str(pmap[p]), "judgment": "成立"}
-                for p in path if not nodes[p].get("pass_through")]
+                 "actual": _actual_str(pmap[p]), "judgment": "成立"} for p in path if not nodes[p].get("pass_through")]
 
     if truth["tier"] == "confirmed":
         path = path_to_root(nodes, nid)
@@ -267,58 +324,61 @@ def build_reference(truth, nodes):
     elif truth["tier"] == "probable":
         path = path_to_root(nodes, nid)
         out["probable_causes"] = [{"Root_cause": truth["root_cause_name"], "blocked_at": "叶子因(数据不足)",
-                                   "caveats": "叶子因数据不足,已定位到该层、叶子待定",
-                                   "support": "中间层判据成立", "evidence_path": ep_for(path)}]
+                                   "caveats": "叶子因数据不足,已定位到该层、叶子待定", "support": "中间层判据成立",
+                                   "evidence_path": ep_for(path)}]
     else:
         out["undetermined"] = [{"note": "无闭合成立路径,数据不足/条件不成立,未定位到根因"}]
     return out
 
 
 def main():
-    import sys
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="真实大树故障注入")
-    ap.add_argument("--tree", default=str(DEFAULT_TREE))
+    ap = argparse.ArgumentParser(description="多树故障注入(不带 predicate)")
+    ap.add_argument("--trees", default=str(TREES))
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     args = ap.parse_args()
     sys.path.insert(0, str(HERE.parent.parent / "cs-scot-execute" / "scripts"))
     from tree_prune import prune  # noqa: E402
 
-    tree = json.loads(Path(args.tree).read_text(encoding="utf-8"))
-    nodes = tree["nodes"]
     out = Path(args.out)
     ans = out / "_answers"
     ans.mkdir(parents=True, exist_ok=True)
-    print(f"真实树:{tree['scenario']} · {len(nodes)} 节点 · 注入 {len(SPECS)} 个场景")
-    for spec in SPECS:
-        widx, results, truth = build(spec, tree)
-        pr = prune(widx, results)
-        payload = {"fault_tree": {"scenario": pr["scenario"], "root": pr["root"],
-                                  "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
-                   "unmapped_facts": pr["unmapped"], "tree_issues": pr["coverage"]}
-        d = out / spec["name"]
-        d.mkdir(parents=True, exist_ok=True)
-        # 模型只读这个(冻结的考题);答案另放 _answers/,做 RCA 时别读。
-        (d / "rca_input.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        (ans / f"{spec['name']}.json").write_text(json.dumps(
-            {"scenario": spec["name"], "category": spec["category"], "truth": truth,
-             "reference_rca": build_reference(truth, nodes)}, ensure_ascii=False, indent=2), encoding="utf-8")
-        tgt = truth["root_cause_node_id"] or "—(无根因)"
-        print(f"  {spec['name']:<32}[{spec['category']:<22}] 埋因 {tgt:<5} "
-              f"剪枝保留 {pr['coverage']['kept_nodes']}/{pr['coverage']['total_nodes']} "
-              f"诱饵/禁报 {len(truth['must_not_report'])}")
+    tree_files = sorted(Path(args.trees).glob("*.tree_index.json"))
+    total = 0
+    for tf in tree_files:
+        tree = json.loads(tf.read_text(encoding="utf-8"))
+        nodes = tree["nodes"]
+        tag = tf.stem.replace(".tree_index", "")
+        print(f"\n■ {tag} · {len(nodes)} 节点")
+        for spec in auto_specs(tree):
+            widx, results, truth, state = build(spec, tree)
+            pr = prune(widx, results)
+            payload = {"fault_tree": {"scenario": pr["scenario"], "root": pr["root"],
+                                      "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
+                       "unmapped_facts": pr["unmapped"], "tree_issues": pr["coverage"]}
+            name = f"{tag}__{spec['kind']}"
+            d = out / name
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "rca_input.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            (ans / f"{name}.json").write_text(json.dumps(
+                {"scenario": name, "tree": tag, "tree_nodes": len(nodes), "category": spec["category"],
+                 "truth": truth, "node_states": state, "reference_rca": build_reference(truth, nodes)},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+            total += 1
+            tgt = truth["root_cause_node_id"] or "—"
+            print(f"   {spec['kind']:<18} 埋因 {tgt:<5} 剪枝 {pr['coverage']['kept_nodes']}/{pr['coverage']['total_nodes']}"
+                  f" 禁报 {len(truth['must_not_report'])}")
     (out / "README.md").write_text(
-        "# 冻结的诊断准确率考题(真实大树注入)\n\n"
-        "这些场景由可信侧预先生成并提交,**本地不要重新生成**(避免出题方=答题方、自找便宜路径)。\n\n"
-        "- `<场景>/rca_input.json` —— **答题模型只读这个**(局部子树+事实)。\n"
-        "- `<场景>/rca.json` —— 答题模型把 RCA 结果写这里(本地产物,不提交)。\n"
-        "- `_answers/<场景>.json` —— **答案区(truth+满分参考),做 RCA 时别读**,只给打分器用。\n\n"
-        "跑分:`python ../scripts/score_accuracy.py --suite . -o accuracy_report.txt`\n"
-        "自测打分链路:`... score_accuracy.py --suite . --use-reference`(应 100%)。\n", encoding="utf-8")
-    print(f"\n→ {out}(已冻结提交;答案在 _answers/)\n下一步:逐场景用 fault-tree-rca 读 <场景>/rca_input.json 写 <场景>/rca.json,再跑 score_accuracy.py --suite suite_real")
+        "# 冻结的诊断准确率考题(多树故障注入,不带 predicate)\n\n"
+        "可信侧预生成、已提交,**本地勿重新生成**。每个 `<场景>/rca_input.json` 是答题模型**唯一该读**的;\n"
+        "事实**不含 predicate_satisfied**,模型须拿实际值自己判 condition 成立/不成立,再导航。\n"
+        "`_answers/` 是答案区(truth+node_states+满分参考),**做题时勿读**,只给打分器。\n\n"
+        "跑分:`python ../scripts/score_accuracy.py --suite . -o accuracy_report.txt`;"
+        "自测:`... --use-reference`(应 100%)。\n", encoding="utf-8")
+    print(f"\n→ {out}:共 {total} 个场景(跨 {len(tree_files)} 棵树,不同规模)")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,30 @@
+{
+  "scenario": "real_sub_接入_小__excluded",
+  "tree": "real_sub_接入_小",
+  "tree_nodes": 27,
+  "category": "excluded",
+  "truth": {
+    "root_cause_node_id": null,
+    "root_cause_name": null,
+    "tier": "excluded",
+    "must_not_report": []
+  },
+  "node_states": {
+    "n50": "fail",
+    "n69": "fail",
+    "n70": "fail",
+    "n71": "fail",
+    "n72": "fail",
+    "n51": "fail"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [],
+    "undetermined": [
+      {
+        "note": "无闭合成立路径,数据不足/条件不成立,未定位到根因"
+      }
+    ],
+    "tree_issues": {}
+  }
+}

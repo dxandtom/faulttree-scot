@@ -1,0 +1,67 @@
+{
+  "scenario": "synth_中__confirmed_deep",
+  "tree": "synth_中",
+  "tree_nodes": 95,
+  "category": "confirmed",
+  "truth": {
+    "root_cause_node_id": "s31",
+    "root_cause_name": "GPS失锁/时钟告警",
+    "tier": "confirmed",
+    "must_not_report": [
+      "s12",
+      "s49",
+      "s12",
+      "s50"
+    ]
+  },
+  "node_states": {
+    "s2": "hold",
+    "s7": "hold",
+    "s31": "hold",
+    "s49": "hold",
+    "s12": "fail",
+    "s50": "hold",
+    "s24": "fail",
+    "s25": "fail",
+    "s26": "insuf",
+    "s27": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "GPS失锁/时钟告警",
+        "Fault_tree_path": [
+          "切换成功率低",
+          "UECapabilityEnquiry无回复",
+          "GPS失锁/时钟告警"
+        ],
+        "evidence_path": [
+          {
+            "node": "切换成功率低",
+            "node_id": "s2",
+            "condition": "NR_HO_SuccRate(%) < 95",
+            "actual": "NR_HO_SuccRate(%)=80.1",
+            "judgment": "成立"
+          },
+          {
+            "node": "UECapabilityEnquiry无回复",
+            "node_id": "s7",
+            "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
+            "actual": "命中会话 12 个",
+            "judgment": "成立"
+          },
+          {
+            "node": "GPS失锁/时钟告警",
+            "node_id": "s31",
+            "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
+            "actual": "AlarmLog 命中 2/2",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "scenario": "synth_中__honest",
+  "tree": "synth_中",
+  "tree_nodes": 95,
+  "category": "honest_insufficient",
+  "truth": {
+    "root_cause_node_id": null,
+    "root_cause_name": null,
+    "tier": "undetermined",
+    "must_not_report": [
+      "s31",
+      "s33",
+      "s34",
+      "s35",
+      "s36",
+      "s37"
+    ]
+  },
+  "node_states": {
+    "s31": "insuf",
+    "s33": "insuf",
+    "s34": "insuf",
+    "s35": "insuf",
+    "s36": "insuf",
+    "s37": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [],
+    "undetermined": [
+      {
+        "note": "无闭合成立路径,数据不足/条件不成立,未定位到根因"
+      }
+    ],
+    "tree_issues": {}
+  }
+}

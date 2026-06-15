@@ -1,0 +1,480 @@
+{
+  "fault_tree": {
+    "scenario": "synth_中",
+    "root": "s1",
+    "outline": {
+      "s2": "uncovered",
+      "s7": "uncovered",
+      "s36": "insufficient",
+      "s8": "uncovered",
+      "s35": "insufficient",
+      "s37": "insufficient",
+      "s33": "insufficient",
+      "s9": "uncovered",
+      "s34": "insufficient",
+      "s31": "insufficient",
+      "s1": "pass"
+    },
+    "pruned_nodes": {
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "unknown"
+      },
+      "s7": {
+        "name": "L3节点_007",
+        "parent": "s2",
+        "level": 4,
+        "combine": "OR"
+      },
+      "s36": {
+        "name": "RegistrationRequest无Accept",
+        "parent": "s8",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "信令:有 RegistrationRequest 但无 RegistrationAccept",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s36_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s8": {
+        "name": "L3节点_008",
+        "parent": "s2",
+        "level": 4,
+        "combine": "unknown"
+      },
+      "s35": {
+        "name": "有RRCSetupRequest无RRCSetupComplete",
+        "parent": "s8",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s35_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s37": {
+        "name": "UECapabilityEnquiry无回复",
+        "parent": "s9",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "s37_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s33": {
+        "name": "License受限告警",
+        "parent": "s7",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "告警日志存在「ALM-26818 License不足」",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s33_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s9": {
+        "name": "L3节点_009",
+        "parent": "s2",
+        "level": 4,
+        "combine": "AND"
+      },
+      "s34": {
+        "name": "会话缺SecurityModeComplete",
+        "parent": "s8",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "信令:会话内出现 SecurityModeCommand 但缺 SecurityModeComplete",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s34_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s31": {
+        "name": "GPS失锁/时钟告警",
+        "parent": "s7",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s31_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      }
+    }
+  },
+  "unmapped_facts": [],
+  "tree_issues": {
+    "total_nodes": 95,
+    "kept_nodes": 11,
+    "uncovered_condition_nodes": [
+      {
+        "id": "s2",
+        "name": "L2节点_002"
+      },
+      {
+        "id": "s3",
+        "name": "L2节点_003"
+      },
+      {
+        "id": "s4",
+        "name": "L2节点_004"
+      },
+      {
+        "id": "s5",
+        "name": "L2节点_005"
+      },
+      {
+        "id": "s6",
+        "name": "L2节点_006"
+      },
+      {
+        "id": "s7",
+        "name": "L3节点_007"
+      },
+      {
+        "id": "s8",
+        "name": "L3节点_008"
+      },
+      {
+        "id": "s9",
+        "name": "L3节点_009"
+      },
+      {
+        "id": "s11",
+        "name": "L3节点_011"
+      },
+      {
+        "id": "s12",
+        "name": "L3节点_012"
+      },
+      {
+        "id": "s13",
+        "name": "L3节点_013"
+      },
+      {
+        "id": "s14",
+        "name": "L3节点_014"
+      },
+      {
+        "id": "s15",
+        "name": "L3节点_015"
+      },
+      {
+        "id": "s16",
+        "name": "L3节点_016"
+      },
+      {
+        "id": "s17",
+        "name": "L3节点_017"
+      },
+      {
+        "id": "s18",
+        "name": "L3节点_018"
+      },
+      {
+        "id": "s19",
+        "name": "L3节点_019"
+      },
+      {
+        "id": "s21",
+        "name": "L3节点_021"
+      },
+      {
+        "id": "s22",
+        "name": "L3节点_022"
+      },
+      {
+        "id": "s23",
+        "name": "L3节点_023"
+      },
+      {
+        "id": "s24",
+        "name": "L3节点_024"
+      },
+      {
+        "id": "s25",
+        "name": "L3节点_025"
+      },
+      {
+        "id": "s26",
+        "name": "L3节点_026"
+      },
+      {
+        "id": "s27",
+        "name": "L3节点_027"
+      },
+      {
+        "id": "s28",
+        "name": "L3节点_028"
+      },
+      {
+        "id": "s29",
+        "name": "L3节点_029"
+      },
+      {
+        "id": "s30",
+        "name": "L3节点_030"
+      },
+      {
+        "id": "s39",
+        "name": "L4节点_039"
+      },
+      {
+        "id": "s40",
+        "name": "L4节点_040"
+      },
+      {
+        "id": "s42",
+        "name": "L4节点_042"
+      },
+      {
+        "id": "s44",
+        "name": "L4节点_044"
+      },
+      {
+        "id": "s45",
+        "name": "L4节点_045"
+      },
+      {
+        "id": "s46",
+        "name": "L4节点_046"
+      },
+      {
+        "id": "s48",
+        "name": "L4节点_048"
+      },
+      {
+        "id": "s49",
+        "name": "L4节点_049"
+      },
+      {
+        "id": "s50",
+        "name": "L4节点_050"
+      },
+      {
+        "id": "s51",
+        "name": "L4节点_051"
+      },
+      {
+        "id": "s52",
+        "name": "L4节点_052"
+      },
+      {
+        "id": "s53",
+        "name": "L4节点_053"
+      },
+      {
+        "id": "s54",
+        "name": "L4节点_054"
+      },
+      {
+        "id": "s55",
+        "name": "L4节点_055"
+      },
+      {
+        "id": "s56",
+        "name": "L4节点_056"
+      },
+      {
+        "id": "s57",
+        "name": "L4节点_057"
+      },
+      {
+        "id": "s60",
+        "name": "L4节点_060"
+      },
+      {
+        "id": "s61",
+        "name": "L4节点_061"
+      },
+      {
+        "id": "s62",
+        "name": "L4节点_062"
+      },
+      {
+        "id": "s63",
+        "name": "L4节点_063"
+      },
+      {
+        "id": "s64",
+        "name": "L4节点_064"
+      },
+      {
+        "id": "s65",
+        "name": "L4节点_065"
+      },
+      {
+        "id": "s66",
+        "name": "L4节点_066"
+      },
+      {
+        "id": "s67",
+        "name": "L4节点_067"
+      },
+      {
+        "id": "s68",
+        "name": "L4节点_068"
+      },
+      {
+        "id": "s69",
+        "name": "L4节点_069"
+      },
+      {
+        "id": "s70",
+        "name": "L4节点_070"
+      },
+      {
+        "id": "s71",
+        "name": "L4节点_071"
+      },
+      {
+        "id": "s72",
+        "name": "L4节点_072"
+      },
+      {
+        "id": "s73",
+        "name": "L4节点_073"
+      },
+      {
+        "id": "s74",
+        "name": "L4节点_074"
+      },
+      {
+        "id": "s75",
+        "name": "L4节点_075"
+      },
+      {
+        "id": "s76",
+        "name": "L4节点_076"
+      },
+      {
+        "id": "s77",
+        "name": "L4节点_077"
+      },
+      {
+        "id": "s79",
+        "name": "L4节点_079"
+      },
+      {
+        "id": "s80",
+        "name": "L4节点_080"
+      },
+      {
+        "id": "s81",
+        "name": "L4节点_081"
+      },
+      {
+        "id": "s82",
+        "name": "L4节点_082"
+      },
+      {
+        "id": "s83",
+        "name": "L4节点_083"
+      },
+      {
+        "id": "s84",
+        "name": "L4节点_084"
+      },
+      {
+        "id": "s85",
+        "name": "L4节点_085"
+      },
+      {
+        "id": "s86",
+        "name": "L4节点_086"
+      },
+      {
+        "id": "s87",
+        "name": "L4节点_087"
+      },
+      {
+        "id": "s88",
+        "name": "L4节点_088"
+      },
+      {
+        "id": "s89",
+        "name": "L4节点_089"
+      },
+      {
+        "id": "s90",
+        "name": "L4节点_090"
+      },
+      {
+        "id": "s91",
+        "name": "L4节点_091"
+      },
+      {
+        "id": "s92",
+        "name": "L4节点_092"
+      },
+      {
+        "id": "s93",
+        "name": "L4节点_093"
+      },
+      {
+        "id": "s94",
+        "name": "L4节点_094"
+      },
+      {
+        "id": "s95",
+        "name": "L4节点_095"
+      }
+    ],
+    "orphan_node_ids": [],
+    "facts_without_node_id": 0
+  }
+}

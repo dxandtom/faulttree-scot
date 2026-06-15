@@ -1,0 +1,53 @@
+{
+  "scenario": "real_sub_上下文_中__confirmed_shallow",
+  "tree": "real_sub_上下文_中",
+  "tree_nodes": 44,
+  "category": "confirmed",
+  "truth": {
+    "root_cause_node_id": "n12",
+    "root_cause_name": "NG接口/AMF信令建立失败",
+    "tier": "confirmed",
+    "must_not_report": [
+      "n35",
+      "n36"
+    ]
+  },
+  "node_states": {
+    "n4": "hold",
+    "n12": "hold",
+    "n36": "hold",
+    "n35": "fail",
+    "n10": "fail",
+    "n11": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "NG接口/AMF信令建立失败",
+        "Fault_tree_path": [
+          "TOP1终端型号集中",
+          "NG接口/AMF信令建立失败"
+        ],
+        "evidence_path": [
+          {
+            "node": "TOP1终端型号集中",
+            "node_id": "n4",
+            "condition": "失败会话按 TerminalType 分组,TOP1 占比 > 50%",
+            "actual": "TOP1=BrandX-Model9 占比 0.72",
+            "judgment": "成立"
+          },
+          {
+            "node": "NG接口/AMF信令建立失败",
+            "node_id": "n12",
+            "condition": "SA_NGSig_Conn_SuccRate(%) < 99.5",
+            "actual": "SA_NGSig_Conn_SuccRate(%)=95.1",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

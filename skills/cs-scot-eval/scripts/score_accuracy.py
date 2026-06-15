@@ -16,13 +16,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SKILLS_ROOT = HERE.parent.parent
 DEFAULT_SUITE = HERE.parent / "suite_real"
 
 
@@ -51,22 +48,24 @@ def _covers(entry: dict, nid, name) -> bool:
     return bool((nid and nid in ids) or (name and _norm(name) in names))
 
 
-def _validate_rca(rca_path: Path, input_path: Path) -> bool:
-    vr = SKILLS_ROOT / "fault-tree-rca" / "scripts" / "validate_rca.py"
-    if not vr.exists():
-        return True  # 没装校验器不阻断打分(诚实项记为通过)
-    r = subprocess.run([sys.executable, str(vr), str(rca_path), str(input_path)],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
-    return r.returncode == 0
+def _judged_hold_ids(conf, prob) -> set:
+    """模型在 evidence_path 里判为"成立"的节点 id 集合(用于对真值查"伪造成立")。"""
+    out = set()
+    for e in conf + prob:
+        for step in (e.get("evidence_path") or []):
+            j = str(step.get("judgment", ""))
+            if "成立" in j and "不成立" not in j and step.get("node_id"):
+                out.add(step["node_id"])
+    return out
 
 
 def score_one(scn_dir: Path, use_reference: bool) -> dict:
-    # 模型只读 scn_dir/rca_input.json,把判断写 scn_dir/rca.json;答案(truth+满分参考)放在 _answers/<名>.json。
+    # 模型只读 scn_dir/rca_input.json,把判断写 scn_dir/rca.json;答案(truth/node_states/参考)在 _answers/<名>.json。
     ans = json.loads((scn_dir.parent / "_answers" / f"{scn_dir.name}.json").read_text(encoding="utf-8"))
     category, t, ref = ans["category"], ans["truth"], ans.get("reference_rca")
-    inp = scn_dir / "rca_input.json"
     rca_file = scn_dir / "rca.json"
-    base = {"scenario": scn_dir.name, "category": category}
+    base = {"scenario": scn_dir.name, "category": category, "tree": ans.get("tree"),
+            "tree_nodes": ans.get("tree_nodes")}
     if use_reference:
         rca = ref
     elif rca_file.exists():
@@ -101,14 +100,10 @@ def score_one(scn_dir: Path, use_reference: bool) -> dict:
         hit = (len(conf) == 0)
         tier_ok = (len(conf) == 0)
         no_fp = (len(conf) == 0) and not fp
-    # 诚实校验:validate_rca 吃文件 → 把 rca(可能来自答案区/内存)落到临时文件再校
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as tf:
-        json.dump(rca, tf, ensure_ascii=False)
-        tmp = tf.name
-    try:
-        honest = _validate_rca(Path(tmp), inp)
-    finally:
-        Path(tmp).unlink(missing_ok=True)
+    # 诚实(对真值查"伪造成立"):凡模型判"成立"的节点,必须确实是埋下的 hold 节点;
+    # 在 fail/数据不足 节点上判成立 = 伪造/自相矛盾。(本套不带 predicate,故不走 validate_rca,直接对 node_states。)
+    planted_hold = {nid for nid, s in (ans.get("node_states") or {}).items() if s == "hold"}
+    honest = _judged_hold_ids(conf, prob) <= planted_hold
     why = []
     if not hit:
         why.append("没命中应在档位")
@@ -137,29 +132,39 @@ def main() -> int:
                   and (d / "rca_input.json").exists())
     rows = [score_one(d, args.use_reference) for d in scns]
 
-    L = ["=" * 78,
-         "诊断准确率评测(受控合成故障注入 · Mode A 隔离 RCA" + ("· 参考答案自测" if args.use_reference else "") + ")",
-         "=" * 78,
-         f"{'场景':<30}{'类别':<22}{'命中':<5}{'档位':<5}{'无假阳':<7}{'诚实':<5}{'综合'}"]
+    L = ["=" * 84,
+         "诊断准确率评测(受控合成故障注入 · 多树 · 事实不带 predicate,模型须自判)"
+         + ("· 参考答案自测" if args.use_reference else ""),
+         "=" * 84,
+         f"{'场景':<34}{'类别':<22}{'命中':<5}{'档位':<5}{'无假阳':<7}{'诚实':<5}{'综合'}"]
     M = lambda b: " ✓  " if b else " ✗  "
     for r in rows:
         if r["status"] == "pending":
-            L.append(f"{r['scenario']:<30}{r['category']:<22}{'—— 待模型产出 rca.json ——'}")
+            L.append(f"{r['scenario']:<34}{r['category']:<22}{'—— 待模型产出 rca.json ——'}")
             continue
-        L.append(f"{r['scenario']:<30}{r['category']:<22}{M(r['hit'])}{M(r['tier'])}{M(r['no_fp'])+'  '}"
+        L.append(f"{r['scenario']:<34}{r['category']:<22}{M(r['hit'])}{M(r['tier'])}{M(r['no_fp'])+'  '}"
                  f"{M(r['honest'])}{'✓ 通过' if r['ok'] else '✗ ' + r['why']}")
     scored = [r for r in rows if r["status"] == "scored"]
     n = len(scored) or 1
     agg = {k: sum(1 for r in scored if r[k]) for k in ("hit", "tier", "no_fp", "honest", "ok")}
-    L.append("-" * 78)
+    L.append("-" * 84)
     L.append(f"合计({len(scored)} 个已评分): 命中 {agg['hit']}/{len(scored)}、档位 {agg['tier']}/{len(scored)}、"
              f"无假阳 {agg['no_fp']}/{len(scored)}、诚实 {agg['honest']}/{len(scored)}")
-    L.append(f"综合准确率(四项全过): {agg['ok']}/{len(scored)} = {100*agg['ok']/n:.0f}%")
+    L.append(f"综合准确率(四项全过): {agg['ok']}/{len(scored)} = {100 * agg['ok'] / n:.0f}%")
+    # 按树规模分档(看"准确率 vs 规模"曲线)
+    by = {}
+    for r in scored:
+        by.setdefault((r.get("tree_nodes") or 0, r.get("tree")), []).append(r)
+    if len(by) > 1:
+        L.append("\n按树规模分档(综合通过率):")
+        for (sz, tag), rs in sorted(by.items()):
+            ok = sum(1 for r in rs if r["ok"])
+            L.append(f"  {str(sz)+' 节点':<10} {str(tag):<22} {ok}/{len(rs)}")
     pend = [r for r in rows if r["status"] == "pending"]
     if pend:
-        L.append(f"\n待评分 {len(pend)} 个(先用 fault-tree-rca 产出其 result/rca.json):{[r['scenario'] for r in pend]}")
-    L.append("注:这是【受控合成】下的准确率,证明推理链在干净事实上成立(必要不充分);现网准确率需真实标注案例。")
-    L.append("=" * 78)
+        L.append(f"\n待评分 {len(pend)} 个(先用 fault-tree-rca 产出其 rca.json):{[r['scenario'] for r in pend]}")
+    L.append("注:【受控合成】下的 RCA 大树推理稳健性(判条件+导航+抗诱饵+诚实),必要不充分;现网准确率需真实标注案例。")
+    L.append("=" * 84)
     report = "\n".join(L)
     print(report)
     if args.output:

@@ -1,0 +1,80 @@
+{
+  "scenario": "synth_特大__fp_heavy",
+  "tree": "synth_特大",
+  "tree_nodes": 320,
+  "category": "false_positive_resist",
+  "truth": {
+    "root_cause_node_id": "s289",
+    "root_cause_name": "UECapabilityEnquiry无回复",
+    "tier": "confirmed",
+    "must_not_report": [
+      "s39",
+      "s132",
+      "s39",
+      "s133",
+      "s39",
+      "s134",
+      "s39",
+      "s135"
+    ]
+  },
+  "node_states": {
+    "s7": "hold",
+    "s25": "hold",
+    "s94": "hold",
+    "s289": "hold",
+    "s132": "hold",
+    "s39": "fail",
+    "s133": "hold",
+    "s134": "hold",
+    "s135": "hold",
+    "s100": "fail",
+    "s101": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "UECapabilityEnquiry无回复",
+        "Fault_tree_path": [
+          "邻区漏配",
+          "GTP-U路径故障告警",
+          "License受限告警",
+          "UECapabilityEnquiry无回复"
+        ],
+        "evidence_path": [
+          {
+            "node": "邻区漏配",
+            "node_id": "s7",
+            "condition": "配置核查:存在漏配的同频邻区关系(命中)",
+            "actual": "ConfigDiff 命中 5/5",
+            "judgment": "成立"
+          },
+          {
+            "node": "GTP-U路径故障告警",
+            "node_id": "s25",
+            "condition": "告警日志存在「ALM-25952 GTPU路径故障」",
+            "actual": "AlarmLog 命中 4/4",
+            "judgment": "成立"
+          },
+          {
+            "node": "License受限告警",
+            "node_id": "s94",
+            "condition": "告警日志存在「ALM-26818 License不足」",
+            "actual": "AlarmLog 命中 1/1",
+            "judgment": "成立"
+          },
+          {
+            "node": "UECapabilityEnquiry无回复",
+            "node_id": "s289",
+            "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
+            "actual": "命中会话 12 个",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "scenario": "real_sub_接入_小__fp_heavy",
+  "tree": "real_sub_接入_小",
+  "tree_nodes": 27,
+  "category": "false_positive_resist",
+  "truth": {
+    "root_cause_node_id": "n69",
+    "root_cause_name": "Xn链路故障告警",
+    "tier": "confirmed",
+    "must_not_report": [
+      "n48",
+      "n50",
+      "n48",
+      "n51",
+      "n48",
+      "n52",
+      "n48",
+      "n53"
+    ]
+  },
+  "node_states": {
+    "n67": "hold",
+    "n68": "hold",
+    "n69": "hold",
+    "n50": "hold",
+    "n48": "fail",
+    "n51": "hold",
+    "n52": "hold",
+    "n53": "hold",
+    "n54": "fail",
+    "n55": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "Xn链路故障告警",
+        "Fault_tree_path": [
+          "射频单元驻波比异常告警",
+          "小区不可用告警",
+          "Xn链路故障告警"
+        ],
+        "evidence_path": [
+          {
+            "node": "射频单元驻波比异常告警",
+            "node_id": "n67",
+            "condition": "告警日志存在「ALM-26529 射频单元驻波比异常」",
+            "actual": "AlarmLog 命中 3/3",
+            "judgment": "成立"
+          },
+          {
+            "node": "小区不可用告警",
+            "node_id": "n68",
+            "condition": "告警日志存在「ALM-25888 小区不可用」",
+            "actual": "AlarmLog 命中 2/2",
+            "judgment": "成立"
+          },
+          {
+            "node": "Xn链路故障告警",
+            "node_id": "n69",
+            "condition": "告警日志存在「ALM-29240 Xn链路故障」",
+            "actual": "AlarmLog 命中 1/1",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "scenario": "real_sub_上下文_中__honest",
+  "tree": "real_sub_上下文_中",
+  "tree_nodes": 44,
+  "category": "honest_insufficient",
+  "truth": {
+    "root_cause_node_id": null,
+    "root_cause_name": null,
+    "tier": "undetermined",
+    "must_not_report": [
+      "n10",
+      "n11",
+      "n15",
+      "n16",
+      "n17",
+      "n18"
+    ]
+  },
+  "node_states": {
+    "n10": "insuf",
+    "n11": "insuf",
+    "n15": "insuf",
+    "n16": "insuf",
+    "n17": "insuf",
+    "n18": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [],
+    "undetermined": [
+      {
+        "note": "无闭合成立路径,数据不足/条件不成立,未定位到根因"
+      }
+    ],
+    "tree_issues": {}
+  }
+}

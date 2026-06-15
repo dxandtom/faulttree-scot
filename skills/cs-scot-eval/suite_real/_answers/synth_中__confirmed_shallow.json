@@ -1,0 +1,53 @@
+{
+  "scenario": "synth_中__confirmed_shallow",
+  "tree": "synth_中",
+  "tree_nodes": 95,
+  "category": "confirmed",
+  "truth": {
+    "root_cause_node_id": "s24",
+    "root_cause_name": "传输资源不可用占比高",
+    "tier": "confirmed",
+    "must_not_report": [
+      "s7",
+      "s31"
+    ]
+  },
+  "node_states": {
+    "s5": "hold",
+    "s24": "hold",
+    "s31": "hold",
+    "s7": "fail",
+    "s25": "fail",
+    "s26": "insuf"
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "传输资源不可用占比高",
+        "Fault_tree_path": [
+          "弱覆盖采样占比高",
+          "传输资源不可用占比高"
+        ],
+        "evidence_path": [
+          {
+            "node": "弱覆盖采样占比高",
+            "node_id": "s5",
+            "condition": "RSRP<-110 的采样占比 > 15%",
+            "actual": "弱覆盖采样占比 RSRP<-110(%)=38.4",
+            "judgment": "成立"
+          },
+          {
+            "node": "传输资源不可用占比高",
+            "node_id": "s24",
+            "condition": "NgRanCause=transport-resource-unavailable 占比 ≥ 20%",
+            "actual": "NgRanCause 命中 198/600(占比 0.33)",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}
