@@ -3,40 +3,98 @@
     "scenario": "SA场景接入失败",
     "root": "n1",
     "outline": {
+      "n11": "insufficient",
+      "n49": "pass",
       "n3": "hold",
-      "n115": "uncovered",
+      "n102": "uncovered",
+      "n1": "pass",
       "n50": "hold",
-      "n114": "uncovered",
-      "n121": "insufficient",
-      "n48": "fail",
-      "n5": "hold",
+      "n115": "uncovered",
       "n4": "hold",
       "n47": "uncovered",
-      "n11": "insufficient",
-      "n1": "pass",
-      "n49": "pass",
-      "n12": "fail",
-      "n102": "uncovered"
+      "n5": "hold",
+      "n121": "insufficient",
+      "n114": "uncovered",
+      "n48": "fail",
+      "n12": "fail"
     },
     "pruned_nodes": {
+      "n11": {
+        "name": "Xn链路故障告警",
+        "parent": "n5",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "告警日志存在「ALM-29240 Xn链路故障」",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n11_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "n49": {
+        "name": "L4节点_019",
+        "parent": "n48",
+        "level": 5,
+        "pass_through": true
+      },
       "n3": {
-        "name": "L2节点_002",
+        "name": "UE上下文建立成功率低",
         "parent": "n1",
         "level": 3,
-        "condition": "合成判据#n3(导航测试,非真实业务)",
+        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
         "combine": "OR",
         "facts": [
           {
             "id": "n3_b",
             "indicator": "kpi",
-            "mapping_reason": "合成注入",
+            "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
             "status": "ok",
             "predicate_satisfied": true,
-            "resolved_column": "syn_metric",
-            "value": 1.0,
-            "op": ">",
-            "threshold": 0
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 93.8,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "n102": {
+        "name": "L2节点_007",
+        "parent": "n1",
+        "level": 3,
+        "combine": "OR"
+      },
+      "n1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "n50": {
+        "name": "PRACH随机接入成功率低",
+        "parent": "n49",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "RACH_Setup_SuccRate(%) < 95",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n50_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "RACH_Setup_SuccRate(%)",
+            "value": 78.6,
+            "op": "<",
+            "threshold": 95.0
           }
         ]
       },
@@ -46,111 +104,30 @@
         "level": 5,
         "combine": "AND"
       },
-      "n50": {
-        "name": "L5节点_023",
-        "parent": "n49",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "合成判据#n50(导航测试,非真实业务)",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n50_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "syn_metric",
-            "value": 1.0,
-            "op": ">",
-            "threshold": 0
-          }
-        ]
-      },
-      "n114": {
-        "name": "L3节点_030",
-        "parent": "n102",
-        "level": 4,
-        "combine": "OR"
-      },
-      "n121": {
-        "name": "L5节点_034",
-        "parent": "n115",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "合成判据#n121(导航测试,非真实业务)",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n121_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入",
-            "class": "A",
-            "status": "insufficient_data"
-          }
-        ]
-      },
-      "n48": {
-        "name": "L3节点_004",
-        "parent": "n47",
-        "level": 4,
-        "condition": "合成判据#n48(导航测试,非真实业务)",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n48_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "syn_metric",
-            "value": 0.0,
-            "op": ">",
-            "threshold": 0
-          }
-        ]
-      },
-      "n5": {
-        "name": "L4节点_001",
-        "parent": "n4",
-        "level": 5,
-        "condition": "合成判据#n5(导航测试,非真实业务)",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "n5_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "syn_metric",
-            "value": 1.0,
-            "op": ">",
-            "threshold": 0
-          }
-        ]
-      },
       "n4": {
-        "name": "L3节点_001",
+        "name": "Xn链路故障告警",
         "parent": "n3",
         "level": 4,
-        "condition": "合成判据#n4(导航测试,非真实业务)",
+        "condition": "告警日志存在「ALM-29240 Xn链路故障」",
         "combine": "OR",
         "facts": [
           {
             "id": "n4_b",
             "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "A",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
             "status": "ok",
             "predicate_satisfied": true,
-            "resolved_column": "syn_metric",
-            "value": 1.0,
-            "op": ">",
-            "threshold": 0
+            "resolved_column": "AlarmLog",
+            "matched": 1,
+            "total": 1,
+            "ratio": 1.0,
+            "top": [
+              [
+                "ALM-29240 Xn链路故障",
+                1
+              ]
+            ]
           }
         ]
       },
@@ -160,62 +137,93 @@
         "level": 3,
         "combine": "unknown"
       },
-      "n11": {
-        "name": "L5节点_006",
-        "parent": "n5",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "合成判据#n11(导航测试,非真实业务)",
-        "combine": "unknown",
+      "n5": {
+        "name": "QoS Flow建立成功率低",
+        "parent": "n4",
+        "level": 5,
+        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
+        "combine": "AND",
         "facts": [
           {
-            "id": "n11_b",
+            "id": "n5_b",
             "indicator": "kpi",
-            "mapping_reason": "合成注入",
+            "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
-            "status": "insufficient_data"
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
+            "value": 90.2,
+            "op": "<",
+            "threshold": 99.0
           }
         ]
       },
-      "n1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
+      "n121": {
+        "name": "RRC建立尝试与成功数差>0",
+        "parent": "n115",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "N.RRC.ConnReq.Att − N.RRC.ConnReq.Succ > 0",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n121_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "B",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
       },
-      "n49": {
-        "name": "L4节点_019",
-        "parent": "n48",
-        "level": 5,
-        "pass_through": true
+      "n114": {
+        "name": "L3节点_030",
+        "parent": "n102",
+        "level": 4,
+        "combine": "OR"
+      },
+      "n48": {
+        "name": "UE上下文建立成功率低",
+        "parent": "n47",
+        "level": 4,
+        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n48_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 99.95,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
       },
       "n12": {
-        "name": "L4节点_002",
+        "name": "QoS Flow建立成功率低",
         "parent": "n4",
         "level": 5,
         "is_leaf": true,
-        "condition": "合成判据#n12(导航测试,非真实业务)",
+        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
         "combine": "unknown",
         "facts": [
           {
             "id": "n12_b",
             "indicator": "chr",
-            "mapping_reason": "合成注入",
+            "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
             "status": "ok",
             "predicate_satisfied": false,
-            "resolved_column": "syn_metric",
-            "value": 0.0,
-            "op": ">",
-            "threshold": 0
+            "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
+            "value": 99.8,
+            "op": "<",
+            "threshold": 99.0
           }
         ]
-      },
-      "n102": {
-        "name": "L2节点_007",
-        "parent": "n1",
-        "level": 3,
-        "combine": "OR"
       }
     }
   },

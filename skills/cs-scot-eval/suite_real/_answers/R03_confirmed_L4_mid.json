@@ -3,7 +3,7 @@
   "category": "confirmed",
   "truth": {
     "root_cause_node_id": "n164",
-    "root_cause_name": "L3节点_034",
+    "root_cause_name": "Xn链路故障告警",
     "tier": "confirmed",
     "must_not_report": [
       "n48",
@@ -13,25 +13,24 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "L3节点_034",
+        "Root_cause": "Xn链路故障告警",
         "Fault_tree_path": [
-          "L1节点_001",
-          "L2节点_009",
-          "L3节点_034"
+          "小区不可用告警",
+          "Xn链路故障告警"
         ],
         "evidence_path": [
           {
-            "node": "L2节点_009",
+            "node": "小区不可用告警",
             "node_id": "n163",
-            "condition": "合成判据#n163(导航测试,非真实业务)",
-            "actual": "满足",
+            "condition": "告警日志存在「ALM-25888 小区不可用」",
+            "actual": "AlarmLog 命中 2/2(占比 1.0)",
             "judgment": "成立"
           },
           {
-            "node": "L3节点_034",
+            "node": "Xn链路故障告警",
             "node_id": "n164",
-            "condition": "合成判据#n164(导航测试,非真实业务)",
-            "actual": "满足",
+            "condition": "告警日志存在「ALM-29240 Xn链路故障」",
+            "actual": "AlarmLog 命中 1/1(占比 1.0)",
             "judgment": "成立"
           }
         ]

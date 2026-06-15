@@ -3,7 +3,7 @@
   "category": "confirmed",
   "truth": {
     "root_cause_node_id": "n121",
-    "root_cause_name": "L5节点_034",
+    "root_cause_name": "RRC建立尝试与成功数差>0",
     "tier": "confirmed",
     "must_not_report": [
       "n5",
@@ -15,41 +15,40 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "L5节点_034",
+        "Root_cause": "RRC建立尝试与成功数差>0",
         "Fault_tree_path": [
-          "L1节点_001",
-          "L2节点_007",
-          "L3节点_030",
-          "L4节点_049",
-          "L5节点_034"
+          "PRACH随机接入成功率低",
+          "单小区接入失败占比高",
+          "弱覆盖采样占比高",
+          "RRC建立尝试与成功数差>0"
         ],
         "evidence_path": [
           {
-            "node": "L2节点_007",
+            "node": "PRACH随机接入成功率低",
             "node_id": "n102",
-            "condition": "合成判据#n102(导航测试,非真实业务)",
-            "actual": "满足",
+            "condition": "RACH_Setup_SuccRate(%) < 95",
+            "actual": "RACH_Setup_SuccRate(%)=78.6",
             "judgment": "成立"
           },
           {
-            "node": "L3节点_030",
+            "node": "单小区接入失败占比高",
             "node_id": "n114",
-            "condition": "合成判据#n114(导航测试,非真实业务)",
-            "actual": "满足",
+            "condition": "失败会话按 NRCellID 分组,TOP1 小区占比 > 60%",
+            "actual": "TOP1=CellID-0x1A3F 占比 0.81",
             "judgment": "成立"
           },
           {
-            "node": "L4节点_049",
+            "node": "弱覆盖采样占比高",
             "node_id": "n115",
-            "condition": "合成判据#n115(导航测试,非真实业务)",
-            "actual": "满足",
+            "condition": "RSRP<-110 的采样占比 > 15%",
+            "actual": "弱覆盖采样占比 RSRP<-110(%)=38.4",
             "judgment": "成立"
           },
           {
-            "node": "L5节点_034",
+            "node": "RRC建立尝试与成功数差>0",
             "node_id": "n121",
-            "condition": "合成判据#n121(导航测试,非真实业务)",
-            "actual": "满足",
+            "condition": "N.RRC.ConnReq.Att − N.RRC.ConnReq.Succ > 0",
+            "actual": "N.RRC.ConnReq.Att−N.RRC.ConnReq.Succ=1240",
             "judgment": "成立"
           }
         ]
