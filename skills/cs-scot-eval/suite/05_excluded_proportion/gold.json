@@ -1,0 +1,28 @@
+{
+  "scenario": "05_excluded_proportion",
+  "category": "excluded",
+  "kernels": [
+    "E"
+  ],
+  "bindings": [
+    {
+      "id": "b2",
+      "node_id": "n2",
+      "source": "chr",
+      "class": "E",
+      "group_by": "TerminalType",
+      "op": ">",
+      "threshold": 0.5,
+      "condition_text": "TOP终端占比>0.5",
+      "mapping_reason": "占比阈值"
+    }
+  ],
+  "truth": {
+    "root_cause_node_id": null,
+    "root_cause_name": null,
+    "tier": "excluded",
+    "must_not_report": [
+      "n2"
+    ]
+  }
+}

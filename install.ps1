@@ -31,7 +31,7 @@ if (-not $Target) {
 $Source = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SkillsSrc = Join-Path $Source "skills"
 $Mode = if ($Link) { "link" } else { "copy" }
-$Dirs = @("cs-scot-generate", "cs-scot-execute", "fault-tree-rca", "cs-scot-benchmark")
+$Dirs = @("cs-scot-generate", "cs-scot-execute", "fault-tree-rca", "cs-scot-benchmark", "cs-scot-eval")
 
 Write-Step "source:  $SkillsSrc"
 Write-Step "target:  $Target"
@@ -78,6 +78,6 @@ foreach ($d in $Dirs) {
 }
 
 Write-Host ""
-Write-Step "DONE. 已安装 4 个 skill 到:$Target"
-Write-Host "  - cs-scot-generate / cs-scot-execute / fault-tree-rca / cs-scot-benchmark"
+Write-Step "DONE. 已安装 5 个 skill 到:$Target"
+Write-Host "  - cs-scot-generate / cs-scot-execute / fault-tree-rca / cs-scot-benchmark / cs-scot-eval"
 Write-Host "依赖:仅 Python 标准库;读取 .xlsx 需 openpyxl(csv 开箱即用): pip install openpyxl"

@@ -1,0 +1,53 @@
+{
+  "scenario": "06_false_positive_resist",
+  "root": "n1",
+  "nodes": {
+    "n1": {
+      "name": "接入质差",
+      "code": "接入质差",
+      "parent": null,
+      "children": [
+        "n2",
+        "n3"
+      ],
+      "level": 2,
+      "pass_through": true
+    },
+    "n2": {
+      "name": "覆盖问题",
+      "code": "覆盖问题",
+      "parent": "n1",
+      "children": [
+        "n4"
+      ],
+      "level": 3,
+      "condition": "RSRP<-110"
+    },
+    "n3": {
+      "name": "干扰问题",
+      "code": "干扰问题",
+      "parent": "n1",
+      "children": [
+        "n5"
+      ],
+      "level": 3,
+      "condition": "干扰电平>-100"
+    },
+    "n4": {
+      "name": "弱覆盖",
+      "code": "弱覆盖",
+      "parent": "n2",
+      "children": [],
+      "level": 4,
+      "condition": "RSRP<-120"
+    },
+    "n5": {
+      "name": "外部干扰",
+      "code": "外部干扰",
+      "parent": "n3",
+      "children": [],
+      "level": 4,
+      "condition": "SINR<0"
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "scenario": "02_confirmed_combo",
+  "category": "confirmed",
+  "kernels": [
+    "D",
+    "C",
+    "A"
+  ],
+  "bindings": [
+    {
+      "id": "b2",
+      "node_id": "n2",
+      "source": "chr",
+      "class": "D",
+      "combine": "AND",
+      "condition_text": "DCErrType=RNL_Unspecified 且 RSRP<-120",
+      "mapping_reason": "错误码且弱场,组合",
+      "sub": [
+        {
+          "class": "C",
+          "source": "chr",
+          "column": "DCErrType",
+          "equals": [
+            "RNL_Unspecified"
+          ],
+          "require": 1
+        },
+        {
+          "class": "A",
+          "source": "chr",
+          "column": "RSRP",
+          "op": "<",
+          "threshold": -120,
+          "scope": "count_rows",
+          "require": 1
+        }
+      ]
+    },
+    {
+      "id": "b3",
+      "node_id": "n3",
+      "source": "chr",
+      "class": "C",
+      "column": "DCErrType",
+      "equals": [
+        "OTHER"
+      ],
+      "require": 1,
+      "condition_text": "DCErrType=OTHER",
+      "mapping_reason": "错误码匹配"
+    }
+  ],
+  "truth": {
+    "root_cause_node_id": "n2",
+    "root_cause_name": "弱覆盖致接入失败",
+    "tier": "confirmed",
+    "must_not_report": [
+      "n3"
+    ]
+  }
+}

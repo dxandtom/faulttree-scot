@@ -1,0 +1,30 @@
+{
+  "scenario": "04_honest_insufficient",
+  "category": "honest_insufficient",
+  "kernels": [
+    "H"
+  ],
+  "bindings": [
+    {
+      "id": "b2",
+      "node_id": "n2",
+      "source": "sig",
+      "class": "H",
+      "key": "CallID",
+      "msg_column": "MessageType",
+      "lacks": [
+        "SecurityModeComplete"
+      ],
+      "condition_text": "会话缺 SecurityModeComplete",
+      "mapping_reason": "信令缺失判定"
+    }
+  ],
+  "truth": {
+    "root_cause_node_id": null,
+    "root_cause_name": null,
+    "tier": "undetermined",
+    "must_not_report": [
+      "n2"
+    ]
+  }
+}

@@ -8,6 +8,7 @@
 - **cs-scot-execute** — 按 `plan.json` 顺序执行 SCoT 计划
 - **fault-tree-rca** — 综合根因分析
 - **cs-scot-benchmark** — 对 generate 产物跑基准(压缩/稳定/可复现/护栏),出报告 txt
+- **cs-scot-eval** — 合成故障注入测诊断准确率(自带 ground truth),出准确率表
 
 > 注:这三个是**工具 skill**。用 `cs-scot-generate` 为某场景生成出来的"场景 skill"
 > (如 `examples/sa-access-fail/`)是另外单独上传/使用的,不由本脚本安装。
@@ -49,7 +50,7 @@ pip install openpyxl
 ## 验证
 ```bash
 ls ~/.claude/skills/
-# 应看到:cs-scot-generate/  cs-scot-execute/  fault-tree-rca/  cs-scot-benchmark/
+# 应看到:cs-scot-generate/  cs-scot-execute/  fault-tree-rca/  cs-scot-benchmark/  cs-scot-eval/
 ```
 跑一个现成的场景示例(`examples/sa-access-fail/` 是已生成好的场景 skill):
 ```bash
@@ -68,7 +69,8 @@ python scripts/runner.py --plan plan.json \
 rm -rf ~/.claude/skills/cs-scot-generate \
        ~/.claude/skills/cs-scot-execute \
        ~/.claude/skills/fault-tree-rca \
-       ~/.claude/skills/cs-scot-benchmark
+       ~/.claude/skills/cs-scot-benchmark \
+       ~/.claude/skills/cs-scot-eval
 ```
 (若是 `--link` 安装,只删软链,不影响源仓。)
 

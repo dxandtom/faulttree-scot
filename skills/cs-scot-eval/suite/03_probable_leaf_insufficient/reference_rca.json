@@ -1,0 +1,22 @@
+{
+  "rca_result": [],
+  "probable_causes": [
+    {
+      "Root_cause": "承载网丢包",
+      "blocked_at": "光模块劣化",
+      "caveats": "叶子因数据不足,已定位到该层、叶子因待定",
+      "support": "中间层条件成立",
+      "evidence_path": [
+        {
+          "node": "承载网丢包",
+          "node_id": "n2",
+          "condition": "传输丢包率>1",
+          "actual": "满足",
+          "judgment": "成立"
+        }
+      ]
+    }
+  ],
+  "undetermined": [],
+  "tree_issues": {}
+}

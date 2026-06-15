@@ -1,0 +1,70 @@
+{
+  "scenario": "01_confirmed_threshold",
+  "category": "confirmed",
+  "kernels": [
+    "A"
+  ],
+  "bindings": [
+    {
+      "id": "b2",
+      "node_id": "n2",
+      "source": "kpi",
+      "class": "A",
+      "column": "rrc_succ_rate",
+      "op": "<",
+      "threshold": 100,
+      "scope": "aggregate",
+      "agg": "mean",
+      "condition_text": "RRC建立成功率<100",
+      "mapping_reason": "同流程率重述"
+    },
+    {
+      "id": "b3",
+      "node_id": "n3",
+      "source": "kpi",
+      "class": "A",
+      "column": "qos_succ_rate",
+      "op": "<",
+      "threshold": 100,
+      "scope": "aggregate",
+      "agg": "mean",
+      "condition_text": "QoS建立成功率<100",
+      "mapping_reason": "同流程率重述"
+    },
+    {
+      "id": "b4",
+      "node_id": "n4",
+      "source": "kpi",
+      "class": "A",
+      "column": "rrc_res_avail",
+      "op": "<",
+      "threshold": 100,
+      "scope": "aggregate",
+      "agg": "mean",
+      "condition_text": "RRC可用资源率<100",
+      "mapping_reason": "资源率阈值"
+    },
+    {
+      "id": "b5",
+      "node_id": "n5",
+      "source": "kpi",
+      "class": "A",
+      "column": "qos_auth_rate",
+      "op": "<",
+      "threshold": 100,
+      "scope": "aggregate",
+      "agg": "mean",
+      "condition_text": "QoS鉴权成功率<100",
+      "mapping_reason": "鉴权率阈值"
+    }
+  ],
+  "truth": {
+    "root_cause_node_id": "n4",
+    "root_cause_name": "RRC可用资源不足",
+    "tier": "confirmed",
+    "must_not_report": [
+      "n5",
+      "n3"
+    ]
+  }
+}

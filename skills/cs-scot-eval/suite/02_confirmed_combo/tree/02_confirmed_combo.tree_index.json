@@ -1,0 +1,34 @@
+{
+  "scenario": "02_confirmed_combo",
+  "root": "n1",
+  "nodes": {
+    "n1": {
+      "name": "接入失败",
+      "code": "接入失败",
+      "parent": null,
+      "children": [
+        "n2",
+        "n3"
+      ],
+      "level": 2,
+      "pass_through": true
+    },
+    "n2": {
+      "name": "弱覆盖致接入失败",
+      "code": "弱覆盖致接入失败",
+      "parent": "n1",
+      "children": [],
+      "level": 3,
+      "condition": "DCErrType=RNL_Unspecified 且 RSRP<-120",
+      "combine": "AND"
+    },
+    "n3": {
+      "name": "其它原因",
+      "code": "其它原因",
+      "parent": "n1",
+      "children": [],
+      "level": 3,
+      "condition": "DCErrType=OTHER"
+    }
+  }
+}

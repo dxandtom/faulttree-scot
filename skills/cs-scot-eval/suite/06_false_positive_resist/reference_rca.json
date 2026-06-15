@@ -1,0 +1,31 @@
+{
+  "rca_result": [
+    {
+      "Root_cause": "弱覆盖",
+      "Fault_tree_path": [
+        "接入质差",
+        "覆盖问题",
+        "弱覆盖"
+      ],
+      "evidence_path": [
+        {
+          "node": "覆盖问题",
+          "node_id": "n2",
+          "condition": "RSRP<-110",
+          "actual": "满足",
+          "judgment": "成立"
+        },
+        {
+          "node": "弱覆盖",
+          "node_id": "n4",
+          "condition": "RSRP<-120",
+          "actual": "满足",
+          "judgment": "成立"
+        }
+      ]
+    }
+  ],
+  "probable_causes": [],
+  "undetermined": [],
+  "tree_issues": {}
+}
