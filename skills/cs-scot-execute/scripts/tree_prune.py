@@ -111,12 +111,15 @@ def prune(index: dict, results: dict) -> dict:
         pruned[nid] = rec
         outline[nid] = _coarse(ent, n.get("pass_through"))          # outline 只存状态(name/parent 去 pruned_nodes 取)
 
-    uncovered = [{"id": nid, "name": n.get("name"), "condition": (n.get("condition") or "")[:60]}
+    # 未覆盖清单只留 id+name(给人/RCA 当"没查到的分支"线索):条件文本无任何逻辑消费,
+    # 越稀疏这张表越长,带 60 字条件会把 payload 顶大 → 去掉(要看细节有每个保留节点的 uncovered_children)。
+    uncovered = [{"id": nid, "name": n.get("name")}
                  for nid, n in nodes.items() if not n.get("pass_through") and nid not in facts]
     orphans = sorted(k for k in facts if k != "__no_node_id__" and k not in nodes)
     unmapped = list(facts.get("__no_node_id__", []))
     for oid in orphans:
         unmapped.extend(facts[oid])
+    unmapped = [_slim_fact(e) for e in unmapped]   # 孤儿事实也瘦身(同 pruned_nodes):去整条 condition_text、截 mapping_reason
 
     return {"scenario": index.get("scenario"), "root": index.get("root"),
             "outline": outline, "pruned_nodes": pruned, "unmapped": unmapped,

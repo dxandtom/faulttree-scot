@@ -317,8 +317,11 @@ def main() -> int:
         cov = run0["pr"]["coverage"]
         before = len(json.dumps({"fault_tree_md": md_text, "indicator_results": run0["facts"]}, ensure_ascii=False))
         after = run0["payload_len"]
+        floored = bool(before) and after >= before          # 零损失下界:剪枝反而更大 → runner 会回退完整树
+        eff_after = before if floored else after             # 实际发送的体积(取局部子树/完整树中较小者)
         t1 = {"total": cov["total_nodes"], "kept": cov["kept_nodes"], "before": before, "after": after,
-              "saved": (100 * (1 - after / before)) if before else 0}
+              "eff_after": eff_after, "floored": floored,
+              "saved": (100 * (1 - eff_after / before)) if before else 0}
     # T3 可复现
     repro = {}
     for ind in indicators:
@@ -369,9 +372,11 @@ def main() -> int:
     L.append("\n【1. 压缩有效】")
     if t1:
         L.append(f"  故障树节点: 总 {t1['total']} → 局部子树保留 {t1['kept']}")
-        L.append(f"  RCA 输入(字符): 压缩前(整树+全量事实) ~{t1['before']} → 压缩后(局部子树) ~{t1['after']}")
-        L.append(f"  节省: {t1['saved']:.0f}%")
-        L.append(f"  结论: {'✓ 有效,省 %.0f%%(树越大省越多)' % t1['saved'] if t1['saved'] > 0 else '≈ 本场景子树占比高,省得少'}")
+        L.append(f"  RCA 输入(字符): 压缩前(整树+全量事实) ~{t1['before']} → 局部子树 ~{t1['after']}")
+        if t1["floored"]:
+            L.append("  零损失下界: 局部子树 ≥ 完整树 → 实际回退完整树发送,压缩 0%(此树小/密,本就无可剪)")
+        L.append(f"  实际节省: {t1['saved']:.0f}%")
+        L.append(f"  结论: {'✓ 有效,省 %.0f%%(树越大省越多)' % t1['saved'] if t1['saved'] > 0 else '≈ 零损失下界生效:本树小/密,保证不倒贴(0%)'}")
     else:
         L.append("  (分析脚本未全部跑通,无法计算)")
 
