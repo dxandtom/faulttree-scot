@@ -9,7 +9,7 @@
   诚实    —— 复用 validate_rca:确证路径无数据不足/不成立、无伪造成立。
 综合 = 四项全过。**这是"受控合成故障注入下"的准确率,是必要不充分(现网更脏)。**
 
-用法: python score_accuracy.py [--suite <目录,默认 ../suite>] [--use-reference]
+用法: python score_accuracy.py [--suite <目录,默认 ../suite_real>] [--use-reference]
   --use-reference: 用每个场景的 reference_rca.json 当输入做自测(应满分),用于验证打分链路本身。
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SKILLS_ROOT = HERE.parent.parent
-DEFAULT_SUITE = HERE.parent / "suite"
+DEFAULT_SUITE = HERE.parent / "suite_real"
 
 
 def _norm(s):
@@ -61,20 +61,11 @@ def _validate_rca(rca_path: Path, input_path: Path) -> bool:
 
 
 def score_one(scn_dir: Path, use_reference: bool) -> dict:
-    # 两种布局:新版(真实大树)答案区分离 _answers/<名>.json;旧版(toy)gold.json 在场景目录内。
-    ans_file = scn_dir.parent / "_answers" / f"{scn_dir.name}.json"
-    if ans_file.exists():                                   # 新版:模型只读 rca_input,答案另放
-        ans = json.loads(ans_file.read_text(encoding="utf-8"))
-        category, t, ref = ans["category"], ans["truth"], ans.get("reference_rca")
-        inp = scn_dir / "rca_input.json"
-        rca_file = scn_dir / "rca.json"
-    else:                                                   # 旧版 toy 布局
-        gold = json.loads((scn_dir / "gold.json").read_text(encoding="utf-8"))
-        category, t = gold["category"], gold["truth"]
-        rf = scn_dir / "reference_rca.json"
-        ref = json.loads(rf.read_text(encoding="utf-8")) if rf.exists() else None
-        inp = scn_dir / "result" / "rca_input.json"
-        rca_file = scn_dir / "result" / "rca.json"
+    # 模型只读 scn_dir/rca_input.json,把判断写 scn_dir/rca.json;答案(truth+满分参考)放在 _answers/<名>.json。
+    ans = json.loads((scn_dir.parent / "_answers" / f"{scn_dir.name}.json").read_text(encoding="utf-8"))
+    category, t, ref = ans["category"], ans["truth"], ans.get("reference_rca")
+    inp = scn_dir / "rca_input.json"
+    rca_file = scn_dir / "rca.json"
     base = {"scenario": scn_dir.name, "category": category}
     if use_reference:
         rca = ref
@@ -143,7 +134,7 @@ def main() -> int:
     args = ap.parse_args()
     suite = Path(args.suite)
     scns = sorted(d for d in suite.iterdir() if d.is_dir() and not d.name.startswith("_")
-                  and ((d / "rca_input.json").exists() or (d / "gold.json").exists()))
+                  and (d / "rca_input.json").exists())
     rows = [score_one(d, args.use_reference) for d in scns]
 
     L = ["=" * 78,
