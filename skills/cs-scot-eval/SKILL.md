@@ -16,18 +16,16 @@ description: 用"合成故障注入"测诊断准确率——在脱敏后的真�
 
 **Mode A(默认):跳过模型绑定 → 隔离测纯 RCA 推理/导航**,数字最干净。条件已脱敏为 null,所以真实大树这套测的是 **RCA 在大树上的导航/结构推理**(闭合路径、AND/OR、档位、抗假阳、诚实),不是"条件判数据"。
 
-## 三步跑法(主:真实大树 `suite_real`)
+> **考题已冻结提交,本地不要重新生成**(出题方=可信侧,答题方=你本地模型,防止自出自答找便宜路)。
+> `suite_real/<场景>/rca_input.json` = **答题模型唯一该读的**;`suite_real/_answers/` = **答案区,做 RCA 时别读**,只给打分器。
 
-### 步骤 1:在真实大树上注入(确定性,一条命令造出全部场景的 `rca_input.json`)
-```bash
-python "<本目录>/scripts/inject_on_tree.py"      # 读 real_trees/ 真实树 → 写 suite_real/<场景>/result/rca_input.json + gold.json
-```
+## 两步跑法(主:真实大树 `suite_real`,考题已预置)
 
-### 步骤 2:逐场景做 RCA(**这一步是模型判断,正是被打分的对象**)
-对 `suite_real/` 下**每个**场景,用 **fault-tree-rca** 技能读它的 `result/rca_input.json` 做根因判断,把结果按该技能的契约写到**同目录** `result/rca.json`。
-> 别看 truth/reference 再判——那是作弊;就当普通一次 RCA,凭 `rca_input.json` 里的事实(局部子树)判。
+### 步骤 1:逐场景做 RCA(**这一步是模型判断,正是被打分的对象**)
+对 `suite_real/` 下**每个**场景(`_answers/` 不是场景),用 **fault-tree-rca** 技能读它的 `rca_input.json` 做根因判断,把结果按该技能的契约写到**同目录** `rca.json`。
+> 别去翻 `_answers/`——那是作弊;就当普通一次 RCA,凭 `rca_input.json` 里的事实(局部子树)判。
 
-### 步骤 3:打分出表(确定性)
+### 步骤 2:打分出表(确定性)
 ```bash
 python "<本目录>/scripts/score_accuracy.py" --suite "<本目录>/suite_real" -o "<本目录>/accuracy_report.txt"
 ```
@@ -44,9 +42,9 @@ python "<本目录>/scripts/score_accuracy.py" --suite "<本目录>/suite_real" 
 ```
 用每个场景的 `reference_rca.json`(满分参考)当输入,应出 **100%**——证明注入+剪枝+打分链路本身没毛病。
 
-## 换树 / 扩充场景
-- **换真实树**:把另一棵脱敏 `*.tree_index.json` 丢进 `real_trees/`,`inject_on_tree.py --tree <它>` 即可(只需拓扑,条件可为 null)。
-- **加注入场景**:在 `inject_on_tree.py` 的 `SPECS` 加一条(`target` 埋因叶子 / `decoys` 诱饵 / 噪声),重跑;埋更深、加更多诱饵 = 加难度。
+## 换树 / 扩充场景(维护用,平时不跑;改完要重新提交冻结)
+- **换真实树**:把另一棵脱敏 `*.tree_index.json` 丢进 `real_trees/`,`inject_on_tree.py --tree <它>` 重生成 `suite_real/` 再提交(只需拓扑,条件可为 null)。
+- **加注入场景**:在 `inject_on_tree.py` 的 `SPECS` 加一条(`target` 埋因叶子 / `decoys` 诱饵 / 噪声),重跑重提交;埋更深、加更多诱饵 = 加难度。
 - **toy 自测套件**:`make_injection_suite.py` 重生成 `suite/`;它走金标准绑定,需先 `eval_prep.py --suite suite` 备 `rca_input` 再 RCA、再 `score_accuracy.py --suite suite`。
 
 ## 注意(写进汇报必须说清)

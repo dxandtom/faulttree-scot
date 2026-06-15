@@ -1,0 +1,60 @@
+{
+  "scenario": "R08_confirmed_L5",
+  "category": "confirmed",
+  "truth": {
+    "root_cause_node_id": "n72",
+    "root_cause_name": "L5节点_028",
+    "tier": "confirmed",
+    "must_not_report": [
+      "n131",
+      "n135"
+    ]
+  },
+  "reference_rca": {
+    "rca_result": [
+      {
+        "Root_cause": "L5节点_028",
+        "Fault_tree_path": [
+          "L1节点_001",
+          "L2节点_003",
+          "L3节点_007",
+          "L4节点_033",
+          "L5节点_028"
+        ],
+        "evidence_path": [
+          {
+            "node": "L2节点_003",
+            "node_id": "n47",
+            "condition": "合成判据#n47(导航测试,非真实业务)",
+            "actual": "满足",
+            "judgment": "成立"
+          },
+          {
+            "node": "L3节点_007",
+            "node_id": "n67",
+            "condition": "合成判据#n67(导航测试,非真实业务)",
+            "actual": "满足",
+            "judgment": "成立"
+          },
+          {
+            "node": "L4节点_033",
+            "node_id": "n68",
+            "condition": "合成判据#n68(导航测试,非真实业务)",
+            "actual": "满足",
+            "judgment": "成立"
+          },
+          {
+            "node": "L5节点_028",
+            "node_id": "n72",
+            "condition": "合成判据#n72(导航测试,非真实业务)",
+            "actual": "满足",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "probable_causes": [],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

@@ -18,6 +18,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -60,17 +61,30 @@ def _validate_rca(rca_path: Path, input_path: Path) -> bool:
 
 
 def score_one(scn_dir: Path, use_reference: bool) -> dict:
-    gold = json.loads((scn_dir / "gold.json").read_text(encoding="utf-8"))
-    t = gold["truth"]
-    rca_file = scn_dir / "result" / ("reference_rca.json" if use_reference else "rca.json")
+    # 两种布局:新版(真实大树)答案区分离 _answers/<名>.json;旧版(toy)gold.json 在场景目录内。
+    ans_file = scn_dir.parent / "_answers" / f"{scn_dir.name}.json"
+    if ans_file.exists():                                   # 新版:模型只读 rca_input,答案另放
+        ans = json.loads(ans_file.read_text(encoding="utf-8"))
+        category, t, ref = ans["category"], ans["truth"], ans.get("reference_rca")
+        inp = scn_dir / "rca_input.json"
+        rca_file = scn_dir / "rca.json"
+    else:                                                   # 旧版 toy 布局
+        gold = json.loads((scn_dir / "gold.json").read_text(encoding="utf-8"))
+        category, t = gold["category"], gold["truth"]
+        rf = scn_dir / "reference_rca.json"
+        ref = json.loads(rf.read_text(encoding="utf-8")) if rf.exists() else None
+        inp = scn_dir / "result" / "rca_input.json"
+        rca_file = scn_dir / "result" / "rca.json"
+    base = {"scenario": scn_dir.name, "category": category}
     if use_reference:
-        rca_file = scn_dir / "reference_rca.json"
-    inp = scn_dir / "result" / "rca_input.json"
-    base = {"scenario": scn_dir.name, "category": gold["category"]}
-    if not rca_file.exists():
+        rca = ref
+    elif rca_file.exists():
+        rca = json.loads(rca_file.read_text(encoding="utf-8"))
+    else:
+        rca = None
+    if rca is None:
         return {**base, "status": "pending", "hit": False, "tier": False, "no_fp": False,
                 "honest": False, "ok": False, "why": "缺 rca.json(模型还没判)"}
-    rca = json.loads(rca_file.read_text(encoding="utf-8"))
     conf = rca.get("rca_result") or []
     prob = rca.get("probable_causes") or []
     nid, name = t.get("root_cause_node_id"), t.get("root_cause_name")
@@ -96,7 +110,14 @@ def score_one(scn_dir: Path, use_reference: bool) -> dict:
         hit = (len(conf) == 0)
         tier_ok = (len(conf) == 0)
         no_fp = (len(conf) == 0) and not fp
-    honest = _validate_rca(rca_file, inp)
+    # 诚实校验:validate_rca 吃文件 → 把 rca(可能来自答案区/内存)落到临时文件再校
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as tf:
+        json.dump(rca, tf, ensure_ascii=False)
+        tmp = tf.name
+    try:
+        honest = _validate_rca(Path(tmp), inp)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
     why = []
     if not hit:
         why.append("没命中应在档位")
@@ -121,7 +142,8 @@ def main() -> int:
     ap.add_argument("-o", "--output", help="报告 txt(默认打印到终端)")
     args = ap.parse_args()
     suite = Path(args.suite)
-    scns = sorted(d for d in suite.iterdir() if d.is_dir() and (d / "gold.json").exists())
+    scns = sorted(d for d in suite.iterdir() if d.is_dir() and not d.name.startswith("_")
+                  and ((d / "rca_input.json").exists() or (d / "gold.json").exists()))
     rows = [score_one(d, args.use_reference) for d in scns]
 
     L = ["=" * 78,

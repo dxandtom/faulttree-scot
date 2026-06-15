@@ -1,0 +1,49 @@
+{
+  "scenario": "R05_probable_leaf_insuf",
+  "category": "probable",
+  "truth": {
+    "root_cause_node_id": "n5",
+    "root_cause_name": "L4节点_001",
+    "tier": "probable",
+    "must_not_report": [
+      "n48",
+      "n50"
+    ]
+  },
+  "reference_rca": {
+    "rca_result": [],
+    "probable_causes": [
+      {
+        "Root_cause": "L4节点_001",
+        "blocked_at": "叶子因",
+        "caveats": "叶子因数据不足,已定位到该层、叶子待定",
+        "support": "中间层闭合",
+        "evidence_path": [
+          {
+            "node": "L2节点_002",
+            "node_id": "n3",
+            "condition": "合成判据#n3(导航测试,非真实业务)",
+            "actual": "满足",
+            "judgment": "成立"
+          },
+          {
+            "node": "L3节点_001",
+            "node_id": "n4",
+            "condition": "合成判据#n4(导航测试,非真实业务)",
+            "actual": "满足",
+            "judgment": "成立"
+          },
+          {
+            "node": "L4节点_001",
+            "node_id": "n5",
+            "condition": "合成判据#n5(导航测试,非真实业务)",
+            "actual": "满足",
+            "judgment": "成立"
+          }
+        ]
+      }
+    ],
+    "undetermined": [],
+    "tree_issues": {}
+  }
+}

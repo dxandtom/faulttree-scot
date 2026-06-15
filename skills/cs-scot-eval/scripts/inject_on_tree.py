@@ -174,6 +174,8 @@ def main():
     tree = json.loads(Path(args.tree).read_text(encoding="utf-8"))
     nodes = tree["nodes"]
     out = Path(args.out)
+    ans = out / "_answers"
+    ans.mkdir(parents=True, exist_ok=True)
     print(f"真实树:{tree['scenario']} · {len(nodes)} 节点 · 注入 {len(SPECS)} 个场景")
     for spec in SPECS:
         widx, results, truth = build(spec, tree)
@@ -182,18 +184,25 @@ def main():
                                   "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
                    "unmapped_facts": pr["unmapped"], "tree_issues": pr["coverage"]}
         d = out / spec["name"]
-        (d / "result").mkdir(parents=True, exist_ok=True)
-        (d / "result" / "rca_input.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        (d / "gold.json").write_text(json.dumps(
-            {"scenario": spec["name"], "category": spec["category"], "truth": truth},
-            ensure_ascii=False, indent=2), encoding="utf-8")
-        (d / "reference_rca.json").write_text(json.dumps(
-            build_reference(truth, nodes), ensure_ascii=False, indent=2), encoding="utf-8")
+        d.mkdir(parents=True, exist_ok=True)
+        # 模型只读这个(冻结的考题);答案另放 _answers/,做 RCA 时别读。
+        (d / "rca_input.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        (ans / f"{spec['name']}.json").write_text(json.dumps(
+            {"scenario": spec["name"], "category": spec["category"], "truth": truth,
+             "reference_rca": build_reference(truth, nodes)}, ensure_ascii=False, indent=2), encoding="utf-8")
         tgt = truth["root_cause_node_id"] or "—(无根因)"
         print(f"  {spec['name']:<32}[{spec['category']:<22}] 埋因 {tgt:<5} "
               f"剪枝保留 {pr['coverage']['kept_nodes']}/{pr['coverage']['total_nodes']} "
               f"诱饵/禁报 {len(truth['must_not_report'])}")
-    print(f"\n→ {out}\n下一步:逐场景用 fault-tree-rca 读 result/rca_input.json 写 result/rca.json,再跑 score_accuracy.py --suite suite_real")
+    (out / "README.md").write_text(
+        "# 冻结的诊断准确率考题(真实大树注入)\n\n"
+        "这些场景由可信侧预先生成并提交,**本地不要重新生成**(避免出题方=答题方、自找便宜路径)。\n\n"
+        "- `<场景>/rca_input.json` —— **答题模型只读这个**(局部子树+事实)。\n"
+        "- `<场景>/rca.json` —— 答题模型把 RCA 结果写这里(本地产物,不提交)。\n"
+        "- `_answers/<场景>.json` —— **答案区(truth+满分参考),做 RCA 时别读**,只给打分器用。\n\n"
+        "跑分:`python ../scripts/score_accuracy.py --suite . -o accuracy_report.txt`\n"
+        "自测打分链路:`... score_accuracy.py --suite . --use-reference`(应 100%)。\n", encoding="utf-8")
+    print(f"\n→ {out}(已冻结提交;答案在 _answers/)\n下一步:逐场景用 fault-tree-rca 读 <场景>/rca_input.json 写 <场景>/rca.json,再跑 score_accuracy.py --suite suite_real")
 
 
 if __name__ == "__main__":

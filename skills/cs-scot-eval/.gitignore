@@ -1,1 +1,2 @@
-suite_real/
+suite_real/*/rca.json
+suite_real/accuracy_report.txt
