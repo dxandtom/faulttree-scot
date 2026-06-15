@@ -129,6 +129,46 @@ def prune(index: dict, results: dict) -> dict:
                          "facts_without_node_id": len(facts.get("__no_node_id__", []))}}
 
 
+def compose_rca_payload(index: dict, results: dict, md_text: str = "") -> dict:
+    """剪枝 + 组装 RCA 输入 + 应用"零损失下界" —— **唯一出口**:任何调用方(runner/benchmark/
+    单独测压缩的脚本)都从这里拿到一致结果,floor 想漏都漏不掉。
+
+    返回 {payload, mode, note, before, after, eff_after, saved, floored, kept, total_nodes, coverage}:
+    - mode="pruned"            用局部子树(确实比完整树小);
+    - mode="fallback_floor"    局部子树 ≥ 完整树 → 回退完整树(小/密的树,省 0%、绝不倒贴);
+    - mode="fallback_coverage" node_id 覆盖 <50% → 回退完整树(剪枝不可信)。
+    `payload` 即最终该发给 RCA 的对象;`note` 是给终端打印的中文说明。
+    """
+    pr = prune(index, results)
+    cov = pr["coverage"]
+    cand = {"fault_tree": {"scenario": pr["scenario"], "root": pr["root"],
+                           "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
+            "unmapped_facts": pr["unmapped"], "tree_issues": cov}
+    md_payload = {"fault_tree_md": md_text, "indicator_results": results}
+    before = len(json.dumps(md_payload, ensure_ascii=False))
+    after = len(json.dumps(cand, ensure_ascii=False))
+    total = sum(len((r or {}).get("conditions", [])) for r in (results or {}).values())
+    mapped = total - cov.get("facts_without_node_id", 0)
+    base = {"before": before, "after": after, "coverage": cov,
+            "kept": cov["kept_nodes"], "total_nodes": cov["total_nodes"]}
+
+    if total > 0 and mapped < 0.5 * total:                       # 覆盖太低 → 剪枝不可信,回退完整树
+        return {**base, "payload": md_payload, "mode": "fallback_coverage", "eff_after": before,
+                "saved": 0.0, "floored": True,
+                "note": f"[info] node_id 覆盖不足(mapped {mapped}/{total}),回退完整子树。"}
+    if md_text and before and after >= before:                  # 零损失下界:剪枝反而更大 → 回退完整树
+        return {**base, "payload": md_payload, "mode": "fallback_floor", "eff_after": before,
+                "saved": 0.0, "floored": True,
+                "note": (f"[info] 局部子树(~{after})≥完整树(~{before}),零损失下界生效:"
+                         f"回退完整子树、压缩 0%(此树小/密,本就无可剪)。")}
+    saved = 100 * (1 - after / before) if before else 0.0       # 真省了 → 用局部子树
+    return {**base, "payload": cand, "mode": "pruned", "eff_after": after,
+            "saved": saved, "floored": False,
+            "note": (f"已用局部子树:保留 {cov['kept_nodes']}/{cov['total_nodes']} 节点;"
+                     f"上下文 压缩前(完整树+全量事实)~{before} → 压缩后 ~{after} 字符 (省 {saved:.0f}%);"
+                     f"未覆盖 {len(cov['uncovered_condition_nodes'])}、孤儿 {len(cov['orphan_node_ids'])}。")}
+
+
 def _load(path: str) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -142,6 +182,7 @@ def main() -> None:
     ap.add_argument("--index", required=True)
     ap.add_argument("--results", action="append", default=[], help="name=path(可多次)")
     ap.add_argument("-o", "--output", required=True)
+    ap.add_argument("--md", help="该场景子树 md;给了就按 runner 同款'零损失下界'报压缩率(单独测压缩用,负数会被夹到0)")
     args = ap.parse_args()
     results = {}
     for item in args.results:
@@ -150,11 +191,18 @@ def main() -> None:
             sys.exit(2)
         k, v = item.split("=", 1)
         results[k.strip()] = _load(v.strip())
-    out = prune(_load(args.index), results)
+    index = _load(args.index)
+    out = prune(index, results)
     Path(args.output).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     cov = out["coverage"]
     print(f"[tree_prune] 保留 {cov['kept_nodes']}/{cov['total_nodes']} 节点;"
           f"未覆盖条件节点 {len(cov['uncovered_condition_nodes'])};孤儿 node_id {len(cov['orphan_node_ids'])} → {args.output}")
+    if args.md:  # 单独测压缩:走与 runner 完全相同的 compose+floor,得到"实际发送"的压缩率(永不为负)
+        md_text = Path(args.md).read_text(encoding="utf-8") if Path(args.md).exists() else ""
+        comp = compose_rca_payload(index, results, md_text)
+        print(f"[compress] {comp['note']}")
+        print(f"[compress] 实际节省 {comp['saved']:.0f}% (mode={comp['mode']}, "
+              f"压缩前~{comp['before']} → 实际发送~{comp['eff_after']})")
 
 
 if __name__ == "__main__":

@@ -162,32 +162,13 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
     if idx_path and idx_path.exists():
         try:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from tree_prune import prune
-            pr = prune(json.loads(idx_path.read_text(encoding="utf-8")), ins)
-            total = sum(len((r or {}).get("conditions", [])) for r in ins.values())
-            mapped = total - pr["coverage"].get("facts_without_node_id", 0)
-            if total > 0 and mapped >= 0.5 * total:
-                cand = {"fault_tree": {"scenario": pr["scenario"], "root": pr["root"],
-                                       "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
-                        "unmapped_facts": pr["unmapped"], "tree_issues": pr["coverage"]}
-                cov = pr["coverage"]
-                md_text = md_path.read_text(encoding="utf-8") if (md_path and md_path.exists()) else ""
-                before = len(json.dumps({"fault_tree_md": md_text, "indicator_results": ins}, ensure_ascii=False))
-                after = len(json.dumps(cand, ensure_ascii=False))
-                if before and after < before:                 # 真省了才用局部子树
-                    payload = cand
-                    tree_note = (f"  已用局部子树:保留 {cov['kept_nodes']}/{cov['total_nodes']} 节点;"
-                                 f"上下文 压缩前(完整树+全量事实)~{before} → 压缩后 ~{after} 字符 "
-                                 f"(省 {100 * (1 - after / before):.0f}%);"
-                                 f"未覆盖 {len(cov['uncovered_condition_nodes'])}、孤儿 {len(cov['orphan_node_ids'])}。")
-                else:                                          # 零损失下界:剪枝反而更大(小/密的树)→ 回退完整树、不倒贴
-                    tree_note = (f"  [info] 局部子树(~{after})≥完整树(~{before}),零损失下界生效:"
-                                 f"回退完整子树、压缩 0%(此树小/密,本就无可剪)。")
-            else:
-                tree_note = f"  [info] node_id 覆盖不足(mapped {mapped}/{total}),回退完整子树。"
+            from tree_prune import compose_rca_payload
+            md_text = md_path.read_text(encoding="utf-8") if (md_path and md_path.exists()) else ""
+            comp = compose_rca_payload(json.loads(idx_path.read_text(encoding="utf-8")), ins, md_text)
+            payload, tree_note = comp["payload"], "  " + comp["note"]   # 剪枝/floor/覆盖回退已在 compose 内统一处理
         except Exception as e:  # noqa: BLE001
-            tree_note = f"  [warn] 剪枝失败,回退完整子树: {e}"
-    if payload is None:  # 回退:完整 md + 全量 indicator_results
+            payload, tree_note = None, f"  [warn] 剪枝失败,回退完整子树: {e}"
+    if payload is None:  # 无 index / 剪枝异常 → 完整 md + 全量 indicator_results
         ft_text = md_path.read_text(encoding="utf-8") if (md_path and md_path.exists()) else ft
         payload = {"fault_tree_md": ft_text, "indicator_results": ins}
 
