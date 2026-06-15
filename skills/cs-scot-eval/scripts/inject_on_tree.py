@@ -3,9 +3,9 @@
 
 要点:
 - **多棵树**(trees/ 下:真实树 + 其子树 + 合成树,~27~320 节点)→ 出"准确率 vs 规模"。
-- **不带 predicate_satisfied**:事实只给实际值(成功率/占比/告警数/会话数…)+ 判据带阈值,
-  **逼模型自己判 condition 成立/不成立**,而不是读字面布尔。(注:真实生产输入是带 predicate 的,
-  这里刻意抽掉做更硬的考。)
+- **rca_input 与生产完全一致**:事实由"内核同形"构造(含 predicate_satisfied、value/ratio/matched…),
+  就是生产里 analyzer→tree_prune 给 RCA 的那个样子;测的是 RCA 干它的本职——按树结构组合判定 + 导航 +
+  档位 + 抗诱饵 + 诚实(不另造"逼模型重算"的非生产任务)。
 - 每棵树**自动**生成 6 类场景(确证深/浅、疑似、抗假阳、诚实、排除),埋因+诱饵+噪声确定性选取。
 - 答案(truth + 满分参考 + 埋下的逐节点状态 node_states)放 _answers/,做题时勿读。
 
@@ -151,7 +151,8 @@ def _persona_map(nodes: dict) -> dict:
 
 
 def _fact(persona: dict, state: str) -> dict:
-    """按人设+状态出事实——**不含 predicate_satisfied**(只给实际值,逼模型自己判)。"""
+    """按人设+状态出事实——**与生产内核同形(含 predicate_satisfied)**:生产里内核会算字面判定,
+    tree_prune 也保留它,所以 rca_input 本来就带 predicate。hold→True、fail→False(由构造保证与值一致)。"""
     cls = persona["cls"]
     if state == "insuf":
         return {"class": cls, "status": "insufficient_data", "resolved_column": None, "reason": persona["insuf"]}
@@ -159,20 +160,21 @@ def _fact(persona: dict, state: str) -> dict:
     k = persona["kind"]
     if k == "num":
         v = persona["hold_v"] if hold else persona["fail_v"]
-        return {"class": cls, "status": "ok", "resolved_column": persona["col"],
-                "op": persona["op"], "threshold": persona["thr"], "value": v}
+        return {"class": cls, "status": "ok", "resolved_column": persona["col"], "op": persona["op"],
+                "threshold": persona["thr"], "value": v, "predicate_satisfied": hold}
     if k in ("propmatch", "exist"):
         m, tot, top = persona["hold"] if hold else persona["fail"]
-        f = {"class": cls, "status": "ok", "resolved_column": persona["col"], "matched": m, "total": tot, "top": top}
+        f = {"class": cls, "status": "ok", "resolved_column": persona["col"], "matched": m, "total": tot,
+             "top": top, "predicate_satisfied": hold}
         if k == "propmatch":
             f["ratio"] = round(m / tot, 3) if tot else 0.0
-            f["min_ratio"] = persona["min_ratio"]
         return f
     if k == "sess":
         return {"class": cls, "status": "ok", "resolved_column": "MessageType",
-                "matched_sessions": persona["hold_s"] if hold else 0}
+                "matched_sessions": persona["hold_s"] if hold else 0, "predicate_satisfied": hold}
     return {"class": cls, "status": "ok", "group_by": persona["col"], "top1": persona["top1"],
-            "top1_ratio": persona["hold_r"] if hold else persona["fail_r"], "op": persona["op"], "threshold": persona["thr"]}
+            "top1_ratio": persona["hold_r"] if hold else persona["fail_r"], "op": persona["op"],
+            "threshold": persona["thr"], "predicate_satisfied": hold}
 
 
 def _actual_str(persona: dict) -> str:
@@ -372,10 +374,11 @@ def main():
             print(f"   {spec['kind']:<18} 埋因 {tgt:<5} 剪枝 {pr['coverage']['kept_nodes']}/{pr['coverage']['total_nodes']}"
                   f" 禁报 {len(truth['must_not_report'])}")
     (out / "README.md").write_text(
-        "# 冻结的诊断准确率考题(多树故障注入,不带 predicate)\n\n"
-        "可信侧预生成、已提交,**本地勿重新生成**。每个 `<场景>/rca_input.json` 是答题模型**唯一该读**的;\n"
-        "事实**不含 predicate_satisfied**,模型须拿实际值自己判 condition 成立/不成立,再导航。\n"
-        "`_answers/` 是答案区(truth+node_states+满分参考),**做题时勿读**,只给打分器。\n\n"
+        "# 冻结的诊断准确率考题(多树故障注入)\n\n"
+        "可信侧预生成、已提交,**本地勿重新生成**。每个 `<场景>/rca_input.json` 是答题模型**唯一该读**的,\n"
+        "格式**与生产 rca_input 完全一致**(含 predicate_satisfied/value/ratio…);模型按 fault-tree-rca\n"
+        "正常流程判断,把结果写同目录 `rca.json`。`_answers/` 是答案区(truth+node_states+满分参考),\n"
+        "**做题时勿读**,只给打分器。\n\n"
         "跑分:`python ../scripts/score_accuracy.py --suite . -o accuracy_report.txt`;"
         "自测:`... --use-reference`(应 100%)。\n", encoding="utf-8")
     print(f"\n→ {out}:共 {total} 个场景(跨 {len(tree_files)} 棵树,不同规模)")

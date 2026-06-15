@@ -3,31 +3,19 @@
     "scenario": "synth_中",
     "root": "s1",
     "outline": {
-      "s2": "uncovered",
-      "s7": "uncovered",
-      "s36": "?",
+      "s36": "fail",
       "s8": "uncovered",
-      "s35": "?",
-      "s37": "?",
-      "s33": "?",
+      "s35": "fail",
+      "s1": "pass",
+      "s37": "fail",
+      "s7": "uncovered",
+      "s2": "uncovered",
+      "s33": "fail",
+      "s34": "fail",
       "s9": "uncovered",
-      "s34": "?",
-      "s31": "?",
-      "s1": "pass"
+      "s31": "fail"
     },
     "pruned_nodes": {
-      "s2": {
-        "name": "L2节点_002",
-        "parent": "s1",
-        "level": 3,
-        "combine": "unknown"
-      },
-      "s7": {
-        "name": "L3节点_007",
-        "parent": "s2",
-        "level": 4,
-        "combine": "OR"
-      },
       "s36": {
         "name": "RegistrationRequest无Accept",
         "parent": "s8",
@@ -42,6 +30,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "H",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "MessageType",
             "matched_sessions": 0
           }
@@ -67,10 +56,17 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "H",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "MessageType",
             "matched_sessions": 0
           }
         ]
+      },
+      "s1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
       },
       "s37": {
         "name": "UECapabilityEnquiry无回复",
@@ -86,10 +82,23 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "H",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "MessageType",
             "matched_sessions": 0
           }
         ]
+      },
+      "s7": {
+        "name": "L3节点_007",
+        "parent": "s2",
+        "level": 4,
+        "combine": "OR"
+      },
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "unknown"
       },
       "s33": {
         "name": "License受限告警",
@@ -105,18 +114,13 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "G",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "AlarmLog",
             "matched": 0,
             "total": 1,
             "top": []
           }
         ]
-      },
-      "s9": {
-        "name": "L3节点_009",
-        "parent": "s2",
-        "level": 4,
-        "combine": "AND"
       },
       "s34": {
         "name": "会话缺SecurityModeComplete",
@@ -132,10 +136,17 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "H",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "MessageType",
             "matched_sessions": 0
           }
         ]
+      },
+      "s9": {
+        "name": "L3节点_009",
+        "parent": "s2",
+        "level": 4,
+        "combine": "AND"
       },
       "s31": {
         "name": "GPS失锁/时钟告警",
@@ -151,18 +162,13 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "G",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "AlarmLog",
             "matched": 0,
             "total": 1,
             "top": []
           }
         ]
-      },
-      "s1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
       }
     }
   },

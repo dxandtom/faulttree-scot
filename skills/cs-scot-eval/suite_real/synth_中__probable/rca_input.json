@@ -3,61 +3,17 @@
     "scenario": "synth_中",
     "root": "s1",
     "outline": {
-      "s2": "?",
-      "s7": "?",
+      "s49": "hold",
+      "s1": "pass",
+      "s7": "hold",
+      "s2": "hold",
+      "s12": "fail",
       "s3": "uncovered",
-      "s49": "?",
-      "s24": "?",
-      "s12": "?",
-      "s31": "insufficient",
+      "s24": "fail",
       "s5": "uncovered",
-      "s1": "pass"
+      "s31": "insufficient"
     },
     "pruned_nodes": {
-      "s2": {
-        "name": "切换成功率低",
-        "parent": "s1",
-        "level": 3,
-        "condition": "NR_HO_SuccRate(%) < 95",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s2_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "resolved_column": "NR_HO_SuccRate(%)",
-            "value": 80.1,
-            "op": "<",
-            "threshold": 95.0
-          }
-        ]
-      },
-      "s7": {
-        "name": "UECapabilityEnquiry无回复",
-        "parent": "s2",
-        "level": 4,
-        "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "s7_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "ok",
-            "resolved_column": "MessageType",
-            "matched_sessions": 12
-          }
-        ]
-      },
-      "s3": {
-        "name": "L2节点_003",
-        "parent": "s1",
-        "level": 3,
-        "combine": "AND"
-      },
       "s49": {
         "name": "RLC重传率高",
         "parent": "s12",
@@ -72,12 +28,86 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
             "status": "ok",
+            "predicate_satisfied": true,
             "resolved_column": "RLC_Retx_Rate(%)",
             "value": 23.5,
             "op": ">",
             "threshold": 10.0
           }
         ]
+      },
+      "s1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "s7": {
+        "name": "UECapabilityEnquiry无回复",
+        "parent": "s2",
+        "level": 4,
+        "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "s7_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "MessageType",
+            "matched_sessions": 12
+          }
+        ]
+      },
+      "s2": {
+        "name": "切换成功率低",
+        "parent": "s1",
+        "level": 3,
+        "condition": "NR_HO_SuccRate(%) < 95",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s2_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "NR_HO_SuccRate(%)",
+            "value": 80.1,
+            "op": "<",
+            "threshold": 95.0
+          }
+        ]
+      },
+      "s12": {
+        "name": "QoS Flow建立成功率低",
+        "parent": "s3",
+        "level": 4,
+        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "s12_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
+            "value": 99.8,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "s3": {
+        "name": "L2节点_003",
+        "parent": "s1",
+        "level": 3,
+        "combine": "AND"
       },
       "s24": {
         "name": "传输资源不可用占比高",
@@ -93,6 +123,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "C",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "NgRanCause",
             "matched": 3,
             "total": 600,
@@ -110,25 +141,11 @@
           }
         ]
       },
-      "s12": {
-        "name": "QoS Flow建立成功率低",
-        "parent": "s3",
-        "level": 4,
-        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "s12_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
-            "value": 99.8,
-            "op": "<",
-            "threshold": 99.0
-          }
-        ]
+      "s5": {
+        "name": "L2节点_005",
+        "parent": "s1",
+        "level": 3,
+        "combine": "AND"
       },
       "s31": {
         "name": "GPS失锁/时钟告警",
@@ -147,18 +164,6 @@
             "resolved_column": null
           }
         ]
-      },
-      "s5": {
-        "name": "L2节点_005",
-        "parent": "s1",
-        "level": 3,
-        "combine": "AND"
-      },
-      "s1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
       }
     }
   },

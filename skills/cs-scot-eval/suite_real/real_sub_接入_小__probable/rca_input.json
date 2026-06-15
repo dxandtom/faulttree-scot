@@ -3,16 +3,38 @@
     "scenario": "real_sub_接入_小",
     "root": "n47",
     "outline": {
-      "n68": "?",
-      "n48": "?",
+      "n50": "hold",
+      "n68": "hold",
       "n49": "pass",
-      "n47": "pass",
-      "n67": "?",
-      "n50": "?",
+      "n67": "hold",
       "n69": "insufficient",
-      "n51": "?"
+      "n48": "fail",
+      "n47": "pass",
+      "n51": "fail"
     },
     "pruned_nodes": {
+      "n50": {
+        "name": "QoS Flow建立成功率低",
+        "parent": "n49",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n50_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
+            "value": 90.2,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
       "n68": {
         "name": "小区不可用告警",
         "parent": "n67",
@@ -26,6 +48,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "G",
             "status": "ok",
+            "predicate_satisfied": true,
             "resolved_column": "AlarmLog",
             "matched": 2,
             "total": 2,
@@ -38,36 +61,10 @@
           }
         ]
       },
-      "n48": {
-        "name": "UE上下文建立成功率低",
-        "parent": "n47",
-        "level": 3,
-        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n48_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
-            "value": 99.95,
-            "op": "<",
-            "threshold": 99.0
-          }
-        ]
-      },
       "n49": {
         "name": "L4节点_019",
         "parent": "n48",
         "level": 4,
-        "pass_through": true
-      },
-      "n47": {
-        "name": "L2节点_003",
-        "parent": null,
-        "level": 2,
         "pass_through": true
       },
       "n67": {
@@ -83,6 +80,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "G",
             "status": "ok",
+            "predicate_satisfied": true,
             "resolved_column": "AlarmLog",
             "matched": 3,
             "total": 3,
@@ -92,27 +90,6 @@
                 3
               ]
             ]
-          }
-        ]
-      },
-      "n50": {
-        "name": "QoS Flow建立成功率低",
-        "parent": "n49",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n50_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
-            "value": 90.2,
-            "op": "<",
-            "threshold": 99.0
           }
         ]
       },
@@ -134,6 +111,33 @@
           }
         ]
       },
+      "n48": {
+        "name": "UE上下文建立成功率低",
+        "parent": "n47",
+        "level": 3,
+        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n48_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 99.95,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "n47": {
+        "name": "L2节点_003",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
       "n51": {
         "name": "PRACH随机接入成功率低",
         "parent": "n48",
@@ -148,6 +152,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "RACH_Setup_SuccRate(%)",
             "value": 98.9,
             "op": "<",

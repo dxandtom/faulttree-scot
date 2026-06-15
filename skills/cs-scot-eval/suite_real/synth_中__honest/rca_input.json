@@ -3,31 +3,19 @@
     "scenario": "synth_中",
     "root": "s1",
     "outline": {
-      "s2": "uncovered",
-      "s7": "uncovered",
       "s36": "insufficient",
       "s8": "uncovered",
       "s35": "insufficient",
+      "s1": "pass",
       "s37": "insufficient",
+      "s7": "uncovered",
+      "s2": "uncovered",
       "s33": "insufficient",
-      "s9": "uncovered",
       "s34": "insufficient",
-      "s31": "insufficient",
-      "s1": "pass"
+      "s9": "uncovered",
+      "s31": "insufficient"
     },
     "pruned_nodes": {
-      "s2": {
-        "name": "L2节点_002",
-        "parent": "s1",
-        "level": 3,
-        "combine": "unknown"
-      },
-      "s7": {
-        "name": "L3节点_007",
-        "parent": "s2",
-        "level": 4,
-        "combine": "OR"
-      },
       "s36": {
         "name": "RegistrationRequest无Accept",
         "parent": "s8",
@@ -70,6 +58,12 @@
           }
         ]
       },
+      "s1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
       "s37": {
         "name": "UECapabilityEnquiry无回复",
         "parent": "s9",
@@ -87,6 +81,18 @@
             "resolved_column": null
           }
         ]
+      },
+      "s7": {
+        "name": "L3节点_007",
+        "parent": "s2",
+        "level": 4,
+        "combine": "OR"
+      },
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "unknown"
       },
       "s33": {
         "name": "License受限告警",
@@ -106,12 +112,6 @@
           }
         ]
       },
-      "s9": {
-        "name": "L3节点_009",
-        "parent": "s2",
-        "level": 4,
-        "combine": "AND"
-      },
       "s34": {
         "name": "会话缺SecurityModeComplete",
         "parent": "s8",
@@ -130,6 +130,12 @@
           }
         ]
       },
+      "s9": {
+        "name": "L3节点_009",
+        "parent": "s2",
+        "level": 4,
+        "combine": "AND"
+      },
       "s31": {
         "name": "GPS失锁/时钟告警",
         "parent": "s7",
@@ -147,12 +153,6 @@
             "resolved_column": null
           }
         ]
-      },
-      "s1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
       }
     }
   },

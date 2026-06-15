@@ -3,71 +3,22 @@
     "scenario": "synth_特大",
     "root": "s1",
     "outline": {
-      "s94": "uncovered",
-      "s25": "uncovered",
-      "s2": "pass",
-      "s7": "uncovered",
-      "s289": "insufficient",
-      "s26": "uncovered",
       "s291": "insufficient",
-      "s287": "insufficient",
-      "s96": "uncovered",
-      "s92": "uncovered",
-      "s290": "insufficient",
-      "s292": "insufficient",
       "s1": "pass",
-      "s293": "insufficient"
+      "s7": "uncovered",
+      "s287": "insufficient",
+      "s92": "uncovered",
+      "s292": "insufficient",
+      "s94": "uncovered",
+      "s293": "insufficient",
+      "s2": "pass",
+      "s96": "uncovered",
+      "s289": "insufficient",
+      "s290": "insufficient",
+      "s26": "uncovered",
+      "s25": "uncovered"
     },
     "pruned_nodes": {
-      "s94": {
-        "name": "L5节点_094",
-        "parent": "s25",
-        "level": 6,
-        "combine": "OR"
-      },
-      "s25": {
-        "name": "L4节点_025",
-        "parent": "s7",
-        "level": 5,
-        "combine": "unknown"
-      },
-      "s2": {
-        "name": "L2节点_002",
-        "parent": "s1",
-        "level": 3,
-        "combine": "OR",
-        "pass_through": true
-      },
-      "s7": {
-        "name": "L3节点_007",
-        "parent": "s2",
-        "level": 4,
-        "combine": "OR"
-      },
-      "s289": {
-        "name": "UECapabilityEnquiry无回复",
-        "parent": "s94",
-        "level": 7,
-        "is_leaf": true,
-        "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s289_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
-      "s26": {
-        "name": "L4节点_026",
-        "parent": "s7",
-        "level": 5,
-        "combine": "unknown"
-      },
       "s291": {
         "name": "单频点失败集中",
         "parent": "s94",
@@ -85,6 +36,18 @@
             "resolved_column": null
           }
         ]
+      },
+      "s1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "s7": {
+        "name": "L3节点_007",
+        "parent": "s2",
+        "level": 4,
+        "combine": "OR"
       },
       "s287": {
         "name": "有RRCSetupRequest无RRCSetupComplete",
@@ -104,35 +67,11 @@
           }
         ]
       },
-      "s96": {
-        "name": "L5节点_096",
-        "parent": "s26",
-        "level": 6,
-        "combine": "AND"
-      },
       "s92": {
         "name": "L5节点_092",
         "parent": "s25",
         "level": 6,
         "combine": "unknown"
-      },
-      "s290": {
-        "name": "单小区接入失败占比高",
-        "parent": "s94",
-        "level": 7,
-        "is_leaf": true,
-        "condition": "失败会话按 NRCellID 分组,TOP1 小区占比 > 60%",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s290_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "E",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
       },
       "s292": {
         "name": "TAC配置不一致",
@@ -152,11 +91,11 @@
           }
         ]
       },
-      "s1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
+      "s94": {
+        "name": "L5节点_094",
+        "parent": "s25",
+        "level": 6,
+        "combine": "OR"
       },
       "s293": {
         "name": "邻区漏配",
@@ -175,6 +114,67 @@
             "resolved_column": null
           }
         ]
+      },
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "OR",
+        "pass_through": true
+      },
+      "s96": {
+        "name": "L5节点_096",
+        "parent": "s26",
+        "level": 6,
+        "combine": "AND"
+      },
+      "s289": {
+        "name": "UECapabilityEnquiry无回复",
+        "parent": "s94",
+        "level": 7,
+        "is_leaf": true,
+        "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s289_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s290": {
+        "name": "单小区接入失败占比高",
+        "parent": "s94",
+        "level": 7,
+        "is_leaf": true,
+        "condition": "失败会话按 NRCellID 分组,TOP1 小区占比 > 60%",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s290_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "E",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s26": {
+        "name": "L4节点_026",
+        "parent": "s7",
+        "level": 5,
+        "combine": "unknown"
+      },
+      "s25": {
+        "name": "L4节点_025",
+        "parent": "s7",
+        "level": 5,
+        "combine": "unknown"
       }
     }
   },

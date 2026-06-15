@@ -3,15 +3,47 @@
     "scenario": "real_sub_接入_小",
     "root": "n47",
     "outline": {
+      "n64": "hold",
       "n52": "insufficient",
-      "n48": "?",
+      "n50": "hold",
       "n49": "pass",
+      "n48": "fail",
       "n47": "pass",
-      "n50": "?",
-      "n64": "?",
-      "n51": "?"
+      "n51": "fail"
     },
     "pruned_nodes": {
+      "n64": {
+        "name": "AMF过载拒绝占比高",
+        "parent": "n47",
+        "level": 3,
+        "is_leaf": true,
+        "condition": "NgRanCause=amf-overload 占比 ≥ 20%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n64_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "C",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "NgRanCause",
+            "matched": 140,
+            "total": 500,
+            "ratio": 0.28,
+            "top": [
+              [
+                "amf-overload",
+                140
+              ],
+              [
+                "normal",
+                330
+              ]
+            ]
+          }
+        ]
+      },
       "n52": {
         "name": "Msg2响应比例低",
         "parent": "n48",
@@ -30,38 +62,6 @@
           }
         ]
       },
-      "n48": {
-        "name": "UE上下文建立成功率低",
-        "parent": "n47",
-        "level": 3,
-        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n48_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
-            "value": 99.95,
-            "op": "<",
-            "threshold": 99.0
-          }
-        ]
-      },
-      "n49": {
-        "name": "L4节点_019",
-        "parent": "n48",
-        "level": 4,
-        "pass_through": true
-      },
-      "n47": {
-        "name": "L2节点_003",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
-      },
       "n50": {
         "name": "QoS Flow建立成功率低",
         "parent": "n49",
@@ -76,6 +76,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
             "status": "ok",
+            "predicate_satisfied": true,
             "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
             "value": 90.2,
             "op": "<",
@@ -83,36 +84,38 @@
           }
         ]
       },
-      "n64": {
-        "name": "AMF过载拒绝占比高",
+      "n49": {
+        "name": "L4节点_019",
+        "parent": "n48",
+        "level": 4,
+        "pass_through": true
+      },
+      "n48": {
+        "name": "UE上下文建立成功率低",
         "parent": "n47",
         "level": 3,
-        "is_leaf": true,
-        "condition": "NgRanCause=amf-overload 占比 ≥ 20%",
-        "combine": "unknown",
+        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
+        "combine": "OR",
         "facts": [
           {
-            "id": "n64_b",
-            "indicator": "cfg",
+            "id": "n48_b",
+            "indicator": "kpi",
             "mapping_reason": "合成注入(真实业务判据)",
-            "class": "C",
+            "class": "A",
             "status": "ok",
-            "resolved_column": "NgRanCause",
-            "matched": 140,
-            "total": 500,
-            "ratio": 0.28,
-            "top": [
-              [
-                "amf-overload",
-                140
-              ],
-              [
-                "normal",
-                330
-              ]
-            ]
+            "predicate_satisfied": false,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 99.95,
+            "op": "<",
+            "threshold": 99.0
           }
         ]
+      },
+      "n47": {
+        "name": "L2节点_003",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
       },
       "n51": {
         "name": "PRACH随机接入成功率低",
@@ -128,6 +131,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "RACH_Setup_SuccRate(%)",
             "value": 98.9,
             "op": "<",

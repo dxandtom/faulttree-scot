@@ -101,7 +101,7 @@ def score_one(scn_dir: Path, use_reference: bool) -> dict:
         tier_ok = (len(conf) == 0)
         no_fp = (len(conf) == 0) and not fp
     # 诚实(对真值查"伪造成立"):凡模型判"成立"的节点,必须确实是埋下的 hold 节点;
-    # 在 fail/数据不足 节点上判成立 = 伪造/自相矛盾。(本套不带 predicate,故不走 validate_rca,直接对 node_states。)
+    # 在 fail/数据不足 节点上判成立 = 伪造/自相矛盾。直接对真值 node_states 查,比 validate_rca 启发式更精确。
     planted_hold = {nid for nid, s in (ans.get("node_states") or {}).items() if s == "hold"}
     honest = _judged_hold_ids(conf, prob) <= planted_hold
     why = []

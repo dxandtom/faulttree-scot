@@ -3,45 +3,24 @@
     "scenario": "SA场景接入失败",
     "root": "n1",
     "outline": {
-      "n10": "?",
-      "n115": "?",
-      "n5": "?",
-      "n114": "uncovered",
-      "n105": "insufficient",
-      "n104": "uncovered",
-      "n1": "pass",
-      "n116": "?",
-      "n103": "insufficient",
-      "n100": "?",
-      "n101": "?",
-      "n117": "?",
+      "n115": "fail",
+      "n4": "hold",
+      "n10": "hold",
+      "n3": "hold",
       "n86": "pass",
+      "n114": "uncovered",
+      "n5": "hold",
+      "n117": "hold",
+      "n104": "uncovered",
+      "n116": "hold",
+      "n103": "insufficient",
+      "n1": "pass",
+      "n100": "fail",
+      "n105": "insufficient",
       "n102": "uncovered",
-      "n4": "?",
-      "n3": "?"
+      "n101": "fail"
     },
     "pruned_nodes": {
-      "n10": {
-        "name": "UE上下文建立成功率低",
-        "parent": "n5",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n10_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
-            "value": 93.8,
-            "op": "<",
-            "threshold": 99.0
-          }
-        ]
-      },
       "n115": {
         "name": "RRC拒绝(拥塞)占比高",
         "parent": "n114",
@@ -55,6 +34,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "C",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "RrcRejectCause",
             "matched": 5,
             "total": 800,
@@ -72,6 +52,80 @@
           }
         ]
       },
+      "n4": {
+        "name": "PRACH随机接入成功率低",
+        "parent": "n3",
+        "level": 4,
+        "condition": "RACH_Setup_SuccRate(%) < 95",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n4_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "RACH_Setup_SuccRate(%)",
+            "value": 78.6,
+            "op": "<",
+            "threshold": 95.0
+          }
+        ]
+      },
+      "n10": {
+        "name": "UE上下文建立成功率低",
+        "parent": "n5",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n10_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 93.8,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "n3": {
+        "name": "RegistrationRequest无Accept",
+        "parent": "n1",
+        "level": 3,
+        "condition": "信令:有 RegistrationRequest 但无 RegistrationAccept",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n3_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "MessageType",
+            "matched_sessions": 18
+          }
+        ]
+      },
+      "n86": {
+        "name": "L2节点_006",
+        "parent": "n1",
+        "level": 3,
+        "pass_through": true
+      },
+      "n114": {
+        "name": "L3节点_030",
+        "parent": "n102",
+        "level": 4,
+        "combine": "OR"
+      },
       "n5": {
         "name": "无线链路失败RNL占比高",
         "parent": "n4",
@@ -85,6 +139,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "C",
             "status": "ok",
+            "predicate_satisfied": true,
             "resolved_column": "DCErrType",
             "matched": 343,
             "total": 1000,
@@ -102,27 +157,30 @@
           }
         ]
       },
-      "n114": {
-        "name": "L3节点_030",
-        "parent": "n102",
-        "level": 4,
-        "combine": "OR"
-      },
-      "n105": {
-        "name": "RLC重传率高",
-        "parent": "n104",
-        "level": 5,
+      "n117": {
+        "name": "射频单元驻波比异常告警",
+        "parent": "n115",
+        "level": 6,
         "is_leaf": true,
-        "condition": "RLC_Retx_Rate(%) > 10",
-        "combine": "OR",
+        "condition": "告警日志存在「ALM-26529 射频单元驻波比异常」",
+        "combine": "AND",
         "facts": [
           {
-            "id": "n105_b",
-            "indicator": "cfg",
+            "id": "n117_b",
+            "indicator": "sig",
             "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "insufficient_data",
-            "resolved_column": null
+            "class": "G",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "AlarmLog",
+            "matched": 3,
+            "total": 3,
+            "top": [
+              [
+                "ALM-26529 射频单元驻波比异常",
+                3
+              ]
+            ]
           }
         ]
       },
@@ -131,12 +189,6 @@
         "parent": "n102",
         "level": 4,
         "combine": "unknown"
-      },
-      "n1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
       },
       "n116": {
         "name": "注册失败(PLMN不允许)占比高",
@@ -152,6 +204,7 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "C",
             "status": "ok",
+            "predicate_satisfied": true,
             "resolved_column": "RegRejectCause",
             "matched": 132,
             "total": 400,
@@ -187,6 +240,12 @@
           }
         ]
       },
+      "n1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
       "n100": {
         "name": "NG接口/AMF信令建立失败",
         "parent": "n86",
@@ -201,12 +260,37 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "SA_NGSig_Conn_SuccRate(%)",
             "value": 99.99,
             "op": "<",
             "threshold": 99.5
           }
         ]
+      },
+      "n105": {
+        "name": "RLC重传率高",
+        "parent": "n104",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "RLC_Retx_Rate(%) > 10",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n105_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "n102": {
+        "name": "L2节点_007",
+        "parent": "n1",
+        "level": 3,
+        "combine": "OR"
       },
       "n101": {
         "name": "QoS Flow建立成功率低",
@@ -222,86 +306,11 @@
             "mapping_reason": "合成注入(真实业务判据)",
             "class": "A",
             "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
             "value": 99.8,
             "op": "<",
             "threshold": 99.0
-          }
-        ]
-      },
-      "n117": {
-        "name": "射频单元驻波比异常告警",
-        "parent": "n115",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "告警日志存在「ALM-26529 射频单元驻波比异常」",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "n117_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "G",
-            "status": "ok",
-            "resolved_column": "AlarmLog",
-            "matched": 3,
-            "total": 3,
-            "top": [
-              [
-                "ALM-26529 射频单元驻波比异常",
-                3
-              ]
-            ]
-          }
-        ]
-      },
-      "n86": {
-        "name": "L2节点_006",
-        "parent": "n1",
-        "level": 3,
-        "pass_through": true
-      },
-      "n102": {
-        "name": "L2节点_007",
-        "parent": "n1",
-        "level": 3,
-        "combine": "OR"
-      },
-      "n4": {
-        "name": "PRACH随机接入成功率低",
-        "parent": "n3",
-        "level": 4,
-        "condition": "RACH_Setup_SuccRate(%) < 95",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n4_b",
-            "indicator": "cfg",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "resolved_column": "RACH_Setup_SuccRate(%)",
-            "value": 78.6,
-            "op": "<",
-            "threshold": 95.0
-          }
-        ]
-      },
-      "n3": {
-        "name": "RegistrationRequest无Accept",
-        "parent": "n1",
-        "level": 3,
-        "condition": "信令:有 RegistrationRequest 但无 RegistrationAccept",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n3_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "ok",
-            "resolved_column": "MessageType",
-            "matched_sessions": 18
           }
         ]
       }
