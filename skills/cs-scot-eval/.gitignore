@@ -1,2 +1,5 @@
 suite_real/*/rca.json
+suite_real/*/prompt.txt
+suite_real/_HOWTO_prompts.md
 suite_real/accuracy_report.txt
+suite_real/batch_rca.py

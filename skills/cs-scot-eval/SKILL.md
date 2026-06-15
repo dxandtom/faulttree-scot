@@ -17,11 +17,24 @@ description: 用"合成故障注入"测诊断准确率——在多棵不同大�
 > **考题已冻结提交,本地不要重新生成**(出题方=可信侧,答题方=你本地模型,防止自出自答找便宜路)。
 > `suite_real/<场景>/rca_input.json` = **答题模型唯一该读的**;`suite_real/_answers/` = **答案区,做 RCA 时别读**,只给打分器。
 
+## ⛔ 诚信红线(违反则结果作废)
+**这套测的是【模型自己的 RCA 推理】。绝对禁止**:
+1. **写任何脚本/程序去批量产 `rca.json`**(例如读 `predicate_satisfied` 后遍历树的 `batch_rca` 之类)——那测的是脚本不是模型,**结果无意义**;
+2. 偷看 `_answers/`;
+3. 拿 `reference_rca` 当答案。
+**正确做法**:每个场景**逐个**由模型**自己阅读 `rca_input.json`、推理、写 `rca.json`**。
+> 最稳的做法见下方"步骤 1B":用 `make_prompts.py` 把每个场景做成题面,喂给**普通模型(纯聊天,不带写代码的工具)**作答——模型就没法用脚本绕过推理了。
+
 ## 两步跑法(主:真实大树 `suite_real`,考题已预置)
 
-### 步骤 1:逐场景做 RCA(**这一步是模型判断,正是被打分的对象**)
-对 `suite_real/` 下**每个**场景(`_answers/` 不是场景),用 **fault-tree-rca** 技能读它的 `rca_input.json` 做根因判断,把结果按该技能的契约写到**同目录** `rca.json`。
-> 别去翻 `_answers/`——那是作弊;就当普通一次 RCA,凭 `rca_input.json` 里的事实(局部子树)判。
+### 步骤 1:逐场景做 RCA(**模型判断,正是被打分的对象;不许写求解脚本**)
+对 `suite_real/` 下**每个**场景(`_answers/` 不是场景),用 **fault-tree-rca** 技能读它的 `rca_input.json` 做根因判断,把结果按该技能的契约写到**同目录** `rca.json`。一次一个,**自己读、自己判**。
+
+### 步骤 1B(防作弊推荐):题面喂纯模型
+```bash
+python "<本目录>/scripts/make_prompts.py"   # 每个场景生成自包含题面 <场景>/prompt.txt
+```
+把每个 `prompt.txt` 发给**普通模型/聊天(别用能写代码的 agent)**,它**只能靠推理**答 JSON;输出原样存成同目录 `rca.json`。详见生成的 `suite_real/_HOWTO_prompts.md`。
 
 ### 步骤 2:打分出表(确定性)
 ```bash
