@@ -61,6 +61,18 @@ def score_binding(model_list: list, gold_list: list) -> dict:
 
 
 # ---------------- RCA 打分(逐场景,多根因感知) ----------------
+def _seclist(rca: dict, *keys) -> list:
+    """取某一档的记录列表,认契约 key 及常见同义写法(模型把 rca_result 写成 root_cause_nodes
+    不该把"推理对了"判成空)。返回第一个是 list 的 key 值。"""
+    if not isinstance(rca, dict):
+        return []
+    for k in keys:
+        v = rca.get(k)
+        if isinstance(v, list):
+            return v
+    return []
+
+
 def build_ref_rca(roots: set, tier: str, id_states: dict, nodes: dict) -> dict:
     """由 truth 构造"满分参考答案":确证→逐根因列成立路径;疑似→列疑似;排除/不足→不报确证。
     evidence_path 只放 hold 节点(诚实:不在 fail/insuf 节点上写"成立")。"""
@@ -86,8 +98,9 @@ def build_ref_rca(roots: set, tier: str, id_states: dict, nodes: dict) -> dict:
 
 
 def score_rca(rca: dict, roots: set, mnr: set, tier: str, id_states: dict, nodes: dict) -> dict:
-    conf = rca.get("rca_result") or []
-    prob = rca.get("probable_causes") or []
+    conf = _seclist(rca, "rca_result", "root_cause_nodes", "root_causes", "confirmed",
+                    "confirmed_root_causes", "results", "roots")
+    prob = _seclist(rca, "probable_causes", "probable", "suspected_causes", "suspected")
     reported = set()
     for e in conf + prob:
         reported |= _entry_ids(e)[0]
