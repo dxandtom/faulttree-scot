@@ -68,6 +68,22 @@ python "<本目录>/scripts/score_binding.py"  --suite "<本目录>/suite_real" 
 ```
 用满分参考/金标准当输入,应出 **100%**——证明注入+剪枝+打分链路本身没毛病。
 
+## v2:端到端评测(`suite_v2`,零重写 gap)
+v1 复用真实内核但**自己算** `rca_input`(绕过 generate/execute 的技能壳);**v2 把手工题库喂给真
+`excel_to_tree`+`assemble_scenario`+`runner` 端到端跑,再评它们的产物**——测的就是三个 skill 串起来准不准。
+题库**手工精心编排**(非脚本随机生成):一棵因果连贯的 SA 接入失败树(17 节点)+ 9 个有意义场景
+(弱覆盖/AMF过载/鉴权/疑似/排除/数据不足/抗诱饵/多根因),全部真实内核校验过。**join key 是 code**:
+`gold_tree`/`truth` 按 code 索引,真 excel_to_tree 重分配 id 后用重解析的 `tree_index` 映射回来。
+```bash
+python "<本目录>/scripts/v2_run.py"                       # 真 excel_to_tree+assemble+runner → 各场景 rca_input.json + binding_question.json
+python "<本目录>/scripts/make_prompts.py" --v2            # RCA 9 道(scenarios/*/prompt.txt)+ 绑定 1 道(binding_prompt.txt)
+#   发给普通模型答题 → 存 rca.json(各场景)/ binding.json(suite 根)
+python "<本目录>/scripts/score_v2.py"                     # 同时出 绑定 + RCA
+python "<本目录>/scripts/score_v2.py" --use-reference     # 自测打分链路(应 100%)
+```
+RCA 路用**金标准绑定**算事实,隔离绑定误差、单测大树推理;绑定阶段(大白话→系统列)单独评。细节见 `suite_v2/README.md`。
+维护题库:改 `v2_handcrafted.py` 的 `TREE`/`SPEC`/`SCENARIOS` → `python v2_handcrafted.py` 重生(每个场景内核校验须全过)。
+
 ## 换树 / 扩充场景(维护用,平时不跑;改完要重新提交冻结)
 - **加树/换规模**:`make_trees.py` 从真实树切子树 + 生成合成树到 `trees/`(改 `SUBTREES`/`SYNTH` 调规模);要加你自己的脱敏真实树,丢进 `trees/` 即可(只需拓扑,condition 可 null)。
 - **重生成考题**:`inject_on_tree.py` 遍历 `trees/` 每棵树自动出 6 类场景到 `suite_real/`(确定性),改完重新提交冻结。

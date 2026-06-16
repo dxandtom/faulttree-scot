@@ -1,3 +1,4 @@
+# v1(suite_real):提交考题(data/truth/rca_input/binding_question);忽略模型答案与题面/报告
 suite_real/*/rca.json
 suite_real/*/binding.json
 suite_real/*/prompt.txt
@@ -5,8 +6,15 @@ suite_real/*/binding_prompt.txt
 suite_real/_HOWTO_prompts.md
 suite_real/*_report.txt
 suite_real/batch_rca.py
-suite_v2/
+
+# v2(suite_v2):只提交【手工源题库】(fault_tree.csv / gold_tree.json / scenarios/*/data / truth.json)+ 生成器/编排/打分脚本。
+# 忽略流水线产物(v2_run.py 一条命令确定性重生)与模型答案/题面/报告:
+suite_v2/产物/
+suite_v2/binding_question.json
+suite_v2/binding.json
+suite_v2/binding_prompt.txt
+suite_v2/_HOWTO_prompts.md
+suite_v2/*_report.txt
 suite_v2/scenarios/*/rca_input.json
-suite_v2/scenarios/*/binding.json
 suite_v2/scenarios/*/rca.json
-suite_v2/产物
+suite_v2/scenarios/*/prompt.txt

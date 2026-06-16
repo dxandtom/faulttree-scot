@@ -86,6 +86,61 @@ HOWTO = """# 怎么用这些 prompt 跑出【真·模型】准确率
 注意:`_answers/` 是标准答案,**答题时绝不能给模型看**;它只给打分器用。
 """
 
+HOWTO_V2 = """# v2 题面:怎么用(端到端 —— 评的是真 generate/execute/rca 的输出)
+
+v2 与 v1 的区别:v1 复用真实内核但自算 rca_input(绕过技能壳);**v2 真的跑 excel_to_tree+assemble+runner**
+(见 `v2_run.py`),再评它们的产物 → 零重写 gap。题库是**手工精心编排**(非脚本随机生成)的一棵连贯树 + 9 个场景。
+
+前置(本地先跑一次,产出题面 —— 确定性):
+```bash
+python ../scripts/v2_run.py        # 真 excel_to_tree+assemble+runner → 各场景 rca_input.json + binding_question.json
+python ../scripts/make_prompts.py --v2
+```
+
+## 一、RCA(9 道,逐场景)
+每个 `scenarios/<场景>/prompt.txt` = 判据法则 + 该场景 `rca_input.json`(真 runner 用**金标准绑定**算出的事实+剪枝树)。
+**发给普通模型/聊天(别用能写代码的 agent)**,只输出 rca.json 那段 JSON,**原样存成** `scenarios/<场景>/rca.json`。
+
+## 二、绑定(1 道,suite 级)
+`binding_prompt.txt`(由 suite 级 `binding_question.json` 生成:15 条大白话判据 + 各源列概览)。
+同样发给普通模型,输出 CONDITIONS 的 JSON 列表,**原样存成** `binding.json`(放 suite_v2/ 根)。
+
+## 三、打分
+```bash
+python ../scripts/score_v2.py            # 同时出 绑定 + RCA 两段
+python ../scripts/score_v2.py --use-reference   # 自测打分链路(金标准/参考),应 100%
+```
+RCA 用**金标准绑定**隔离绑定误差(单测大树推理);绑定阶段单独评(大白话→系统列选列命中率最关键)。
+注意:`scenarios/*/truth.json` 是答案,**答题时别给模型看**,只给打分器。
+"""
+
+
+def make_v2(suite: Path) -> None:
+    """v2 题面:RCA 逐场景(scenarios/<场景>/prompt.txt)+ 绑定 suite 级一道(binding_prompt.txt)。"""
+    scns = sorted(d for d in (suite / "scenarios").iterdir() if d.is_dir()) if (suite / "scenarios").exists() else []
+    n = 0
+    for d in scns:
+        ri = d / "rca_input.json"
+        if not ri.exists():
+            continue
+        (d / "prompt.txt").write_text(
+            RULES + "\n【本场景输入(rca_input.json)】:\n" + ri.read_text(encoding="utf-8")
+            + "\n\n【现在请只输出该场景的 rca.json(纯 JSON)】", encoding="utf-8")
+        n += 1
+    bq = suite / "binding_question.json"
+    if bq.exists():
+        (suite / "binding_prompt.txt").write_text(
+            BINDING_RULES + "\n【要绑的判据 + 各源列概览(binding_question.json)】:\n"
+            + bq.read_text(encoding="utf-8")
+            + "\n\n【现在请只输出 CONDITIONS 的 JSON 列表(纯 JSON)】", encoding="utf-8")
+    (suite / "_HOWTO_prompts.md").write_text(HOWTO_V2, encoding="utf-8")
+    if not n:
+        print(f"未找到 RCA 题面(先跑 v2_run.py 产 rca_input.json):{suite}", file=sys.stderr)
+        sys.exit(2)
+    print(f"v2 已生成 {n} 道 RCA 题面(scenarios/<场景>/prompt.txt)+ 1 道绑定题面(binding_prompt.txt)+ _HOWTO_prompts.md。")
+    print("RCA:发各 prompt.txt → 存同目录 rca.json;绑定:发 binding_prompt.txt → 存 suite_v2/binding.json;再 score_v2.py。")
+    print("一律发给【普通模型/聊天,别用能写代码的 agent】。")
+
 
 def main():
     try:
@@ -93,9 +148,13 @@ def main():
     except Exception:
         pass
     ap = argparse.ArgumentParser(description="为每个场景生成自包含题面 prompt")
-    ap.add_argument("--suite", default=str(DEFAULT_SUITE))
+    ap.add_argument("--suite", help="题库目录(默认:v1=suite_real;--v2 时=suite_v2)")
+    ap.add_argument("--v2", action="store_true", help="v2 题库布局(scenarios/ + suite 级绑定题)")
     args = ap.parse_args()
-    suite = Path(args.suite)
+    if args.v2:
+        make_v2(Path(args.suite) if args.suite else DEFAULT_SUITE.parent / "suite_v2")
+        return
+    suite = Path(args.suite) if args.suite else DEFAULT_SUITE
     scns = sorted(d for d in suite.iterdir() if d.is_dir() and not d.name.startswith("_")
                   and (d / "rca_input.json").exists())
     if not scns:

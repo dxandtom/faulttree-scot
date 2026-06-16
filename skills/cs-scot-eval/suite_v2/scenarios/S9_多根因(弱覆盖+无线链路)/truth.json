@@ -1,0 +1,27 @@
+{
+  "scenario": "S9_多根因(弱覆盖+无线链路)",
+  "category": "confirmed",
+  "tier": "confirmed",
+  "root_cause_codes": [
+    "FT-004",
+    "FT-013"
+  ],
+  "must_not_report_codes": [],
+  "node_states": {
+    "FT-001": "hold",
+    "FT-002": "hold",
+    "FT-004": "hold",
+    "FT-012": "hold",
+    "FT-013": "hold",
+    "FT-003": "fail",
+    "FT-005": "fail",
+    "FT-006": "fail",
+    "FT-007": "fail",
+    "FT-008": "fail",
+    "FT-009": "fail",
+    "FT-010": "fail",
+    "FT-011": "fail",
+    "FT-015": "fail",
+    "FT-016": "fail"
+  }
+}

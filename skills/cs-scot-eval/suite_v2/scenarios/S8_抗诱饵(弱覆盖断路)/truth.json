@@ -1,0 +1,28 @@
+{
+  "scenario": "S8_抗诱饵(弱覆盖断路)",
+  "category": "false_positive_resist",
+  "tier": "confirmed",
+  "root_cause_codes": [
+    "FT-010"
+  ],
+  "must_not_report_codes": [
+    "FT-004"
+  ],
+  "node_states": {
+    "FT-009": "hold",
+    "FT-010": "hold",
+    "FT-004": "hold",
+    "FT-001": "fail",
+    "FT-002": "fail",
+    "FT-003": "fail",
+    "FT-005": "fail",
+    "FT-006": "fail",
+    "FT-007": "fail",
+    "FT-008": "fail",
+    "FT-011": "fail",
+    "FT-012": "fail",
+    "FT-013": "fail",
+    "FT-015": "fail",
+    "FT-016": "fail"
+  }
+}

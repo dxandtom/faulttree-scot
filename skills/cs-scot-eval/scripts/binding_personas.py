@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """绑定/数据 人设池 —— 把每个"业务因"同时定义出三样东西,且三样自洽:
   ① 树判据(tree_cond,大白话,**不含系统列名** → 制造"语义对列"的难点);
-  ② 系统数据列名(col)+ 能让内核算出 成立/不成立 的真实数据行(synth_rows);
+  ② 系统数据列名(col)+ 能让内核算出 成立/不成立 的真实数据行(own_series/shared_series/sessions);
   ③ 金标准绑定(gold_binding:类别/列/参数)。
-facts 不再手写,而是 **synth_rows → 真实内核 evaluate_binding** 算出来(保证 data+binding→fact 自洽,
+facts 不再手写,而是 **造出的数据行 → 真实内核 evaluate_binding** 算出来(保证 data+binding→fact 自洽,
 也顺带验证 execute 链)。这样同一套场景能测三段:绑定(模型 vs 金标准)、执行(数据→事实)、RCA(事实→根因)。
 """
 from __future__ import annotations
@@ -92,17 +92,6 @@ def gold_binding(p: dict, node_id: str, node_name: str, source: str) -> dict:
     return base
 
 
-def synth_rows(p: dict, state: str, sid: int):
-    """(旧:单列稀疏行)保留给单元自测;主流程改用 own_series/sessions 造密集表。"""
-    if state == "insuf":
-        return []
-    cols = persona_cols(p)
-    if p["kind"] == "sess":
-        return sessions(p, state, (sid + 1) * 1000)
-    series = {c: own_series(p, state, c, 12) for c in cols}
-    return [{c: series[c][i] for c in series} for i in range(12)]
-
-
 def persona_cols(p: dict):
     k = p["kind"]
     if k == "diff":
@@ -144,7 +133,7 @@ def shared_series(owners, N):
     for p, st in owners:
         if p["kind"] == "exist":
             cnt = (p.get("hold_m", 1) if st == "hold" else 0)
-        else:  # propmatch:按各自占比放
+        else:  # match:按各自占比放命中行
             cnt = round((p["hold_m"] if st == "hold" else p["fail_m"]) / p["total"] * N)
         vals += [p["value"]] * cnt
     vals += ["OTHER"] * max(0, N - len(vals))

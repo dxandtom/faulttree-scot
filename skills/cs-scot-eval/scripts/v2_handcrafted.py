@@ -228,9 +228,12 @@ def main():
         (d / "data").mkdir(parents=True, exist_ok=True)
         for src, rows in build_data(_states(scn)).items():
             _write_csv(d / "data" / f"{src}.csv", rows)
+        # truth 一律用 codes_fmt(= Excel/gold 的 code,也是映射到重解析 id 的 join key),与内部 code 解耦
         (d / "truth.json").write_text(json.dumps(
             {"scenario": scn["name"], "category": scn["category"], "tier": scn["tier"],
-             "root_cause_codes": scn["roots"], "must_not_report_codes": scn["must_not_report"]},
+             "root_cause_codes": [codes_fmt[c] for c in scn["roots"]],
+             "must_not_report_codes": [codes_fmt[c] for c in scn["must_not_report"]],
+             "node_states": {codes_fmt[c]: s for c, s in _states(scn).items()}},
             ensure_ascii=False, indent=2), encoding="utf-8")
         flag = "✓" if not bad else "✗ " + "; ".join(bad[:3])
         print(f"  {scn['name']:<26}[{scn['category']:<22}] 内核校验 {flag}")
