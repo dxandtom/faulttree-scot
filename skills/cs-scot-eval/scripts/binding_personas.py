@@ -118,8 +118,11 @@ def own_series(p: dict, state: str, col: str, N: int):
     k = p["kind"]
     if k == "num":
         v = p["hold_v"] if hold else p["fail_v"]
-        step = 0.0 if abs(v) < 1e-9 else abs(v) * 0.01
-        return [round(v + (i % 5 - 2) * step, 4) for i in range(N)]   # 围绕 v 抖动,均值≈v
+        d = abs(v) * 0.003 if abs(v) > 1 else 0.02   # 小幅抖动,均值≈v,不跨越阈值
+        vals = [round(v + (i % 5 - 2) * d, 4) for i in range(N)]
+        if "%" in str(col):                          # 成功率/占比:夹到 [0,100],不出现 >100 的假值
+            vals = [min(100.0, max(0.0, x)) for x in vals]
+        return vals
     if k == "diff":
         m, s = p["hold"] if hold else p["fail"]
         return [m] * N if col == p["minuend"] else [s] * N
@@ -136,11 +139,15 @@ def own_series(p: dict, state: str, col: str, N: int):
 
 
 def shared_series(owners, N):
-    """多个判据共用一列(如 AlarmLog 里多种告警码):各放各的命中行,补 NONE。"""
+    """多个判据共用一列(如 NgapCause 多种原因码、AlarmCode 多种告警):各放各的命中行,补 OTHER。"""
     vals = []
     for p, st in owners:
-        vals += [p["value"]] * (p.get("hold_m", 1) if st == "hold" else 0)
-    vals += ["NONE"] * max(0, N - len(vals))
+        if p["kind"] == "exist":
+            cnt = (p.get("hold_m", 1) if st == "hold" else 0)
+        else:  # propmatch:按各自占比放
+            cnt = round((p["hold_m"] if st == "hold" else p["fail_m"]) / p["total"] * N)
+        vals += [p["value"]] * cnt
+    vals += ["OTHER"] * max(0, N - len(vals))
     return vals[:N]
 
 

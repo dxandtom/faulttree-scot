@@ -6,3 +6,7 @@ suite_real/_HOWTO_prompts.md
 suite_real/*_report.txt
 suite_real/batch_rca.py
 suite_v2/
+suite_v2/scenarios/*/rca_input.json
+suite_v2/scenarios/*/binding.json
+suite_v2/scenarios/*/rca.json
+suite_v2/产物
