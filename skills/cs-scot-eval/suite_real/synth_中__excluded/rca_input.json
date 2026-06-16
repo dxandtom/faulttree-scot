@@ -3,106 +3,113 @@
     "scenario": "synth_中",
     "root": "s1",
     "outline": {
-      "s1": "pass",
       "s37": "fail",
       "s33": "fail",
-      "s31": "fail",
       "s35": "fail",
+      "s31": "fail",
       "s7": "uncovered",
-      "s34": "fail",
-      "s2": "uncovered",
-      "s9": "uncovered",
       "s8": "uncovered",
-      "s36": "fail"
+      "s9": "uncovered",
+      "s1": "pass",
+      "s36": "fail",
+      "s34": "fail",
+      "s2": "uncovered"
     },
     "pruned_nodes": {
-      "s1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
-      },
       "s37": {
-        "name": "UECapabilityEnquiry无回复",
+        "name": "会话缺安全模式完成",
         "parent": "s9",
         "level": 5,
         "is_leaf": true,
-        "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
+        "condition": "信令会话里 有 SecurityModeCommand 却 缺 SecurityModeComplete",
         "combine": "OR",
         "facts": [
           {
             "id": "s37_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
+            "indicator": "sig",
+            "mapping_reason": "合成注入",
             "class": "H",
             "status": "ok",
             "predicate_satisfied": false,
-            "resolved_column": "MessageType",
             "matched_sessions": 0
           }
         ]
       },
       "s33": {
-        "name": "License受限告警",
+        "name": "GTP-U路径故障告警",
         "parent": "s7",
         "level": 5,
         "is_leaf": true,
-        "condition": "告警日志存在「ALM-26818 License不足」",
+        "condition": "存在 GTP-U 路径故障 告警(ALM-25952)",
         "combine": "unknown",
         "facts": [
           {
             "id": "s33_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入(真实业务判据)",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入",
             "class": "G",
             "status": "ok",
             "predicate_satisfied": false,
             "resolved_column": "AlarmLog",
             "matched": 0,
-            "total": 1,
-            "top": []
-          }
-        ]
-      },
-      "s31": {
-        "name": "GPS失锁/时钟告警",
-        "parent": "s7",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s31_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "G",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "AlarmLog",
-            "matched": 0,
-            "total": 1,
-            "top": []
+            "total": 0,
+            "ratio": null,
+            "top": [],
+            "nulls": 3
           }
         ]
       },
       "s35": {
-        "name": "有RRCSetupRequest无RRCSetupComplete",
+        "name": "TOP1终端型号集中",
         "parent": "s8",
         "level": 5,
         "is_leaf": true,
-        "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
+        "condition": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
         "combine": "AND",
         "facts": [
           {
             "id": "s35_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
+            "indicator": "chr",
+            "mapping_reason": "合成注入",
+            "class": "E",
             "status": "ok",
             "predicate_satisfied": false,
-            "resolved_column": "MessageType",
-            "matched_sessions": 0
+            "top1": "Other-0",
+            "top1_ratio": 0.2,
+            "top1_count": 5,
+            "valid": 25,
+            "filtered_n": 25,
+            "op": ">",
+            "threshold": 0.5
+          }
+        ]
+      },
+      "s31": {
+        "name": "传输资源不可用占比高",
+        "parent": "s7",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s31_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入",
+            "class": "C",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "NgRanCause",
+            "matched": 0,
+            "total": 30,
+            "ratio": 0.0,
+            "top": [
+              [
+                "OTHER",
+                30
+              ]
+            ],
+            "nulls": 0
           }
         ]
       },
@@ -112,30 +119,10 @@
         "level": 4,
         "combine": "OR"
       },
-      "s34": {
-        "name": "会话缺SecurityModeComplete",
-        "parent": "s8",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "信令:会话内出现 SecurityModeCommand 但缺 SecurityModeComplete",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s34_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "MessageType",
-            "matched_sessions": 0
-          }
-        ]
-      },
-      "s2": {
-        "name": "L2节点_002",
-        "parent": "s1",
-        "level": 3,
+      "s8": {
+        "name": "L3节点_008",
+        "parent": "s2",
+        "level": 4,
         "combine": "unknown"
       },
       "s9": {
@@ -144,31 +131,66 @@
         "level": 4,
         "combine": "AND"
       },
-      "s8": {
-        "name": "L3节点_008",
-        "parent": "s2",
-        "level": 4,
-        "combine": "unknown"
+      "s1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
       },
       "s36": {
-        "name": "RegistrationRequest无Accept",
+        "name": "单小区接入失败集中",
         "parent": "s8",
         "level": 5,
         "is_leaf": true,
-        "condition": "信令:有 RegistrationRequest 但无 RegistrationAccept",
+        "condition": "失败会话按 小区 分组,占比最高的小区 超过 60%",
         "combine": "AND",
         "facts": [
           {
             "id": "s36_b",
-            "indicator": "cfg",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
+            "indicator": "chr",
+            "mapping_reason": "合成注入",
+            "class": "E",
             "status": "ok",
             "predicate_satisfied": false,
-            "resolved_column": "MessageType",
-            "matched_sessions": 0
+            "top1": "Cell-0x1A3F",
+            "top1_ratio": 0.24,
+            "top1_count": 6,
+            "valid": 25,
+            "filtered_n": 25,
+            "op": ">",
+            "threshold": 0.6
           }
         ]
+      },
+      "s34": {
+        "name": "Xn链路故障告警",
+        "parent": "s8",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "存在 Xn 链路故障 告警(ALM-29240)",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s34_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入",
+            "class": "G",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "AlarmLog",
+            "matched": 0,
+            "total": 0,
+            "ratio": null,
+            "top": [],
+            "nulls": 3
+          }
+        ]
+      },
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "unknown"
       }
     }
   },

@@ -5,7 +5,7 @@
   "category": "confirmed",
   "truth": {
     "root_cause_node_id": "s24",
-    "root_cause_name": "传输资源不可用占比高",
+    "root_cause_name": "RRC连接建立成功率低",
     "tier": "confirmed",
     "must_not_report": [
       "s7",
@@ -23,24 +23,24 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "传输资源不可用占比高",
+        "Root_cause": "RRC连接建立成功率低",
         "Fault_tree_path": [
-          "弱覆盖采样占比高",
-          "传输资源不可用占比高"
+          "TOP1终端型号集中",
+          "RRC连接建立成功率低"
         ],
         "evidence_path": [
           {
-            "node": "弱覆盖采样占比高",
+            "node": "TOP1终端型号集中",
             "node_id": "s5",
-            "condition": "RSRP<-110 的采样占比 > 15%",
-            "actual": "弱覆盖采样占比 RSRP<-110(%)=38.4",
+            "condition": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
+            "actual": "TOP1=BrandX-Model9 占比 0.72",
             "judgment": "成立"
           },
           {
-            "node": "传输资源不可用占比高",
+            "node": "RRC连接建立成功率低",
             "node_id": "s24",
-            "condition": "NgRanCause=transport-resource-unavailable 占比 ≥ 20%",
-            "actual": "NgRanCause 命中 198/600(占比 0.33)",
+            "condition": "RRC连接建立成功率 低于 98%",
+            "actual": "SA_RRC_ConnSetup_SuccRate(%)=91.4",
             "judgment": "成立"
           }
         ]
@@ -49,5 +49,90 @@
     "probable_causes": [],
     "undetermined": [],
     "tree_issues": {}
-  }
+  },
+  "gold_binding": [
+    {
+      "id": "s24_b",
+      "node_id": "s24",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_RRC_ConnSetup_SuccRate(%)",
+      "op": "<",
+      "threshold": 98.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s25_b",
+      "node_id": "s25",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_UECntx_Est_SuccRate(%)",
+      "op": "<",
+      "threshold": 99.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s26_b",
+      "node_id": "s26",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "RACH_Setup_SuccRate(%)",
+      "op": "<",
+      "threshold": 95.0,
+      "scope": "aggregate",
+      "agg": "mean",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s31_b",
+      "node_id": "s31",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "NgRanCause",
+      "contains": [
+        "transport-resource-unavailable"
+      ],
+      "require": 6
+    },
+    {
+      "id": "s5_b",
+      "node_id": "s5",
+      "node": "TOP1终端型号集中",
+      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
+      "source": "chr",
+      "class": "E",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "group_by": "TerminalModel",
+      "op": ">",
+      "threshold": 0.5
+    },
+    {
+      "id": "s7_b",
+      "node_id": "s7",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "RACH_Setup_SuccRate(%)",
+      "op": "<",
+      "threshold": 95.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    }
+  ]
 }

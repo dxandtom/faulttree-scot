@@ -1,0 +1,11 @@
+CallID,MessageType
+6000,RRCSetupRequest
+6000,OtherMsg
+6001,RRCSetupRequest
+6001,OtherMsg
+6002,RRCSetupRequest
+6002,OtherMsg
+6003,RRCSetupRequest
+6003,OtherMsg
+6004,RRCSetupRequest
+6004,OtherMsg

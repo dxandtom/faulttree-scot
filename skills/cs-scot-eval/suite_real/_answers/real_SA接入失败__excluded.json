@@ -26,5 +26,94 @@
       }
     ],
     "tree_issues": {}
-  }
+  },
+  "gold_binding": [
+    {
+      "id": "n10_b",
+      "node_id": "n10",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_UECntx_Est_SuccRate(%)",
+      "op": "<",
+      "threshold": 99.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n11_b",
+      "node_id": "n11",
+      "node": "TOP1终端型号集中",
+      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
+      "source": "chr",
+      "class": "E",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "group_by": "TerminalModel",
+      "op": ">",
+      "threshold": 0.5
+    },
+    {
+      "id": "n116_b",
+      "node_id": "n116",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n117_b",
+      "node_id": "n117",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "WeakCov_Sample_Ratio(%)",
+      "op": ">",
+      "threshold": 15.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n118_b",
+      "node_id": "n118",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi",
+      "class": "B",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "minuend": [
+        "N.RRC.ConnReq.Att"
+      ],
+      "subtrahend": [
+        "N.RRC.ConnReq.Succ"
+      ],
+      "op": ">",
+      "threshold": 0,
+      "scope": "aggregate",
+      "agg": "sum"
+    },
+    {
+      "id": "n119_b",
+      "node_id": "n119",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "DCErrType",
+      "contains": [
+        "RNL_RadioLinkFailure"
+      ],
+      "require": 10
+    }
+  ]
 }

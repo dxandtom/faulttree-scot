@@ -1,0 +1,96 @@
+{
+  "scenario": "real_SA接入失败__probable",
+  "to_bind": [
+    {
+      "node_id": "n10",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n100",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n115",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n116",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n3",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n4",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n5",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "RACH_Setup_SuccRate(%)",
+          "samples": [
+            98.9
+          ]
+        },
+        {
+          "name": "PUSCH_RSSI(dBm)",
+          "samples": [
+            -96.5
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Att",
+          "samples": [
+            8420
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Succ",
+          "samples": [
+            7180
+          ]
+        },
+        {
+          "name": "SA_RRC_ConnSetup_SuccRate(%)",
+          "samples": [
+            91.4
+          ]
+        }
+      ],
+      "n_rows": 9
+    },
+    "alarm": {
+      "columns": [
+        {
+          "name": "AlarmLog",
+          "samples": [
+            "ALM-29240",
+            "NONE"
+          ]
+        }
+      ],
+      "n_rows": 3
+    }
+  }
+}

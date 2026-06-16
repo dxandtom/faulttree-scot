@@ -1,0 +1,9 @@
+PUSCH_RSSI(dBm),SA_RRC_ConnSetup_SuccRate(%),SA_UECntx_Est_SuccRate(%),RACH_Setup_SuccRate(%)
+-117.8,,,
+-117.8,,,
+,99.7,,
+,99.7,,
+,,99.95,
+,,99.95,
+,,,78.6
+,,,78.6

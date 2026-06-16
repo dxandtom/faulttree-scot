@@ -5,7 +5,7 @@
   "category": "confirmed",
   "truth": {
     "root_cause_node_id": "s287",
-    "root_cause_name": "有RRCSetupRequest无RRCSetupComplete",
+    "root_cause_name": "RRC连接建立成功率低",
     "tier": "confirmed",
     "must_not_report": [
       "s39",
@@ -30,40 +30,40 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "有RRCSetupRequest无RRCSetupComplete",
+        "Root_cause": "RRC连接建立成功率低",
         "Fault_tree_path": [
-          "邻区漏配",
-          "GTP-U路径故障告警",
-          "GPS失锁/时钟告警",
-          "有RRCSetupRequest无RRCSetupComplete"
+          "有建立请求无建立完成",
+          "NAS鉴权失败占比高",
+          "传输资源不可用占比高",
+          "RRC连接建立成功率低"
         ],
         "evidence_path": [
           {
-            "node": "邻区漏配",
+            "node": "有建立请求无建立完成",
             "node_id": "s7",
-            "condition": "配置核查:存在漏配的同频邻区关系(命中)",
-            "actual": "ConfigDiff 命中 5/5",
+            "condition": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
+            "actual": "命中会话 5 个",
             "judgment": "成立"
           },
           {
-            "node": "GTP-U路径故障告警",
+            "node": "NAS鉴权失败占比高",
             "node_id": "s25",
-            "condition": "告警日志存在「ALM-25952 GTPU路径故障」",
-            "actual": "AlarmLog 命中 4/4",
+            "condition": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+            "actual": "ReleaseCause 命中 14/40",
             "judgment": "成立"
           },
           {
-            "node": "GPS失锁/时钟告警",
+            "node": "传输资源不可用占比高",
             "node_id": "s92",
-            "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
-            "actual": "AlarmLog 命中 2/2",
+            "condition": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+            "actual": "NgRanCause 命中 12/30",
             "judgment": "成立"
           },
           {
-            "node": "有RRCSetupRequest无RRCSetupComplete",
+            "node": "RRC连接建立成功率低",
             "node_id": "s287",
-            "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
-            "actual": "命中会话 41 个",
+            "condition": "RRC连接建立成功率 低于 98%",
+            "actual": "SA_RRC_ConnSetup_SuccRate(%)=91.4",
             "judgment": "成立"
           }
         ]
@@ -72,5 +72,171 @@
     "probable_causes": [],
     "undetermined": [],
     "tree_issues": {}
-  }
+  },
+  "gold_binding": [
+    {
+      "id": "s100_b",
+      "node_id": "s100",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "RACH_Setup_SuccRate(%)",
+      "op": "<",
+      "threshold": 95.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s101_b",
+      "node_id": "s101",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s103_b",
+      "node_id": "s103",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi",
+      "class": "B",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "minuend": [
+        "N.RRC.ConnReq.Att"
+      ],
+      "subtrahend": [
+        "N.RRC.ConnReq.Succ"
+      ],
+      "op": ">",
+      "threshold": 0,
+      "scope": "aggregate",
+      "agg": "sum",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s105_b",
+      "node_id": "s105",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "ReleaseCause",
+      "contains": [
+        "NAS_Authentication_Failure"
+      ],
+      "require": 8,
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s132_b",
+      "node_id": "s132",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi",
+      "class": "B",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "minuend": [
+        "N.RRC.ConnReq.Att"
+      ],
+      "subtrahend": [
+        "N.RRC.ConnReq.Succ"
+      ],
+      "op": ">",
+      "threshold": 0,
+      "scope": "aggregate",
+      "agg": "sum"
+    },
+    {
+      "id": "s133_b",
+      "node_id": "s133",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "DCErrType",
+      "contains": [
+        "RNL_RadioLinkFailure"
+      ],
+      "require": 10
+    },
+    {
+      "id": "s25_b",
+      "node_id": "s25",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "ReleaseCause",
+      "contains": [
+        "NAS_Authentication_Failure"
+      ],
+      "require": 8
+    },
+    {
+      "id": "s287_b",
+      "node_id": "s287",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_RRC_ConnSetup_SuccRate(%)",
+      "op": "<",
+      "threshold": 98.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s39_b",
+      "node_id": "s39",
+      "node": "单小区接入失败集中",
+      "condition_text": "失败会话按 小区 分组,占比最高的小区 超过 60%",
+      "source": "chr",
+      "class": "E",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "group_by": "NRCellIdentity",
+      "op": ">",
+      "threshold": 0.6
+    },
+    {
+      "id": "s7_b",
+      "node_id": "s7",
+      "node": "有建立请求无建立完成",
+      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
+      "source": "sig",
+      "class": "H",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "key": "CallID",
+      "msg_column": "MessageType",
+      "lacks": [
+        "RRCSetupComplete"
+      ]
+    },
+    {
+      "id": "s92_b",
+      "node_id": "s92",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "NgRanCause",
+      "contains": [
+        "transport-resource-unavailable"
+      ],
+      "require": 6
+    }
+  ]
 }

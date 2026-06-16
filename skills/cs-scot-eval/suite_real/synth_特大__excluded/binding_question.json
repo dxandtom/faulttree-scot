@@ -1,0 +1,97 @@
+{
+  "scenario": "synth_特大__excluded",
+  "to_bind": [
+    {
+      "node_id": "s287",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s289",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s290",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s291",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s292",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s293",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "SA_RRC_ConnSetup_SuccRate(%)",
+          "samples": [
+            99.7
+          ]
+        },
+        {
+          "name": "RACH_Setup_SuccRate(%)",
+          "samples": [
+            98.9
+          ]
+        },
+        {
+          "name": "WeakCov_Sample_Ratio(%)",
+          "samples": [
+            2.1
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Att",
+          "samples": [
+            5000
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Succ",
+          "samples": [
+            5000
+          ]
+        }
+      ],
+      "n_rows": 7
+    },
+    "chr": {
+      "columns": [
+        {
+          "name": "DCErrType",
+          "samples": [
+            "RNL_RadioLinkFailure",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "ReleaseCause",
+          "samples": [
+            "NAS_Authentication_Failure",
+            "OTHER"
+          ]
+        }
+      ],
+      "n_rows": 90
+    }
+  }
+}

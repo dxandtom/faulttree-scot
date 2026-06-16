@@ -3,40 +3,135 @@
     "scenario": "real_sub_上下文_中",
     "root": "n3",
     "outline": {
-      "n32": "uncovered",
-      "n35": "fail",
-      "n3": "pass",
-      "n36": "hold",
-      "n10": "insufficient",
-      "n4": "hold",
       "n11": "fail",
+      "n35": "fail",
+      "n4": "hold",
+      "n10": "insufficient",
+      "n32": "uncovered",
+      "n36": "hold",
+      "n3": "pass",
       "n5": "hold"
     },
     "pruned_nodes": {
+      "n11": {
+        "name": "UE上下文建立成功率低",
+        "parent": "n5",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "UE上下文建立成功率 低于 99%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n11_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 99.95,
+            "valid": 2,
+            "n_rows": 2,
+            "nulls": 0,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "n35": {
+        "name": "GTP-U路径故障告警",
+        "parent": "n32",
+        "level": 4,
+        "condition": "存在 GTP-U 路径故障 告警(ALM-25952)",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n35_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入",
+            "class": "G",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "AlarmLog",
+            "matched": 0,
+            "total": 0,
+            "ratio": null,
+            "top": [],
+            "nulls": 3
+          }
+        ]
+      },
+      "n4": {
+        "name": "有建立请求无建立完成",
+        "parent": "n3",
+        "level": 3,
+        "condition": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n4_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入",
+            "class": "H",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "matched_sessions": 5,
+            "lacks_never_seen": [
+              "RRCSetupComplete"
+            ]
+          }
+        ]
+      },
+      "n10": {
+        "name": "RRC连接建立成功率低",
+        "parent": "n5",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "RRC连接建立成功率 低于 98%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n10_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
       "n32": {
         "name": "L3节点_002",
         "parent": "n3",
         "level": 3,
         "combine": "unknown"
       },
-      "n35": {
-        "name": "License受限告警",
-        "parent": "n32",
-        "level": 4,
-        "condition": "告警日志存在「ALM-26818 License不足」",
+      "n36": {
+        "name": "Xn链路故障告警",
+        "parent": "n35",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "存在 Xn 链路故障 告警(ALM-29240)",
         "combine": "unknown",
         "facts": [
           {
-            "id": "n35_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
+            "id": "n36_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入",
             "class": "G",
             "status": "ok",
-            "predicate_satisfied": false,
+            "predicate_satisfied": true,
             "resolved_column": "AlarmLog",
-            "matched": 0,
+            "matched": 1,
             "total": 1,
-            "top": []
+            "ratio": 1.0,
+            "top": [
+              [
+                "ALM-29240",
+                1
+              ]
+            ],
+            "nulls": 2
           }
         ]
       },
@@ -46,105 +141,35 @@
         "level": 2,
         "pass_through": true
       },
-      "n36": {
-        "name": "会话缺SecurityModeComplete",
-        "parent": "n35",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "信令:会话内出现 SecurityModeCommand 但缺 SecurityModeComplete",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n36_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "MessageType",
-            "matched_sessions": 27
-          }
-        ]
-      },
-      "n10": {
-        "name": "RRC连接建立成功率低",
-        "parent": "n5",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "SA_RRC_ConnSetup_SuccRate(%) < 98",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n10_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
-      "n4": {
-        "name": "TOP1终端型号集中",
-        "parent": "n3",
-        "level": 3,
-        "condition": "失败会话按 TerminalType 分组,TOP1 占比 > 50%",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n4_b",
-            "indicator": "cfg",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "E",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "top1": "BrandX-Model9",
-            "top1_ratio": 0.72,
-            "op": ">",
-            "threshold": 0.5
-          }
-        ]
-      },
-      "n11": {
-        "name": "UE上下文建立成功率低",
-        "parent": "n5",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n11_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
-            "value": 99.95,
-            "op": "<",
-            "threshold": 99.0
-          }
-        ]
-      },
       "n5": {
-        "name": "QoS Flow建立成功率低",
+        "name": "NAS鉴权失败占比高",
         "parent": "n4",
         "level": 4,
-        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
+        "condition": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
         "combine": "AND",
         "facts": [
           {
             "id": "n5_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
+            "indicator": "chr",
+            "mapping_reason": "合成注入",
+            "class": "C",
             "status": "ok",
             "predicate_satisfied": true,
-            "resolved_column": "SA_QoSFlow_Est_SuccRate(%)",
-            "value": 90.2,
-            "op": "<",
-            "threshold": 99.0
+            "resolved_column": "ReleaseCause",
+            "matched": 14,
+            "total": 40,
+            "ratio": 0.35,
+            "top": [
+              [
+                "OTHER",
+                26
+              ],
+              [
+                "NAS_Authentication_Failure",
+                14
+              ]
+            ],
+            "nulls": 0
           }
         ]
       }

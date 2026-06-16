@@ -33,5 +33,93 @@
       }
     ],
     "tree_issues": {}
-  }
+  },
+  "gold_binding": [
+    {
+      "id": "s31_b",
+      "node_id": "s31",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "NgRanCause",
+      "contains": [
+        "transport-resource-unavailable"
+      ],
+      "require": 6,
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s33_b",
+      "node_id": "s33",
+      "node": "GTP-U路径故障告警",
+      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
+      "source": "alarm",
+      "class": "G",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "AlarmLog",
+      "contains": [
+        "ALM-25952"
+      ],
+      "require": 1,
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s34_b",
+      "node_id": "s34",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm",
+      "class": "G",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "AlarmLog",
+      "contains": [
+        "ALM-29240"
+      ],
+      "require": 1,
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s35_b",
+      "node_id": "s35",
+      "node": "TOP1终端型号集中",
+      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
+      "source": "chr",
+      "class": "E",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "group_by": "TerminalModel",
+      "op": ">",
+      "threshold": 0.5,
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s36_b",
+      "node_id": "s36",
+      "node": "单小区接入失败集中",
+      "condition_text": "失败会话按 小区 分组,占比最高的小区 超过 60%",
+      "source": "chr",
+      "class": "E",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "group_by": "NRCellIdentity",
+      "op": ">",
+      "threshold": 0.6,
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s37_b",
+      "node_id": "s37",
+      "node": "会话缺安全模式完成",
+      "condition_text": "信令会话里 有 SecurityModeCommand 却 缺 SecurityModeComplete",
+      "source": "sig",
+      "class": "H",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "key": "CallID",
+      "msg_column": "MessageType",
+      "lacks": [
+        "SecurityModeComplete"
+      ],
+      "decision": "insufficient_data"
+    }
+  ]
 }

@@ -1,0 +1,96 @@
+{
+  "scenario": "real_sub_接入_小__excluded",
+  "to_bind": [
+    {
+      "node_id": "n50",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n51",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n69",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n70",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n71",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n72",
+      "node": "射频单元驻波比告警",
+      "condition_text": "存在 射频单元驻波比异常 告警(ALM-26529)",
+      "source": "alarm"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "PUSCH_RSSI(dBm)",
+          "samples": [
+            -117.8
+          ]
+        },
+        {
+          "name": "WeakCov_Sample_Ratio(%)",
+          "samples": [
+            2.1
+          ]
+        }
+      ],
+      "n_rows": 4
+    },
+    "chr": {
+      "columns": [
+        {
+          "name": "DCErrType",
+          "samples": [
+            "RNL_RadioLinkFailure",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "ReleaseCause",
+          "samples": [
+            "NAS_Authentication_Failure",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "NgRanCause",
+          "samples": [
+            "OTHER"
+          ]
+        }
+      ],
+      "n_rows": 120
+    },
+    "alarm": {
+      "columns": [
+        {
+          "name": "AlarmLog",
+          "samples": [
+            "NONE"
+          ]
+        }
+      ],
+      "n_rows": 3
+    }
+  }
+}

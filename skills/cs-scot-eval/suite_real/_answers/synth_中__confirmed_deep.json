@@ -5,7 +5,7 @@
   "category": "confirmed",
   "truth": {
     "root_cause_node_id": "s31",
-    "root_cause_name": "GPS失锁/时钟告警",
+    "root_cause_name": "传输资源不可用占比高",
     "tier": "confirmed",
     "must_not_report": [
       "s12",
@@ -29,32 +29,32 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "GPS失锁/时钟告警",
+        "Root_cause": "传输资源不可用占比高",
         "Fault_tree_path": [
-          "切换成功率低",
-          "UECapabilityEnquiry无回复",
-          "GPS失锁/时钟告警"
+          "Xn链路故障告警",
+          "PRACH随机接入成功率低",
+          "传输资源不可用占比高"
         ],
         "evidence_path": [
           {
-            "node": "切换成功率低",
+            "node": "Xn链路故障告警",
             "node_id": "s2",
-            "condition": "NR_HO_SuccRate(%) < 95",
-            "actual": "NR_HO_SuccRate(%)=80.1",
+            "condition": "存在 Xn 链路故障 告警(ALM-29240)",
+            "actual": "AlarmLog 命中 1/1",
             "judgment": "成立"
           },
           {
-            "node": "UECapabilityEnquiry无回复",
+            "node": "PRACH随机接入成功率低",
             "node_id": "s7",
-            "condition": "信令:UECapabilityEnquiry 后无 UECapabilityInformation",
-            "actual": "命中会话 12 个",
+            "condition": "PRACH 随机接入成功率 低于 95%",
+            "actual": "RACH_Setup_SuccRate(%)=78.6",
             "judgment": "成立"
           },
           {
-            "node": "GPS失锁/时钟告警",
+            "node": "传输资源不可用占比高",
             "node_id": "s31",
-            "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
-            "actual": "AlarmLog 命中 2/2",
+            "condition": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+            "actual": "NgRanCause 命中 12/30",
             "judgment": "成立"
           }
         ]
@@ -63,5 +63,147 @@
     "probable_causes": [],
     "undetermined": [],
     "tree_issues": {}
-  }
+  },
+  "gold_binding": [
+    {
+      "id": "s12_b",
+      "node_id": "s12",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s2_b",
+      "node_id": "s2",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm",
+      "class": "G",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "AlarmLog",
+      "contains": [
+        "ALM-29240"
+      ],
+      "require": 1
+    },
+    {
+      "id": "s24_b",
+      "node_id": "s24",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_RRC_ConnSetup_SuccRate(%)",
+      "op": "<",
+      "threshold": 98.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s25_b",
+      "node_id": "s25",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_UECntx_Est_SuccRate(%)",
+      "op": "<",
+      "threshold": 99.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s26_b",
+      "node_id": "s26",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "RACH_Setup_SuccRate(%)",
+      "op": "<",
+      "threshold": 95.0,
+      "scope": "aggregate",
+      "agg": "mean",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s27_b",
+      "node_id": "s27",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s31_b",
+      "node_id": "s31",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "NgRanCause",
+      "contains": [
+        "transport-resource-unavailable"
+      ],
+      "require": 6
+    },
+    {
+      "id": "s49_b",
+      "node_id": "s49",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm",
+      "class": "G",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "AlarmLog",
+      "contains": [
+        "ALM-29240"
+      ],
+      "require": 1
+    },
+    {
+      "id": "s50_b",
+      "node_id": "s50",
+      "node": "单小区接入失败集中",
+      "condition_text": "失败会话按 小区 分组,占比最高的小区 超过 60%",
+      "source": "chr",
+      "class": "E",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "group_by": "NRCellIdentity",
+      "op": ">",
+      "threshold": 0.6
+    },
+    {
+      "id": "s7_b",
+      "node_id": "s7",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "RACH_Setup_SuccRate(%)",
+      "op": "<",
+      "threshold": 95.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    }
+  ]
 }

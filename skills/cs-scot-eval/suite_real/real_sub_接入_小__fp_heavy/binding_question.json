@@ -1,0 +1,121 @@
+{
+  "scenario": "real_sub_接入_小__fp_heavy",
+  "to_bind": [
+    {
+      "node_id": "n48",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n50",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n51",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n52",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n67",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n68",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n53",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n54",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n55",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n69",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "SA_UECntx_Est_SuccRate(%)",
+          "samples": [
+            99.95
+          ]
+        },
+        {
+          "name": "PUSCH_RSSI(dBm)",
+          "samples": [
+            -96.5
+          ]
+        },
+        {
+          "name": "WeakCov_Sample_Ratio(%)",
+          "samples": [
+            38.4
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Att",
+          "samples": [
+            8420
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Succ",
+          "samples": [
+            7180
+          ]
+        }
+      ],
+      "n_rows": 10
+    },
+    "chr": {
+      "columns": [
+        {
+          "name": "DCErrType",
+          "samples": [
+            "RNL_RadioLinkFailure",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "ReleaseCause",
+          "samples": [
+            "NAS_Authentication_Failure",
+            "OTHER"
+          ]
+        }
+      ],
+      "n_rows": 140
+    }
+  }
+}

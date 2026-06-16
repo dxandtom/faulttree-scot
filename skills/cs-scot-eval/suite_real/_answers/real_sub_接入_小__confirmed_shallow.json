@@ -5,7 +5,7 @@
   "category": "confirmed",
   "truth": {
     "root_cause_node_id": "n64",
-    "root_cause_name": "AMF过载拒绝占比高",
+    "root_cause_name": "UE上下文建立成功率低",
     "tier": "confirmed",
     "must_not_report": [
       "n48",
@@ -22,16 +22,16 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "AMF过载拒绝占比高",
+        "Root_cause": "UE上下文建立成功率低",
         "Fault_tree_path": [
-          "AMF过载拒绝占比高"
+          "UE上下文建立成功率低"
         ],
         "evidence_path": [
           {
-            "node": "AMF过载拒绝占比高",
+            "node": "UE上下文建立成功率低",
             "node_id": "n64",
-            "condition": "NgRanCause=amf-overload 占比 ≥ 20%",
-            "actual": "NgRanCause 命中 140/500(占比 0.28)",
+            "condition": "UE上下文建立成功率 低于 99%",
+            "actual": "SA_UECntx_Est_SuccRate(%)=93.8",
             "judgment": "成立"
           }
         ]
@@ -40,5 +40,83 @@
     "probable_causes": [],
     "undetermined": [],
     "tree_issues": {}
-  }
+  },
+  "gold_binding": [
+    {
+      "id": "n48_b",
+      "node_id": "n48",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_UECntx_Est_SuccRate(%)",
+      "op": "<",
+      "threshold": 99.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n50_b",
+      "node_id": "n50",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n51_b",
+      "node_id": "n51",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "WeakCov_Sample_Ratio(%)",
+      "op": ">",
+      "threshold": 15.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n52_b",
+      "node_id": "n52",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi",
+      "class": "B",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "minuend": [
+        "N.RRC.ConnReq.Att"
+      ],
+      "subtrahend": [
+        "N.RRC.ConnReq.Succ"
+      ],
+      "op": ">",
+      "threshold": 0,
+      "scope": "aggregate",
+      "agg": "sum",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "n64_b",
+      "node_id": "n64",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_UECntx_Est_SuccRate(%)",
+      "op": "<",
+      "threshold": 99.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    }
+  ]
 }

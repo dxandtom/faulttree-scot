@@ -1,8 +1,8 @@
-# 冻结的诊断准确率考题(多树故障注入)
+# 冻结考题(多树注入 · 数据+绑定+RCA 三段)
 
-可信侧预生成、已提交,**本地勿重新生成**。每个 `<场景>/rca_input.json` 是答题模型**唯一该读**的,
-格式**与生产 rca_input 完全一致**(含 predicate_satisfied/value/ratio…);模型按 fault-tree-rca
-正常流程判断,把结果写同目录 `rca.json`。`_answers/` 是答案区(truth+node_states+满分参考),
-**做题时勿读**,只给打分器。
+可信侧预生成、本地勿重生成。每场景:
+- `rca_input.json`(RCA 题,与生产一致)+ `data/*.csv`(数据)+ `binding_question.json`(绑定题);
+- `_answers/<场景>.json` 是答案(truth/node_states/reference_rca/gold_binding),**做题时勿读**。
 
-跑分:`python ../scripts/score_accuracy.py --suite . -o accuracy_report.txt`;自测:`... --use-reference`(应 100%)。
+测 RCA:逐场景模型读 rca_input → 写 rca.json,再 `score_accuracy.py`。
+测绑定:逐场景模型读 binding_question + data → 写 binding.json(CONDITIONS),再 `score_binding.py`。

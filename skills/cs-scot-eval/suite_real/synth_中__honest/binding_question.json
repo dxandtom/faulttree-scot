@@ -1,0 +1,55 @@
+{
+  "scenario": "synth_中__honest",
+  "to_bind": [
+    {
+      "node_id": "s31",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s35",
+      "node": "TOP1终端型号集中",
+      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s36",
+      "node": "单小区接入失败集中",
+      "condition_text": "失败会话按 小区 分组,占比最高的小区 超过 60%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s33",
+      "node": "GTP-U路径故障告警",
+      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "s34",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "s37",
+      "node": "会话缺安全模式完成",
+      "condition_text": "信令会话里 有 SecurityModeCommand 却 缺 SecurityModeComplete",
+      "source": "sig"
+    }
+  ],
+  "data_overview": {
+    "chr": {
+      "columns": [],
+      "n_rows": 0
+    },
+    "alarm": {
+      "columns": [],
+      "n_rows": 0
+    },
+    "sig": {
+      "columns": [],
+      "n_rows": 0
+    }
+  }
+}

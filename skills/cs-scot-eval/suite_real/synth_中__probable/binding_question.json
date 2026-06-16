@@ -1,0 +1,82 @@
+{
+  "scenario": "synth_中__probable",
+  "to_bind": [
+    {
+      "node_id": "s12",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s24",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s7",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s2",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "s49",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "s31",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "PUSCH_RSSI(dBm)",
+          "samples": [
+            -117.8
+          ]
+        },
+        {
+          "name": "SA_RRC_ConnSetup_SuccRate(%)",
+          "samples": [
+            99.7
+          ]
+        },
+        {
+          "name": "RACH_Setup_SuccRate(%)",
+          "samples": [
+            78.6
+          ]
+        }
+      ],
+      "n_rows": 6
+    },
+    "alarm": {
+      "columns": [
+        {
+          "name": "AlarmLog",
+          "samples": [
+            "ALM-29240",
+            "NONE"
+          ]
+        }
+      ],
+      "n_rows": 6
+    },
+    "chr": {
+      "columns": [],
+      "n_rows": 0
+    }
+  }
+}

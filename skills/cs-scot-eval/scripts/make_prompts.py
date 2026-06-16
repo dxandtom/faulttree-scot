@@ -47,6 +47,22 @@ facts(已解析事实,含实际值;ok 事实带 predicate_satisfied=内核字面
 evidence_path 必须是逐节点的**列表**;**别自创** node_name/path/evidence 这类别的键(否则打分器对不上)。
 """
 
+BINDING_RULES = """你是"绑定器"(generate 第 2.5 步)。给你一棵故障子树的若干【判据(大白话)】+ 各数据源的【列概览】
+(系统列名 + 样例值)。请为**每条判据**产出一条绑定 CONDITIONS:把大白话判据**映射到系统列**、选对内核类别、给参数。
+**严禁写脚本**;靠你自己读判据语义 + 看列名/样例值对上。
+
+内核类别(选一个):A 阈值比较 / B 差值(尝试-成功>0 这类) / C 字段·错误码匹配 / E 占比TopN / G 告警·日志匹配 / H 信令会话缺失。
+每条绑定写成一个对象(node_id 照抄判据的):
+  A:   {"node_id":"…","class":"A","source":"<源>","column":"<系统列裸名>","op":"<或>等","threshold":数,"scope":"aggregate","agg":"mean"}
+  B:   {"node_id":"…","class":"B","source":"<源>","minuend":["列"],"subtrahend":["列"],"op":">","threshold":0}
+  C/G: {"node_id":"…","class":"C或G","source":"<源>","column":"<列>","contains":["要匹配的取值"]}
+  E:   {"node_id":"…","class":"E","source":"<源>","group_by":"<列>","op":">","threshold":0.5}
+  H:   {"node_id":"…","class":"H","source":"<源>","key":"<会话键列>","msg_column":"<消息列>","lacks":["缺的消息名"]}
+**数据里没有该判据要的列** → 标 {"node_id":"…","decision":"insufficient_data"},别硬绑别的列。
+
+只输出 CONDITIONS 的 **JSON 列表**(每条判据一个对象),不要任何额外文字。
+"""
+
 HOWTO = """# 怎么用这些 prompt 跑出【真·模型】准确率
 
 每个 `<场景>/prompt.txt` 是一道自包含题面(判据法则 + 该场景的故障子树+事实 + 输出契约)。
@@ -60,6 +76,12 @@ HOWTO = """# 怎么用这些 prompt 跑出【真·模型】准确率
 2. 全部收齐后打分:
    python ../scripts/score_accuracy.py --suite . -o <你要的输出路径>/accuracy_report.txt
 3. 报告里的命中/档位/无假阳/诚实 + 按规模分档,才是 MiniMax 真实的 RCA 推理表现。
+
+## 另一套:绑定阶段(测 generate 第 2.5 步)
+每个 `<场景>/binding_prompt.txt` 是一道绑定题(大白话判据 + 各源列概览 + `data/*.csv`)。
+同样**发给普通模型**,让它输出 CONDITIONS 的 JSON 列表,**原样存成** `<场景>/binding.json`;全部收齐后:
+   python ../scripts/score_binding.py --suite . -o <输出路径>/binding_report.txt
+报告里的 **选列命中率** 最关键——反映模型把"大白话判据"对到"系统列"的能力(generate 最易错的活)。
 
 注意:`_answers/` 是标准答案,**答题时绝不能给模型看**;它只给打分器用。
 """
@@ -81,12 +103,19 @@ def main():
         sys.exit(2)
     for d in scns:
         rca_input = (d / "rca_input.json").read_text(encoding="utf-8")
-        prompt = (RULES + "\n【本场景输入(rca_input.json)】:\n" + rca_input
-                  + "\n\n【现在请只输出该场景的 rca.json(纯 JSON)】")
-        (d / "prompt.txt").write_text(prompt, encoding="utf-8")
+        (d / "prompt.txt").write_text(
+            RULES + "\n【本场景输入(rca_input.json)】:\n" + rca_input
+            + "\n\n【现在请只输出该场景的 rca.json(纯 JSON)】", encoding="utf-8")
+        bq = d / "binding_question.json"
+        if bq.exists():                                # 绑定题面(测 generate 绑定阶段)
+            (d / "binding_prompt.txt").write_text(
+                BINDING_RULES + "\n【要绑的判据 + 各源列概览(binding_question.json)】:\n"
+                + bq.read_text(encoding="utf-8")
+                + "\n\n【现在请只输出 CONDITIONS 的 JSON 列表(纯 JSON)】", encoding="utf-8")
     (suite / "_HOWTO_prompts.md").write_text(HOWTO, encoding="utf-8")
-    print(f"已为 {len(scns)} 个场景生成 prompt.txt(+ _HOWTO_prompts.md)。")
-    print("把每个 <场景>/prompt.txt 发给【普通模型/聊天,别用能写代码的 agent】,输出存成同目录 rca.json,再打分。")
+    print(f"已为 {len(scns)} 个场景生成 prompt.txt(RCA)+ binding_prompt.txt(绑定)+ _HOWTO_prompts.md。")
+    print("RCA:发 prompt.txt → 存 rca.json → score_accuracy.py;绑定:发 binding_prompt.txt → 存 binding.json → score_binding.py。")
+    print("一律发给【普通模型/聊天,别用能写代码的 agent】。")
 
 
 if __name__ == "__main__":

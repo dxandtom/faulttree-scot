@@ -1,0 +1,61 @@
+{
+  "scenario": "real_sub_接入_小__confirmed_shallow",
+  "to_bind": [
+    {
+      "node_id": "n48",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n50",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n51",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n52",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n64",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "SA_UECntx_Est_SuccRate(%)",
+          "samples": [
+            99.95,
+            93.8
+          ]
+        },
+        {
+          "name": "PUSCH_RSSI(dBm)",
+          "samples": [
+            -96.5
+          ]
+        },
+        {
+          "name": "WeakCov_Sample_Ratio(%)",
+          "samples": [
+            2.1
+          ]
+        }
+      ],
+      "n_rows": 8
+    }
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "scenario": "synth_中__fp_heavy",
+  "to_bind": [
+    {
+      "node_id": "s12",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s24",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s25",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s7",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s2",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "s33",
+      "node": "GTP-U路径故障告警",
+      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "s49",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "s50",
+      "node": "单小区接入失败集中",
+      "condition_text": "失败会话按 小区 分组,占比最高的小区 超过 60%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s51",
+      "node": "会话缺安全模式完成",
+      "condition_text": "信令会话里 有 SecurityModeCommand 却 缺 SecurityModeComplete",
+      "source": "sig"
+    },
+    {
+      "node_id": "s52",
+      "node": "有建立请求无建立完成",
+      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
+      "source": "sig"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "PUSCH_RSSI(dBm)",
+          "samples": [
+            -117.8
+          ]
+        },
+        {
+          "name": "SA_RRC_ConnSetup_SuccRate(%)",
+          "samples": [
+            99.7
+          ]
+        },
+        {
+          "name": "RACH_Setup_SuccRate(%)",
+          "samples": [
+            78.6
+          ]
+        }
+      ],
+      "n_rows": 6
+    },
+    "alarm": {
+      "columns": [
+        {
+          "name": "AlarmLog",
+          "samples": [
+            "ALM-29240",
+            "NONE",
+            "ALM-25952"
+          ]
+        }
+      ],
+      "n_rows": 11
+    },
+    "chr": {
+      "columns": [
+        {
+          "name": "NRCellIdentity",
+          "samples": [
+            "Cell-0x1A3F",
+            "Other-0",
+            "Other-1",
+            "Other-2"
+          ]
+        }
+      ],
+      "n_rows": 25
+    },
+    "sig": {
+      "columns": [
+        {
+          "name": "CallID",
+          "samples": [
+            7000,
+            7001,
+            7002,
+            7003
+          ]
+        },
+        {
+          "name": "MessageType",
+          "samples": [
+            "SecurityModeCommand",
+            "OtherMsg",
+            "RRCSetupRequest"
+          ]
+        }
+      ],
+      "n_rows": 22
+    }
+  }
+}

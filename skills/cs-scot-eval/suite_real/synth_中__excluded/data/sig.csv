@@ -1,0 +1,10 @@
+CallID,MessageType
+5000,SecurityModeCommand
+5000,OtherMsg
+5000,SecurityModeComplete
+5001,SecurityModeCommand
+5001,OtherMsg
+5001,SecurityModeComplete
+5002,SecurityModeCommand
+5002,OtherMsg
+5002,SecurityModeComplete

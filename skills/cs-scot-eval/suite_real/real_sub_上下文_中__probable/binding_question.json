@@ -1,0 +1,99 @@
+{
+  "scenario": "real_sub_上下文_中__probable",
+  "to_bind": [
+    {
+      "node_id": "n10",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n11",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n35",
+      "node": "GTP-U路径故障告警",
+      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "n36",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "n4",
+      "node": "有建立请求无建立完成",
+      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
+      "source": "sig"
+    },
+    {
+      "node_id": "n5",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "SA_UECntx_Est_SuccRate(%)",
+          "samples": [
+            99.95
+          ]
+        }
+      ],
+      "n_rows": 2
+    },
+    "alarm": {
+      "columns": [
+        {
+          "name": "AlarmLog",
+          "samples": [
+            "NONE",
+            "ALM-29240"
+          ]
+        }
+      ],
+      "n_rows": 6
+    },
+    "sig": {
+      "columns": [
+        {
+          "name": "CallID",
+          "samples": [
+            4000,
+            4001,
+            4002,
+            4003
+          ]
+        },
+        {
+          "name": "MessageType",
+          "samples": [
+            "RRCSetupRequest",
+            "OtherMsg"
+          ]
+        }
+      ],
+      "n_rows": 10
+    },
+    "chr": {
+      "columns": [
+        {
+          "name": "ReleaseCause",
+          "samples": [
+            "NAS_Authentication_Failure",
+            "OTHER"
+          ]
+        }
+      ],
+      "n_rows": 40
+    }
+  }
+}

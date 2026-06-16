@@ -1,0 +1,93 @@
+{
+  "scenario": "real_sub_上下文_中__confirmed_shallow",
+  "to_bind": [
+    {
+      "node_id": "n10",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n11",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n12",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n35",
+      "node": "GTP-U路径故障告警",
+      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "n36",
+      "node": "Xn链路故障告警",
+      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "source": "alarm"
+    },
+    {
+      "node_id": "n4",
+      "node": "有建立请求无建立完成",
+      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
+      "source": "sig"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "SA_RRC_ConnSetup_SuccRate(%)",
+          "samples": [
+            99.7
+          ]
+        },
+        {
+          "name": "RACH_Setup_SuccRate(%)",
+          "samples": [
+            78.6
+          ]
+        }
+      ],
+      "n_rows": 4
+    },
+    "alarm": {
+      "columns": [
+        {
+          "name": "AlarmLog",
+          "samples": [
+            "NONE",
+            "ALM-29240"
+          ]
+        }
+      ],
+      "n_rows": 6
+    },
+    "sig": {
+      "columns": [
+        {
+          "name": "CallID",
+          "samples": [
+            5000,
+            5001,
+            5002,
+            5003
+          ]
+        },
+        {
+          "name": "MessageType",
+          "samples": [
+            "RRCSetupRequest",
+            "OtherMsg"
+          ]
+        }
+      ],
+      "n_rows": 10
+    }
+  }
+}

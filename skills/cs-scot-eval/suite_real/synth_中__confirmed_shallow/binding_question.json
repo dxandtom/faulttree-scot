@@ -1,0 +1,87 @@
+{
+  "scenario": "synth_中__confirmed_shallow",
+  "to_bind": [
+    {
+      "node_id": "s24",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s25",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s26",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s7",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s31",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s5",
+      "node": "TOP1终端型号集中",
+      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
+      "source": "chr"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "SA_RRC_ConnSetup_SuccRate(%)",
+          "samples": [
+            91.4
+          ]
+        },
+        {
+          "name": "SA_UECntx_Est_SuccRate(%)",
+          "samples": [
+            99.95
+          ]
+        },
+        {
+          "name": "RACH_Setup_SuccRate(%)",
+          "samples": [
+            98.9
+          ]
+        }
+      ],
+      "n_rows": 6
+    },
+    "chr": {
+      "columns": [
+        {
+          "name": "NgRanCause",
+          "samples": [
+            "transport-resource-unavailable",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "TerminalModel",
+          "samples": [
+            "BrandX-Model9",
+            "Other-0",
+            "Other-1",
+            "Other-2"
+          ]
+        }
+      ],
+      "n_rows": 55
+    }
+  }
+}

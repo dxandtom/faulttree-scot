@@ -1,0 +1,165 @@
+{
+  "scenario": "synth_特大__fp_heavy",
+  "to_bind": [
+    {
+      "node_id": "s100",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s101",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s132",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s289",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "s133",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s134",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s135",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s25",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s39",
+      "node": "单小区接入失败集中",
+      "condition_text": "失败会话按 小区 分组,占比最高的小区 超过 60%",
+      "source": "chr"
+    },
+    {
+      "node_id": "s7",
+      "node": "有建立请求无建立完成",
+      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
+      "source": "sig"
+    },
+    {
+      "node_id": "s94",
+      "node": "GTP-U路径故障告警",
+      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
+      "source": "alarm"
+    }
+  ],
+  "data_overview": {
+    "kpi": {
+      "columns": [
+        {
+          "name": "RACH_Setup_SuccRate(%)",
+          "samples": [
+            98.9,
+            78.6
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Att",
+          "samples": [
+            8420
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Succ",
+          "samples": [
+            7180
+          ]
+        }
+      ],
+      "n_rows": 5
+    },
+    "chr": {
+      "columns": [
+        {
+          "name": "DCErrType",
+          "samples": [
+            "RNL_RadioLinkFailure",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "ReleaseCause",
+          "samples": [
+            "NAS_Authentication_Failure",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "NgRanCause",
+          "samples": [
+            "transport-resource-unavailable",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "NRCellIdentity",
+          "samples": [
+            "Cell-0x1A3F",
+            "Other-0",
+            "Other-1",
+            "Other-2"
+          ]
+        }
+      ],
+      "n_rows": 185
+    },
+    "sig": {
+      "columns": [
+        {
+          "name": "CallID",
+          "samples": [
+            9000,
+            9001,
+            9002,
+            9003
+          ]
+        },
+        {
+          "name": "MessageType",
+          "samples": [
+            "RRCSetupRequest",
+            "OtherMsg"
+          ]
+        }
+      ],
+      "n_rows": 10
+    },
+    "alarm": {
+      "columns": [
+        {
+          "name": "AlarmLog",
+          "samples": [
+            "ALM-25952",
+            "NONE"
+          ]
+        }
+      ],
+      "n_rows": 5
+    }
+  }
+}
