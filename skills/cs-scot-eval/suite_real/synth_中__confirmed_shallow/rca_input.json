@@ -4,14 +4,14 @@
     "root": "s1",
     "outline": {
       "s1": "pass",
+      "s6": "uncovered",
+      "s31": "hold",
       "s7": "fail",
+      "s5": "hold",
       "s2": "uncovered",
       "s24": "hold",
-      "s6": "uncovered",
-      "s26": "insufficient",
       "s25": "fail",
-      "s5": "hold",
-      "s31": "hold"
+      "s26": "insufficient"
     },
     "pruned_nodes": {
       "s1": {
@@ -19,6 +19,39 @@
         "parent": null,
         "level": 2,
         "pass_through": true
+      },
+      "s6": {
+        "name": "L2节点_006",
+        "parent": "s1",
+        "level": 3,
+        "combine": "unknown"
+      },
+      "s31": {
+        "name": "GPS失锁/时钟告警",
+        "parent": "s7",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s31_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "AlarmLog",
+            "matched": 2,
+            "total": 2,
+            "top": [
+              [
+                "ALM-26262 时钟参考源异常",
+                2
+              ]
+            ]
+          }
+        ]
       },
       "s7": {
         "name": "UECapabilityEnquiry无回复",
@@ -36,6 +69,27 @@
             "predicate_satisfied": false,
             "resolved_column": "MessageType",
             "matched_sessions": 0
+          }
+        ]
+      },
+      "s5": {
+        "name": "弱覆盖采样占比高",
+        "parent": "s1",
+        "level": 3,
+        "condition": "RSRP<-110 的采样占比 > 15%",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s5_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "弱覆盖采样占比 RSRP<-110(%)",
+            "value": 38.4,
+            "op": ">",
+            "threshold": 15.0
           }
         ]
       },
@@ -77,30 +131,6 @@
           }
         ]
       },
-      "s6": {
-        "name": "L2节点_006",
-        "parent": "s1",
-        "level": 3,
-        "combine": "unknown"
-      },
-      "s26": {
-        "name": "RRC拒绝(拥塞)占比高",
-        "parent": "s6",
-        "level": 4,
-        "is_leaf": true,
-        "condition": "RRCReject 原因=congestion 占比 ≥ 15%",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s26_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "C",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
       "s25": {
         "name": "AMF过载拒绝占比高",
         "parent": "s5",
@@ -133,51 +163,21 @@
           }
         ]
       },
-      "s5": {
-        "name": "弱覆盖采样占比高",
-        "parent": "s1",
-        "level": 3,
-        "condition": "RSRP<-110 的采样占比 > 15%",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s5_b",
-            "indicator": "cfg",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "弱覆盖采样占比 RSRP<-110(%)",
-            "value": 38.4,
-            "op": ">",
-            "threshold": 15.0
-          }
-        ]
-      },
-      "s31": {
-        "name": "GPS失锁/时钟告警",
-        "parent": "s7",
-        "level": 5,
+      "s26": {
+        "name": "RRC拒绝(拥塞)占比高",
+        "parent": "s6",
+        "level": 4,
         "is_leaf": true,
-        "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
-        "combine": "AND",
+        "condition": "RRCReject 原因=congestion 占比 ≥ 15%",
+        "combine": "unknown",
         "facts": [
           {
-            "id": "s31_b",
-            "indicator": "alarm",
+            "id": "s26_b",
+            "indicator": "sig",
             "mapping_reason": "合成注入(真实业务判据)",
-            "class": "G",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "AlarmLog",
-            "matched": 2,
-            "total": 2,
-            "top": [
-              [
-                "ALM-26262 时钟参考源异常",
-                2
-              ]
-            ]
+            "class": "C",
+            "status": "insufficient_data",
+            "resolved_column": null
           }
         ]
       }

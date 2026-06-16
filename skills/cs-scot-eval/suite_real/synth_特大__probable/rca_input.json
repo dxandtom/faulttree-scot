@@ -3,31 +3,37 @@
     "scenario": "synth_特大",
     "root": "s1",
     "outline": {
-      "s11": "uncovered",
       "s1": "pass",
-      "s7": "hold",
-      "s92": "hold",
-      "s287": "insufficient",
-      "s2": "pass",
       "s28": "uncovered",
       "s3": "uncovered",
-      "s132": "hold",
+      "s7": "hold",
+      "s2": "pass",
       "s25": "hold",
+      "s100": "fail",
+      "s132": "hold",
+      "s92": "hold",
+      "s11": "uncovered",
       "s39": "fail",
-      "s100": "fail"
+      "s287": "insufficient"
     },
     "pruned_nodes": {
-      "s11": {
-        "name": "L3节点_011",
-        "parent": "s3",
-        "level": 4,
-        "combine": "unknown"
-      },
       "s1": {
         "name": "L1节点_001",
         "parent": null,
         "level": 2,
         "pass_through": true
+      },
+      "s28": {
+        "name": "L4节点_028",
+        "parent": "s7",
+        "level": 5,
+        "combine": "OR"
+      },
+      "s3": {
+        "name": "L2节点_003",
+        "parent": "s1",
+        "level": 3,
+        "combine": "unknown"
       },
       "s7": {
         "name": "邻区漏配",
@@ -52,6 +58,83 @@
                 5
               ]
             ]
+          }
+        ]
+      },
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "OR",
+        "pass_through": true
+      },
+      "s25": {
+        "name": "GTP-U路径故障告警",
+        "parent": "s7",
+        "level": 5,
+        "condition": "告警日志存在「ALM-25952 GTPU路径故障」",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s25_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "AlarmLog",
+            "matched": 4,
+            "total": 4,
+            "top": [
+              [
+                "ALM-25952 GTPU路径故障",
+                4
+              ]
+            ]
+          }
+        ]
+      },
+      "s100": {
+        "name": "NG接口/AMF信令建立失败",
+        "parent": "s28",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "SA_NGSig_Conn_SuccRate(%) < 99.5",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "s100_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "SA_NGSig_Conn_SuccRate(%)",
+            "value": 99.99,
+            "op": "<",
+            "threshold": 99.5
+          }
+        ]
+      },
+      "s132": {
+        "name": "UE上下文建立成功率低",
+        "parent": "s39",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s132_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 93.8,
+            "op": "<",
+            "threshold": 99.0
           }
         ]
       },
@@ -81,90 +164,11 @@
           }
         ]
       },
-      "s287": {
-        "name": "有RRCSetupRequest无RRCSetupComplete",
-        "parent": "s92",
-        "level": 7,
-        "is_leaf": true,
-        "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s287_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
-      "s2": {
-        "name": "L2节点_002",
-        "parent": "s1",
-        "level": 3,
-        "combine": "OR",
-        "pass_through": true
-      },
-      "s28": {
-        "name": "L4节点_028",
-        "parent": "s7",
-        "level": 5,
-        "combine": "OR"
-      },
-      "s3": {
-        "name": "L2节点_003",
-        "parent": "s1",
-        "level": 3,
+      "s11": {
+        "name": "L3节点_011",
+        "parent": "s3",
+        "level": 4,
         "combine": "unknown"
-      },
-      "s132": {
-        "name": "UE上下文建立成功率低",
-        "parent": "s39",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "SA_UECntx_Est_SuccRate(%) < 99",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s132_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
-            "value": 93.8,
-            "op": "<",
-            "threshold": 99.0
-          }
-        ]
-      },
-      "s25": {
-        "name": "GTP-U路径故障告警",
-        "parent": "s7",
-        "level": 5,
-        "condition": "告警日志存在「ALM-25952 GTPU路径故障」",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s25_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "G",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "AlarmLog",
-            "matched": 4,
-            "total": 4,
-            "top": [
-              [
-                "ALM-25952 GTPU路径故障",
-                4
-              ]
-            ]
-          }
-        ]
       },
       "s39": {
         "name": "UE上下文建立成功率低",
@@ -187,25 +191,21 @@
           }
         ]
       },
-      "s100": {
-        "name": "NG接口/AMF信令建立失败",
-        "parent": "s28",
-        "level": 6,
+      "s287": {
+        "name": "有RRCSetupRequest无RRCSetupComplete",
+        "parent": "s92",
+        "level": 7,
         "is_leaf": true,
-        "condition": "SA_NGSig_Conn_SuccRate(%) < 99.5",
-        "combine": "OR",
+        "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
+        "combine": "AND",
         "facts": [
           {
-            "id": "s100_b",
-            "indicator": "kpi",
+            "id": "s287_b",
+            "indicator": "alarm",
             "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "SA_NGSig_Conn_SuccRate(%)",
-            "value": 99.99,
-            "op": "<",
-            "threshold": 99.5
+            "class": "H",
+            "status": "insufficient_data",
+            "resolved_column": null
           }
         ]
       }

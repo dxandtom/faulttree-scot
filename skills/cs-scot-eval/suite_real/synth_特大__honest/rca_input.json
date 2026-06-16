@@ -3,130 +3,33 @@
     "scenario": "synth_特大",
     "root": "s1",
     "outline": {
-      "s291": "insufficient",
       "s1": "pass",
-      "s7": "uncovered",
-      "s287": "insufficient",
-      "s92": "uncovered",
-      "s292": "insufficient",
       "s94": "uncovered",
-      "s293": "insufficient",
-      "s2": "pass",
-      "s96": "uncovered",
       "s289": "insufficient",
+      "s292": "insufficient",
+      "s7": "uncovered",
       "s290": "insufficient",
-      "s26": "uncovered",
-      "s25": "uncovered"
+      "s96": "uncovered",
+      "s2": "pass",
+      "s291": "insufficient",
+      "s25": "uncovered",
+      "s293": "insufficient",
+      "s92": "uncovered",
+      "s287": "insufficient",
+      "s26": "uncovered"
     },
     "pruned_nodes": {
-      "s291": {
-        "name": "单频点失败集中",
-        "parent": "s94",
-        "level": 7,
-        "is_leaf": true,
-        "condition": "失败会话按 ARFCN 分组,TOP1 频点占比 > 50%",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s291_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "E",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
       "s1": {
         "name": "L1节点_001",
         "parent": null,
         "level": 2,
         "pass_through": true
       },
-      "s7": {
-        "name": "L3节点_007",
-        "parent": "s2",
-        "level": 4,
-        "combine": "OR"
-      },
-      "s287": {
-        "name": "有RRCSetupRequest无RRCSetupComplete",
-        "parent": "s92",
-        "level": 7,
-        "is_leaf": true,
-        "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s287_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
-      "s92": {
-        "name": "L5节点_092",
-        "parent": "s25",
-        "level": 6,
-        "combine": "unknown"
-      },
-      "s292": {
-        "name": "TAC配置不一致",
-        "parent": "s96",
-        "level": 7,
-        "is_leaf": true,
-        "condition": "配置核查:小区 TAC 与核心网规划不一致(命中)",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s292_b",
-            "indicator": "cfg",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "F",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
       "s94": {
         "name": "L5节点_094",
         "parent": "s25",
         "level": 6,
         "combine": "OR"
-      },
-      "s293": {
-        "name": "邻区漏配",
-        "parent": "s96",
-        "level": 7,
-        "is_leaf": true,
-        "condition": "配置核查:存在漏配的同频邻区关系(命中)",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s293_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "F",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
-      "s2": {
-        "name": "L2节点_002",
-        "parent": "s1",
-        "level": 3,
-        "combine": "OR",
-        "pass_through": true
-      },
-      "s96": {
-        "name": "L5节点_096",
-        "parent": "s26",
-        "level": 6,
-        "combine": "AND"
       },
       "s289": {
         "name": "UECapabilityEnquiry无回复",
@@ -146,6 +49,30 @@
           }
         ]
       },
+      "s292": {
+        "name": "TAC配置不一致",
+        "parent": "s96",
+        "level": 7,
+        "is_leaf": true,
+        "condition": "配置核查:小区 TAC 与核心网规划不一致(命中)",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s292_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "F",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s7": {
+        "name": "L3节点_007",
+        "parent": "s2",
+        "level": 4,
+        "combine": "OR"
+      },
       "s290": {
         "name": "单小区接入失败占比高",
         "parent": "s94",
@@ -164,14 +91,87 @@
           }
         ]
       },
-      "s26": {
-        "name": "L4节点_026",
+      "s96": {
+        "name": "L5节点_096",
+        "parent": "s26",
+        "level": 6,
+        "combine": "AND"
+      },
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "OR",
+        "pass_through": true
+      },
+      "s291": {
+        "name": "单频点失败集中",
+        "parent": "s94",
+        "level": 7,
+        "is_leaf": true,
+        "condition": "失败会话按 ARFCN 分组,TOP1 频点占比 > 50%",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s291_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "E",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s25": {
+        "name": "L4节点_025",
         "parent": "s7",
         "level": 5,
         "combine": "unknown"
       },
-      "s25": {
-        "name": "L4节点_025",
+      "s293": {
+        "name": "邻区漏配",
+        "parent": "s96",
+        "level": 7,
+        "is_leaf": true,
+        "condition": "配置核查:存在漏配的同频邻区关系(命中)",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s293_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "F",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s92": {
+        "name": "L5节点_092",
+        "parent": "s25",
+        "level": 6,
+        "combine": "unknown"
+      },
+      "s287": {
+        "name": "有RRCSetupRequest无RRCSetupComplete",
+        "parent": "s92",
+        "level": 7,
+        "is_leaf": true,
+        "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s287_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s26": {
+        "name": "L4节点_026",
         "parent": "s7",
         "level": 5,
         "combine": "unknown"

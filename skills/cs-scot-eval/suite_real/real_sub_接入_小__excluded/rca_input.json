@@ -4,16 +4,16 @@
     "root": "n47",
     "outline": {
       "n50": "fail",
-      "n49": "pass",
-      "n68": "uncovered",
       "n67": "uncovered",
-      "n70": "fail",
       "n71": "fail",
+      "n70": "fail",
+      "n51": "fail",
       "n69": "fail",
-      "n48": "uncovered",
-      "n72": "fail",
+      "n49": "pass",
       "n47": "pass",
-      "n51": "fail"
+      "n68": "uncovered",
+      "n72": "fail",
+      "n48": "uncovered"
     },
     "pruned_nodes": {
       "n50": {
@@ -38,23 +38,33 @@
           }
         ]
       },
-      "n49": {
-        "name": "L4节点_019",
-        "parent": "n48",
-        "level": 4,
-        "pass_through": true
-      },
-      "n68": {
-        "name": "L4节点_033",
-        "parent": "n67",
-        "level": 4,
-        "combine": "OR"
-      },
       "n67": {
         "name": "L3节点_007",
         "parent": "n47",
         "level": 3,
         "combine": "OR"
+      },
+      "n71": {
+        "name": "GPS失锁/时钟告警",
+        "parent": "n68",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n71_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "AlarmLog",
+            "matched": 0,
+            "total": 1,
+            "top": []
+          }
+        ]
       },
       "n70": {
         "name": "GTP-U路径故障告警",
@@ -78,25 +88,25 @@
           }
         ]
       },
-      "n71": {
-        "name": "GPS失锁/时钟告警",
-        "parent": "n68",
-        "level": 5,
+      "n51": {
+        "name": "PRACH随机接入成功率低",
+        "parent": "n48",
+        "level": 4,
         "is_leaf": true,
-        "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
-        "combine": "OR",
+        "condition": "RACH_Setup_SuccRate(%) < 95",
+        "combine": "unknown",
         "facts": [
           {
-            "id": "n71_b",
-            "indicator": "cfg",
+            "id": "n51_b",
+            "indicator": "chr",
             "mapping_reason": "合成注入(真实业务判据)",
-            "class": "G",
+            "class": "A",
             "status": "ok",
             "predicate_satisfied": false,
-            "resolved_column": "AlarmLog",
-            "matched": 0,
-            "total": 1,
-            "top": []
+            "resolved_column": "RACH_Setup_SuccRate(%)",
+            "value": 98.9,
+            "op": "<",
+            "threshold": 95.0
           }
         ]
       },
@@ -122,10 +132,22 @@
           }
         ]
       },
-      "n48": {
-        "name": "L3节点_004",
-        "parent": "n47",
-        "level": 3,
+      "n49": {
+        "name": "L4节点_019",
+        "parent": "n48",
+        "level": 4,
+        "pass_through": true
+      },
+      "n47": {
+        "name": "L2节点_003",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "n68": {
+        "name": "L4节点_033",
+        "parent": "n67",
+        "level": 4,
         "combine": "OR"
       },
       "n72": {
@@ -150,33 +172,11 @@
           }
         ]
       },
-      "n47": {
-        "name": "L2节点_003",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
-      },
-      "n51": {
-        "name": "PRACH随机接入成功率低",
-        "parent": "n48",
-        "level": 4,
-        "is_leaf": true,
-        "condition": "RACH_Setup_SuccRate(%) < 95",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n51_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "RACH_Setup_SuccRate(%)",
-            "value": 98.9,
-            "op": "<",
-            "threshold": 95.0
-          }
-        ]
+      "n48": {
+        "name": "L3节点_004",
+        "parent": "n47",
+        "level": 3,
+        "combine": "OR"
       }
     }
   },

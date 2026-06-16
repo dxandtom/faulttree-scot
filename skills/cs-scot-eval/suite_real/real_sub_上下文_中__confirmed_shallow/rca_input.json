@@ -3,35 +3,89 @@
     "scenario": "real_sub_上下文_中",
     "root": "n3",
     "outline": {
-      "n4": "hold",
-      "n10": "fail",
-      "n3": "pass",
-      "n35": "fail",
-      "n5": "uncovered",
-      "n11": "insufficient",
       "n32": "uncovered",
+      "n35": "fail",
+      "n12": "hold",
+      "n3": "pass",
       "n36": "hold",
-      "n12": "hold"
+      "n10": "fail",
+      "n4": "hold",
+      "n11": "insufficient",
+      "n5": "uncovered"
     },
     "pruned_nodes": {
-      "n4": {
-        "name": "TOP1终端型号集中",
+      "n32": {
+        "name": "L3节点_002",
         "parent": "n3",
         "level": 3,
-        "condition": "失败会话按 TerminalType 分组,TOP1 占比 > 50%",
-        "combine": "OR",
+        "combine": "unknown"
+      },
+      "n35": {
+        "name": "License受限告警",
+        "parent": "n32",
+        "level": 4,
+        "condition": "告警日志存在「ALM-26818 License不足」",
+        "combine": "unknown",
         "facts": [
           {
-            "id": "n4_b",
-            "indicator": "kpi",
+            "id": "n35_b",
+            "indicator": "alarm",
             "mapping_reason": "合成注入(真实业务判据)",
-            "class": "E",
+            "class": "G",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "AlarmLog",
+            "matched": 0,
+            "total": 1,
+            "top": []
+          }
+        ]
+      },
+      "n12": {
+        "name": "NG接口/AMF信令建立失败",
+        "parent": "n4",
+        "level": 4,
+        "is_leaf": true,
+        "condition": "SA_NGSig_Conn_SuccRate(%) < 99.5",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n12_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
             "status": "ok",
             "predicate_satisfied": true,
-            "top1": "BrandX-Model9",
-            "top1_ratio": 0.72,
-            "op": ">",
-            "threshold": 0.5
+            "resolved_column": "SA_NGSig_Conn_SuccRate(%)",
+            "value": 95.1,
+            "op": "<",
+            "threshold": 99.5
+          }
+        ]
+      },
+      "n3": {
+        "name": "L2节点_002",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "n36": {
+        "name": "会话缺SecurityModeComplete",
+        "parent": "n35",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "信令:会话内出现 SecurityModeCommand 但缺 SecurityModeComplete",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n36_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "MessageType",
+            "matched_sessions": 27
           }
         ]
       },
@@ -57,38 +111,26 @@
           }
         ]
       },
-      "n3": {
-        "name": "L2节点_002",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
-      },
-      "n35": {
-        "name": "License受限告警",
-        "parent": "n32",
-        "level": 4,
-        "condition": "告警日志存在「ALM-26818 License不足」",
-        "combine": "unknown",
+      "n4": {
+        "name": "TOP1终端型号集中",
+        "parent": "n3",
+        "level": 3,
+        "condition": "失败会话按 TerminalType 分组,TOP1 占比 > 50%",
+        "combine": "OR",
         "facts": [
           {
-            "id": "n35_b",
-            "indicator": "alarm",
+            "id": "n4_b",
+            "indicator": "kpi",
             "mapping_reason": "合成注入(真实业务判据)",
-            "class": "G",
+            "class": "E",
             "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "AlarmLog",
-            "matched": 0,
-            "total": 1,
-            "top": []
+            "predicate_satisfied": true,
+            "top1": "BrandX-Model9",
+            "top1_ratio": 0.72,
+            "op": ">",
+            "threshold": 0.5
           }
         ]
-      },
-      "n5": {
-        "name": "L4节点_001",
-        "parent": "n4",
-        "level": 4,
-        "combine": "AND"
       },
       "n11": {
         "name": "UE上下文建立成功率低",
@@ -108,53 +150,11 @@
           }
         ]
       },
-      "n32": {
-        "name": "L3节点_002",
-        "parent": "n3",
-        "level": 3,
-        "combine": "unknown"
-      },
-      "n36": {
-        "name": "会话缺SecurityModeComplete",
-        "parent": "n35",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "信令:会话内出现 SecurityModeCommand 但缺 SecurityModeComplete",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n36_b",
-            "indicator": "cfg",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "MessageType",
-            "matched_sessions": 27
-          }
-        ]
-      },
-      "n12": {
-        "name": "NG接口/AMF信令建立失败",
+      "n5": {
+        "name": "L4节点_001",
         "parent": "n4",
         "level": 4,
-        "is_leaf": true,
-        "condition": "SA_NGSig_Conn_SuccRate(%) < 99.5",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n12_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "SA_NGSig_Conn_SuccRate(%)",
-            "value": 95.1,
-            "op": "<",
-            "threshold": 99.5
-          }
-        ]
+        "combine": "AND"
       }
     }
   },

@@ -3,61 +3,19 @@
     "scenario": "synth_中",
     "root": "s1",
     "outline": {
-      "s36": "insufficient",
-      "s8": "uncovered",
-      "s35": "insufficient",
       "s1": "pass",
       "s37": "insufficient",
-      "s7": "uncovered",
-      "s2": "uncovered",
       "s33": "insufficient",
+      "s31": "insufficient",
+      "s35": "insufficient",
+      "s7": "uncovered",
       "s34": "insufficient",
+      "s2": "uncovered",
       "s9": "uncovered",
-      "s31": "insufficient"
+      "s8": "uncovered",
+      "s36": "insufficient"
     },
     "pruned_nodes": {
-      "s36": {
-        "name": "RegistrationRequest无Accept",
-        "parent": "s8",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "信令:有 RegistrationRequest 但无 RegistrationAccept",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s36_b",
-            "indicator": "cfg",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
-      "s8": {
-        "name": "L3节点_008",
-        "parent": "s2",
-        "level": 4,
-        "combine": "unknown"
-      },
-      "s35": {
-        "name": "有RRCSetupRequest无RRCSetupComplete",
-        "parent": "s8",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "s35_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "H",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
       "s1": {
         "name": "L1节点_001",
         "parent": null,
@@ -82,18 +40,6 @@
           }
         ]
       },
-      "s7": {
-        "name": "L3节点_007",
-        "parent": "s2",
-        "level": 4,
-        "combine": "OR"
-      },
-      "s2": {
-        "name": "L2节点_002",
-        "parent": "s1",
-        "level": 3,
-        "combine": "unknown"
-      },
       "s33": {
         "name": "License受限告警",
         "parent": "s7",
@@ -111,6 +57,48 @@
             "resolved_column": null
           }
         ]
+      },
+      "s31": {
+        "name": "GPS失锁/时钟告警",
+        "parent": "s7",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s31_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s35": {
+        "name": "有RRCSetupRequest无RRCSetupComplete",
+        "parent": "s8",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "信令:存在 RRCSetupRequest 但无 RRCSetupComplete",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "s35_b",
+            "indicator": "alarm",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "H",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "s7": {
+        "name": "L3节点_007",
+        "parent": "s2",
+        "level": 4,
+        "combine": "OR"
       },
       "s34": {
         "name": "会话缺SecurityModeComplete",
@@ -130,25 +118,37 @@
           }
         ]
       },
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "unknown"
+      },
       "s9": {
         "name": "L3节点_009",
         "parent": "s2",
         "level": 4,
         "combine": "AND"
       },
-      "s31": {
-        "name": "GPS失锁/时钟告警",
-        "parent": "s7",
+      "s8": {
+        "name": "L3节点_008",
+        "parent": "s2",
+        "level": 4,
+        "combine": "unknown"
+      },
+      "s36": {
+        "name": "RegistrationRequest无Accept",
+        "parent": "s8",
         "level": 5,
         "is_leaf": true,
-        "condition": "告警日志存在「ALM-26262 时钟参考源异常」",
+        "condition": "信令:有 RegistrationRequest 但无 RegistrationAccept",
         "combine": "AND",
         "facts": [
           {
-            "id": "s31_b",
-            "indicator": "kpi",
+            "id": "s36_b",
+            "indicator": "cfg",
             "mapping_reason": "合成注入(真实业务判据)",
-            "class": "G",
+            "class": "H",
             "status": "insufficient_data",
             "resolved_column": null
           }

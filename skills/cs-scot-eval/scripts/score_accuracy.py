@@ -28,18 +28,23 @@ def _norm(s):
 
 
 def _entry_ids(entry: dict):
+    """从一条根因记录里抽出它引用的节点 id / 名字。兼容多种写法:契约形态(evidence_path[].node_id /
+    Root_cause / Fault_tree_path)+ 常见变体(顶层 node_id/node_name、path)。"""
     ids, names = set(), set()
     for e in entry.get("evidence_path") or []:
         if e.get("node_id"):
             ids.add(e["node_id"])
         if e.get("node"):
             names.add(_norm(e["node"]))
-    for k in ("Root_cause", "blocked_at"):
+    if entry.get("node_id"):                       # 变体:顶层直接给 node_id
+        ids.add(entry["node_id"])
+    for k in ("Root_cause", "blocked_at", "node_name", "node"):
         if entry.get(k):
             names.add(_norm(entry[k]))
-    fp = entry.get("Fault_tree_path") or []
-    if fp:
-        names.add(_norm(fp[-1]))
+    for pk in ("Fault_tree_path", "path"):         # 路径(契约给名字 / 变体给 node_id)整条都收
+        for x in entry.get(pk) or []:
+            ids.add(x)
+            names.add(_norm(x))
     return ids, names
 
 
@@ -48,14 +53,29 @@ def _covers(entry: dict, nid, name) -> bool:
     return bool((nid and nid in ids) or (name and _norm(name) in names))
 
 
+def _claimed_cause_ids(entry: dict) -> set:
+    """这条记录断言的"根因/关键节点"id(顶层 node_id 优先,否则路径末端的 nN/sN)。"""
+    if entry.get("node_id"):
+        return {entry["node_id"]}
+    ep = entry.get("evidence_path") or []
+    if ep and ep[-1].get("node_id"):
+        return {ep[-1]["node_id"]}
+    for pk in ("path", "Fault_tree_path"):
+        p = entry.get(pk) or []
+        if p and isinstance(p[-1], str) and p[-1][:1] in "ns" and p[-1][1:].isdigit():
+            return {p[-1]}
+    return set()
+
+
 def _judged_hold_ids(conf, prob) -> set:
-    """模型在 evidence_path 里判为"成立"的节点 id 集合(用于对真值查"伪造成立")。"""
+    """模型判为"成立"的节点 id 集合(查"伪造成立"用)。有逐节点 judgment 就用它;
+    没有(很多模型只给根因不给 evidence_path)→ 退而用它断言的根因节点(确证/疑似都隐含路径成立)。"""
     out = set()
     for e in conf + prob:
-        for step in (e.get("evidence_path") or []):
-            j = str(step.get("judgment", ""))
-            if "成立" in j and "不成立" not in j and step.get("node_id"):
-                out.add(step["node_id"])
+        ep = e.get("evidence_path") or []
+        explicit = {s["node_id"] for s in ep if s.get("node_id")
+                    and "成立" in str(s.get("judgment", "")) and "不成立" not in str(s.get("judgment", ""))}
+        out |= explicit or _claimed_cause_ids(e)
     return out
 
 
@@ -133,7 +153,7 @@ def main() -> int:
     rows = [score_one(d, args.use_reference) for d in scns]
 
     L = ["=" * 84,
-         "诊断准确率评测(受控合成故障注入 · 多树 · 事实不带 predicate,模型须自判)"
+         "诊断准确率评测(受控合成故障注入 · 多树 · rca_input 与生产一致)"
          + ("· 参考答案自测" if args.use_reference else ""),
          "=" * 84,
          f"{'场景':<34}{'类别':<22}{'命中':<5}{'档位':<5}{'无假阳':<7}{'诚实':<5}{'综合'}"]

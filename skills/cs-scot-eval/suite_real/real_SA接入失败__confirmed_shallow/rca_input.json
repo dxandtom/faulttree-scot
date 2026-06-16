@@ -3,22 +3,34 @@
     "scenario": "SA场景接入失败",
     "root": "n1",
     "outline": {
-      "n4": "uncovered",
-      "n10": "hold",
-      "n3": "uncovered",
       "n86": "pass",
+      "n3": "uncovered",
+      "n1": "pass",
+      "n10": "hold",
+      "n4": "uncovered",
+      "n101": "insufficient",
       "n175": "hold",
       "n5": "fail",
-      "n1": "pass",
-      "n100": "fail",
-      "n101": "insufficient"
+      "n100": "fail"
     },
     "pruned_nodes": {
-      "n4": {
-        "name": "L3节点_001",
-        "parent": "n3",
-        "level": 4,
+      "n86": {
+        "name": "L2节点_006",
+        "parent": "n1",
+        "level": 3,
+        "pass_through": true
+      },
+      "n3": {
+        "name": "L2节点_002",
+        "parent": "n1",
+        "level": 3,
         "combine": "OR"
+      },
+      "n1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
       },
       "n10": {
         "name": "UE上下文建立成功率低",
@@ -42,17 +54,29 @@
           }
         ]
       },
-      "n3": {
-        "name": "L2节点_002",
-        "parent": "n1",
-        "level": 3,
+      "n4": {
+        "name": "L3节点_001",
+        "parent": "n3",
+        "level": 4,
         "combine": "OR"
       },
-      "n86": {
-        "name": "L2节点_006",
-        "parent": "n1",
-        "level": 3,
-        "pass_through": true
+      "n101": {
+        "name": "QoS Flow建立成功率低",
+        "parent": "n86",
+        "level": 4,
+        "is_leaf": true,
+        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "n101_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
       },
       "n175": {
         "name": "RRC建立尝试与成功数差>0",
@@ -107,12 +131,6 @@
           }
         ]
       },
-      "n1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
-      },
       "n100": {
         "name": "NG接口/AMF信令建立失败",
         "parent": "n86",
@@ -132,24 +150,6 @@
             "value": 99.99,
             "op": "<",
             "threshold": 99.5
-          }
-        ]
-      },
-      "n101": {
-        "name": "QoS Flow建立成功率低",
-        "parent": "n86",
-        "level": 4,
-        "is_leaf": true,
-        "condition": "SA_QoSFlow_Est_SuccRate(%) < 99",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "n101_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "insufficient_data",
-            "resolved_column": null
           }
         ]
       }

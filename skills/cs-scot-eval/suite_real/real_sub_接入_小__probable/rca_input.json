@@ -4,13 +4,13 @@
     "root": "n47",
     "outline": {
       "n50": "hold",
-      "n68": "hold",
-      "n49": "pass",
       "n67": "hold",
+      "n51": "fail",
       "n69": "insufficient",
-      "n48": "fail",
+      "n49": "pass",
       "n47": "pass",
-      "n51": "fail"
+      "n68": "hold",
+      "n48": "fail"
     },
     "pruned_nodes": {
       "n50": {
@@ -34,38 +34,6 @@
             "threshold": 99.0
           }
         ]
-      },
-      "n68": {
-        "name": "小区不可用告警",
-        "parent": "n67",
-        "level": 4,
-        "condition": "告警日志存在「ALM-25888 小区不可用」",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n68_b",
-            "indicator": "cfg",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "G",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "AlarmLog",
-            "matched": 2,
-            "total": 2,
-            "top": [
-              [
-                "ALM-25888 小区不可用",
-                2
-              ]
-            ]
-          }
-        ]
-      },
-      "n49": {
-        "name": "L4节点_019",
-        "parent": "n48",
-        "level": 4,
-        "pass_through": true
       },
       "n67": {
         "name": "射频单元驻波比异常告警",
@@ -93,6 +61,28 @@
           }
         ]
       },
+      "n51": {
+        "name": "PRACH随机接入成功率低",
+        "parent": "n48",
+        "level": 4,
+        "is_leaf": true,
+        "condition": "RACH_Setup_SuccRate(%) < 95",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n51_b",
+            "indicator": "sig",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "RACH_Setup_SuccRate(%)",
+            "value": 98.9,
+            "op": "<",
+            "threshold": 95.0
+          }
+        ]
+      },
       "n69": {
         "name": "Xn链路故障告警",
         "parent": "n68",
@@ -108,6 +98,44 @@
             "class": "G",
             "status": "insufficient_data",
             "resolved_column": null
+          }
+        ]
+      },
+      "n49": {
+        "name": "L4节点_019",
+        "parent": "n48",
+        "level": 4,
+        "pass_through": true
+      },
+      "n47": {
+        "name": "L2节点_003",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "n68": {
+        "name": "小区不可用告警",
+        "parent": "n67",
+        "level": 4,
+        "condition": "告警日志存在「ALM-25888 小区不可用」",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n68_b",
+            "indicator": "cfg",
+            "mapping_reason": "合成注入(真实业务判据)",
+            "class": "G",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "AlarmLog",
+            "matched": 2,
+            "total": 2,
+            "top": [
+              [
+                "ALM-25888 小区不可用",
+                2
+              ]
+            ]
           }
         ]
       },
@@ -129,34 +157,6 @@
             "value": 99.95,
             "op": "<",
             "threshold": 99.0
-          }
-        ]
-      },
-      "n47": {
-        "name": "L2节点_003",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
-      },
-      "n51": {
-        "name": "PRACH随机接入成功率低",
-        "parent": "n48",
-        "level": 4,
-        "is_leaf": true,
-        "condition": "RACH_Setup_SuccRate(%) < 95",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n51_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入(真实业务判据)",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "RACH_Setup_SuccRate(%)",
-            "value": 98.9,
-            "op": "<",
-            "threshold": 95.0
           }
         ]
       }

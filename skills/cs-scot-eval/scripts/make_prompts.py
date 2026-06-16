@@ -43,6 +43,8 @@ facts(已解析事实,含实际值;ok 事实带 predicate_satisfied=内核字面
   "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…"]} ],
   "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }
 }
+**键名必须照抄上面**(Root_cause / Fault_tree_path / evidence_path / node_id / node / condition / actual / judgment),
+evidence_path 必须是逐节点的**列表**;**别自创** node_name/path/evidence 这类别的键(否则打分器对不上)。
 """
 
 HOWTO = """# 怎么用这些 prompt 跑出【真·模型】准确率
