@@ -93,39 +93,66 @@ def gold_binding(p: dict, node_id: str, node_name: str, source: str) -> dict:
 
 
 def synth_rows(p: dict, state: str, sid: int):
-    """造能让内核算出 hold/fail 的真实数据行(insuf 不造行 → 列缺失 → 内核数据不足)。"""
+    """(旧:单列稀疏行)保留给单元自测;主流程改用 own_series/sessions 造密集表。"""
     if state == "insuf":
         return []
+    cols = persona_cols(p)
+    if p["kind"] == "sess":
+        return sessions(p, state, (sid + 1) * 1000)
+    series = {c: own_series(p, state, c, 12) for c in cols}
+    return [{c: series[c][i] for c in series} for i in range(12)]
+
+
+def persona_cols(p: dict):
+    k = p["kind"]
+    if k == "diff":
+        return [p["minuend"], p["subtrahend"]]
+    if k == "sess":
+        return [p["key"], p["col"]]
+    return [p["col"]]
+
+
+def own_series(p: dict, state: str, col: str, N: int):
+    """该列在 N 行里的取值(单一来源)。num 加点抖动更像真,但保持比较关系。"""
     hold = state == "hold"
     k = p["kind"]
     if k == "num":
         v = p["hold_v"] if hold else p["fail_v"]
-        return [{p["col"]: v}, {p["col"]: v}]
+        step = 0.0 if abs(v) < 1e-9 else abs(v) * 0.01
+        return [round(v + (i % 5 - 2) * step, 4) for i in range(N)]   # 围绕 v 抖动,均值≈v
     if k == "diff":
         m, s = p["hold"] if hold else p["fail"]
-        return [{p["minuend"]: m, p["subtrahend"]: s}]
+        return [m] * N if col == p["minuend"] else [s] * N
     if k == "match":
-        m = p["hold_m"] if hold else p["fail_m"]
-        return [{p["col"]: p["value"]} for _ in range(m)] + [{p["col"]: "OTHER"} for _ in range(p["total"] - m)]
+        mm = max(0, round((p["hold_m"] if hold else p["fail_m"]) / p["total"] * N))
+        return [p["value"]] * mm + ["OTHER"] * (N - mm)
     if k == "exist":
-        m = p["hold_m"] if hold else 0
-        return [{p["col"]: p["value"]} for _ in range(m)] + [{p["col"]: "NONE"} for _ in range(max(1, 3 - m))]
+        mm = (p.get("hold_m", 1) if hold else 0)
+        return [p["value"]] * mm + ["NONE"] * (N - mm)
     if k == "prop":
-        r = p["hold_r"] if hold else p["fail_r"]
-        n = 25
-        n1 = round(r * n)
-        rows = [{p["col"]: p["top1"]} for _ in range(n1)]
-        rows += [{p["col"]: f"Other-{i % 5}"} for i in range(n - n1)]
-        return rows
-    # sess: hold → hold_s 个会话(含 have、缺 msg);fail → 同样多会话但补上 msg(于是不缺)
+        n1 = round((p["hold_r"] if hold else p["fail_r"]) * N)
+        return [p["top1"]] * n1 + [f"Other-{i % 5}" for i in range(N - n1)]
+    return [""] * N
+
+
+def shared_series(owners, N):
+    """多个判据共用一列(如 AlarmLog 里多种告警码):各放各的命中行,补 NONE。"""
+    vals = []
+    for p, st in owners:
+        vals += [p["value"]] * (p.get("hold_m", 1) if st == "hold" else 0)
+    vals += ["NONE"] * max(0, N - len(vals))
+    return vals[:N]
+
+
+def sessions(p: dict, state: str, base: int):
+    """H 信令:hold→若干会话(有 have、缺 msg);fail→补上 msg(于是不缺)。"""
     rows = []
-    base = sid * 1000
-    cnt = p["hold_s"] if hold else 3
+    cnt = p["hold_s"] if state == "hold" else 3
     for i in range(cnt):
         cid = base + i
         rows.append({p["key"]: cid, p["col"]: p["have"]})
         rows.append({p["key"]: cid, p["col"]: "OtherMsg"})
-        if not hold:                                  # fail:补上"缺的那条" → 不再满足 lacks
+        if state != "hold":
             rows.append({p["key"]: cid, p["col"]: p["msg"]})
     return rows
 
@@ -137,10 +164,3 @@ def _table(rows):
             if kk not in header:
                 header.append(kk)
     return (header, rows)
-
-
-def fact_via_kernel(p: dict, state: str, sid: int) -> dict:
-    """用【真实内核】把 synth_rows 算成事实——保证 data+binding→fact 自洽,顺带验证执行逻辑。"""
-    binding = gold_binding(p, "n", p["name"], "s")
-    rows = synth_rows(p, state, sid)
-    return evaluate_binding(binding, {"s": _table(rows)}, "s")

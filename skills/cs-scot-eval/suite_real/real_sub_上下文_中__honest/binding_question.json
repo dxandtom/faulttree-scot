@@ -15,35 +15,31 @@
     },
     {
       "node_id": "n15",
-      "node": "RRC建立尝试与成功数差大于0",
-      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
       "source": "kpi"
     },
     {
       "node_id": "n16",
-      "node": "无线链路失败占比高",
-      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
-      "source": "chr"
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
     },
     {
       "node_id": "n17",
-      "node": "NAS鉴权失败占比高",
-      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
-      "source": "chr"
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
     },
     {
       "node_id": "n18",
-      "node": "传输资源不可用占比高",
-      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
-      "source": "chr"
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
     }
   ],
   "data_overview": {
     "kpi": {
-      "columns": [],
-      "n_rows": 0
-    },
-    "chr": {
       "columns": [],
       "n_rows": 0
     }

@@ -15,27 +15,27 @@
     },
     {
       "node_id": "n35",
-      "node": "GTP-U路径故障告警",
-      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
-      "source": "alarm"
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi"
     },
     {
       "node_id": "n36",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
-      "source": "alarm"
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
     },
     {
       "node_id": "n4",
-      "node": "有建立请求无建立完成",
-      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-      "source": "sig"
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
     },
     {
       "node_id": "n5",
-      "node": "NAS鉴权失败占比高",
-      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
-      "source": "chr"
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
     }
   ],
   "data_overview": {
@@ -44,52 +44,49 @@
         {
           "name": "SA_UECntx_Est_SuccRate(%)",
           "samples": [
-            99.95
-          ]
-        }
-      ],
-      "n_rows": 2
-    },
-    "alarm": {
-      "columns": [
-        {
-          "name": "AlarmLog",
-          "samples": [
-            "NONE",
-            "ALM-29240"
-          ]
-        }
-      ],
-      "n_rows": 6
-    },
-    "sig": {
-      "columns": [
-        {
-          "name": "CallID",
-          "samples": [
-            4000,
-            4001,
-            4002,
-            4003
+            97.951,
+            98.9505,
+            99.95,
+            100.9495
           ]
         },
         {
-          "name": "MessageType",
+          "name": "RACH_Setup_SuccRate(%)",
           "samples": [
-            "RRCSetupRequest",
-            "OtherMsg"
+            96.922,
+            97.911,
+            98.9,
+            99.889
           ]
-        }
-      ],
-      "n_rows": 10
-    },
-    "chr": {
-      "columns": [
+        },
         {
-          "name": "ReleaseCause",
+          "name": "PUSCH_RSSI(dBm)",
           "samples": [
-            "NAS_Authentication_Failure",
-            "OTHER"
+            -98.43,
+            -97.465,
+            -96.5,
+            -95.535
+          ]
+        },
+        {
+          "name": "WeakCov_Sample_Ratio(%)",
+          "samples": [
+            37.632,
+            38.016,
+            38.4,
+            38.784
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Att",
+          "samples": [
+            8420
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Succ",
+          "samples": [
+            7180
           ]
         }
       ],

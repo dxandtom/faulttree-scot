@@ -21,21 +21,21 @@
     },
     {
       "node_id": "n35",
-      "node": "GTP-U路径故障告警",
-      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
-      "source": "alarm"
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
     },
     {
       "node_id": "n36",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
-      "source": "alarm"
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
     },
     {
       "node_id": "n4",
-      "node": "有建立请求无建立完成",
-      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-      "source": "sig"
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
     }
   ],
   "data_overview": {
@@ -44,50 +44,53 @@
         {
           "name": "SA_RRC_ConnSetup_SuccRate(%)",
           "samples": [
-            99.7
+            97.706,
+            98.703,
+            99.7,
+            100.697
           ]
         },
         {
           "name": "RACH_Setup_SuccRate(%)",
           "samples": [
-            78.6
-          ]
-        }
-      ],
-      "n_rows": 4
-    },
-    "alarm": {
-      "columns": [
-        {
-          "name": "AlarmLog",
-          "samples": [
-            "NONE",
-            "ALM-29240"
-          ]
-        }
-      ],
-      "n_rows": 6
-    },
-    "sig": {
-      "columns": [
-        {
-          "name": "CallID",
-          "samples": [
-            5000,
-            5001,
-            5002,
-            5003
+            77.028,
+            77.814,
+            78.6,
+            79.386
           ]
         },
         {
-          "name": "MessageType",
+          "name": "PUSCH_RSSI(dBm)",
           "samples": [
-            "RRCSetupRequest",
-            "OtherMsg"
+            -120.156,
+            -118.978,
+            -117.8,
+            -116.622
+          ]
+        },
+        {
+          "name": "WeakCov_Sample_Ratio(%)",
+          "samples": [
+            37.632,
+            38.016,
+            38.4,
+            38.784
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Att",
+          "samples": [
+            8420
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Succ",
+          "samples": [
+            7180
           ]
         }
       ],
-      "n_rows": 10
+      "n_rows": 40
     }
   }
 }

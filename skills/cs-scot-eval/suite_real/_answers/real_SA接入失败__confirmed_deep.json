@@ -5,7 +5,7 @@
   "category": "confirmed",
   "truth": {
     "root_cause_node_id": "n10",
-    "root_cause_name": "UE上下文建立成功率低",
+    "root_cause_name": "RRC连接建立成功率低",
     "tier": "confirmed",
     "must_not_report": [
       "n115",
@@ -30,40 +30,40 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "UE上下文建立成功率低",
+        "Root_cause": "RRC连接建立成功率低",
         "Fault_tree_path": [
-          "RRC建立尝试与成功数差大于0",
-          "RRC连接建立成功率低",
-          "Xn链路故障告警",
-          "UE上下文建立成功率低"
+          "传输资源不可用占比高",
+          "射频单元驻波比告警",
+          "GTP-U路径故障告警",
+          "RRC连接建立成功率低"
         ],
         "evidence_path": [
           {
-            "node": "RRC建立尝试与成功数差大于0",
+            "node": "传输资源不可用占比高",
             "node_id": "n3",
-            "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
-            "actual": "=1240.0",
+            "condition": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+            "actual": "NgRanCause 命中 16/40",
+            "judgment": "成立"
+          },
+          {
+            "node": "射频单元驻波比告警",
+            "node_id": "n4",
+            "condition": "存在 射频单元驻波比异常 告警(ALM-26529)",
+            "actual": "AlarmLog 命中 3/7",
+            "judgment": "成立"
+          },
+          {
+            "node": "GTP-U路径故障告警",
+            "node_id": "n5",
+            "condition": "存在 GTP-U 路径故障 告警(ALM-25952)",
+            "actual": "AlarmLog 命中 4/7",
             "judgment": "成立"
           },
           {
             "node": "RRC连接建立成功率低",
-            "node_id": "n4",
+            "node_id": "n10",
             "condition": "RRC连接建立成功率 低于 98%",
             "actual": "SA_RRC_ConnSetup_SuccRate(%)=91.4",
-            "judgment": "成立"
-          },
-          {
-            "node": "Xn链路故障告警",
-            "node_id": "n5",
-            "condition": "存在 Xn 链路故障 告警(ALM-29240)",
-            "actual": "AlarmLog 命中 1/1",
-            "judgment": "成立"
-          },
-          {
-            "node": "UE上下文建立成功率低",
-            "node_id": "n10",
-            "condition": "UE上下文建立成功率 低于 99%",
-            "actual": "SA_UECntx_Est_SuccRate(%)=93.8",
             "judgment": "成立"
           }
         ]
@@ -77,6 +77,20 @@
     {
       "id": "n10_b",
       "node_id": "n10",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_RRC_ConnSetup_SuccRate(%)",
+      "op": "<",
+      "threshold": 98.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n100_b",
+      "node_id": "n100",
       "node": "UE上下文建立成功率低",
       "condition_text": "UE上下文建立成功率 低于 99%",
       "source": "kpi",
@@ -89,8 +103,8 @@
       "agg": "mean"
     },
     {
-      "id": "n100_b",
-      "node_id": "n100",
+      "id": "n101_b",
+      "node_id": "n101",
       "node": "PRACH随机接入成功率低",
       "condition_text": "PRACH 随机接入成功率 低于 95%",
       "source": "kpi",
@@ -99,75 +113,12 @@
       "column": "RACH_Setup_SuccRate(%)",
       "op": "<",
       "threshold": 95.0,
-      "scope": "aggregate",
-      "agg": "mean"
-    },
-    {
-      "id": "n101_b",
-      "node_id": "n101",
-      "node": "上行干扰偏高",
-      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
-      "source": "kpi",
-      "class": "A",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "PUSCH_RSSI(dBm)",
-      "op": ">",
-      "threshold": -105.0,
       "scope": "aggregate",
       "agg": "mean"
     },
     {
       "id": "n103_b",
       "node_id": "n103",
-      "node": "RRC建立尝试与成功数差大于0",
-      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
-      "source": "kpi",
-      "class": "B",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "minuend": [
-        "N.RRC.ConnReq.Att"
-      ],
-      "subtrahend": [
-        "N.RRC.ConnReq.Succ"
-      ],
-      "op": ">",
-      "threshold": 0,
-      "scope": "aggregate",
-      "agg": "sum",
-      "decision": "insufficient_data"
-    },
-    {
-      "id": "n105_b",
-      "node_id": "n105",
-      "node": "NAS鉴权失败占比高",
-      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
-      "source": "chr",
-      "class": "C",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "ReleaseCause",
-      "contains": [
-        "NAS_Authentication_Failure"
-      ],
-      "require": 8,
-      "decision": "insufficient_data"
-    },
-    {
-      "id": "n115_b",
-      "node_id": "n115",
-      "node": "PRACH随机接入成功率低",
-      "condition_text": "PRACH 随机接入成功率 低于 95%",
-      "source": "kpi",
-      "class": "A",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "RACH_Setup_SuccRate(%)",
-      "op": "<",
-      "threshold": 95.0,
-      "scope": "aggregate",
-      "agg": "mean"
-    },
-    {
-      "id": "n116_b",
-      "node_id": "n116",
       "node": "上行干扰偏高",
       "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
       "source": "kpi",
@@ -177,11 +128,12 @@
       "op": ">",
       "threshold": -105.0,
       "scope": "aggregate",
-      "agg": "mean"
+      "agg": "mean",
+      "decision": "insufficient_data"
     },
     {
-      "id": "n117_b",
-      "node_id": "n117",
+      "id": "n105_b",
+      "node_id": "n105",
       "node": "弱覆盖采样占比高",
       "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
       "source": "kpi",
@@ -191,11 +143,12 @@
       "op": ">",
       "threshold": 15.0,
       "scope": "aggregate",
-      "agg": "mean"
+      "agg": "mean",
+      "decision": "insufficient_data"
     },
     {
-      "id": "n3_b",
-      "node_id": "n3",
+      "id": "n115_b",
+      "node_id": "n115",
       "node": "RRC建立尝试与成功数差大于0",
       "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
       "source": "kpi",
@@ -213,30 +166,72 @@
       "agg": "sum"
     },
     {
-      "id": "n4_b",
-      "node_id": "n4",
-      "node": "RRC连接建立成功率低",
-      "condition_text": "RRC连接建立成功率 低于 98%",
-      "source": "kpi",
-      "class": "A",
+      "id": "n116_b",
+      "node_id": "n116",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
       "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "SA_RRC_ConnSetup_SuccRate(%)",
-      "op": "<",
-      "threshold": 98.0,
-      "scope": "aggregate",
-      "agg": "mean"
+      "column": "DCErrType",
+      "contains": [
+        "RNL_RadioLinkFailure"
+      ],
+      "require": 10
     },
     {
-      "id": "n5_b",
-      "node_id": "n5",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "id": "n117_b",
+      "node_id": "n117",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "ReleaseCause",
+      "contains": [
+        "NAS_Authentication_Failure"
+      ],
+      "require": 8
+    },
+    {
+      "id": "n3_b",
+      "node_id": "n3",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "NgRanCause",
+      "contains": [
+        "transport-resource-unavailable"
+      ],
+      "require": 6
+    },
+    {
+      "id": "n4_b",
+      "node_id": "n4",
+      "node": "射频单元驻波比告警",
+      "condition_text": "存在 射频单元驻波比异常 告警(ALM-26529)",
       "source": "alarm",
       "class": "G",
       "mapping_reason": "金标准:大白话判据→系统列",
       "column": "AlarmLog",
       "contains": [
-        "ALM-29240"
+        "ALM-26529"
+      ],
+      "require": 1
+    },
+    {
+      "id": "n5_b",
+      "node_id": "n5",
+      "node": "GTP-U路径故障告警",
+      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
+      "source": "alarm",
+      "class": "G",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "AlarmLog",
+      "contains": [
+        "ALM-25952"
       ],
       "require": 1
     }

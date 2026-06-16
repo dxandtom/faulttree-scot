@@ -5,7 +5,7 @@
   "category": "false_positive_resist",
   "truth": {
     "root_cause_node_id": "s33",
-    "root_cause_name": "GTP-U路径故障告警",
+    "root_cause_name": "弱覆盖采样占比高",
     "tier": "confirmed",
     "must_not_report": [
       "s12",
@@ -33,32 +33,32 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "GTP-U路径故障告警",
+        "Root_cause": "弱覆盖采样占比高",
         "Fault_tree_path": [
-          "Xn链路故障告警",
-          "PRACH随机接入成功率低",
-          "GTP-U路径故障告警"
+          "UE上下文建立成功率低",
+          "射频单元驻波比告警",
+          "弱覆盖采样占比高"
         ],
         "evidence_path": [
           {
-            "node": "Xn链路故障告警",
+            "node": "UE上下文建立成功率低",
             "node_id": "s2",
-            "condition": "存在 Xn 链路故障 告警(ALM-29240)",
-            "actual": "AlarmLog 命中 1/1",
+            "condition": "UE上下文建立成功率 低于 99%",
+            "actual": "SA_UECntx_Est_SuccRate(%)=93.8",
             "judgment": "成立"
           },
           {
-            "node": "PRACH随机接入成功率低",
+            "node": "射频单元驻波比告警",
             "node_id": "s7",
-            "condition": "PRACH 随机接入成功率 低于 95%",
-            "actual": "RACH_Setup_SuccRate(%)=78.6",
+            "condition": "存在 射频单元驻波比异常 告警(ALM-26529)",
+            "actual": "AlarmLog 命中 3/3",
             "judgment": "成立"
           },
           {
-            "node": "GTP-U路径故障告警",
+            "node": "弱覆盖采样占比高",
             "node_id": "s33",
-            "condition": "存在 GTP-U 路径故障 告警(ALM-25952)",
-            "actual": "AlarmLog 命中 4/4",
+            "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+            "actual": "WeakCov_Sample_Ratio(%)=38.4",
             "judgment": "成立"
           }
         ]
@@ -72,34 +72,6 @@
     {
       "id": "s12_b",
       "node_id": "s12",
-      "node": "上行干扰偏高",
-      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
-      "source": "kpi",
-      "class": "A",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "PUSCH_RSSI(dBm)",
-      "op": ">",
-      "threshold": -105.0,
-      "scope": "aggregate",
-      "agg": "mean"
-    },
-    {
-      "id": "s2_b",
-      "node_id": "s2",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
-      "source": "alarm",
-      "class": "G",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "AlarmLog",
-      "contains": [
-        "ALM-29240"
-      ],
-      "require": 1
-    },
-    {
-      "id": "s24_b",
-      "node_id": "s24",
       "node": "RRC连接建立成功率低",
       "condition_text": "RRC连接建立成功率 低于 98%",
       "source": "kpi",
@@ -112,8 +84,8 @@
       "agg": "mean"
     },
     {
-      "id": "s25_b",
-      "node_id": "s25",
+      "id": "s2_b",
+      "node_id": "s2",
       "node": "UE上下文建立成功率低",
       "condition_text": "UE上下文建立成功率 低于 99%",
       "source": "kpi",
@@ -123,80 +95,11 @@
       "op": "<",
       "threshold": 99.0,
       "scope": "aggregate",
-      "agg": "mean",
-      "decision": "insufficient_data"
+      "agg": "mean"
     },
     {
-      "id": "s33_b",
-      "node_id": "s33",
-      "node": "GTP-U路径故障告警",
-      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
-      "source": "alarm",
-      "class": "G",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "AlarmLog",
-      "contains": [
-        "ALM-25952"
-      ],
-      "require": 1
-    },
-    {
-      "id": "s49_b",
-      "node_id": "s49",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
-      "source": "alarm",
-      "class": "G",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "AlarmLog",
-      "contains": [
-        "ALM-29240"
-      ],
-      "require": 1
-    },
-    {
-      "id": "s50_b",
-      "node_id": "s50",
-      "node": "单小区接入失败集中",
-      "condition_text": "失败会话按 小区 分组,占比最高的小区 超过 60%",
-      "source": "chr",
-      "class": "E",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "group_by": "NRCellIdentity",
-      "op": ">",
-      "threshold": 0.6
-    },
-    {
-      "id": "s51_b",
-      "node_id": "s51",
-      "node": "会话缺安全模式完成",
-      "condition_text": "信令会话里 有 SecurityModeCommand 却 缺 SecurityModeComplete",
-      "source": "sig",
-      "class": "H",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "key": "CallID",
-      "msg_column": "MessageType",
-      "lacks": [
-        "SecurityModeComplete"
-      ]
-    },
-    {
-      "id": "s52_b",
-      "node_id": "s52",
-      "node": "有建立请求无建立完成",
-      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-      "source": "sig",
-      "class": "H",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "key": "CallID",
-      "msg_column": "MessageType",
-      "lacks": [
-        "RRCSetupComplete"
-      ]
-    },
-    {
-      "id": "s7_b",
-      "node_id": "s7",
+      "id": "s24_b",
+      "node_id": "s24",
       "node": "PRACH随机接入成功率低",
       "condition_text": "PRACH 随机接入成功率 低于 95%",
       "source": "kpi",
@@ -207,6 +110,110 @@
       "threshold": 95.0,
       "scope": "aggregate",
       "agg": "mean"
+    },
+    {
+      "id": "s25_b",
+      "node_id": "s25",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s33_b",
+      "node_id": "s33",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "WeakCov_Sample_Ratio(%)",
+      "op": ">",
+      "threshold": 15.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s49_b",
+      "node_id": "s49",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi",
+      "class": "B",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "minuend": [
+        "N.RRC.ConnReq.Att"
+      ],
+      "subtrahend": [
+        "N.RRC.ConnReq.Succ"
+      ],
+      "op": ">",
+      "threshold": 0,
+      "scope": "aggregate",
+      "agg": "sum"
+    },
+    {
+      "id": "s50_b",
+      "node_id": "s50",
+      "node": "无线链路失败占比高",
+      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "DCErrType",
+      "contains": [
+        "RNL_RadioLinkFailure"
+      ],
+      "require": 10
+    },
+    {
+      "id": "s51_b",
+      "node_id": "s51",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "ReleaseCause",
+      "contains": [
+        "NAS_Authentication_Failure"
+      ],
+      "require": 8
+    },
+    {
+      "id": "s52_b",
+      "node_id": "s52",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "NgRanCause",
+      "contains": [
+        "transport-resource-unavailable"
+      ],
+      "require": 6
+    },
+    {
+      "id": "s7_b",
+      "node_id": "s7",
+      "node": "射频单元驻波比告警",
+      "condition_text": "存在 射频单元驻波比异常 告警(ALM-26529)",
+      "source": "alarm",
+      "class": "G",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "AlarmLog",
+      "contains": [
+        "ALM-26529"
+      ],
+      "require": 1
     }
   ]
 }

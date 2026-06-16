@@ -3,87 +3,33 @@
     "scenario": "SA场景接入失败",
     "root": "n1",
     "outline": {
-      "n118": "fail",
-      "n11": "fail",
       "n4": "uncovered",
-      "n102": "uncovered",
       "n10": "fail",
-      "n115": "uncovered",
-      "n1": "pass",
-      "n117": "fail",
-      "n119": "fail",
-      "n3": "uncovered",
       "n5": "uncovered",
+      "n119": "fail",
+      "n11": "fail",
+      "n114": "uncovered",
+      "n118": "fail",
+      "n102": "uncovered",
       "n116": "fail",
-      "n114": "uncovered"
+      "n115": "uncovered",
+      "n117": "fail",
+      "n1": "pass",
+      "n3": "uncovered"
     },
     "pruned_nodes": {
-      "n118": {
-        "name": "RRC建立尝试与成功数差大于0",
-        "parent": "n115",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "n118_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入",
-            "class": "B",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "value": 0.0,
-            "valid": 1,
-            "nulls": 0,
-            "op": ">",
-            "threshold": 0
-          }
-        ]
-      },
-      "n11": {
-        "name": "TOP1终端型号集中",
-        "parent": "n5",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n11_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "E",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "top1": "Other-0",
-            "top1_ratio": 0.2,
-            "top1_count": 5,
-            "valid": 25,
-            "filtered_n": 25,
-            "op": ">",
-            "threshold": 0.5
-          }
-        ]
-      },
       "n4": {
         "name": "L3节点_001",
         "parent": "n3",
         "level": 4,
         "combine": "OR"
       },
-      "n102": {
-        "name": "L2节点_007",
-        "parent": "n1",
-        "level": 3,
-        "combine": "OR"
-      },
       "n10": {
-        "name": "UE上下文建立成功率低",
+        "name": "RRC连接建立成功率低",
         "parent": "n5",
         "level": 6,
         "is_leaf": true,
-        "condition": "UE上下文建立成功率 低于 99%",
+        "condition": "RRC连接建立成功率 低于 98%",
         "combine": "unknown",
         "facts": [
           {
@@ -93,29 +39,77 @@
             "class": "A",
             "status": "ok",
             "predicate_satisfied": false,
+            "resolved_column": "SA_RRC_ConnSetup_SuccRate(%)",
+            "value": 99.7,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": "<",
+            "threshold": 98.0
+          }
+        ]
+      },
+      "n5": {
+        "name": "L4节点_001",
+        "parent": "n4",
+        "level": 5,
+        "combine": "AND"
+      },
+      "n119": {
+        "name": "RRC建立尝试与成功数差大于0",
+        "parent": "n115",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "n119_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "B",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "value": 0.0,
+            "valid": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": 0
+          }
+        ]
+      },
+      "n11": {
+        "name": "UE上下文建立成功率低",
+        "parent": "n5",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "UE上下文建立成功率 低于 99%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n11_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "SA_UECntx_Est_SuccRate(%)",
             "value": 99.95,
-            "valid": 2,
-            "n_rows": 2,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": "<",
             "threshold": 99.0
           }
         ]
       },
-      "n115": {
-        "name": "L4节点_049",
-        "parent": "n114",
-        "level": 5,
-        "combine": "AND"
+      "n114": {
+        "name": "L3节点_030",
+        "parent": "n102",
+        "level": 4,
+        "combine": "OR"
       },
-      "n1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
-      },
-      "n117": {
+      "n118": {
         "name": "弱覆盖采样占比高",
         "parent": "n115",
         "level": 6,
@@ -124,7 +118,7 @@
         "combine": "AND",
         "facts": [
           {
-            "id": "n117_b",
+            "id": "n118_b",
             "indicator": "kpi",
             "mapping_reason": "合成注入",
             "class": "A",
@@ -132,65 +126,26 @@
             "predicate_satisfied": false,
             "resolved_column": "WeakCov_Sample_Ratio(%)",
             "value": 2.1,
-            "valid": 2,
-            "n_rows": 2,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": ">",
             "threshold": 15.0
           }
         ]
       },
-      "n119": {
-        "name": "无线链路失败占比高",
-        "parent": "n115",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "n119_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "C",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "DCErrType",
-            "matched": 1,
-            "total": 50,
-            "ratio": 0.02,
-            "top": [
-              [
-                "OTHER",
-                49
-              ],
-              [
-                "RNL_RadioLinkFailure",
-                1
-              ]
-            ],
-            "nulls": 0
-          }
-        ]
-      },
-      "n3": {
-        "name": "L2节点_002",
+      "n102": {
+        "name": "L2节点_007",
         "parent": "n1",
         "level": 3,
         "combine": "OR"
       },
-      "n5": {
-        "name": "L4节点_001",
-        "parent": "n4",
-        "level": 5,
-        "combine": "AND"
-      },
       "n116": {
-        "name": "上行干扰偏高",
+        "name": "PRACH随机接入成功率低",
         "parent": "n115",
         "level": 6,
         "is_leaf": true,
-        "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
+        "condition": "PRACH 随机接入成功率 低于 95%",
         "combine": "unknown",
         "facts": [
           {
@@ -200,20 +155,57 @@
             "class": "A",
             "status": "ok",
             "predicate_satisfied": false,
+            "resolved_column": "RACH_Setup_SuccRate(%)",
+            "value": 98.9,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": "<",
+            "threshold": 95.0
+          }
+        ]
+      },
+      "n115": {
+        "name": "L4节点_049",
+        "parent": "n114",
+        "level": 5,
+        "combine": "AND"
+      },
+      "n117": {
+        "name": "上行干扰偏高",
+        "parent": "n115",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "n117_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "PUSCH_RSSI(dBm)",
             "value": -117.8,
-            "valid": 2,
-            "n_rows": 2,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": ">",
             "threshold": -105.0
           }
         ]
       },
-      "n114": {
-        "name": "L3节点_030",
-        "parent": "n102",
-        "level": 4,
+      "n1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
+      "n3": {
+        "name": "L2节点_002",
+        "parent": "n1",
+        "level": 3,
         "combine": "OR"
       }
     }

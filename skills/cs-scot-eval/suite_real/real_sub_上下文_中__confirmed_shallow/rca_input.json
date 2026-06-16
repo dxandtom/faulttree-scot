@@ -3,78 +3,44 @@
     "scenario": "real_sub_上下文_中",
     "root": "n3",
     "outline": {
-      "n11": "insufficient",
-      "n35": "fail",
       "n4": "hold",
-      "n10": "fail",
       "n32": "uncovered",
-      "n12": "hold",
+      "n10": "fail",
+      "n5": "uncovered",
+      "n11": "insufficient",
       "n36": "hold",
-      "n3": "pass",
-      "n5": "uncovered"
+      "n35": "fail",
+      "n12": "hold",
+      "n3": "pass"
     },
     "pruned_nodes": {
-      "n11": {
-        "name": "UE上下文建立成功率低",
-        "parent": "n5",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "UE上下文建立成功率 低于 99%",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n11_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入",
-            "class": "A",
-            "status": "insufficient_data",
-            "resolved_column": null
-          }
-        ]
-      },
-      "n35": {
-        "name": "GTP-U路径故障告警",
-        "parent": "n32",
-        "level": 4,
-        "condition": "存在 GTP-U 路径故障 告警(ALM-25952)",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n35_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入",
-            "class": "G",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "AlarmLog",
-            "matched": 0,
-            "total": 0,
-            "ratio": null,
-            "top": [],
-            "nulls": 3
-          }
-        ]
-      },
       "n4": {
-        "name": "有建立请求无建立完成",
+        "name": "RRC建立尝试与成功数差大于0",
         "parent": "n3",
         "level": 3,
-        "condition": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
+        "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
         "combine": "OR",
         "facts": [
           {
             "id": "n4_b",
-            "indicator": "sig",
+            "indicator": "kpi",
             "mapping_reason": "合成注入",
-            "class": "H",
+            "class": "B",
             "status": "ok",
             "predicate_satisfied": true,
-            "matched_sessions": 5,
-            "lacks_never_seen": [
-              "RRCSetupComplete"
-            ]
+            "value": 49600.0,
+            "valid": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": 0
           }
         ]
+      },
+      "n32": {
+        "name": "L3节点_002",
+        "parent": "n3",
+        "level": 3,
+        "combine": "unknown"
       },
       "n10": {
         "name": "RRC连接建立成功率低",
@@ -93,19 +59,86 @@
             "predicate_satisfied": false,
             "resolved_column": "SA_RRC_ConnSetup_SuccRate(%)",
             "value": 99.7,
-            "valid": 2,
-            "n_rows": 2,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": "<",
             "threshold": 98.0
           }
         ]
       },
-      "n32": {
-        "name": "L3节点_002",
-        "parent": "n3",
-        "level": 3,
-        "combine": "unknown"
+      "n5": {
+        "name": "L4节点_001",
+        "parent": "n4",
+        "level": 4,
+        "combine": "AND"
+      },
+      "n11": {
+        "name": "UE上下文建立成功率低",
+        "parent": "n5",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "UE上下文建立成功率 低于 99%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n11_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "insufficient_data",
+            "resolved_column": null
+          }
+        ]
+      },
+      "n36": {
+        "name": "弱覆盖采样占比高",
+        "parent": "n35",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n36_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "WeakCov_Sample_Ratio(%)",
+            "value": 38.4,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": 15.0
+          }
+        ]
+      },
+      "n35": {
+        "name": "上行干扰偏高",
+        "parent": "n32",
+        "level": 4,
+        "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n35_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "PUSCH_RSSI(dBm)",
+            "value": -117.8,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": -105.0
+          }
+        ]
       },
       "n12": {
         "name": "PRACH随机接入成功率低",
@@ -124,40 +157,11 @@
             "predicate_satisfied": true,
             "resolved_column": "RACH_Setup_SuccRate(%)",
             "value": 78.6,
-            "valid": 2,
-            "n_rows": 2,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": "<",
             "threshold": 95.0
-          }
-        ]
-      },
-      "n36": {
-        "name": "Xn链路故障告警",
-        "parent": "n35",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "存在 Xn 链路故障 告警(ALM-29240)",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n36_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入",
-            "class": "G",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "AlarmLog",
-            "matched": 1,
-            "total": 1,
-            "ratio": 1.0,
-            "top": [
-              [
-                "ALM-29240",
-                1
-              ]
-            ],
-            "nulls": 2
           }
         ]
       },
@@ -166,12 +170,6 @@
         "parent": null,
         "level": 2,
         "pass_through": true
-      },
-      "n5": {
-        "name": "L4节点_001",
-        "parent": "n4",
-        "level": 4,
-        "combine": "AND"
       }
     }
   },

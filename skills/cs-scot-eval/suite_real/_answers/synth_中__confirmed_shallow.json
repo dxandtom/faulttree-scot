@@ -25,15 +25,15 @@
       {
         "Root_cause": "RRC连接建立成功率低",
         "Fault_tree_path": [
-          "TOP1终端型号集中",
+          "弱覆盖采样占比高",
           "RRC连接建立成功率低"
         ],
         "evidence_path": [
           {
-            "node": "TOP1终端型号集中",
+            "node": "弱覆盖采样占比高",
             "node_id": "s5",
-            "condition": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
-            "actual": "TOP1=BrandX-Model9 占比 0.72",
+            "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+            "actual": "WeakCov_Sample_Ratio(%)=38.4",
             "judgment": "成立"
           },
           {
@@ -97,42 +97,49 @@
     {
       "id": "s31_b",
       "node_id": "s31",
-      "node": "传输资源不可用占比高",
-      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
-      "source": "chr",
-      "class": "C",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
       "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "NgRanCause",
-      "contains": [
-        "transport-resource-unavailable"
-      ],
-      "require": 6
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean"
     },
     {
       "id": "s5_b",
       "node_id": "s5",
-      "node": "TOP1终端型号集中",
-      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
-      "source": "chr",
-      "class": "E",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi",
+      "class": "A",
       "mapping_reason": "金标准:大白话判据→系统列",
-      "group_by": "TerminalModel",
+      "column": "WeakCov_Sample_Ratio(%)",
       "op": ">",
-      "threshold": 0.5
+      "threshold": 15.0,
+      "scope": "aggregate",
+      "agg": "mean"
     },
     {
       "id": "s7_b",
       "node_id": "s7",
-      "node": "PRACH随机接入成功率低",
-      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
       "source": "kpi",
-      "class": "A",
+      "class": "B",
       "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "RACH_Setup_SuccRate(%)",
-      "op": "<",
-      "threshold": 95.0,
+      "minuend": [
+        "N.RRC.ConnReq.Att"
+      ],
+      "subtrahend": [
+        "N.RRC.ConnReq.Succ"
+      ],
+      "op": ">",
+      "threshold": 0,
       "scope": "aggregate",
-      "agg": "mean"
+      "agg": "sum"
     }
   ]
 }

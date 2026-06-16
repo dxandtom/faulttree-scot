@@ -3,68 +3,68 @@
   "to_bind": [
     {
       "node_id": "n10",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n100",
       "node": "UE上下文建立成功率低",
       "condition_text": "UE上下文建立成功率 低于 99%",
       "source": "kpi"
     },
     {
-      "node_id": "n100",
+      "node_id": "n11",
       "node": "PRACH随机接入成功率低",
       "condition_text": "PRACH 随机接入成功率 低于 95%",
       "source": "kpi"
     },
     {
       "node_id": "n115",
-      "node": "PRACH随机接入成功率低",
-      "condition_text": "PRACH 随机接入成功率 低于 95%",
-      "source": "kpi"
-    },
-    {
-      "node_id": "n116",
       "node": "上行干扰偏高",
       "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
       "source": "kpi"
     },
     {
-      "node_id": "n117",
+      "node_id": "n116",
       "node": "弱覆盖采样占比高",
       "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
       "source": "kpi"
     },
     {
+      "node_id": "n117",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
+    },
+    {
       "node_id": "n118",
-      "node": "RRC建立尝试与成功数差大于0",
-      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
-      "source": "kpi"
-    },
-    {
-      "node_id": "n3",
-      "node": "RRC建立尝试与成功数差大于0",
-      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
-      "source": "kpi"
-    },
-    {
-      "node_id": "n4",
-      "node": "RRC连接建立成功率低",
-      "condition_text": "RRC连接建立成功率 低于 98%",
-      "source": "kpi"
-    },
-    {
-      "node_id": "n11",
-      "node": "TOP1终端型号集中",
-      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
-      "source": "chr"
-    },
-    {
-      "node_id": "n119",
       "node": "无线链路失败占比高",
       "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
       "source": "chr"
     },
     {
+      "node_id": "n119",
+      "node": "NAS鉴权失败占比高",
+      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n3",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n4",
+      "node": "射频单元驻波比告警",
+      "condition_text": "存在 射频单元驻波比异常 告警(ALM-26529)",
+      "source": "alarm"
+    },
+    {
       "node_id": "n5",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
+      "node": "GTP-U路径故障告警",
+      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
       "source": "alarm"
     }
   ],
@@ -72,27 +72,39 @@
     "kpi": {
       "columns": [
         {
-          "name": "SA_UECntx_Est_SuccRate(%)",
+          "name": "SA_RRC_ConnSetup_SuccRate(%)",
           "samples": [
-            99.95
+            97.706,
+            98.703,
+            99.7,
+            100.697
           ]
         },
         {
           "name": "RACH_Setup_SuccRate(%)",
           "samples": [
-            98.9
+            77.028,
+            77.814,
+            78.6,
+            79.386
           ]
         },
         {
           "name": "PUSCH_RSSI(dBm)",
           "samples": [
-            -96.5
+            -120.156,
+            -118.978,
+            -117.8,
+            -116.622
           ]
         },
         {
           "name": "WeakCov_Sample_Ratio(%)",
           "samples": [
-            38.4
+            37.632,
+            38.016,
+            38.4,
+            38.784
           ]
         },
         {
@@ -106,48 +118,48 @@
           "samples": [
             7180
           ]
-        },
-        {
-          "name": "SA_RRC_ConnSetup_SuccRate(%)",
-          "samples": [
-            91.4
-          ]
         }
       ],
-      "n_rows": 12
+      "n_rows": 40
     },
     "chr": {
       "columns": [
-        {
-          "name": "TerminalModel",
-          "samples": [
-            "BrandX-Model9",
-            "Other-0",
-            "Other-1",
-            "Other-2"
-          ]
-        },
         {
           "name": "DCErrType",
           "samples": [
             "RNL_RadioLinkFailure",
             "OTHER"
           ]
+        },
+        {
+          "name": "ReleaseCause",
+          "samples": [
+            "NAS_Authentication_Failure",
+            "OTHER"
+          ]
+        },
+        {
+          "name": "NgRanCause",
+          "samples": [
+            "transport-resource-unavailable",
+            "OTHER"
+          ]
         }
       ],
-      "n_rows": 75
+      "n_rows": 40
     },
     "alarm": {
       "columns": [
         {
           "name": "AlarmLog",
           "samples": [
-            "ALM-29240",
+            "ALM-26529",
+            "ALM-25952",
             "NONE"
           ]
         }
       ],
-      "n_rows": 3
+      "n_rows": 40
     }
   }
 }

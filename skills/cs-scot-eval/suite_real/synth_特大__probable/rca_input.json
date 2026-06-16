@@ -3,26 +3,154 @@
     "scenario": "synth_特大",
     "root": "s1",
     "outline": {
-      "s100": "fail",
-      "s287": "insufficient",
-      "s92": "hold",
-      "s11": "uncovered",
-      "s132": "hold",
-      "s3": "uncovered",
       "s7": "hold",
+      "s132": "hold",
       "s28": "uncovered",
-      "s1": "pass",
+      "s11": "uncovered",
+      "s92": "hold",
+      "s2": "pass",
       "s25": "hold",
+      "s3": "uncovered",
+      "s100": "fail",
       "s39": "fail",
-      "s2": "pass"
+      "s1": "pass",
+      "s287": "insufficient"
     },
     "pruned_nodes": {
-      "s100": {
+      "s7": {
+        "name": "RRC建立尝试与成功数差大于0",
+        "parent": "s2",
+        "level": 4,
+        "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "s7_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "B",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "value": 49600.0,
+            "valid": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": 0
+          }
+        ]
+      },
+      "s132": {
+        "name": "UE上下文建立成功率低",
+        "parent": "s39",
+        "level": 6,
+        "is_leaf": true,
+        "condition": "UE上下文建立成功率 低于 99%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s132_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 93.8,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "s28": {
+        "name": "L4节点_028",
+        "parent": "s7",
+        "level": 5,
+        "combine": "OR"
+      },
+      "s11": {
+        "name": "L3节点_011",
+        "parent": "s3",
+        "level": 4,
+        "combine": "unknown"
+      },
+      "s92": {
+        "name": "无线链路失败占比高",
+        "parent": "s25",
+        "level": 6,
+        "condition": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s92_b",
+            "indicator": "chr",
+            "mapping_reason": "合成注入",
+            "class": "C",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "DCErrType",
+            "matched": 14,
+            "total": 40,
+            "ratio": 0.35,
+            "top": [
+              [
+                "OTHER",
+                26
+              ],
+              [
+                "RNL_RadioLinkFailure",
+                14
+              ]
+            ],
+            "nulls": 0
+          }
+        ]
+      },
+      "s2": {
+        "name": "L2节点_002",
+        "parent": "s1",
+        "level": 3,
+        "combine": "OR",
+        "pass_through": true
+      },
+      "s25": {
         "name": "PRACH随机接入成功率低",
+        "parent": "s7",
+        "level": 5,
+        "condition": "PRACH 随机接入成功率 低于 95%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s25_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": true,
+            "resolved_column": "RACH_Setup_SuccRate(%)",
+            "value": 78.6,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": "<",
+            "threshold": 95.0
+          }
+        ]
+      },
+      "s3": {
+        "name": "L2节点_003",
+        "parent": "s1",
+        "level": 3,
+        "combine": "unknown"
+      },
+      "s100": {
+        "name": "RRC连接建立成功率低",
         "parent": "s28",
         "level": 6,
         "is_leaf": true,
-        "condition": "PRACH 随机接入成功率 低于 95%",
+        "condition": "RRC连接建立成功率 低于 98%",
         "combine": "OR",
         "facts": [
           {
@@ -32,22 +160,52 @@
             "class": "A",
             "status": "ok",
             "predicate_satisfied": false,
-            "resolved_column": "RACH_Setup_SuccRate(%)",
-            "value": 98.9,
-            "valid": 2,
-            "n_rows": 2,
+            "resolved_column": "SA_RRC_ConnSetup_SuccRate(%)",
+            "value": 99.7,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": "<",
-            "threshold": 95.0
+            "threshold": 98.0
           }
         ]
       },
+      "s39": {
+        "name": "弱覆盖采样占比高",
+        "parent": "s11",
+        "level": 5,
+        "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "s39_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "WeakCov_Sample_Ratio(%)",
+            "value": 2.1,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": 15.0
+          }
+        ]
+      },
+      "s1": {
+        "name": "L1节点_001",
+        "parent": null,
+        "level": 2,
+        "pass_through": true
+      },
       "s287": {
-        "name": "RRC连接建立成功率低",
+        "name": "上行干扰偏高",
         "parent": "s92",
         "level": 7,
         "is_leaf": true,
-        "condition": "RRC连接建立成功率 低于 98%",
+        "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
         "combine": "AND",
         "facts": [
           {
@@ -59,169 +217,6 @@
             "resolved_column": null
           }
         ]
-      },
-      "s92": {
-        "name": "传输资源不可用占比高",
-        "parent": "s25",
-        "level": 6,
-        "condition": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s92_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "C",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "NgRanCause",
-            "matched": 12,
-            "total": 30,
-            "ratio": 0.4,
-            "top": [
-              [
-                "OTHER",
-                18
-              ],
-              [
-                "transport-resource-unavailable",
-                12
-              ]
-            ],
-            "nulls": 0
-          }
-        ]
-      },
-      "s11": {
-        "name": "L3节点_011",
-        "parent": "s3",
-        "level": 4,
-        "combine": "unknown"
-      },
-      "s132": {
-        "name": "RRC建立尝试与成功数差大于0",
-        "parent": "s39",
-        "level": 6,
-        "is_leaf": true,
-        "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s132_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入",
-            "class": "B",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "value": 1240.0,
-            "valid": 1,
-            "nulls": 0,
-            "op": ">",
-            "threshold": 0
-          }
-        ]
-      },
-      "s3": {
-        "name": "L2节点_003",
-        "parent": "s1",
-        "level": 3,
-        "combine": "unknown"
-      },
-      "s7": {
-        "name": "有建立请求无建立完成",
-        "parent": "s2",
-        "level": 4,
-        "condition": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "s7_b",
-            "indicator": "sig",
-            "mapping_reason": "合成注入",
-            "class": "H",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "matched_sessions": 5,
-            "lacks_never_seen": [
-              "RRCSetupComplete"
-            ]
-          }
-        ]
-      },
-      "s28": {
-        "name": "L4节点_028",
-        "parent": "s7",
-        "level": 5,
-        "combine": "OR"
-      },
-      "s1": {
-        "name": "L1节点_001",
-        "parent": null,
-        "level": 2,
-        "pass_through": true
-      },
-      "s25": {
-        "name": "NAS鉴权失败占比高",
-        "parent": "s7",
-        "level": 5,
-        "condition": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s25_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "C",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "ReleaseCause",
-            "matched": 14,
-            "total": 40,
-            "ratio": 0.35,
-            "top": [
-              [
-                "OTHER",
-                26
-              ],
-              [
-                "NAS_Authentication_Failure",
-                14
-              ]
-            ],
-            "nulls": 0
-          }
-        ]
-      },
-      "s39": {
-        "name": "单小区接入失败集中",
-        "parent": "s11",
-        "level": 5,
-        "condition": "失败会话按 小区 分组,占比最高的小区 超过 60%",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "s39_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "E",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "top1": "Cell-0x1A3F",
-            "top1_ratio": 0.24,
-            "top1_count": 6,
-            "valid": 25,
-            "filtered_n": 25,
-            "op": ">",
-            "threshold": 0.6
-          }
-        ]
-      },
-      "s2": {
-        "name": "L2节点_002",
-        "parent": "s1",
-        "level": 3,
-        "combine": "OR",
-        "pass_through": true
       }
     }
   },

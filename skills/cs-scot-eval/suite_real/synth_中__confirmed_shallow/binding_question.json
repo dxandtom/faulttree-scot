@@ -20,22 +20,22 @@
       "source": "kpi"
     },
     {
-      "node_id": "s7",
-      "node": "PRACH随机接入成功率低",
-      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "node_id": "s31",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
       "source": "kpi"
     },
     {
-      "node_id": "s31",
-      "node": "传输资源不可用占比高",
-      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
-      "source": "chr"
+      "node_id": "s5",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
     },
     {
-      "node_id": "s5",
-      "node": "TOP1终端型号集中",
-      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
-      "source": "chr"
+      "node_id": "s7",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi"
     }
   ],
   "data_overview": {
@@ -44,44 +44,53 @@
         {
           "name": "SA_RRC_ConnSetup_SuccRate(%)",
           "samples": [
-            91.4
+            89.572,
+            90.486,
+            91.4,
+            92.314
           ]
         },
         {
           "name": "SA_UECntx_Est_SuccRate(%)",
           "samples": [
-            99.95
+            97.951,
+            98.9505,
+            99.95,
+            100.9495
           ]
         },
         {
-          "name": "RACH_Setup_SuccRate(%)",
+          "name": "PUSCH_RSSI(dBm)",
           "samples": [
-            98.9
-          ]
-        }
-      ],
-      "n_rows": 6
-    },
-    "chr": {
-      "columns": [
-        {
-          "name": "NgRanCause",
-          "samples": [
-            "transport-resource-unavailable",
-            "OTHER"
+            -98.43,
+            -97.465,
+            -96.5,
+            -95.535
           ]
         },
         {
-          "name": "TerminalModel",
+          "name": "WeakCov_Sample_Ratio(%)",
           "samples": [
-            "BrandX-Model9",
-            "Other-0",
-            "Other-1",
-            "Other-2"
+            37.632,
+            38.016,
+            38.4,
+            38.784
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Att",
+          "samples": [
+            5000
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Succ",
+          "samples": [
+            5000
           ]
         }
       ],
-      "n_rows": 55
+      "n_rows": 40
     }
   }
 }

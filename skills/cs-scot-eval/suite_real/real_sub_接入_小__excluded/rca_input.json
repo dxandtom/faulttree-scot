@@ -3,31 +3,25 @@
     "scenario": "real_sub_接入_小",
     "root": "n47",
     "outline": {
-      "n68": "uncovered",
       "n51": "fail",
-      "n47": "pass",
       "n69": "fail",
-      "n49": "pass",
-      "n67": "uncovered",
-      "n71": "fail",
-      "n72": "fail",
       "n50": "fail",
+      "n49": "pass",
       "n70": "fail",
-      "n48": "uncovered"
+      "n48": "uncovered",
+      "n67": "uncovered",
+      "n68": "uncovered",
+      "n71": "fail",
+      "n47": "pass",
+      "n72": "fail"
     },
     "pruned_nodes": {
-      "n68": {
-        "name": "L4节点_033",
-        "parent": "n67",
-        "level": 4,
-        "combine": "OR"
-      },
       "n51": {
-        "name": "弱覆盖采样占比高",
+        "name": "UE上下文建立成功率低",
         "parent": "n48",
         "level": 4,
         "is_leaf": true,
-        "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+        "condition": "UE上下文建立成功率 低于 99%",
         "combine": "unknown",
         "facts": [
           {
@@ -37,10 +31,134 @@
             "class": "A",
             "status": "ok",
             "predicate_satisfied": false,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 99.95,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": "<",
+            "threshold": 99.0
+          }
+        ]
+      },
+      "n69": {
+        "name": "PRACH随机接入成功率低",
+        "parent": "n68",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "PRACH 随机接入成功率 低于 95%",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "n69_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "RACH_Setup_SuccRate(%)",
+            "value": 98.9,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": "<",
+            "threshold": 95.0
+          }
+        ]
+      },
+      "n50": {
+        "name": "RRC连接建立成功率低",
+        "parent": "n49",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "RRC连接建立成功率 低于 98%",
+        "combine": "unknown",
+        "facts": [
+          {
+            "id": "n50_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "SA_RRC_ConnSetup_SuccRate(%)",
+            "value": 99.7,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": "<",
+            "threshold": 98.0
+          }
+        ]
+      },
+      "n49": {
+        "name": "L4节点_019",
+        "parent": "n48",
+        "level": 4,
+        "pass_through": true
+      },
+      "n70": {
+        "name": "上行干扰偏高",
+        "parent": "n68",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n70_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "PUSCH_RSSI(dBm)",
+            "value": -117.8,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": -105.0
+          }
+        ]
+      },
+      "n48": {
+        "name": "L3节点_004",
+        "parent": "n47",
+        "level": 3,
+        "combine": "OR"
+      },
+      "n67": {
+        "name": "L3节点_007",
+        "parent": "n47",
+        "level": 3,
+        "combine": "OR"
+      },
+      "n68": {
+        "name": "L4节点_033",
+        "parent": "n67",
+        "level": 4,
+        "combine": "OR"
+      },
+      "n71": {
+        "name": "弱覆盖采样占比高",
+        "parent": "n68",
+        "level": 5,
+        "is_leaf": true,
+        "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+        "combine": "OR",
+        "facts": [
+          {
+            "id": "n71_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
             "resolved_column": "WeakCov_Sample_Ratio(%)",
             "value": 2.1,
-            "valid": 2,
-            "n_rows": 2,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": ">",
             "threshold": 15.0
@@ -53,167 +171,28 @@
         "level": 2,
         "pass_through": true
       },
-      "n69": {
-        "name": "无线链路失败占比高",
-        "parent": "n68",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
-        "combine": "AND",
-        "facts": [
-          {
-            "id": "n69_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "C",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "DCErrType",
-            "matched": 1,
-            "total": 50,
-            "ratio": 0.02,
-            "top": [
-              [
-                "OTHER",
-                49
-              ],
-              [
-                "RNL_RadioLinkFailure",
-                1
-              ]
-            ],
-            "nulls": 0
-          }
-        ]
-      },
-      "n49": {
-        "name": "L4节点_019",
-        "parent": "n48",
-        "level": 4,
-        "pass_through": true
-      },
-      "n67": {
-        "name": "L3节点_007",
-        "parent": "n47",
-        "level": 3,
-        "combine": "OR"
-      },
-      "n71": {
-        "name": "传输资源不可用占比高",
-        "parent": "n68",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n71_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "C",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "NgRanCause",
-            "matched": 0,
-            "total": 30,
-            "ratio": 0.0,
-            "top": [
-              [
-                "OTHER",
-                30
-              ]
-            ],
-            "nulls": 0
-          }
-        ]
-      },
       "n72": {
-        "name": "射频单元驻波比告警",
+        "name": "RRC建立尝试与成功数差大于0",
         "parent": "n68",
         "level": 5,
         "is_leaf": true,
-        "condition": "存在 射频单元驻波比异常 告警(ALM-26529)",
+        "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
         "combine": "AND",
         "facts": [
           {
             "id": "n72_b",
-            "indicator": "alarm",
-            "mapping_reason": "合成注入",
-            "class": "G",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "AlarmLog",
-            "matched": 0,
-            "total": 0,
-            "ratio": null,
-            "top": [],
-            "nulls": 3
-          }
-        ]
-      },
-      "n50": {
-        "name": "上行干扰偏高",
-        "parent": "n49",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n50_b",
             "indicator": "kpi",
             "mapping_reason": "合成注入",
-            "class": "A",
+            "class": "B",
             "status": "ok",
             "predicate_satisfied": false,
-            "resolved_column": "PUSCH_RSSI(dBm)",
-            "value": -117.8,
-            "valid": 2,
-            "n_rows": 2,
+            "value": 0.0,
+            "valid": 40,
             "nulls": 0,
             "op": ">",
-            "threshold": -105.0
+            "threshold": 0
           }
         ]
-      },
-      "n70": {
-        "name": "NAS鉴权失败占比高",
-        "parent": "n68",
-        "level": 5,
-        "is_leaf": true,
-        "condition": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
-        "combine": "OR",
-        "facts": [
-          {
-            "id": "n70_b",
-            "indicator": "chr",
-            "mapping_reason": "合成注入",
-            "class": "C",
-            "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "ReleaseCause",
-            "matched": 1,
-            "total": 40,
-            "ratio": 0.025,
-            "top": [
-              [
-                "OTHER",
-                39
-              ],
-              [
-                "NAS_Authentication_Failure",
-                1
-              ]
-            ],
-            "nulls": 0
-          }
-        ]
-      },
-      "n48": {
-        "name": "L3节点_004",
-        "parent": "n47",
-        "level": 3,
-        "combine": "OR"
       }
     }
   },

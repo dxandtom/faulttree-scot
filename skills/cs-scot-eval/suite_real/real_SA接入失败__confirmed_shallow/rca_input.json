@@ -3,42 +3,17 @@
     "scenario": "SA场景接入失败",
     "root": "n1",
     "outline": {
-      "n175": "hold",
       "n4": "uncovered",
       "n101": "insufficient",
       "n10": "hold",
+      "n5": "fail",
       "n100": "fail",
       "n86": "pass",
       "n1": "pass",
       "n3": "uncovered",
-      "n5": "fail"
+      "n175": "hold"
     },
     "pruned_nodes": {
-      "n175": {
-        "name": "弱覆盖采样占比高",
-        "parent": "n1",
-        "level": 3,
-        "is_leaf": true,
-        "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
-        "combine": "unknown",
-        "facts": [
-          {
-            "id": "n175_b",
-            "indicator": "kpi",
-            "mapping_reason": "合成注入",
-            "class": "A",
-            "status": "ok",
-            "predicate_satisfied": true,
-            "resolved_column": "WeakCov_Sample_Ratio(%)",
-            "value": 38.4,
-            "valid": 2,
-            "n_rows": 2,
-            "nulls": 0,
-            "op": ">",
-            "threshold": 15.0
-          }
-        ]
-      },
       "n4": {
         "name": "L3节点_001",
         "parent": "n3",
@@ -46,11 +21,11 @@
         "combine": "OR"
       },
       "n101": {
-        "name": "上行干扰偏高",
+        "name": "PRACH随机接入成功率低",
         "parent": "n86",
         "level": 4,
         "is_leaf": true,
-        "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
+        "condition": "PRACH 随机接入成功率 低于 95%",
         "combine": "AND",
         "facts": [
           {
@@ -64,11 +39,11 @@
         ]
       },
       "n10": {
-        "name": "UE上下文建立成功率低",
+        "name": "RRC连接建立成功率低",
         "parent": "n5",
         "level": 6,
         "is_leaf": true,
-        "condition": "UE上下文建立成功率 低于 99%",
+        "condition": "RRC连接建立成功率 低于 98%",
         "combine": "unknown",
         "facts": [
           {
@@ -78,22 +53,46 @@
             "class": "A",
             "status": "ok",
             "predicate_satisfied": true,
-            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
-            "value": 93.8,
-            "valid": 2,
-            "n_rows": 2,
+            "resolved_column": "SA_RRC_ConnSetup_SuccRate(%)",
+            "value": 91.4,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": "<",
-            "threshold": 99.0
+            "threshold": 98.0
+          }
+        ]
+      },
+      "n5": {
+        "name": "弱覆盖采样占比高",
+        "parent": "n4",
+        "level": 5,
+        "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+        "combine": "AND",
+        "facts": [
+          {
+            "id": "n5_b",
+            "indicator": "kpi",
+            "mapping_reason": "合成注入",
+            "class": "A",
+            "status": "ok",
+            "predicate_satisfied": false,
+            "resolved_column": "WeakCov_Sample_Ratio(%)",
+            "value": 2.1,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": 15.0
           }
         ]
       },
       "n100": {
-        "name": "PRACH随机接入成功率低",
+        "name": "UE上下文建立成功率低",
         "parent": "n86",
         "level": 4,
         "is_leaf": true,
-        "condition": "PRACH 随机接入成功率 低于 95%",
+        "condition": "UE上下文建立成功率 低于 99%",
         "combine": "unknown",
         "facts": [
           {
@@ -103,13 +102,13 @@
             "class": "A",
             "status": "ok",
             "predicate_satisfied": false,
-            "resolved_column": "RACH_Setup_SuccRate(%)",
-            "value": 98.9,
-            "valid": 2,
-            "n_rows": 2,
+            "resolved_column": "SA_UECntx_Est_SuccRate(%)",
+            "value": 99.95,
+            "valid": 40,
+            "n_rows": 40,
             "nulls": 0,
             "op": "<",
-            "threshold": 95.0
+            "threshold": 99.0
           }
         ]
       },
@@ -131,26 +130,28 @@
         "level": 3,
         "combine": "OR"
       },
-      "n5": {
-        "name": "Xn链路故障告警",
-        "parent": "n4",
-        "level": 5,
-        "condition": "存在 Xn 链路故障 告警(ALM-29240)",
-        "combine": "AND",
+      "n175": {
+        "name": "上行干扰偏高",
+        "parent": "n1",
+        "level": 3,
+        "is_leaf": true,
+        "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
+        "combine": "unknown",
         "facts": [
           {
-            "id": "n5_b",
-            "indicator": "alarm",
+            "id": "n175_b",
+            "indicator": "kpi",
             "mapping_reason": "合成注入",
-            "class": "G",
+            "class": "A",
             "status": "ok",
-            "predicate_satisfied": false,
-            "resolved_column": "AlarmLog",
-            "matched": 0,
-            "total": 0,
-            "ratio": null,
-            "top": [],
-            "nulls": 3
+            "predicate_satisfied": true,
+            "resolved_column": "PUSCH_RSSI(dBm)",
+            "value": -96.5,
+            "valid": 40,
+            "n_rows": 40,
+            "nulls": 0,
+            "op": ">",
+            "threshold": -105.0
           }
         ]
       }

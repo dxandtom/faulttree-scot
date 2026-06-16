@@ -5,7 +5,7 @@
   "category": "false_positive_resist",
   "truth": {
     "root_cause_node_id": "s289",
-    "root_cause_name": "PRACH随机接入成功率低",
+    "root_cause_name": "NAS鉴权失败占比高",
     "tier": "confirmed",
     "must_not_report": [
       "s39",
@@ -34,40 +34,40 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "PRACH随机接入成功率低",
+        "Root_cause": "NAS鉴权失败占比高",
         "Fault_tree_path": [
-          "有建立请求无建立完成",
-          "NAS鉴权失败占比高",
+          "射频单元驻波比告警",
+          "无线链路失败占比高",
           "GTP-U路径故障告警",
-          "PRACH随机接入成功率低"
+          "NAS鉴权失败占比高"
         ],
         "evidence_path": [
           {
-            "node": "有建立请求无建立完成",
+            "node": "射频单元驻波比告警",
             "node_id": "s7",
-            "condition": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-            "actual": "命中会话 5 个",
+            "condition": "存在 射频单元驻波比异常 告警(ALM-26529)",
+            "actual": "AlarmLog 命中 3/7",
             "judgment": "成立"
           },
           {
-            "node": "NAS鉴权失败占比高",
+            "node": "无线链路失败占比高",
             "node_id": "s25",
-            "condition": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
-            "actual": "ReleaseCause 命中 14/40",
+            "condition": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
+            "actual": "DCErrType 命中 14/40",
             "judgment": "成立"
           },
           {
             "node": "GTP-U路径故障告警",
             "node_id": "s94",
             "condition": "存在 GTP-U 路径故障 告警(ALM-25952)",
-            "actual": "AlarmLog 命中 4/4",
+            "actual": "AlarmLog 命中 4/7",
             "judgment": "成立"
           },
           {
-            "node": "PRACH随机接入成功率低",
+            "node": "NAS鉴权失败占比高",
             "node_id": "s289",
-            "condition": "PRACH 随机接入成功率 低于 95%",
-            "actual": "RACH_Setup_SuccRate(%)=78.6",
+            "condition": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
+            "actual": "ReleaseCause 命中 14/40",
             "judgment": "成立"
           }
         ]
@@ -81,6 +81,35 @@
     {
       "id": "s100_b",
       "node_id": "s100",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_RRC_ConnSetup_SuccRate(%)",
+      "op": "<",
+      "threshold": 98.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s101_b",
+      "node_id": "s101",
+      "node": "UE上下文建立成功率低",
+      "condition_text": "UE上下文建立成功率 低于 99%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_UECntx_Est_SuccRate(%)",
+      "op": "<",
+      "threshold": 99.0,
+      "scope": "aggregate",
+      "agg": "mean",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "s132_b",
+      "node_id": "s132",
       "node": "PRACH随机接入成功率低",
       "condition_text": "PRACH 随机接入成功率 低于 95%",
       "source": "kpi",
@@ -93,8 +122,8 @@
       "agg": "mean"
     },
     {
-      "id": "s101_b",
-      "node_id": "s101",
+      "id": "s133_b",
+      "node_id": "s133",
       "node": "上行干扰偏高",
       "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
       "source": "kpi",
@@ -104,12 +133,25 @@
       "op": ">",
       "threshold": -105.0,
       "scope": "aggregate",
-      "agg": "mean",
-      "decision": "insufficient_data"
+      "agg": "mean"
     },
     {
-      "id": "s132_b",
-      "node_id": "s132",
+      "id": "s134_b",
+      "node_id": "s134",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "WeakCov_Sample_Ratio(%)",
+      "op": ">",
+      "threshold": 15.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "s135_b",
+      "node_id": "s135",
       "node": "RRC建立尝试与成功数差大于0",
       "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
       "source": "kpi",
@@ -127,8 +169,8 @@
       "agg": "sum"
     },
     {
-      "id": "s133_b",
-      "node_id": "s133",
+      "id": "s25_b",
+      "node_id": "s25",
       "node": "无线链路失败占比高",
       "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
       "source": "chr",
@@ -141,8 +183,8 @@
       "require": 10
     },
     {
-      "id": "s134_b",
-      "node_id": "s134",
+      "id": "s289_b",
+      "node_id": "s289",
       "node": "NAS鉴权失败占比高",
       "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
       "source": "chr",
@@ -155,8 +197,8 @@
       "require": 8
     },
     {
-      "id": "s135_b",
-      "node_id": "s135",
+      "id": "s39_b",
+      "node_id": "s39",
       "node": "传输资源不可用占比高",
       "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
       "source": "chr",
@@ -169,58 +211,18 @@
       "require": 6
     },
     {
-      "id": "s25_b",
-      "node_id": "s25",
-      "node": "NAS鉴权失败占比高",
-      "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
-      "source": "chr",
-      "class": "C",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "ReleaseCause",
-      "contains": [
-        "NAS_Authentication_Failure"
-      ],
-      "require": 8
-    },
-    {
-      "id": "s289_b",
-      "node_id": "s289",
-      "node": "PRACH随机接入成功率低",
-      "condition_text": "PRACH 随机接入成功率 低于 95%",
-      "source": "kpi",
-      "class": "A",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "RACH_Setup_SuccRate(%)",
-      "op": "<",
-      "threshold": 95.0,
-      "scope": "aggregate",
-      "agg": "mean"
-    },
-    {
-      "id": "s39_b",
-      "node_id": "s39",
-      "node": "单小区接入失败集中",
-      "condition_text": "失败会话按 小区 分组,占比最高的小区 超过 60%",
-      "source": "chr",
-      "class": "E",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "group_by": "NRCellIdentity",
-      "op": ">",
-      "threshold": 0.6
-    },
-    {
       "id": "s7_b",
       "node_id": "s7",
-      "node": "有建立请求无建立完成",
-      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-      "source": "sig",
-      "class": "H",
+      "node": "射频单元驻波比告警",
+      "condition_text": "存在 射频单元驻波比异常 告警(ALM-26529)",
+      "source": "alarm",
+      "class": "G",
       "mapping_reason": "金标准:大白话判据→系统列",
-      "key": "CallID",
-      "msg_column": "MessageType",
-      "lacks": [
-        "RRCSetupComplete"
-      ]
+      "column": "AlarmLog",
+      "contains": [
+        "ALM-26529"
+      ],
+      "require": 1
     },
     {
       "id": "s94_b",

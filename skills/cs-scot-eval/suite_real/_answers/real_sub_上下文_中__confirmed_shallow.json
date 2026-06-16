@@ -25,15 +25,15 @@
       {
         "Root_cause": "PRACH随机接入成功率低",
         "Fault_tree_path": [
-          "有建立请求无建立完成",
+          "RRC建立尝试与成功数差大于0",
           "PRACH随机接入成功率低"
         ],
         "evidence_path": [
           {
-            "node": "有建立请求无建立完成",
+            "node": "RRC建立尝试与成功数差大于0",
             "node_id": "n4",
-            "condition": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-            "actual": "命中会话 5 个",
+            "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
+            "actual": "=49600.0",
             "judgment": "成立"
           },
           {
@@ -97,44 +97,49 @@
     {
       "id": "n35_b",
       "node_id": "n35",
-      "node": "GTP-U路径故障告警",
-      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
-      "source": "alarm",
-      "class": "G",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
       "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "AlarmLog",
-      "contains": [
-        "ALM-25952"
-      ],
-      "require": 1
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean"
     },
     {
       "id": "n36_b",
       "node_id": "n36",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
-      "source": "alarm",
-      "class": "G",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi",
+      "class": "A",
       "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "AlarmLog",
-      "contains": [
-        "ALM-29240"
-      ],
-      "require": 1
+      "column": "WeakCov_Sample_Ratio(%)",
+      "op": ">",
+      "threshold": 15.0,
+      "scope": "aggregate",
+      "agg": "mean"
     },
     {
       "id": "n4_b",
       "node_id": "n4",
-      "node": "有建立请求无建立完成",
-      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-      "source": "sig",
-      "class": "H",
+      "node": "RRC建立尝试与成功数差大于0",
+      "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
+      "source": "kpi",
+      "class": "B",
       "mapping_reason": "金标准:大白话判据→系统列",
-      "key": "CallID",
-      "msg_column": "MessageType",
-      "lacks": [
-        "RRCSetupComplete"
-      ]
+      "minuend": [
+        "N.RRC.ConnReq.Att"
+      ],
+      "subtrahend": [
+        "N.RRC.ConnReq.Succ"
+      ],
+      "op": ">",
+      "threshold": 0,
+      "scope": "aggregate",
+      "agg": "sum"
     }
   ]
 }

@@ -31,23 +31,23 @@
       {
         "Root_cause": "RRC连接建立成功率低",
         "Fault_tree_path": [
-          "有建立请求无建立完成",
-          "NAS鉴权失败占比高",
+          "传输资源不可用占比高",
+          "射频单元驻波比告警",
           "RRC连接建立成功率低"
         ],
         "evidence_path": [
           {
-            "node": "有建立请求无建立完成",
+            "node": "传输资源不可用占比高",
             "node_id": "n4",
-            "condition": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-            "actual": "命中会话 5 个",
+            "condition": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+            "actual": "NgRanCause 命中 16/40",
             "judgment": "成立"
           },
           {
-            "node": "NAS鉴权失败占比高",
+            "node": "射频单元驻波比告警",
             "node_id": "n5",
-            "condition": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
-            "actual": "ReleaseCause 命中 14/40",
+            "condition": "存在 射频单元驻波比异常 告警(ALM-26529)",
+            "actual": "AlarmLog 命中 3/3",
             "judgment": "成立"
           },
           {
@@ -110,6 +110,36 @@
     {
       "id": "n15_b",
       "node_id": "n15",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "PUSCH_RSSI(dBm)",
+      "op": ">",
+      "threshold": -105.0,
+      "scope": "aggregate",
+      "agg": "mean",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "n16_b",
+      "node_id": "n16",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "WeakCov_Sample_Ratio(%)",
+      "op": ">",
+      "threshold": 15.0,
+      "scope": "aggregate",
+      "agg": "mean",
+      "decision": "insufficient_data"
+    },
+    {
+      "id": "n35_b",
+      "node_id": "n35",
       "node": "RRC建立尝试与成功数差大于0",
       "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
       "source": "kpi",
@@ -124,12 +154,11 @@
       "op": ">",
       "threshold": 0,
       "scope": "aggregate",
-      "agg": "sum",
-      "decision": "insufficient_data"
+      "agg": "sum"
     },
     {
-      "id": "n16_b",
-      "node_id": "n16",
+      "id": "n36_b",
+      "node_id": "n36",
       "node": "无线链路失败占比高",
       "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
       "source": "chr",
@@ -139,66 +168,11 @@
       "contains": [
         "RNL_RadioLinkFailure"
       ],
-      "require": 10,
-      "decision": "insufficient_data"
-    },
-    {
-      "id": "n35_b",
-      "node_id": "n35",
-      "node": "GTP-U路径故障告警",
-      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
-      "source": "alarm",
-      "class": "G",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "AlarmLog",
-      "contains": [
-        "ALM-25952"
-      ],
-      "require": 1
-    },
-    {
-      "id": "n36_b",
-      "node_id": "n36",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
-      "source": "alarm",
-      "class": "G",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "AlarmLog",
-      "contains": [
-        "ALM-29240"
-      ],
-      "require": 1
+      "require": 10
     },
     {
       "id": "n37_b",
       "node_id": "n37",
-      "node": "TOP1终端型号集中",
-      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
-      "source": "chr",
-      "class": "E",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "group_by": "TerminalModel",
-      "op": ">",
-      "threshold": 0.5
-    },
-    {
-      "id": "n4_b",
-      "node_id": "n4",
-      "node": "有建立请求无建立完成",
-      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-      "source": "sig",
-      "class": "H",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "key": "CallID",
-      "msg_column": "MessageType",
-      "lacks": [
-        "RRCSetupComplete"
-      ]
-    },
-    {
-      "id": "n5_b",
-      "node_id": "n5",
       "node": "NAS鉴权失败占比高",
       "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
       "source": "chr",
@@ -209,6 +183,34 @@
         "NAS_Authentication_Failure"
       ],
       "require": 8
+    },
+    {
+      "id": "n4_b",
+      "node_id": "n4",
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr",
+      "class": "C",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "NgRanCause",
+      "contains": [
+        "transport-resource-unavailable"
+      ],
+      "require": 6
+    },
+    {
+      "id": "n5_b",
+      "node_id": "n5",
+      "node": "射频单元驻波比告警",
+      "condition_text": "存在 射频单元驻波比异常 告警(ALM-26529)",
+      "source": "alarm",
+      "class": "G",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "AlarmLog",
+      "contains": [
+        "ALM-26529"
+      ],
+      "require": 1
     }
   ]
 }

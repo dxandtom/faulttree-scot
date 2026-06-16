@@ -21,7 +21,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from binding_personas import PERSONAS, gold_binding, synth_rows, evaluate_binding, _table  # noqa: E402
+from binding_personas import (PERSONAS, gold_binding, evaluate_binding, _table,  # noqa: E402
+                              persona_cols, own_series, shared_series, sessions)
 
 TREES = HERE.parent / "trees"
 DEFAULT_OUT = HERE.parent / "suite_real"
@@ -91,7 +92,7 @@ def auto_specs(tree):
     return specs
 
 
-def _states(spec, tree, pmap):
+def _states(spec, tree):
     nodes = tree["nodes"]
     state = {}
     truth = {"root_cause_node_id": None, "root_cause_name": None, "tier": "undetermined", "must_not_report": []}
@@ -104,13 +105,13 @@ def _states(spec, tree, pmap):
     cat = spec["category"]
     if cat in ("confirmed", "false_positive_resist"):
         tgt = spec["target"]; set_path_hold(tgt); state[tgt] = "hold"
-        truth.update(root_cause_node_id=tgt, root_cause_name=pmap[tgt]["name"], tier="confirmed")
+        truth.update(root_cause_node_id=tgt, tier="confirmed")
     elif cat == "probable":
         leaf = spec["target"]; mid = nodes[leaf]["parent"]
         while mid and nodes[mid].get("pass_through"):
             mid = nodes[mid]["parent"]
         set_path_hold(mid); state[leaf] = "insuf"
-        truth.update(root_cause_node_id=mid, root_cause_name=pmap[mid]["name"], tier="probable")
+        truth.update(root_cause_node_id=mid, tier="probable")
     else:
         truth.update(tier=("undetermined" if cat == "honest_insufficient" else "excluded"))
 
@@ -130,35 +131,65 @@ def _states(spec, tree, pmap):
     return state, truth
 
 
+N_ROWS = 40   # 每个列式数据源的行数(让数据看着像真实话统/CHR,不是几行空表)
+
+
 def build(spec, tree):
-    """→ (剪枝后的工作树索引 widx, 各源事实 results, truth, node_states, 各源数据行, 金标准绑定)。"""
+    """→ (剪枝后的工作树索引 widx, 各源事实 results, truth, node_states, 各源密集数据行, 金标准绑定)。"""
     nodes = tree["nodes"]
-    pmap = _persona_map(nodes)
-    state, truth = _states(spec, tree, pmap)
+    state, truth = _states(spec, tree)
+    # 本场景的事实节点分配【互不相同】的人设(避免同源同列冲突),并补 truth 根因名
+    fact_nodes = sorted(state)
+    pmap = {nid: PERSONAS[i % len(PERSONAS)] for i, nid in enumerate(fact_nodes)}
+    if truth["root_cause_node_id"]:
+        truth["root_cause_name"] = pmap[truth["root_cause_node_id"]]["name"]
 
     widx = copy.deepcopy(tree)
-    results, data_by_source, gold = {}, {}, []
-    for sid, (nid, st) in enumerate(sorted(state.items())):
-        p = pmap[nid]
-        src = SRC_BY_CLASS.get(p["cls"], "kpi")
+    items_by_src = {}
+    for nid in fact_nodes:
+        p = pmap[nid]; src = SRC_BY_CLASS.get(p["cls"], "kpi")
         widx["nodes"][nid]["name"] = p["name"]
         widx["nodes"][nid]["condition"] = p["tree_cond"]
-        binding = gold_binding(p, nid, p["name"], src)
-        rows = synth_rows(p, st, sid)
-        fact = evaluate_binding(binding, {src: _table(rows)}, src)   # 真实内核算事实
-        results.setdefault(src, {"indicator": src, "source": src, "conditions": [], "summary": {}})
-        results[src]["conditions"].append({"id": binding["id"], "node_id": nid, "node": p["name"],
-                                           "condition_text": p["tree_cond"], "class": p["cls"],
-                                           "mapping_reason": "合成注入", "fact": fact})
-        data_by_source.setdefault(src, []).extend(rows)
-        if st != "insuf":                              # insuf 节点:数据里就没这列,绑定题里仍给该判据(模型该判数据不足/无源)
-            gold.append(binding)
+        items_by_src.setdefault(src, []).append((nid, p, state[nid], gold_binding(p, nid, p["name"], src)))
+
+    # 造每个源的【密集】数据表:列式源每行填满所有列;信令源是会话日志
+    data_by_source = {}
+    for src, items in items_by_src.items():
+        if any(it[1]["kind"] == "sess" for it in items):
+            rows = []
+            for j, (nid, p, st, b) in enumerate(items):
+                rows += sessions(p, st, (j + 1) * 1000)
+            data_by_source[src] = rows
         else:
-            gold.append({**binding, "decision": "insufficient_data"})
+            colmap = {}
+            for (nid, p, st, b) in items:
+                if st == "insuf":                       # insuf:数据里就没这列 → 模型/内核该判数据不足
+                    continue
+                for c in persona_cols(p):
+                    colmap.setdefault(c, []).append((p, st))
+            cs = {c: (own_series(o[0][0], o[0][1], c, N_ROWS) if len(o) == 1 else shared_series(o, N_ROWS))
+                  for c, o in colmap.items()}
+            data_by_source[src] = [{c: cs[c][i] for c in cs} for i in range(N_ROWS)] if cs else []
+
+    # 跑真实内核算事实(insuf 直接判数据不足)
+    results, gold = {}, []
+    for src, items in items_by_src.items():
+        tbl = _table(data_by_source.get(src, []))
+        for (nid, p, st, b) in items:
+            if st == "insuf":
+                fact = {"class": p["cls"], "status": "insufficient_data", "resolved_column": None, "reason": p["insuf"]}
+                gold.append({**b, "decision": "insufficient_data"})
+            else:
+                fact = evaluate_binding(b, {src: tbl}, src)
+                gold.append(b)
+            results.setdefault(src, {"indicator": src, "source": src, "conditions": [], "summary": {}})
+            results[src]["conditions"].append({"id": b["id"], "node_id": nid, "node": p["name"],
+                                               "condition_text": p["tree_cond"], "class": p["cls"],
+                                               "mapping_reason": "合成注入", "fact": fact})
     for r in results.values():
-        cs = r["conditions"]
-        r["summary"] = {"total": len(cs), "ok": sum(c["fact"]["status"] == "ok" for c in cs),
-                        "insufficient_data": sum(c["fact"]["status"] == "insufficient_data" for c in cs), "manual": 0}
+        cc = r["conditions"]
+        r["summary"] = {"total": len(cc), "ok": sum(c["fact"]["status"] == "ok" for c in cc),
+                        "insufficient_data": sum(c["fact"]["status"] == "insufficient_data" for c in cc), "manual": 0}
     return widx, results, truth, state, data_by_source, gold
 
 

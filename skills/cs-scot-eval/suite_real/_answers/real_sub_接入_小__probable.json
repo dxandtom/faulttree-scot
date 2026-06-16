@@ -5,7 +5,7 @@
   "category": "probable",
   "truth": {
     "root_cause_node_id": "n68",
-    "root_cause_name": "RRC建立尝试与成功数差大于0",
+    "root_cause_name": "弱覆盖采样占比高",
     "tier": "probable",
     "must_not_report": [
       "n48",
@@ -24,23 +24,23 @@
     "rca_result": [],
     "probable_causes": [
       {
-        "Root_cause": "RRC建立尝试与成功数差大于0",
+        "Root_cause": "弱覆盖采样占比高",
         "blocked_at": "叶子因(数据不足)",
         "caveats": "叶子因数据不足,已定位到该层、叶子待定",
         "support": "中间层判据成立",
         "evidence_path": [
           {
-            "node": "弱覆盖采样占比高",
+            "node": "上行干扰偏高",
             "node_id": "n67",
-            "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
-            "actual": "WeakCov_Sample_Ratio(%)=38.4",
+            "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
+            "actual": "PUSCH_RSSI(dBm)=-96.5",
             "judgment": "成立"
           },
           {
-            "node": "RRC建立尝试与成功数差大于0",
+            "node": "弱覆盖采样占比高",
             "node_id": "n68",
-            "condition": "RRC建立 尝试次数 减 成功次数 大于 0",
-            "actual": "=1240.0",
+            "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+            "actual": "WeakCov_Sample_Ratio(%)=38.4",
             "judgment": "成立"
           }
         ]
@@ -53,6 +53,20 @@
     {
       "id": "n48_b",
       "node_id": "n48",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_RRC_ConnSetup_SuccRate(%)",
+      "op": "<",
+      "threshold": 98.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n50_b",
+      "node_id": "n50",
       "node": "UE上下文建立成功率低",
       "condition_text": "UE上下文建立成功率 低于 99%",
       "source": "kpi",
@@ -65,8 +79,22 @@
       "agg": "mean"
     },
     {
-      "id": "n50_b",
-      "node_id": "n50",
+      "id": "n51_b",
+      "node_id": "n51",
+      "node": "PRACH随机接入成功率低",
+      "condition_text": "PRACH 随机接入成功率 低于 95%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "RACH_Setup_SuccRate(%)",
+      "op": "<",
+      "threshold": 95.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n67_b",
+      "node_id": "n67",
       "node": "上行干扰偏高",
       "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
       "source": "kpi",
@@ -79,36 +107,22 @@
       "agg": "mean"
     },
     {
-      "id": "n51_b",
-      "node_id": "n51",
-      "node": "弱覆盖采样占比高",
-      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
-      "source": "kpi",
-      "class": "A",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "WeakCov_Sample_Ratio(%)",
-      "op": ">",
-      "threshold": 15.0,
-      "scope": "aggregate",
-      "agg": "mean"
-    },
-    {
-      "id": "n67_b",
-      "node_id": "n67",
-      "node": "弱覆盖采样占比高",
-      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
-      "source": "kpi",
-      "class": "A",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "WeakCov_Sample_Ratio(%)",
-      "op": ">",
-      "threshold": 15.0,
-      "scope": "aggregate",
-      "agg": "mean"
-    },
-    {
       "id": "n68_b",
       "node_id": "n68",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "WeakCov_Sample_Ratio(%)",
+      "op": ">",
+      "threshold": 15.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n69_b",
+      "node_id": "n69",
       "node": "RRC建立尝试与成功数差大于0",
       "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
       "source": "kpi",
@@ -123,21 +137,7 @@
       "op": ">",
       "threshold": 0,
       "scope": "aggregate",
-      "agg": "sum"
-    },
-    {
-      "id": "n69_b",
-      "node_id": "n69",
-      "node": "无线链路失败占比高",
-      "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
-      "source": "chr",
-      "class": "C",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "DCErrType",
-      "contains": [
-        "RNL_RadioLinkFailure"
-      ],
-      "require": 10,
+      "agg": "sum",
       "decision": "insufficient_data"
     }
   ]

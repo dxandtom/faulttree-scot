@@ -5,7 +5,7 @@
   "category": "confirmed",
   "truth": {
     "root_cause_node_id": "n175",
-    "root_cause_name": "弱覆盖采样占比高",
+    "root_cause_name": "上行干扰偏高",
     "tier": "confirmed",
     "must_not_report": [
       "n5",
@@ -22,16 +22,16 @@
   "reference_rca": {
     "rca_result": [
       {
-        "Root_cause": "弱覆盖采样占比高",
+        "Root_cause": "上行干扰偏高",
         "Fault_tree_path": [
-          "弱覆盖采样占比高"
+          "上行干扰偏高"
         ],
         "evidence_path": [
           {
-            "node": "弱覆盖采样占比高",
+            "node": "上行干扰偏高",
             "node_id": "n175",
-            "condition": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
-            "actual": "WeakCov_Sample_Ratio(%)=38.4",
+            "condition": "上行底噪(RSSI)抬升,高于 -105dBm",
+            "actual": "PUSCH_RSSI(dBm)=-96.5",
             "judgment": "成立"
           }
         ]
@@ -45,6 +45,20 @@
     {
       "id": "n10_b",
       "node_id": "n10",
+      "node": "RRC连接建立成功率低",
+      "condition_text": "RRC连接建立成功率 低于 98%",
+      "source": "kpi",
+      "class": "A",
+      "mapping_reason": "金标准:大白话判据→系统列",
+      "column": "SA_RRC_ConnSetup_SuccRate(%)",
+      "op": "<",
+      "threshold": 98.0,
+      "scope": "aggregate",
+      "agg": "mean"
+    },
+    {
+      "id": "n100_b",
+      "node_id": "n100",
       "node": "UE上下文建立成功率低",
       "condition_text": "UE上下文建立成功率 低于 99%",
       "source": "kpi",
@@ -57,8 +71,8 @@
       "agg": "mean"
     },
     {
-      "id": "n100_b",
-      "node_id": "n100",
+      "id": "n101_b",
+      "node_id": "n101",
       "node": "PRACH随机接入成功率低",
       "condition_text": "PRACH 随机接入成功率 低于 95%",
       "source": "kpi",
@@ -68,11 +82,12 @@
       "op": "<",
       "threshold": 95.0,
       "scope": "aggregate",
-      "agg": "mean"
+      "agg": "mean",
+      "decision": "insufficient_data"
     },
     {
-      "id": "n101_b",
-      "node_id": "n101",
+      "id": "n175_b",
+      "node_id": "n175",
       "node": "上行干扰偏高",
       "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
       "source": "kpi",
@@ -82,12 +97,11 @@
       "op": ">",
       "threshold": -105.0,
       "scope": "aggregate",
-      "agg": "mean",
-      "decision": "insufficient_data"
+      "agg": "mean"
     },
     {
-      "id": "n175_b",
-      "node_id": "n175",
+      "id": "n5_b",
+      "node_id": "n5",
       "node": "弱覆盖采样占比高",
       "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
       "source": "kpi",
@@ -98,20 +112,6 @@
       "threshold": 15.0,
       "scope": "aggregate",
       "agg": "mean"
-    },
-    {
-      "id": "n5_b",
-      "node_id": "n5",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
-      "source": "alarm",
-      "class": "G",
-      "mapping_reason": "金标准:大白话判据→系统列",
-      "column": "AlarmLog",
-      "contains": [
-        "ALM-29240"
-      ],
-      "require": 1
     }
   ]
 }

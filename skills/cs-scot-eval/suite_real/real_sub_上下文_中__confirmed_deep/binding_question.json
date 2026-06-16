@@ -21,45 +21,45 @@
     },
     {
       "node_id": "n15",
+      "node": "上行干扰偏高",
+      "condition_text": "上行底噪(RSSI)抬升,高于 -105dBm",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n16",
+      "node": "弱覆盖采样占比高",
+      "condition_text": "弱覆盖采样(RSRP低于-110)占比 超过 15%",
+      "source": "kpi"
+    },
+    {
+      "node_id": "n35",
       "node": "RRC建立尝试与成功数差大于0",
       "condition_text": "RRC建立 尝试次数 减 成功次数 大于 0",
       "source": "kpi"
     },
     {
-      "node_id": "n16",
+      "node_id": "n36",
       "node": "无线链路失败占比高",
       "condition_text": "建链错误码中 无线链路失败(RNL_RadioLinkFailure) 占比 不低于 20%",
       "source": "chr"
     },
     {
       "node_id": "n37",
-      "node": "TOP1终端型号集中",
-      "condition_text": "失败会话按 终端型号 分组,占比最高的型号 超过 50%",
-      "source": "chr"
-    },
-    {
-      "node_id": "n5",
       "node": "NAS鉴权失败占比高",
       "condition_text": "释放原因中 鉴权失败(NAS_Authentication_Failure) 占比 不低于 20%",
       "source": "chr"
     },
     {
-      "node_id": "n35",
-      "node": "GTP-U路径故障告警",
-      "condition_text": "存在 GTP-U 路径故障 告警(ALM-25952)",
-      "source": "alarm"
-    },
-    {
-      "node_id": "n36",
-      "node": "Xn链路故障告警",
-      "condition_text": "存在 Xn 链路故障 告警(ALM-29240)",
-      "source": "alarm"
-    },
-    {
       "node_id": "n4",
-      "node": "有建立请求无建立完成",
-      "condition_text": "信令会话里 有 RRCSetupRequest 却 缺 RRCSetupComplete",
-      "source": "sig"
+      "node": "传输资源不可用占比高",
+      "condition_text": "NGAP原因中 传输资源不可用(transport-resource-unavailable) 占比 不低于 20%",
+      "source": "chr"
+    },
+    {
+      "node_id": "n5",
+      "node": "射频单元驻波比告警",
+      "condition_text": "存在 射频单元驻波比异常 告警(ALM-26529)",
+      "source": "alarm"
     }
   ],
   "data_overview": {
@@ -68,33 +68,52 @@
         {
           "name": "SA_RRC_ConnSetup_SuccRate(%)",
           "samples": [
-            91.4
+            89.572,
+            90.486,
+            91.4,
+            92.314
           ]
         },
         {
           "name": "SA_UECntx_Est_SuccRate(%)",
           "samples": [
-            99.95
+            97.951,
+            98.9505,
+            99.95,
+            100.9495
           ]
         },
         {
           "name": "RACH_Setup_SuccRate(%)",
           "samples": [
-            98.9
+            96.922,
+            97.911,
+            98.9,
+            99.889
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Att",
+          "samples": [
+            5000
+          ]
+        },
+        {
+          "name": "N.RRC.ConnReq.Succ",
+          "samples": [
+            5000
           ]
         }
       ],
-      "n_rows": 6
+      "n_rows": 40
     },
     "chr": {
       "columns": [
         {
-          "name": "TerminalModel",
+          "name": "DCErrType",
           "samples": [
-            "BrandX-Model9",
-            "Other-0",
-            "Other-1",
-            "Other-2"
+            "RNL_RadioLinkFailure",
+            "OTHER"
           ]
         },
         {
@@ -103,42 +122,28 @@
             "NAS_Authentication_Failure",
             "OTHER"
           ]
+        },
+        {
+          "name": "NgRanCause",
+          "samples": [
+            "transport-resource-unavailable",
+            "OTHER"
+          ]
         }
       ],
-      "n_rows": 65
+      "n_rows": 40
     },
     "alarm": {
       "columns": [
         {
           "name": "AlarmLog",
           "samples": [
-            "NONE",
-            "ALM-29240"
+            "ALM-26529",
+            "NONE"
           ]
         }
       ],
-      "n_rows": 6
-    },
-    "sig": {
-      "columns": [
-        {
-          "name": "CallID",
-          "samples": [
-            8000,
-            8001,
-            8002,
-            8003
-          ]
-        },
-        {
-          "name": "MessageType",
-          "samples": [
-            "RRCSetupRequest",
-            "OtherMsg"
-          ]
-        }
-      ],
-      "n_rows": 10
+      "n_rows": 40
     }
   }
 }
