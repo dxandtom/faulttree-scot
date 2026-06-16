@@ -5,3 +5,4 @@ suite_real/*/binding_prompt.txt
 suite_real/_HOWTO_prompts.md
 suite_real/*_report.txt
 suite_real/batch_rca.py
+suite_v2/
