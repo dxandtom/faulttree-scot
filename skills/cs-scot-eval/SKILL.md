@@ -25,11 +25,12 @@ description: 评测故障树诊断三个 skill(generate 的绑定 / execute / fa
    - B 差值:`{"node_id","class":"B","minuend":["列"],"subtrahend":["列"],"op",">","threshold":0}`
    - **C vs E 关键**:某原因/错误码"**占比≥X%**"——只要判据点名了**具体取值**(如 amf-overload、RNL),就是 **C**(数该取值条数 ÷ 总数);只有"不点名、看 TopN/最大分组占比"才用 E。
    - 数据里没有该判据要的列 → `{"node_id","decision":"insufficient_data"}`,别硬绑别的列。
-3. **RCA 题(逐场景)**:对 `suite_v2/scenarios/` 下**每个**场景,用 **fault-tree-rca** 技能:
-   - 输入是该场景 `rca_input.json`;**别一次性全读进上下文**——先 `python "<fault-tree-rca 技能>/scripts/rca_query.py" <该 rca_input.json> --outline` 看全局,再 `--node nX` 按分支取条件+事实;
+3. **RCA 题(逐场景,严格隔离)**:对 `suite_v2/scenarios/` 下**每个**场景,用 **fault-tree-rca** 技能:
+   - ⛔**铁律:一次只处理一个场景——读它的 `rca_input` → 当场写完它的 `rca.json` → 再碰下一个。严禁把多个场景的 `rca_input` 一起读进上下文**(会**串场景**:把 A 场景的成立节点安到 B 头上,典型症状是给某场景报了它根本没 hold 的节点);
+   - 输入是该场景 `rca_input.json`;**别整份读进上下文**——先 `python "<fault-tree-rca 技能>/scripts/rca_query.py" <该 rca_input.json> --outline` 看全局,再 `--node nX` 按分支取条件+事实;
    - **每个节点的状态内核已算好**(`outline`:hold/fail/insufficient/pass,与 facts 的 `predicate_satisfied` 一致):**直接采用,别拿实际值自己重算或推翻它**(实际值只用于逐字引用)。你只做"沿路径组合";
    - 按 fault-tree-rca 的四档法则推理:整条祖先全 hold 的叶子才算根因;**叶子自己 hold 但任一祖先 fail → 绝不报(抗诱饵)**;**多条独立全-hold 路径要都报(多根因)**;
-   - 写到**同目录** `rca.json`,**顶层用契约三档键** `rca_result`(确证)/ `probable_causes`(疑似)/ `undetermined`,每条至少给 `node_id`(别只写 `root_cause_nodes` 这类自创键)。一次一个。
+   - 写到**同目录** `rca.json`,**顶层用契约三档键** `rca_result`(确证)/ `probable_causes`(疑似)/ `undetermined`,每条至少给 `node_id`(别只写 `root_cause_nodes` 这类自创键)。**写完这个再读下一个**。
 4. **打分**:
    `python "<本目录>/scripts/score_v2.py" -o "<本目录>/suite_v2/v2_report.txt"`
    出【绑定】(类别 / 选列 / 参数 / 完全正确)+【RCA】(命中 / 档位 / 无假阳 / 诚实,综合 = 四项全过)。
