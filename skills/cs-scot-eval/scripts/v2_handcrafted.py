@@ -79,26 +79,54 @@ SPEC = {
             "cls": "G", "kind": "exist", "col": "AlarmCode", "value": "ALM-25888", "hold_m": 2, "insuf": "无告警日志源"},
 }
 
-# ── 有意义的场景:hold=成立的节点(埋的路径/诱饵);insuf=数据不足;其余带条件节点=不成立(正常)。 ──
+# ── 有意义的场景(18 个,目录名零填充 S01..S18 便于排序,不含括号/+ 等 shell/路径敏感字符)。 ──
+#    hold=成立的节点(埋的路径/诱饵);insuf=数据不足;其余带条件节点=不成立(正常)。
+#    覆盖:10 个叶子因各当一次确证根因 + A阈值/C占比/G告警/H信令 四类内核 + 疑似/排除/数据不足/抗诱饵/多根因。
 SCENARIOS = [
-    {"name": "S1_弱覆盖致接入失败", "category": "confirmed", "tier": "confirmed",
+    # —— 确证:逐个叶子因(A 阈值)——
+    {"name": "S01_弱覆盖致接入失败", "category": "confirmed", "tier": "confirmed",
      "hold": ["B01", "C01", "D02"], "roots": ["D02"], "must_not_report": []},
-    {"name": "S2_AMF过载", "category": "confirmed", "tier": "confirmed",
+    {"name": "S10_上行干扰致接入失败", "category": "confirmed", "tier": "confirmed",
+     "hold": ["B01", "C01", "D01"], "roots": ["D01"], "must_not_report": []},
+    # —— 确证:C 占比/错误码 ——
+    {"name": "S02_AMF过载", "category": "confirmed", "tier": "confirmed",
      "hold": ["B03", "C05"], "roots": ["C05"], "must_not_report": []},
-    {"name": "S3_无线链路失败", "category": "confirmed", "tier": "confirmed",
+    {"name": "S03_无线链路失败", "category": "confirmed", "tier": "confirmed",
      "hold": ["B04", "C07"], "roots": ["C07"], "must_not_report": []},
-    {"name": "S4_鉴权失败", "category": "confirmed", "tier": "confirmed",
+    {"name": "S04_鉴权失败", "category": "confirmed", "tier": "confirmed",
      "hold": ["B02", "C04"], "roots": ["C04"], "must_not_report": []},
-    {"name": "S5_上下文层疑似", "category": "probable", "tier": "probable",
-     "hold": ["B02"], "insuf": ["C03"], "roots": ["B02"], "must_not_report": []},
-    {"name": "S6_网络正常排除", "category": "excluded", "tier": "excluded",
+    {"name": "S11_RRC拒绝拥塞", "category": "confirmed", "tier": "confirmed",
+     "hold": ["B01", "C02"], "roots": ["C02"], "must_not_report": []},
+    {"name": "S12_传输资源不可用", "category": "confirmed", "tier": "confirmed",
+     "hold": ["B03", "C06"], "roots": ["C06"], "must_not_report": []},
+    # —— 确证:G 告警(经 pass_through 的 B05 网元告警;整条祖先都 pass_through,只 C08/C09 成立)——
+    {"name": "S13_射频驻波比告警", "category": "confirmed", "tier": "confirmed",
+     "hold": ["C08"], "roots": ["C08"], "must_not_report": []},
+    {"name": "S14_小区不可用告警", "category": "confirmed", "tier": "confirmed",
+     "hold": ["C09"], "roots": ["C09"], "must_not_report": []},
+    # —— 确证:H 信令缺失 ——
+    {"name": "S15_安全模式失败", "category": "confirmed", "tier": "confirmed",
+     "hold": ["B02", "C03"], "roots": ["C03"], "must_not_report": []},
+    # —— 疑似:中间层成立、叶子数据不足(分别在 UE 上下文层 / NGAP 层)——
+    {"name": "S05_上下文层疑似", "category": "probable", "tier": "probable",
+     "hold": ["B02"], "insuf": ["C03", "C04"], "roots": ["B02"], "must_not_report": []},
+    {"name": "S17_NGAP层疑似", "category": "probable", "tier": "probable",
+     "hold": ["B03"], "insuf": ["C05", "C06"], "roots": ["B03"], "must_not_report": []},
+    # —— 排除 / 数据不足 ——
+    {"name": "S06_网络正常排除", "category": "excluded", "tier": "excluded",
      "hold": [], "roots": [], "must_not_report": []},
-    {"name": "S7_数据不足", "category": "honest_insufficient", "tier": "undetermined",
+    {"name": "S07_数据不足", "category": "honest_insufficient", "tier": "undetermined",
      "hold": [], "insuf": list(SPEC), "roots": [], "must_not_report": []},
-    {"name": "S8_抗诱饵(弱覆盖断路)", "category": "false_positive_resist", "tier": "confirmed",
+    # —— 抗诱饵:叶子自身成立但路径被父级断开,不许报(两条不同分支)——
+    {"name": "S08_抗诱饵_弱覆盖断路", "category": "false_positive_resist", "tier": "confirmed",
      "hold": ["B03", "C05", "D02"], "roots": ["C05"], "must_not_report": ["D02"]},
-    {"name": "S9_多根因(弱覆盖+无线链路)", "category": "confirmed", "tier": "confirmed",
+    {"name": "S18_抗诱饵_上行干扰断路", "category": "false_positive_resist", "tier": "confirmed",
+     "hold": ["B04", "C07", "D01"], "roots": ["C07"], "must_not_report": ["D01"]},
+    # —— 多根因(同源两条 / 跨源 chr+alarm 两条)——
+    {"name": "S09_多根因_弱覆盖加无线链路", "category": "confirmed", "tier": "confirmed",
      "hold": ["B01", "C01", "D02", "B04", "C07"], "roots": ["D02", "C07"], "must_not_report": []},
+    {"name": "S16_多根因_AMF过载加驻波比告警", "category": "confirmed", "tier": "confirmed",
+     "hold": ["B03", "C05", "C08"], "roots": ["C05", "C08"], "must_not_report": []},
 ]
 
 NAME = {c: n for c, n, *_ in TREE}

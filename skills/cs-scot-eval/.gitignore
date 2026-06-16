@@ -9,7 +9,7 @@ suite_real/batch_rca.py
 
 # v2(suite_v2):只提交【手工源题库】(fault_tree.csv / gold_tree.json / scenarios/*/data / truth.json)+ 生成器/编排/打分脚本。
 # 忽略流水线产物(v2_run.py 一条命令确定性重生)与模型答案/题面/报告:
-suite_v2/产物/
+suite_v2/scot产物/
 suite_v2/binding_question.json
 suite_v2/binding.json
 suite_v2/binding_prompt.txt

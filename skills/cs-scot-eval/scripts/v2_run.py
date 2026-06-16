@@ -3,8 +3,8 @@
 
 与 v1(inject_on_tree:复用真实内核但绕过 generate/execute 技能壳)不同,v2 真的把
 suite_v2(由 v2_handcrafted.py 手工编排)喂给**真脚本**:
-  1. 真 excel_to_tree   :fault_tree.csv → 产物/tree/<根>.md + .tree_index.json(重新分配 id n1,n2…)
-  2. 真 assemble_scenario:→ 产物/plan.json + scripts/<源>_analyzer.py(骨架)+ condition_kernels.py + manifest
+  1. 真 excel_to_tree   :fault_tree.csv → scot产物/<场景>/tree/<根>.md + .tree_index.json(重新分配 id n1,n2…)
+  2. 真 assemble_scenario:→ scot产物/<场景>/plan.json + scripts/<源>_analyzer.py + condition_kernels.py + manifest
   3. code→新 id 映射     :gold_tree.json 按 code 索引 → 映射到重解析出的 nN(join key)
   4. 填【金标准绑定】到各 <源>_analyzer.py 的 CONDITIONS(node_id=新 id)——RCA 路隔离绑定误差
   5. 真 runner 逐场景跑  :--data <源>=<场景数据> → result/rca_input.json,搬到 scenarios/<场景>/rca_input.json
@@ -14,7 +14,7 @@ suite_v2(由 v2_handcrafted.py 手工编排)喂给**真脚本**:
 再 score_v2.py 同时给【绑定】(模型 CONDITIONS vs 金标准)和【RCA】(模型 rca vs truth)打分。
 
 用法: python v2_run.py            (先 v2_handcrafted.py 备好 suite_v2)
-       python v2_run.py --keep-result   (调试:保留 产物/result 不清理)
+       python v2_run.py --keep-result   (调试:保留 scot产物/<场景>/result 不清理)
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def main() -> int:
     if not csv_path.exists():
         print("缺 suite_v2/fault_tree.csv —— 先跑 v2_handcrafted.py", file=sys.stderr)
         return 2
-    prod = suite / "产物"
+    prod = suite / "scot产物" / ROOT_NAME      # 与生产一致的产物布局:<根>/scot产物/<场景>/
     if prod.exists():
         shutil.rmtree(prod)
     indicators = sorted({v["source"] for v in gold["by_code"].values()})
@@ -138,7 +138,8 @@ def main() -> int:
                         s.append(v)
     to_bind = [{"node_id": c2i[code], "node": g["name"], "condition_text": g["binding"]["condition_text"],
                 "source": g["source"]} for code, g in gold["by_code"].items()]
-    bq = {"root": tidx["nodes"][tidx["root"]]["name"], "tree_index": "产物/tree/" + md.with_suffix('.tree_index.json').name,
+    bq = {"root": tidx["nodes"][tidx["root"]]["name"],
+          "tree_index": f"scot产物/{ROOT_NAME}/tree/" + md.with_suffix('.tree_index.json').name,
           "to_bind": to_bind,
           "data_overview": {s: {"columns": [{"name": c, "samples": v} for c, v in cols.items()]}
                             for s, cols in overview.items()}}
@@ -149,7 +150,7 @@ def main() -> int:
         shutil.rmtree(prod / "result", ignore_errors=True)
     print(f"\n→ {suite}")
     print("   RCA 题:scenarios/<场景>/rca_input.json(真 runner 用金标准绑定产出)→ 模型写 rca.json")
-    print("   绑定题:binding_question.json + 产物/tree/*.md → 模型写 binding.json(CONDITIONS)")
+    print(f"   绑定题:binding_question.json + scot产物/{ROOT_NAME}/tree/*.md → 模型写 binding.json(CONDITIONS)")
     print("   打分:python score_v2.py            (--use-reference 自测打分链路应 100%)")
     return 0
 

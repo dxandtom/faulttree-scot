@@ -97,7 +97,7 @@ python ../scripts/v2_run.py        # 真 excel_to_tree+assemble+runner → 各�
 python ../scripts/make_prompts.py --v2
 ```
 
-## 一、RCA(9 道,逐场景)
+## 一、RCA(逐场景,每个 scenarios/<场景>/ 一道)
 每个 `scenarios/<场景>/prompt.txt` = 判据法则 + 该场景 `rca_input.json`(真 runner 用**金标准绑定**算出的事实+剪枝树)。
 **发给普通模型/聊天(别用能写代码的 agent)**,只输出 rca.json 那段 JSON,**原样存成** `scenarios/<场景>/rca.json`。
 

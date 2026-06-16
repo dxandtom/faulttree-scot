@@ -128,10 +128,9 @@ def main() -> int:
     ap.add_argument("-o", "--output")
     args = ap.parse_args()
     suite = Path(args.suite)
-    prod = suite / "产物"
-    tidx_files = list((prod / "tree").glob("*.tree_index.json")) if prod.exists() else []
+    tidx_files = list((suite / "scot产物").glob("*/tree/*.tree_index.json"))
     if not tidx_files:
-        print("缺 产物/tree/*.tree_index.json —— 先跑 v2_run.py(真 excel_to_tree+assemble+runner)", file=sys.stderr)
+        print("缺 scot产物/<场景>/tree/*.tree_index.json —— 先跑 v2_run.py(真 excel_to_tree+assemble+runner)", file=sys.stderr)
         return 2
     tidx = json.loads(tidx_files[0].read_text(encoding="utf-8"))
     nodes = tidx["nodes"]
@@ -153,7 +152,7 @@ def main() -> int:
         model_b = _model_list(json.loads(bf.read_text(encoding="utf-8"))) if bf.exists() else None
     L.append("\n【绑定阶段】大白话树判据 → 系统列(模型 CONDITIONS vs 金标准)")
     if model_b is None:
-        L.append("  —— 待模型产出 binding.json(读 binding_question.json + 产物/tree/*.md)——")
+        L.append("  —— 待模型产出 binding.json(读 binding_question.json + scot产物/<场景>/tree/*.md)——")
     else:
         b = score_binding(model_b, gold_list)
         L.append(f"  判据 {b['n']} 条:类别 {b['cls']}/{b['n']}、选列 {b['col']}/{b['n']}、参数 {b['par']}/{b['n']}、"
