@@ -18,21 +18,23 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DEFAULT_SUITE = HERE.parent / "suite_real"
 
-RULES = """你是根因诊断器(fault-tree-rca)。下面给你一棵【已剪枝的故障子树】:每个节点有 condition(判据)和
-facts(已解析事实,含实际值;ok 事实带 predicate_satisfied=内核字面判定,数据不足则 status=insufficient_data)。
-请**只凭这份输入、靠你自己的推理**定位根因,**严禁写任何脚本/程序来求解**。
+RULES = """你是根因诊断器(fault-tree-rca)。下面给你一棵【已剪枝的故障子树】,每个节点的【判定结果内核已算好】:
+- `outline[node_id]` = 该节点状态:**hold**(成立)/ **fail**(不成立)/ **insufficient**(数据不足)/ **pass**(pass_through 无条件节点);
+- 节点 facts 里的 `predicate_satisfied`(true/false)/`status` 与 outline 一致,是内核字面判定。
+**逐节点状态直接采用 outline / predicate_satisfied,别拿 facts 里的实际值自己重算、更别推翻它**
+(实际值只用来在 evidence_path 的 actual 里逐字引用;若你心算与给定状态不符,**以给定状态为准**)。
+你要做的只是把这些状态【沿树组合】成结论,**严禁写任何脚本/程序来求解**。
 
-判定法则:
-1. 逐个带 condition 的节点判:facts 为空或 status=insufficient_data → 该节点【数据不足】;否则据实际值与判据
-   (predicate_satisfied=true)判【成立】、false 判【不成立】。pass_through 节点无条件、不阻断路径、不计入证据。
+判定法则(只做"沿路径组合",不重判单点):
+1. 单点状态直接读:hold=成立、fail=不成立、insufficient=数据不足;pass_through 不阻断路径、不计入证据。
 2. 四档分流(沿根→叶整条路径看):
-   • 路径上每个带条件节点都【成立】且终点是叶子 → 【确证根因】放 rca_result;
-   • 路径上有节点【不成立】→ 该支【排除】,不报为根因;
-   • 无不成立、但有【数据不足】、且已成立到某中间层(叶子待定)→ 【疑似】放 probable_causes
-     (给 confidence/blocked_at/caveats/support);
+   • 路径上每个带条件节点都【hold】且终点是叶子 → 【确证根因】放 rca_result;
+   • 路径上有节点【fail】→ 该支【排除】:**哪怕某叶子自己 hold,只要它任一祖先是 fail,就【绝不报】**(抗诱饵);
+   • 无 fail、但有【insufficient】、且已 hold 到某中间层(叶子待定)→ 【疑似】放 probable_causes(给 confidence/blocked_at/caveats/support);
    • 其余 → undetermined。
-3. 诚实铁律:判【成立】的节点必须真有成立事实;**绝不给"数据不足/不成立/无事实"的节点判成立**;
-   rca_result 为 [] 完全正常(没有任何闭合成立路径时就该是空)。evidence_path 的 actual 要逐字引用事实里的真实值。
+3. 诚实铁律:只报"自身 hold 且整条祖先全 hold"的叶子;**绝不把 fail/insufficient 的节点判成立**;
+   **多条互相独立的全-hold 路径要逐条都报(多根因)**;没有任何闭合成立路径时 rca_result=[] 完全正常。
+   evidence_path 的 actual 要逐字引用事实里的真实值。
 
 **只输出下面这个 JSON,不要任何额外文字/解释/代码块标记:**
 {
