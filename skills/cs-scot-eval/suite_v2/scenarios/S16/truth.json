@@ -1,0 +1,28 @@
+{
+  "scenario": "S16",
+  "desc": "多根因-AMF过载+驻波比告警",
+  "category": "confirmed",
+  "tier": "confirmed",
+  "root_cause_codes": [
+    "FT-010",
+    "FT-015"
+  ],
+  "must_not_report_codes": [],
+  "node_states": {
+    "FT-009": "hold",
+    "FT-010": "hold",
+    "FT-015": "hold",
+    "FT-001": "fail",
+    "FT-002": "fail",
+    "FT-003": "fail",
+    "FT-004": "fail",
+    "FT-005": "fail",
+    "FT-006": "fail",
+    "FT-007": "fail",
+    "FT-008": "fail",
+    "FT-011": "fail",
+    "FT-012": "fail",
+    "FT-013": "fail",
+    "FT-016": "fail"
+  }
+}

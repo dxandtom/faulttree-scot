@@ -16,7 +16,15 @@ description: 评测故障树诊断三个 skill(generate 的绑定 / execute / fa
 1. **编排**(确定性脚本,可执行):
    `python "<本目录>/scripts/v2_run.py"`
    → 真 excel_to_tree+assemble 落 `suite_v2/scot产物/SA接入失败/`(`plan.json`/`scripts/*_analyzer.py`/`tree/*.md`);真 runner 用金标准绑定算事实 → 各 `suite_v2/scenarios/<场景>/rca_input.json` + suite 级 `suite_v2/binding_question.json`。
-2. **绑定题(1 道)**:读 `suite_v2/binding_question.json`(每条大白话判据 + 各源列概览),自己把每条**映射到系统列**、选内核类别(A 阈值 / B 差值 / C 字段·错误码 / E 占比TopN / G 告警 / H 信令缺失)与参数,写成 CONDITIONS 的 JSON 列表到 `suite_v2/binding.json`。数据里没有该判据要的列 → 标 `{"node_id":"…","decision":"insufficient_data"}`。
+2. **绑定题(1 道)**:读 `suite_v2/binding_question.json`(每条大白话判据 + 各源列概览),自己把每条**映射到系统列**、选内核类别、给参数,写成 CONDITIONS 的 JSON 列表到 `suite_v2/binding.json`。**键名照抄下面、别自创**(尤其用 `class` 不是 `category`、用 `contains` 不是 `value`,否则真实内核认不出、绑定跑不起来):
+   - A 阈值:`{"node_id","class":"A","column":"<列裸名>","op":"<或>等","threshold":数}`
+   - C 字段/错误码**占比**(已知具体取值,数它占多少):`{"node_id","class":"C","column","contains":["取值"],"require":条数}`
+   - G 告警存在:`{"node_id","class":"G","column","contains":["告警码"]}`
+   - H 信令缺失:`{"node_id","class":"H","key":"<会话键列>","msg_column":"<消息列>","lacks":["缺的消息"]}`
+   - E 占比TopN(**不指定取值**、看最大分组占比):`{"node_id","class":"E","group_by":"<列>","op",">","threshold":0.5}`
+   - B 差值:`{"node_id","class":"B","minuend":["列"],"subtrahend":["列"],"op",">","threshold":0}`
+   - **C vs E 关键**:某原因/错误码"**占比≥X%**"——只要判据点名了**具体取值**(如 amf-overload、RNL),就是 **C**(数该取值条数 ÷ 总数);只有"不点名、看 TopN/最大分组占比"才用 E。
+   - 数据里没有该判据要的列 → `{"node_id","decision":"insufficient_data"}`,别硬绑别的列。
 3. **RCA 题(逐场景)**:对 `suite_v2/scenarios/` 下**每个**场景,用 **fault-tree-rca** 技能:
    - 输入是该场景 `rca_input.json`;**别一次性全读进上下文**——先 `python "<fault-tree-rca 技能>/scripts/rca_query.py" <该 rca_input.json> --outline` 看全局,再 `--node nX` 按分支取条件+事实;
    - 按 fault-tree-rca 的四档法则推理,把根因 JSON 写到**同目录** `rca.json`。一次一个。

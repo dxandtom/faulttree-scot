@@ -79,53 +79,54 @@ SPEC = {
             "cls": "G", "kind": "exist", "col": "AlarmCode", "value": "ALM-25888", "hold_m": 2, "insuf": "无告警日志源"},
 }
 
-# ── 有意义的场景(18 个,目录名零填充 S01..S18 便于排序,不含括号/+ 等 shell/路径敏感字符)。 ──
-#    hold=成立的节点(埋的路径/诱饵);insuf=数据不足;其余带条件节点=不成立(正常)。
-#    覆盖:10 个叶子因各当一次确证根因 + A阈值/C占比/G告警/H信令 四类内核 + 疑似/排除/数据不足/抗诱饵/多根因。
+# ── 有意义的场景(18 个)。目录名【不透明】(S01..S18),含义放 desc → 写进 truth.json(模型做题读不到),
+#    防止模型从文件名直接抄答案(如"抗诱饵_弱覆盖断路"会剧透哪个是诱饵)。
+#    hold=成立节点(埋的路径/诱饵);insuf=数据不足;其余带条件节点=不成立。
+#    覆盖:10 个叶子因各确证一次 + A阈值/C占比/G告警/H信令 四类内核 + 疑似/排除/数据不足/抗诱饵/多根因。
 SCENARIOS = [
     # —— 确证:逐个叶子因(A 阈值)——
-    {"name": "S01_弱覆盖致接入失败", "category": "confirmed", "tier": "confirmed",
+    {"name": "S01", "desc": "弱覆盖致接入失败", "category": "confirmed", "tier": "confirmed",
      "hold": ["B01", "C01", "D02"], "roots": ["D02"], "must_not_report": []},
-    {"name": "S10_上行干扰致接入失败", "category": "confirmed", "tier": "confirmed",
+    {"name": "S10", "desc": "上行干扰致接入失败", "category": "confirmed", "tier": "confirmed",
      "hold": ["B01", "C01", "D01"], "roots": ["D01"], "must_not_report": []},
     # —— 确证:C 占比/错误码 ——
-    {"name": "S02_AMF过载", "category": "confirmed", "tier": "confirmed",
+    {"name": "S02", "desc": "AMF过载", "category": "confirmed", "tier": "confirmed",
      "hold": ["B03", "C05"], "roots": ["C05"], "must_not_report": []},
-    {"name": "S03_无线链路失败", "category": "confirmed", "tier": "confirmed",
+    {"name": "S03", "desc": "无线链路失败", "category": "confirmed", "tier": "confirmed",
      "hold": ["B04", "C07"], "roots": ["C07"], "must_not_report": []},
-    {"name": "S04_鉴权失败", "category": "confirmed", "tier": "confirmed",
+    {"name": "S04", "desc": "鉴权失败", "category": "confirmed", "tier": "confirmed",
      "hold": ["B02", "C04"], "roots": ["C04"], "must_not_report": []},
-    {"name": "S11_RRC拒绝拥塞", "category": "confirmed", "tier": "confirmed",
+    {"name": "S11", "desc": "RRC拒绝拥塞", "category": "confirmed", "tier": "confirmed",
      "hold": ["B01", "C02"], "roots": ["C02"], "must_not_report": []},
-    {"name": "S12_传输资源不可用", "category": "confirmed", "tier": "confirmed",
+    {"name": "S12", "desc": "传输资源不可用", "category": "confirmed", "tier": "confirmed",
      "hold": ["B03", "C06"], "roots": ["C06"], "must_not_report": []},
     # —— 确证:G 告警(经 pass_through 的 B05 网元告警;整条祖先都 pass_through,只 C08/C09 成立)——
-    {"name": "S13_射频驻波比告警", "category": "confirmed", "tier": "confirmed",
+    {"name": "S13", "desc": "射频驻波比告警", "category": "confirmed", "tier": "confirmed",
      "hold": ["C08"], "roots": ["C08"], "must_not_report": []},
-    {"name": "S14_小区不可用告警", "category": "confirmed", "tier": "confirmed",
+    {"name": "S14", "desc": "小区不可用告警", "category": "confirmed", "tier": "confirmed",
      "hold": ["C09"], "roots": ["C09"], "must_not_report": []},
     # —— 确证:H 信令缺失 ——
-    {"name": "S15_安全模式失败", "category": "confirmed", "tier": "confirmed",
+    {"name": "S15", "desc": "安全模式失败", "category": "confirmed", "tier": "confirmed",
      "hold": ["B02", "C03"], "roots": ["C03"], "must_not_report": []},
     # —— 疑似:中间层成立、叶子数据不足(分别在 UE 上下文层 / NGAP 层)——
-    {"name": "S05_上下文层疑似", "category": "probable", "tier": "probable",
+    {"name": "S05", "desc": "上下文层疑似", "category": "probable", "tier": "probable",
      "hold": ["B02"], "insuf": ["C03", "C04"], "roots": ["B02"], "must_not_report": []},
-    {"name": "S17_NGAP层疑似", "category": "probable", "tier": "probable",
+    {"name": "S17", "desc": "NGAP层疑似", "category": "probable", "tier": "probable",
      "hold": ["B03"], "insuf": ["C05", "C06"], "roots": ["B03"], "must_not_report": []},
     # —— 排除 / 数据不足 ——
-    {"name": "S06_网络正常排除", "category": "excluded", "tier": "excluded",
+    {"name": "S06", "desc": "网络正常排除", "category": "excluded", "tier": "excluded",
      "hold": [], "roots": [], "must_not_report": []},
-    {"name": "S07_数据不足", "category": "honest_insufficient", "tier": "undetermined",
+    {"name": "S07", "desc": "数据不足", "category": "honest_insufficient", "tier": "undetermined",
      "hold": [], "insuf": list(SPEC), "roots": [], "must_not_report": []},
     # —— 抗诱饵:叶子自身成立但路径被父级断开,不许报(两条不同分支)——
-    {"name": "S08_抗诱饵_弱覆盖断路", "category": "false_positive_resist", "tier": "confirmed",
+    {"name": "S08", "desc": "抗诱饵-弱覆盖断路", "category": "false_positive_resist", "tier": "confirmed",
      "hold": ["B03", "C05", "D02"], "roots": ["C05"], "must_not_report": ["D02"]},
-    {"name": "S18_抗诱饵_上行干扰断路", "category": "false_positive_resist", "tier": "confirmed",
+    {"name": "S18", "desc": "抗诱饵-上行干扰断路", "category": "false_positive_resist", "tier": "confirmed",
      "hold": ["B04", "C07", "D01"], "roots": ["C07"], "must_not_report": ["D01"]},
     # —— 多根因(同源两条 / 跨源 chr+alarm 两条)——
-    {"name": "S09_多根因_弱覆盖加无线链路", "category": "confirmed", "tier": "confirmed",
+    {"name": "S09", "desc": "多根因-弱覆盖+无线链路", "category": "confirmed", "tier": "confirmed",
      "hold": ["B01", "C01", "D02", "B04", "C07"], "roots": ["D02", "C07"], "must_not_report": []},
-    {"name": "S16_多根因_AMF过载加驻波比告警", "category": "confirmed", "tier": "confirmed",
+    {"name": "S16", "desc": "多根因-AMF过载+驻波比告警", "category": "confirmed", "tier": "confirmed",
      "hold": ["B03", "C05", "C08"], "roots": ["C05", "C08"], "must_not_report": []},
 ]
 
@@ -257,14 +258,16 @@ def main():
         for src, rows in build_data(_states(scn)).items():
             _write_csv(d / "data" / f"{src}.csv", rows)
         # truth 一律用 codes_fmt(= Excel/gold 的 code,也是映射到重解析 id 的 join key),与内部 code 解耦
+        # desc 只放这里(答案区,做题时模型读不到)——目录名不透明,描述给打分报告用
         (d / "truth.json").write_text(json.dumps(
-            {"scenario": scn["name"], "category": scn["category"], "tier": scn["tier"],
+            {"scenario": scn["name"], "desc": scn.get("desc", ""),
+             "category": scn["category"], "tier": scn["tier"],
              "root_cause_codes": [codes_fmt[c] for c in scn["roots"]],
              "must_not_report_codes": [codes_fmt[c] for c in scn["must_not_report"]],
              "node_states": {codes_fmt[c]: s for c, s in _states(scn).items()}},
             ensure_ascii=False, indent=2), encoding="utf-8")
         flag = "✓" if not bad else "✗ " + "; ".join(bad[:3])
-        print(f"  {scn['name']:<26}[{scn['category']:<22}] 内核校验 {flag}")
+        print(f"  {scn['name']:<4}{scn.get('desc', ''):<22}[{scn['category']:<22}] 内核校验 {flag}")
     print(f"\n→ {OUT}  ({'全部场景内核校验通过 ✓' if allbad == 0 else '✗ 有 %d 处不符' % allbad})")
 
 

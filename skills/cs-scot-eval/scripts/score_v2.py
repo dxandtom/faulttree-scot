@@ -21,7 +21,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from score_accuracy import _entry_ids, _covers, _judged_hold_ids        # noqa: E402
-from score_binding import _cols, _is_insuf, _params, _norm, _model_list  # noqa: E402
+from score_binding import _cols, _cls, _is_insuf, _params, _norm, _model_list  # noqa: E402
 
 DEFAULT_SUITE = HERE.parent / "suite_v2"
 
@@ -49,7 +49,7 @@ def score_binding(model_list: list, gold_list: list) -> dict:
         if not m:
             misses.append(f"{nid}(漏绑)")
             continue
-        c_ok = _norm(m.get("class")) == _norm(g.get("class"))
+        c_ok = _cls(m) == _cls(g) and bool(_cls(g))
         l_ok = _cols(m) == _cols(g) and bool(_cols(g))
         p_ok = _params(m) >= _params(g)
         cls += c_ok; col += l_ok; par += p_ok; full += (c_ok and l_ok and p_ok)
@@ -169,6 +169,7 @@ def main() -> int:
     scored = pend = 0
     for d in scns:
         truth = json.loads((d / "truth.json").read_text(encoding="utf-8"))
+        disp = f"{d.name} {truth.get('desc', '')}".strip()   # 目录名不透明,描述从 truth(模型读不到)取来给人看
         roots = {c2i[c] for c in truth.get("root_cause_codes", [])}
         mnr = {c2i[c] for c in truth.get("must_not_report_codes", [])}
         id_states = {c2i[c]: s for c, s in (truth.get("node_states") or {}).items() if c in c2i}
@@ -178,7 +179,7 @@ def main() -> int:
         else:
             rf = d / "rca.json"
             if not rf.exists():
-                L.append(f"{d.name:<30}{truth.get('category',''):<22}—— 待模型产出 rca.json ——")
+                L.append(f"{disp:<30}{truth.get('category',''):<22}—— 待模型产出 rca.json ——")
                 pend += 1
                 continue
             rca = json.loads(rf.read_text(encoding="utf-8"))
@@ -186,7 +187,7 @@ def main() -> int:
         scored += 1
         for k in agg:
             agg[k] += r[k]
-        L.append(f"{d.name:<30}{truth.get('category',''):<22}{M(r['hit'])}{M(r['tier'])}{M(r['no_fp'])+'  '}"
+        L.append(f"{disp:<30}{truth.get('category',''):<22}{M(r['hit'])}{M(r['tier'])}{M(r['no_fp'])+'  '}"
                  f"{M(r['honest'])}{'✓ 通过' if r['ok'] else '✗ ' + r['why']}")
     L.append("-" * 86)
     if scored:

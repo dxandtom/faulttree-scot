@@ -38,12 +38,21 @@ def _cols(e: dict) -> set:
     return s
 
 
+def _cls(e: dict) -> str:
+    """内核类别:认 class 及常见同义 key(category/kind/cls)——key 名写错不该把"选对了类别"判成错。"""
+    for k in ("class", "category", "kind", "cls"):
+        if e.get(k):
+            return _norm(e[k])
+    return ""
+
+
 def _is_insuf(e: dict) -> bool:
     return str(e.get("decision", "")).startswith("insufficient") or str(e.get("status", "")).startswith("insufficient")
 
 
 def _params(e: dict) -> set:
-    """关键参数集合(归一化):op/阈值、contains 值、lacks/has 值。"""
+    """关键参数集合(归一化):op/阈值、取值匹配。取值认 contains 及同义写法(value/values/equals,
+    标量或列表都行)统一归到 contains;lacks/has 保留。"""
     s = set()
     if e.get("op") is not None:
         s.add("op=" + _norm(e["op"]))
@@ -52,9 +61,13 @@ def _params(e: dict) -> set:
             s.add("thr=" + format(float(e["threshold"]), ".4g"))
         except Exception:
             s.add("thr=" + _norm(e["threshold"]))
-    for k in ("contains", "equals", "lacks", "has"):
-        for x in e.get(k) or []:
-            s.add(k + ":" + _norm(x))
+    for k in ("contains", "equals", "value", "values", "lacks", "has"):
+        v = e.get(k)
+        if v is None:
+            continue
+        tag = k if k in ("lacks", "has") else "contains"     # value/values/equals/contains 同义 → contains
+        for x in (v if isinstance(v, list) else [v]):
+            s.add(tag + ":" + _norm(x))
     return s
 
 
@@ -95,7 +108,7 @@ def score_one(scn_dir: Path, use_reference: bool) -> dict:
         if not m:
             misses.append(f"{nid}(漏绑)")
             continue
-        c_ok = _norm(m.get("class")) == _norm(g.get("class"))
+        c_ok = _cls(m) == _cls(g) and bool(_cls(g))
         l_ok = _cols(m) == _cols(g) and bool(_cols(g))
         p_ok = _params(m) >= _params(g) and bool(_params(g) or True)   # 模型参数需覆盖金标准关键参数
         cls_ok += c_ok; col_ok += l_ok; par_ok += p_ok
