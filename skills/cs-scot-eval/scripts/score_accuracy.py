@@ -79,6 +79,17 @@ def _judged_hold_ids(conf, prob) -> set:
     return out
 
 
+def _seclist(rca: dict, *keys) -> list:
+    """取某一档记录:认契约 key 及常见同义写法(模型把 rca_result 写成 root_cause_nodes 不该判空)。"""
+    if not isinstance(rca, dict):
+        return []
+    for k in keys:
+        v = rca.get(k)
+        if isinstance(v, list):
+            return v
+    return []
+
+
 def score_one(scn_dir: Path, use_reference: bool) -> dict:
     # 模型只读 scn_dir/rca_input.json,把判断写 scn_dir/rca.json;答案(truth/node_states/参考)在 _answers/<名>.json。
     ans = json.loads((scn_dir.parent / "_answers" / f"{scn_dir.name}.json").read_text(encoding="utf-8"))
@@ -95,8 +106,8 @@ def score_one(scn_dir: Path, use_reference: bool) -> dict:
     if rca is None:
         return {**base, "status": "pending", "hit": False, "tier": False, "no_fp": False,
                 "honest": False, "ok": False, "why": "缺 rca.json(模型还没判)"}
-    conf = rca.get("rca_result") or []
-    prob = rca.get("probable_causes") or []
+    conf = _seclist(rca, "rca_result", "root_cause_nodes", "root_causes", "confirmed", "results", "roots")
+    prob = _seclist(rca, "probable_causes", "probable", "suspected_causes", "suspected")
     nid, name = t.get("root_cause_node_id"), t.get("root_cause_name")
     mnr = set(t.get("must_not_report") or [])
 

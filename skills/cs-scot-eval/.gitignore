@@ -18,3 +18,7 @@ suite_v2/*_report.txt
 suite_v2/scenarios/*/rca_input.json
 suite_v2/scenarios/*/rca.json
 suite_v2/scenarios/*/prompt.txt
+
+# v3(suite_v3):跨规模综合(v2 ⊕ v1 融合)。只提交 README;manifest 与报告确定性重生
+suite_v3/manifest.json
+suite_v3/*_report.txt

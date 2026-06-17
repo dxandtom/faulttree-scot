@@ -5,11 +5,13 @@ description: 评测故障树诊断三个 skill(generate 的绑定 / execute / fa
 
 # cs-scot-eval —— 绑定 / RCA 准确率评测
 
-**操作手册,已加载,别再加载。** 默认跑 **v2 端到端**:跑真 generate/execute,自己逐场景推理产出答案,再打分。`<本目录>` = 本技能目录;路径含空格/中文务必加引号(Python 3.11)。
+**操作手册,已加载,别再加载。** 跑真 generate/execute,自己逐场景推理产出答案,再打分。`<本目录>` = 本技能目录;路径含空格/中文务必加引号(Python 3.11)。
+- **v2**(默认,单棵精编 17 节点树):端到端 + 绑定,18 场景。见「v2 跑法」。
+- **v3**(跨规模综合,要"全面评测"用它):v2 ⊕ 多规模树(27–320 节点、真剪枝),1 绑定 + 48 RCA,一次跑完。见「v3 跑法」。
 
 ## ⛔ 红线(违反则本次结果作废)
 1. **严禁写任何脚本/程序批量产 `rca.json` / `binding.json`**(例如读 `predicate_satisfied` 遍历树的 `batch_rca` 之类)——那测的是脚本不是你;**每个场景逐个由你自己读、自己推理、自己写**。
-2. 不许看 `scenarios/*/truth.json`(标准答案,只给打分器)。
+2. 不许看答案文件:`suite_v2/scenarios/*/truth.json`、`suite_real/_answers/*.json`(标准答案,只给打分器)。
 3. 不许重新生成已冻结的题库(`fault_tree.csv` / `data/` / `truth.json`)。
 
 ## v2 跑法(默认)
@@ -36,6 +38,13 @@ description: 评测故障树诊断三个 skill(generate 的绑定 / execute / fa
    出【绑定】(类别 / 选列 / 参数 / 完全正确)+【RCA】(命中 / 档位 / 无假阳 / 诚实,综合 = 四项全过)。
 
 > 更严的防作弊(可选):`python "<本目录>/scripts/make_prompts.py" --v2` 把每题导成自包含题面 `prompt.txt` / `binding_prompt.txt`,发给**纯聊天模型(不带写代码的工具)**作答——它就没法写脚本绕过推理。见生成的 `suite_v2/_HOWTO_prompts.md`。
+
+## v3 跑法(跨规模综合 —— "全面评测"用这个)
+在 v2 上【融合多规模树】:精编 17 节点(全技能壳+绑定)**⊕** 多规模 27/44/95/178/320 节点(真剪枝,大树真丢分支,如 320→约 19 节点),共 **1 道绑定 + 48 道 RCA**,一条命令全建好、一次跑完。
+1. **编排**:`python "<本目录>/scripts/v3_run.py"` → 建两套底座 + `suite_v3/manifest.json`(按规模小→大列出全部 48 个 RCA 场景的 `rel` 路径)。
+2. **绑定题(1 道)**:同上 v2 第 2 步(读 `suite_v2/binding_question.json` → 写 `suite_v2/binding.json`)。
+3. **RCA(48 道,严格隔离)**:照 `suite_v3/manifest.json` 里 `rca_scenarios` **逐条**做,**完全沿用 v2 第 3 步的所有规则**(⛔一次一个、别串场景、直接采用 outline 别重算、抗诱饵、多根因、契约三档键 `rca_result`/`probable_causes`/`undetermined`)。每条:读 `<rel>/rca_input.json` → 写 `<rel>/rca.json`,**写完再读下一个**。大树剪枝后只剩十几个节点,照样按祖先链判。
+4. **打分**:`python "<本目录>/scripts/score_v3.py" -o "<本目录>/suite_v3/v3_report.txt"` → 出【绑定】+【跨规模 RCA】(按**规模** 17/27/44/95/178/320 与**情形** 确证/疑似/抗诱饵/排除/数据不足 两维聚合)。自测:`score_v3.py --use-reference` 应 **100%**。
 
 ## 打分四维(诚实档说明)
 命中 / 档位准 / 无假阳 / **诚实**(凡判"成立"的**带条件**节点必须真是埋下的 `hold`;在 fail/数据不足节点上判成立 = 不诚实。`pass_through` 节点无条件,标不标"成立"都不计入)。
