@@ -46,6 +46,14 @@ description: 评测故障树诊断三个 skill(generate 的绑定 / execute / fa
 3. **RCA(48 道,严格隔离)**:照 `suite_v3/manifest.json` 里 `rca_scenarios` **逐条**做,**完全沿用 v2 第 3 步的所有规则**(⛔一次一个、别串场景、直接采用 outline 别重算、抗诱饵、多根因、契约三档键 `rca_result`/`probable_causes`/`undetermined`)。每条:读 `<rel>/rca_input.json` → 写 `<rel>/rca.json`,**写完再读下一个**。大树剪枝后只剩十几个节点,照样按祖先链判。
 4. **打分**:`python "<本目录>/scripts/score_v3.py" -o "<本目录>/suite_v3/v3_report.txt"` → 出【绑定】+【跨规模 RCA】(按**规模** 17/27/44/95/178/320 与**情形** 确证/疑似/抗诱饵/排除/数据不足 两维聚合)。自测:`score_v3.py --use-reference` 应 **100%**。
 
+### v3 hard 模式(自判节点 —— 要"能考倒模型 / 不怕被问简单"用这个)
+`python "<本目录>/scripts/v3_run.py" --hard` → 每场景多产一份 `rca_input_hard.json`:**删掉 outline、以及每条 fact 的 predicate_satisfied/ratio**,只留 condition + 原始事实。你**不能再直接读现成的 hold/fail 标签**,必须逐节点【自己判】:
+- **A 阈值**:看 fact 的 `value` 与 `op`/`threshold` → 满足比较即成立(如 value 94.2 `<` 99 → 成立);
+- **C 占比**:用 `matched/total` 算占比,与 condition 里的阈值(如"不低于 20%")比(11/40=27.5% ≥ 20% → 成立);
+- **G 告警**:`matched`>0 → 成立;**H 信令缺失**:`matched_sessions`>0(或 lacks 命中)→ 成立;
+- 无可用 fact / `status=insufficient_data` → 【数据不足】;`pass_through` 不判、不阻断。
+判完每个节点的 hold/fail/insufficient 后,**四档导航与 easy 完全一致**(全祖先 hold 的叶子才确证、抗诱饵、多根因、⛔一次一个)。读 `<rel>/rca_input_hard.json` → 写同目录 `rca.json`;打分仍 `score_v3.py`(标准答案不变,可直接对比 easy / hard 两档难度的得分)。
+
 ## 打分四维(诚实档说明)
 命中 / 档位准 / 无假阳 / **诚实**(凡判"成立"的**带条件**节点必须真是埋下的 `hold`;在 fail/数据不足节点上判成立 = 不诚实。`pass_through` 节点无条件,标不标"成立"都不计入)。
 

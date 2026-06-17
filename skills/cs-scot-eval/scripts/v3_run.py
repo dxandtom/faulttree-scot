@@ -18,6 +18,7 @@ HERE = Path(__file__).resolve().parent
 SV2 = HERE.parent / "suite_v2"
 SREAL = HERE.parent / "suite_real"
 SV3 = HERE.parent / "suite_v3"
+ROOT = HERE.parent
 
 
 def _run(script: str):
@@ -35,6 +36,8 @@ def main() -> int:
         pass
     ap = argparse.ArgumentParser(description="v3 跨规模综合评测:精编树(全技能壳+绑定)⊕ 多规模树(真剪枝)")
     ap.add_argument("--skip-build", action="store_true", help="底座已建好,只重算 manifest")
+    ap.add_argument("--hard", action="store_true",
+                    help="hard 模式:删掉 outline/predicate_satisfied 等答案标签,逼模型自判每个节点(能失败、能区分强弱)")
     args = ap.parse_args()
 
     if not args.skip_build:
@@ -68,6 +71,17 @@ def main() -> int:
                               "tier": ans["truth"]["tier"], "mech": "prune_inject",
                               "rel": f"suite_real/{d.name}"})
     items.sort(key=lambda x: (x["scale"], x["dir"]))
+    if args.hard:                                            # 删答案标签 → 逐场景 rca_input_hard.json
+        sys.path.insert(0, str(HERE)); from harden_rca import harden
+        for it in items:
+            p = ROOT / it["rel"] / "rca_input.json"
+            (p.with_name("rca_input_hard.json")).write_text(
+                json.dumps(harden(json.loads(p.read_text(encoding="utf-8"))), ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            it["input"] = it["rel"] + "/rca_input_hard.json"
+    else:
+        for it in items:
+            it["input"] = it["rel"] + "/rca_input.json"
     by_scale = {}
     for it in items:
         by_scale.setdefault(it["scale"], 0)
@@ -75,14 +89,17 @@ def main() -> int:
     (SV3 / "manifest.json").write_text(json.dumps(
         {"binding": {"suite": "suite_v2", "question": "suite_v2/binding_question.json",
                      "answer": "suite_v2/binding.json", "n": 15},
+         "mode": "hard" if args.hard else "easy",
          "rca_scenarios": items, "by_scale": by_scale, "total_rca": len(items)},
         ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"\n→ v3 就绪:1 道绑定 + {len(items)} 道 RCA,跨 {len(by_scale)} 个规模")
+    print(f"\n→ v3 就绪【{'HARD 自判节点' if args.hard else 'easy 给标签'}模式】:1 道绑定 + {len(items)} 道 RCA,跨 {len(by_scale)} 个规模")
     print("   规模分布(节点数→场景数):", dict(sorted(by_scale.items())))
     print("   作答(⛔一次一个,别把多个场景一起读进上下文):")
     print("     · 绑定:读 suite_v2/binding_question.json → 写 suite_v2/binding.json")
-    print("     · RCA :逐条按 manifest.rca_scenarios 读 <rel>/rca_input.json → 写 <rel>/rca.json")
+    print("     · RCA :逐条按 manifest.rca_scenarios 读各自 input(easy=rca_input.json / hard=rca_input_hard.json)→ 写同目录 rca.json")
+    if args.hard:
+        print("   ⚠ HARD:输入无 outline/predicate_satisfied,需自己判每个节点 hold/fail/insufficient(见 SKILL「v3 hard」)。")
     print("   打分:python score_v3.py   (--use-reference 自测应 100%)")
     return 0
 
