@@ -19,6 +19,23 @@ ROOT = HERE.parent
 SV2, SREAL, SV3 = ROOT / "suite_v2", ROOT / "suite_real", ROOT / "suite_v3"
 M = lambda x: " ✓ " if x else " ✗ "
 
+_ST = {"hold": "hold", "成立": "hold", "fail": "fail", "不成立": "fail",
+       "insufficient_data": "insufficient", "insufficient": "insufficient", "数据不足": "insufficient"}
+def _nst(s):
+    s = str(s)
+    for k, v in _ST.items():
+        if k in s:
+            return v
+    return s
+def _score_corr(rca: dict, recs: list):
+    """模型 corrections vs 注入的错误:揪对几个(节点对+方向对)、误纠几个。"""
+    flagged = {str(c.get("node_id")): _nst(c.get("should_be") or c.get("true") or c.get("correct") or "")
+               for c in (rca.get("corrections") or []) if isinstance(c, dict)}
+    inj = {r["node_id"]: r["true"] for r in recs}
+    caught = sum(1 for nid, tv in inj.items() if flagged.get(nid) == tv)
+    false = sum(1 for nid in flagged if nid not in inj)
+    return caught, len(inj), false
+
 
 def main() -> int:
     try:
@@ -27,9 +44,12 @@ def main() -> int:
         pass
     ap = argparse.ArgumentParser(description="v3 跨规模综合打分(绑定 + 跨规模 RCA)")
     ap.add_argument("--use-reference", action="store_true", help="金标准/参考自测打分链路(应 100%)")
+    ap.add_argument("--corrupt", action="store_true", help="纠错卷:额外评「抗错诊断 + 纠错率 + 误纠」(配合 v3_run.py --corrupt)")
     ap.add_argument("-o", "--output")
     args = ap.parse_args()
     man = json.loads((SV3 / "manifest.json").read_text(encoding="utf-8"))
+    ctruth = json.loads((SV3 / "_corrupt_truth.json").read_text(encoding="utf-8")) if args.corrupt else {}
+    corr_acc = [0, 0, 0]   # caught, injected, false
     L = []
     L.append("=" * 90)
     L.append("v3 跨规模综合评测(精编树·全技能壳+绑定  ⊕  多规模树 27–320·真剪枝)")
@@ -76,6 +96,15 @@ def main() -> int:
                 "hit": False, "tier": False, "no_fp": False, "honest": False, "ok": False, "why": "待产出 rca.json"}
         else:
             r = SA.score_one(SREAL / it["dir"], args.use_reference)
+        if args.corrupt:                                   # 纠错卷:额外统计纠错/误纠
+            recs = ctruth.get(it["rel"], [])
+            if args.use_reference:
+                cc, ci, cf = len(recs), len(recs), 0
+            else:
+                sdir = (SV2 / "scenarios" / it["dir"]) if it["suite"] == "suite_v2" else (SREAL / it["dir"])
+                rf = sdir / "rca.json"
+                cc, ci, cf = _score_corr(json.loads(rf.read_text(encoding="utf-8")) if rf.exists() else {}, recs)
+            corr_acc[0] += cc; corr_acc[1] += ci; corr_acc[2] += cf
         rows.append((it["scale"], it["kind"], r, it["dir"]))
 
     def agg(sel):
@@ -84,7 +113,8 @@ def main() -> int:
         g = lambda key: sum(1 for r in sub if r.get(key))
         return n, g("hit"), g("tier"), g("no_fp"), g("honest"), g("ok")
 
-    L.append(f"\n【RCA · 跨规模】共 {len(rows)} 场景(精编17 + 多规模27/44/95/178/320),四维全过才算综合通过")
+    _hdr = "RCA · 抗错诊断(给的结论里掺了错,看还能不能诊断对)" if args.corrupt else "RCA · 跨规模"
+    L.append(f"\n【{_hdr}】共 {len(rows)} 场景(精编17 + 多规模27/44/95/178/320),四维全过才算综合通过")
     L.append(f"  {'规模(节点)':<12}{'场景':<6}{'命中':<6}{'档位':<6}{'无假阳':<7}{'诚实':<6}{'综合通过'}")
     L.append("  " + "-" * 62)
     scales = sorted({sc for sc, _, _, _ in rows})
@@ -113,6 +143,10 @@ def main() -> int:
         for sc, dirn, why in bad[:14]:
             L.append(f"    [{sc}节点] {dirn}: {why}")
 
+    if args.corrupt:
+        cc, ci, cf = corr_acc
+        L.append(f"\n【纠错卷 · 纠错率】注入错误结论 {ci} 处,模型靠复核数据揪出 {cc} 处 = {round(100*cc/ci) if ci else 0}%;误纠(把对的也改)共 {cf} 处。")
+        L.append("  说明:上面那张表是「抗错诊断」——结论里掺了错,看模型会不会被带偏;这里的「纠错率」是它主动指出了多少处错标签。")
     L.append("\n口径:受控合成下的跨规模诊断推理稳健性 + 端到端绑定;精编树走真实 excel_to_tree+assemble+runner 全技能壳,")
     L.append("      多规模树走真实 tree_prune 剪枝(大树真丢分支,如 320→约 19 节点)。必要不充分,非现网脏数据准确率。")
     out = "\n".join(L)

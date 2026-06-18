@@ -26,3 +26,7 @@ suite_v3/*_report.txt
 
 # v3 hard 模式:删标签后的输入,确定性重生(v3_run.py --hard)
 suite_real/*/rca_input_hard.json
+# v3 纠错卷:注错后的输入与答案,确定性重生
+suite_v2/scenarios/*/rca_input_corrupt.json
+suite_real/*/rca_input_corrupt.json
+suite_v3/_corrupt_truth.json

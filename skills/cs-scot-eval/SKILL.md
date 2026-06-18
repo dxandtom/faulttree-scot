@@ -54,6 +54,12 @@ description: 评测故障树诊断三个 skill(generate 的绑定 / execute / fa
 - 无可用 fact / `status=insufficient_data` → 【数据不足】;`pass_through` 不判、不阻断。
 判完每个节点的 hold/fail/insufficient 后,**四档导航与 easy 完全一致**(全祖先 hold 的叶子才确证、抗诱饵、多根因、⛔一次一个)。读 `<rel>/rca_input_hard.json` → 写同目录 `rca.json`;打分仍 `score_v3.py`(标准答案不变,可直接对比 easy / hard 两档难度的得分)。
 
+### v3 纠错卷(进阶:给的结论里掺了错,看模型能不能用数据自己纠正)
+`python "<本目录>/scripts/v3_run.py" --corrupt` → 每场景产 `rca_input_corrupt.json`:**故意把一部分节点的判定结论改错**(假阴 = 真成立的标成不成立、假阳 = 真不成立的标成成立),但**原始事实保持真实**——模拟"上游程序算错 / 绑定错"。
+- 你要做的:**别盲信给定的结论**,逐节点对照原始事实复核;发现结论与数据矛盾,**以数据为准**做诊断;并在 `rca.json` 里加 `corrections` 字段列出你纠正的:`[{"node_id","given":"给定结论","should_be":"你判定的正确结论","依据":"…"}]`。
+- 读 `<rel>/rca_input_corrupt.json` → 写同目录 `rca.json`(⛔仍一次一个)。
+- 打分:`python "<本目录>/scripts/score_v3.py" --corrupt` → 出【抗错诊断】(掺错后还能不能诊断对)+【纠错率】(揪出多少处错标签)+【误纠】。自测 `score_v3.py --corrupt --use-reference` 应 100%。
+
 ## 打分四维(诚实档说明)
 命中 / 档位准 / 无假阳 / **诚实**(凡判"成立"的**带条件**节点必须真是埋下的 `hold`;在 fail/数据不足节点上判成立 = 不诚实。`pass_through` 节点无条件,标不标"成立"都不计入)。
 
