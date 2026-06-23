@@ -97,7 +97,14 @@ def main():
         if c.get("decision") in ("insufficient_data", "manual", "not_applicable") or cls == "J":
             fact = evaluate_binding(c, {}, c.get("source", INDICATOR))      # 不需数据,直接出
         elif c.get("mode") == "custom" and c.get("id") in CUSTOM:
-            fact = CUSTOM[c["id"]](_table(c.get("source")))
+            cf = CUSTOM[c["id"]]
+            import inspect
+            try:
+                _n = len(inspect.signature(cf).parameters)
+            except (ValueError, TypeError):
+                _n = 1
+            # 1 参:custom(table)(老约定);≥2 参:custom(table, load),load(<源/MO类型>) 可再取别的源(跨 CHR+配置)
+            fact = cf(_table(c.get("source")), _table) if _n >= 2 else cf(_table(c.get("source")))
         else:
             _table(c.get("source"))                                        # 按需加载本条页签
             for sub in (c.get("sub") or []):
@@ -221,6 +228,7 @@ def main() -> None:
     # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
     here = Path(__file__).parent
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # A–J 模板库
+    copy_into(here / "mo_config.py", out / "scripts" / "mo_config.py")                  # 配置拓扑适配器:MO文本→表 + IP/追溯原语(.txt 配置 + custom 用)
     copy_into(here / "analyzer.py", out / "scripts" / "analyzer.py")                    # 概览辅助:模型先看列再填条件
     copy_into(here.parent / "references" / "condition_binding_schema.md",
               out / "scripts" / "condition_binding_schema.md")                          # 绑定契约

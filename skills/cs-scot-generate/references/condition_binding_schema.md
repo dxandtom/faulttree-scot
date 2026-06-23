@@ -83,3 +83,4 @@
 
 > 真实例子见 `examples/kpi-tabular/scripts/kpi_analyzer.py`(填好的 `CONDITIONS` + 一条 `custom`)。
 > 跨源组合:把各合取项填进**各自源**的脚本,AND/OR 留给 RCA 合(单脚本只见一个源)。
+> **接入类「配置拓扑」场景**(NSA 的 S1/X2 链路、路由、EPGroup、多运营商等):配置常是 `MOName:key=val,...;` **文本**(非表格)→ 用 `.txt` 直接喂、每个 MO 类型当**页签**、`source=<MO类型>` 套 F/A/C;模板搞不定的(IP 网段匹配、跨 MO 追溯、分号多值、动态表头)写 custom + 用 `mo_config` 原语。**详见 `references/nsa_config_adapter.md`(4 个可照抄的 custom 例子)。**

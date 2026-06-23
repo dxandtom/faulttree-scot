@@ -49,12 +49,25 @@ def list_sheets(path: str):
         names = list(wb.sheetnames)
         wb.close()
         return names
+    if p.suffix.lower() in (".txt", ".cfg", ".mo", ".moc"):
+        try:
+            from mo_config import mo_sheets
+            return mo_sheets(p.read_bytes().decode("utf-8", "ignore"))   # MO 类型清单当"页签"
+        except Exception:
+            return []
     return []
 
 
 def load_table(path: str, sheet=None):
-    """读 csv/xlsx → (header, rows[list[dict]])。xlsx 多页签:sheet 给页签名选表,不给则活动页。"""
+    """读 csv/xlsx/MO配置文本 → (header, rows[list[dict]])。xlsx 多页签:sheet 给页签名选表,不给则活动页;
+    .txt/.cfg/.mo 当作 MO 配置文本(MOName:key=val,...;每实例一行)交 mo_config 解析成表。"""
     p = Path(path)
+    if p.suffix.lower() in (".txt", ".cfg", ".mo", ".moc"):
+        try:
+            from mo_config import parse_mo_text
+            return parse_mo_text(_decode(p.read_bytes()), sheet=sheet)   # sheet=<MO类型>→只取该类,避免同名列污染
+        except Exception:
+            pass            # 解析失败 → 按 csv 兜底,不崩
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
         from openpyxl import load_workbook
         wb = load_workbook(p, read_only=True, data_only=True)
