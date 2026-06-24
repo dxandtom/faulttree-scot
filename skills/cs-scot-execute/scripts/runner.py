@@ -175,6 +175,16 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
     in_path = base / "result" / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 复用产物目录重跑时:把上一轮的最终结果 <id>.json 挪开。RCA 结果由**模型**写(runner 只备输入),
+    # 旧文件留着会让模型看到「result/rca.json 已存在」就直接读了**过期结论**(与本轮绑定/数据不符,实测踩过)。
+    # 挪成 <id>.prev.json:不丢、可对比;本轮必须基于当前 rca_input.json 重新产出。
+    prev = in_path.parent / f"{node['id']}.json"
+    if prev.exists():
+        try:
+            prev.replace(in_path.parent / f"{node['id']}.prev.json")
+            print(f"  [stale] 上轮 {prev.name} 已挪为 {node['id']}.prev.json —— 本轮请基于新输入重产,别读旧的")
+        except Exception as e:  # noqa: BLE001
+            print(f"  [warn] 清理旧 {prev.name} 失败({e});请确认本轮是新写而非沿用旧结果", file=sys.stderr)
     print(f"[agent_skill] {node['id']}: 已备好输入 → {in_path}")
     if tree_note:
         comp = in_path.parent / "_compression.txt"
