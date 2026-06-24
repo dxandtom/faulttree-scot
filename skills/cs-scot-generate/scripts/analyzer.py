@@ -9,7 +9,7 @@
 全部由 fault-tree-rca 拿着故障树去做(且映射要按**语义**、显式可审,见 rca_rules.md)。
 本引擎只产**事实**。
 
-自包含:不 import 任何本仓自定义模块。读 xlsx 需 openpyxl;csv 用标准库。
+自包含:除可选的 mo_config(仅当数据是 .txt/.cfg MO 配置文本时按需 import,缺失则降级当 csv)外,不 import 本仓自定义模块。读 xlsx 需 openpyxl;csv 用标准库。
 用法:python analyzer.py <数据文件> -o <输出.json> [--indicator <标签>] [--fault-tree <故障树.md>]
 给了 --fault-tree(或脚本旁存在唯一的 ../tree/*.md)就尝试**只保留故障树提到的列**以压缩输出;
 但树常用英文/code 名、数据列常为中文,纯子串命中过稀时**保留全部列**,把字段↔列映射交给 RCA 语义完成。
@@ -43,8 +43,13 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", "ignore")
 
 
+def _is_mo_config(p: Path) -> bool:
+    """MO 配置文本(MOName:key=val,...;):用扩展名识别,交 mo_config 解析。"""
+    return p.suffix.lower() in (".txt", ".cfg", ".mo", ".moc")
+
+
 def _sheets(path: str):
-    """xlsx 页签名列表;csv → []。"""
+    """xlsx 页签名列表;MO 配置文本 → MO 类型清单(每类当一个'页签');csv → []。"""
     p = Path(path)
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
         from openpyxl import load_workbook
@@ -52,11 +57,29 @@ def _sheets(path: str):
         names = list(wb.sheetnames)
         wb.close()
         return names
+    if _is_mo_config(p):
+        try:
+            from mo_config import mo_sheets
+            return mo_sheets(_decode(p.read_bytes()))      # MO 类型清单 = 各"页签"
+        except Exception:
+            return []
     return []
 
 
 def _multisheet_brief(path: str):
-    """一次打开工作簿,逐页签只取表头 + 行数(不把每页整张读进内存,概览要快)。"""
+    """逐页签只取表头 + 行数(不整张读进内存,概览要快)。MO 配置文本:每个 MO 类型当一个'页签'。"""
+    p = Path(path)
+    if _is_mo_config(p):
+        from mo_config import parse_mo_grouped
+        briefs = []
+        for motype, instances in parse_mo_grouped(_decode(p.read_bytes())).items():
+            cols, seen = ["MO"], {"MO"}
+            for kv in instances:
+                for k in kv:
+                    if k not in seen:
+                        seen.add(k); cols.append(k)
+            briefs.append({"name": motype, "total_records": len(instances), "columns": cols})
+        return briefs
     from openpyxl import load_workbook
     wb = load_workbook(path, read_only=True, data_only=True)
     briefs = []
@@ -70,8 +93,14 @@ def _multisheet_brief(path: str):
 
 
 def _load(path: str, sheet=None):
-    """读数据 → (header, rows)。xlsx 多页签:sheet 给页签名选表,不给则活动页。"""
+    """读数据 → (header, rows)。xlsx 多页签 / MO 配置文本:sheet 给页签名 / MO 类型选表,不给则全部。"""
     p = Path(path)
+    if _is_mo_config(p):
+        try:
+            from mo_config import parse_mo_text
+            return parse_mo_text(_decode(p.read_bytes()), sheet=sheet)   # sheet=<MO类型>→只取该类,避免同名列污染
+        except Exception:
+            pass            # 解析失败 → 落到 csv 兜底,不崩
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
         try:
             from openpyxl import load_workbook
