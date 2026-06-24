@@ -201,6 +201,9 @@ def main() -> None:
     ap.add_argument("--out-base", help="产物根目录;与 --out 二选一,默认配合 --xlsx 推导")
     ap.add_argument("--xlsx", help="故障树 xlsx 路径;省略 --out 时用它所在目录作为产物根")
     ap.add_argument("--work", help="中间产物目录;默认与 --out 相同(work 与 out 合并为同一目录)")
+    ap.add_argument("--keep", action="store_true",
+                    help="保留已存在的 <ind>_analyzer.py(即便已填/是旧版),不刷新骨架;"
+                         "默认:重跑会用当前空骨架覆盖、旧脚本备份为 .py.bak,以便用上新拷进来的 kernels/mo_config")
     args = ap.parse_args()
 
     scenario = args.scenario
@@ -232,14 +235,35 @@ def main() -> None:
     copy_into(here / "analyzer.py", out / "scripts" / "analyzer.py")                    # 概览辅助:模型先看列再填条件
     copy_into(here.parent / "references" / "condition_binding_schema.md",
               out / "scripts" / "condition_binding_schema.md")                          # 绑定契约
-    scaffolded = []
+    # 重跑 = 重新编译:默认用当前版本的空骨架覆盖旧脚本(这样才能用上刚拷进来的新 condition_kernels/mo_config);
+    # 覆盖前若旧脚本不是"全新空骨架"(填过/手改过/上一版骨架)→ 先备份成 .py.bak,绝不静默丢失。
+    # 想原样保留已填脚本:加 --keep(老的 skip-if-exists 行为)。
+    scaffolded, regenerated = [], []
     for ind in indicators:
         target = out / "scripts" / f"{ind}_analyzer.py"
-        if target.exists():
-            print(f"  [skip] 已存在(可能模型已填),不覆盖: {target}")
-        else:
-            target.write_text(ANALYZER_SCAFFOLD.replace("__IND__", ind), encoding="utf-8")
+        pristine = ANALYZER_SCAFFOLD.replace("__IND__", ind)
+        if not target.exists():
+            target.write_text(pristine, encoding="utf-8")
             scaffolded.append(ind)
+            continue
+        try:
+            existing = target.read_text(encoding="utf-8")
+        except Exception:
+            existing = None
+        if existing == pristine:
+            continue                                    # 还是全新空骨架,没填过 → 无需动
+        if args.keep:
+            print(f"  [keep] 保留已存在脚本(--keep,未刷新骨架/库依赖): {target}")
+            continue
+        bak = target.with_name(f"{ind}_analyzer.py.bak")
+        try:
+            shutil.copy2(target, bak)                    # 旧脚本(可能含模型填的 CONDITIONS)留个底
+            note = f"  (旧脚本已备份 → {bak.name})"
+        except Exception:
+            note = "  (备份失败,已直接覆盖)"
+        target.write_text(pristine, encoding="utf-8")   # 铺当前版本空骨架,模型在步骤2.5重新填
+        regenerated.append(ind)
+        print(f"  [regen] 重铺空骨架: {target}{note}")
 
     plan = build_plan(scenario, indicators, tree_rel)
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -254,12 +278,15 @@ def main() -> None:
     print(f"  plan.json(SCoT v4.0)+ manifest.json(产物铭牌,格式契约 v{PRODUCT_FORMAT_VERSION})"
           f"+ scripts/condition_kernels.py(A–J 模板库)"
           f"+ scripts/<指标>_analyzer.py(待填骨架)+ tree/{scenario}.md")
-    if scaffolded:
-        print(f"\n下一步(generate 的关键一步):为 {scaffolded} 各自的 <指标>_analyzer.py 填 CONDITIONS——")
+    to_fill = scaffolded + regenerated
+    if to_fill:
+        if regenerated:
+            print(f"  (重跑重铺了 {regenerated},旧脚本各留了 .py.bak;它们现在是空骨架,需重新填 CONDITIONS)")
+        print(f"\n下一步(generate 的关键一步):为 {to_fill} 各自的 <指标>_analyzer.py 填 CONDITIONS——")
         print("  先用 analyzer.py 看各源真实列;再按 condition_binding_schema.md,把故障树每条判据")
         print("  路由到对应源、选 A–J 内核、对哪列(裸名即可,组前缀自动剥)、给阈值/变换;对不上就标数据不足。")
         print("  默认直接套模板;模板不够用才为个别条件写 custom。填好后用真实数据各跑一遍校验:")
-        for ind in indicators:
+        for ind in to_fill:
             print(f"    python {out}/scripts/{ind}_analyzer.py <{ind}数据> -o /tmp/{ind}.json && "
                   f"python {here}/validate_conditions.py /tmp/{ind}.json")
     run_hint = " ".join(f"--data {ind}=<文件>" for ind in indicators)

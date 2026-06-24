@@ -50,7 +50,8 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<�
 python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
-它把 A–J 模板库 `condition_kernels.py`、概览引擎 `analyzer.py`、绑定契约拷进 `<OUT>/scripts/`,为每个指标写一份**待填骨架** `<ind>_analyzer.py`,并产出 `plan.json`(`各<ind>_analyzer(script)→rca(agent_skill)`)。`--out` 用步骤 1 打印的 `<OUT>`。格式见 `references/plan_schema.md`。
+它把 A–J 模板库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览引擎 `analyzer.py`、绑定契约拷进 `<OUT>/scripts/`(**这几个库每次重跑都刷新**),为每个指标写一份**待填骨架** `<ind>_analyzer.py`,并产出 `plan.json`(`各<ind>_analyzer(script)→rca(agent_skill)`)。`--out` 用步骤 1 打印的 `<OUT>`。格式见 `references/plan_schema.md`。
+> **重跑 = 重新编译**:已存在的 `<ind>_analyzer.py` 默认**会被当前版本的空骨架覆盖**(旧的先备份成 `.py.bak`),所以**更新 skill 后直接重跑就能生效,不用手删旧脚本**;模型随后在步骤 2.5 重新填。确需保留上次填好的脚本 → 加 `--keep`。
 
 ### 步骤 2.5(关键的一步):为每个 `<ind>_analyzer.py` 填 `CONDITIONS`
 先看各源真实列,再把故障树每条判据填进对应源脚本:
