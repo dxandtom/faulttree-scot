@@ -57,6 +57,8 @@ INDICATOR = "__IND__"
 #      成功率分不出子因 → 永不可用率重述;改用 C 类查错误码字段,或 decision:insufficient_data。
 #  (3) 别丢区分量:树条件是"A 且 B"(如 DCErrType=RNL_Unspecified **且** RSRP<-120)、本源只能查 A →
 #      别绑裸 A(丢了 B、会恒成立、几个不同节点一起命中);要么 D 类组合(把 B 一起绑)、要么 insufficient。
+#  (4) 高频通用值≠特定子因(通用尺子):某分类列里一个取值占比畸高(≥90%/近乎恒在、正常数据里也是它),
+#      拿它去坐实某个特定子因/信号就是代理(在正常样本上也恒为真=不分故障);对不上专属取值、或本源不含该信号 → decision:insufficient_data。
 # decision:insufficient_data 时**不要再填 class**(尤其别填 J;J 是"人工确认 manual",不是数据不足)。
 CONDITIONS = [
     # {"id": "第N行", "node": "RRC建立失败", "node_id": "n12", "condition_text": "<逐字树条件>",
