@@ -30,12 +30,14 @@
 | **C** | 字段匹配 | `column`,`equals`:[值…] 或 `contains`:[子串…],`match`,`case_insensitive`,`require`(默认1) | `matched` 命中行数 + 样例 |
 | **D** | 多条件组合 | `combine`(`AND`/`OR`),`sub`:[子绑定…](每个子绑定自带 `class`,可自带 `source`) | AND:有子False→False、有数据不足→数据不足、否则True;OR 对称 |
 | **E** | 占比/TopN | `group_by`,`filter`:{column,equals/contains},`op`,`threshold` | `top1`/`top1_ratio` |
-| **F** | 配置检查 | `param`,`equals` | 需配置数据源;无→数据不足 |
+| **F** | 配置检查 | `param`,`equals`;或 `not_equals`/`negate:true`(故障=参数**≠**期望值) | 需配置数据源;无→数据不足 |
 | **G** | 日志匹配 | `column`(日志文本列),`contains`:[码/串…] | 同 C(子串) |
 | **H** | 信令流程 | `msg_column`,`key`(会话/callid),`has`:[消息…],`lacks`:[消息…],`where`:{column,equals/contains}(或其列表;同一行须满足全部,表达"某消息**且携带** cause=X") | `matched_sessions`;需 trace;无→数据不足 |
 | **I** | 特征分析 | `feature`/`column`,`metric`(`row_threshold`/`all_same`/`all_null`),`op`,`threshold`,`require`(默认1),`transforms` | TA 距离 `156*TA/2`=`scale:78`;`/100`=`scale:0.01` |
 | **J** | 人工确认 | `note` | `status:"manual"`,不给判断 |
 
+> **F 类极性**:让 `predicate_satisfied` 永远表示"**故障成立**"。树写"参数=坏值才算故障"→ `equals:坏值`;树写"参数**≠**好值才算故障"(如 `SsbPeriod≠20ms`、`TxRxMode≠64T64R`)→ 用 `not_equals:好值`(或 `negate:true`+`equals`),**别绑好值再靠 `mapping_reason` 反推**(那样 `predicate_satisfied` 含义反了,RCA 一不留神就判错)。
+>
 > **标签 = 路由分类,不是 N 个互斥实现**:A–J 对齐的是**故障树的说话方式**(树写"日志"→G、"配置"→F、"特征"→I),方便选型;底层原语共享——**G 就是 C**(同一匹配内核)、F≈C 的"全等"版、I 的 `row_threshold`≈A 的 `count_rows`。所以遇到"日志/配置/特征"别硬塞进 C/A,**按树的措辞选标签**;也别去"合并去重"它们,标签稳定才好绑。`require`:A/B/I 的 `count_rows`/`row_threshold` 统一为"满足行数 ≥ require 才算成立"(默认1)。
 
 ## 处理变换词汇(`transforms`,固定可审,别写任意代码)

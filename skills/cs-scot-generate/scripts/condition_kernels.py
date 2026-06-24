@@ -349,11 +349,19 @@ def k_config(table, b, cls="F"):
     vals = [str(r.get(col, "")).strip() for r in rows if not _is_null(r.get(col, ""))]
     if not vals:
         return _insuf(cls, "参数列无值")
-    exp = str(b.get("equals"))
-    matched = sum(1 for v in vals if v == exp)
-    return {"class": cls, "status": "ok", "resolved_column": col, "resolve": how, "expected": b.get("equals"),
+    # 故障语义:默认 equals=X → 故障="配置(全部)等于X"(predicate=all 行==X);
+    # not_equals=X 或 negate:true → 故障="配置不等于X"(predicate=存在行!=X),
+    # 让 predicate_satisfied 始终表示「故障成立」,省得 RCA 再反推(树里"参数≠X才算故障"很常见,如 SsbPeriod≠20ms)。
+    neg = bool(b.get("negate")) or ("not_equals" in b)
+    raw = b.get("not_equals") if "not_equals" in b else b.get("equals")
+    exp = str(raw)
+    eq_matched = sum(1 for v in vals if v == exp)
+    matched = (len(vals) - eq_matched) if neg else eq_matched      # neg:命中=不等于exp的故障行
+    satisfied = any(v != exp for v in vals) if neg else all(v == exp for v in vals)
+    return {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
+            "expected": raw, "compare": ("!=" if neg else "=="),
             "n": len(vals), "matched": matched, "ratio": round(matched / len(vals), 4),
-            "distinct_values": list(dict.fromkeys(vals))[:5], "predicate_satisfied": all(v == exp for v in vals)}
+            "distinct_values": list(dict.fromkeys(vals))[:5], "predicate_satisfied": satisfied}
 
 
 # ---------- H:信令流程 ----------

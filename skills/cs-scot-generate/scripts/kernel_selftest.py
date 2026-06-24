@@ -103,6 +103,19 @@ CASES = [
     {"name": "F 缺参数列→数据不足", "table": _t(["other"], ["x"]),
      "binding": {"class": "F", "param": "param", "equals": "ON"},
      "expect": {"status": "insufficient_data", "resolved_column": None}},
+    # not_equals / negate:故障="参数≠期望值",predicate_satisfied 始终=「故障成立」(省去 RCA 反推)
+    {"name": "F not_equals 实测全是好值→故障不成立(SsbPeriod≠20,但都=MS20)",
+     "table": _t(["SsbPeriod"], ["MS20"], ["MS20"]),
+     "binding": {"class": "F", "param": "SsbPeriod", "not_equals": "MS20"},
+     "expect": {"status": "ok", "compare": "!=", "matched": 0, "predicate_satisfied": False}},
+    {"name": "F not_equals 存在坏值→故障成立",
+     "table": _t(["SsbPeriod"], ["MS20"], ["MS10"]),
+     "binding": {"class": "F", "param": "SsbPeriod", "not_equals": "MS20"},
+     "expect": {"status": "ok", "compare": "!=", "matched": 1, "predicate_satisfied": True}},
+    {"name": "F negate:true + equals 等价 not_equals(TxRxMode 非 64T64R→故障在)",
+     "table": _t(["m"], ["1T1R"]),
+     "binding": {"class": "F", "param": "m", "equals": "64T64R", "negate": True},
+     "expect": {"status": "ok", "compare": "!=", "matched": 1, "predicate_satisfied": True}},
 
     # ---- G 日志匹配(= C 的 contains)----
     {"name": "G 日志含告警码成立", "table": _t(["log"], ["...ALM-21582 Path拥塞..."], ["normal"]),
