@@ -139,7 +139,54 @@ def run_script_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
     return result
 
 
-def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
+def _gen_run_id() -> str:
+    """生成「时间戳 + 随机后缀」的运行号:可排序、且并发/重跑都不撞。"""
+    import datetime, os
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"run-{ts}-{os.urandom(3).hex()}"
+
+
+def _file_fingerprint(path: str) -> dict:
+    """一个输入文件的指纹(写进运行清单溯源):路径/大小/修改时间/sha1(大文件跳过 sha1)。"""
+    import hashlib, datetime
+    p = Path(path)
+    info: Dict[str, Any] = {"path": str(path), "exists": p.exists()}
+    if not p.exists():
+        return info
+    st = p.stat()
+    info["bytes"] = st.st_size
+    info["mtime"] = datetime.datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")
+    if st.st_size <= 512 * 1024 * 1024:                 # ≤512MB 才整文件 sha1,免大文件拖慢
+        try:
+            h = hashlib.sha1()
+            with p.open("rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            info["sha1"] = h.hexdigest()
+        except Exception:                                # noqa: BLE001
+            info["sha1"] = None
+    else:
+        info["sha1"], info["sha1_skipped"] = None, "file>512MB"
+    return info
+
+
+def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[str, str], base: Path) -> None:
+    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs/index.jsonl 追加一行,供生产侧管理。"""
+    import datetime
+    created = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    inputs = {k: _file_fingerprint(v) for k, v in data_map.items()}
+    manifest = {"run_id": run_id, "created_at": created, "plan_id": plan.get("plan_id"),
+                "product_dir": str(base), "inputs": inputs}
+    (run_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    idx = base / "runs" / "index.jsonl"
+    idx.parent.mkdir(parents=True, exist_ok=True)
+    with idx.open("a", encoding="utf-8") as f:           # 一行一运行:run_id + 时间 + 各输入指纹,便于事后检索/去重
+        f.write(json.dumps({"run_id": run_id, "created_at": created,
+                            "inputs": {k: (v.get("sha1") or v.get("bytes")) for k, v in inputs.items()}},
+                           ensure_ascii=False) + "\n")
+
+
+def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_subdir: str = "result") -> Any:
     """执行 kind=agent_skill 节点:备好输入,交给该 prompt-only 技能(模型)执行。
 
     runner 自身不调模型;它把解析好的 inputs 写到 result/<id>_input.json 并打印待办,
@@ -172,7 +219,7 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
         ft_text = md_path.read_text(encoding="utf-8") if (md_path and md_path.exists()) else ft
         payload = {"fault_tree_md": ft_text, "indicator_results": ins}
 
-    in_path = base / "result" / f"{node['id']}_input.json"
+    in_path = base / result_subdir / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     # 复用产物目录重跑时:把上一轮的最终结果 <id>.json 挪开。RCA 结果由**模型**写(runner 只备输入),
@@ -193,7 +240,7 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
         print(f"  ↑ 压缩统计已落盘 → {comp}(终端把它折叠了也能去这文件看)")
     print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能,依据该输入产出结果,"
           f"写到 {in_path.parent / 'rca.json'}(契约见 fault-tree-rca 技能)。")
-    print("  注意:result/ 目录已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"
+    print(f"  注意:结果目录 {in_path.parent} 已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"
           "且别让带引号的路径以反斜杠结尾(`...\\\"` 会让 shell 一直等闭合引号而卡住)。")
     print("  ⚠ 输入可能很大:**别一次性把整个 rca_input.json 读进上下文**(会超长报错)。"
           "先读 `fault_tree.outline`(id→名字→粗状态,很小)把握全局,再**按分支用 python 只提取相关 `pruned_nodes[id]`**。")
@@ -213,6 +260,10 @@ def main() -> None:
     ap.add_argument("--data", action="append", default=[],
                     help="$input 绑定,如 --data kpi=path.csv(可多次)")
     ap.add_argument("--base", help="路径解析基准目录(默认取 plan.json 所在目录)")
+    ap.add_argument("--run-id", help="运行号:为本次执行单独建 runs/<run-id>/ 存 rca_input/rca.json + run.json 清单"
+                                     "(生产侧多输入隔离、可溯源);不给 → 沿用 result/(旧行为,eval/benchmark 不受影响)")
+    ap.add_argument("--new-run", action="store_true",
+                    help="自动生成「时间戳+随机」运行号(等价于 --run-id <自动>);与 --run-id 二选一")
     args = ap.parse_args()
 
     plan_path = Path(args.plan).resolve()
@@ -241,6 +292,16 @@ def main() -> None:
     print(f"执行 SCoT: {plan.get('plan_id') or plan.get('meta', {}).get('goal', '')} "
           f"(version={plan.get('version')}, nodes={len(nodes)})")
 
+    # 结果目录:默认 result/(向后兼容,eval/benchmark 不变);给 --run-id/--new-run → runs/<run_id>/,
+    # 每份不同输入各占一个运行目录、互不覆盖,并落 run.json 清单(记是哪个产物+哪些输入数据)。
+    run_id = args.run_id or (_gen_run_id() if args.new_run else None)
+    result_subdir = f"runs/{run_id}" if run_id else "result"
+    if run_id:
+        run_dir = base / result_subdir
+        run_dir.mkdir(parents=True, exist_ok=True)
+        _write_run_manifest(run_dir, run_id, plan, data_map, base)
+        print(f"  运行号 run_id={run_id} → 本次产物目录 {run_dir}(已记 run.json + 追加 runs/index.jsonl)")
+
     cur = plan.get("entry")
     visited = 0
     while cur:
@@ -251,7 +312,7 @@ def main() -> None:
         if kind == "script":
             result = run_script_node(node, ctx, base)
         elif kind == "agent_skill":
-            result = run_agent_skill_node(node, ctx, base)
+            result = run_agent_skill_node(node, ctx, base, result_subdir)
         else:
             raise ValueError(f"节点 {cur} 的 kind={kind} 暂不支持(当前实现 script / agent_skill)")
         ctx["step"][cur] = result

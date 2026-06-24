@@ -15,6 +15,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 ```
 - `--data <指标>=<文件>`:绑定计划里 `$input.<指标>` 引用到实际数据文件(xlsx/csv);有几个指标传几次。
 - `--base <dir>`:相对路径基准目录,默认是 `plan.json` 所在目录。
+- `--run-id <id>` / `--new-run`:**生产侧多输入隔离**。默认结果写进 `result/`(够用、向后兼容,eval/benchmark 即此);当**同一个产物要接很多份不同输入**时,给 `--new-run`(自动「时间戳+随机」运行号)或 `--run-id <你的号>`——本次结果改写到 `runs/<run-id>/`(`rca_input.json`/`rca.json`/`run.json`),并往 `runs/index.jsonl` 追加一行。每份输入各占一目录、互不覆盖;`run.json` 记下"哪个产物 + 哪些输入数据(路径/大小/sha1)",可溯源、可检索。
 
 ## 执行模型(真 SCoT)
 1. 从 `entry` 节点开始,用 `memory_init` 初始化工作记忆;
@@ -28,7 +29,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 
 ## 输出
 - `script` 节点产出存入 `$memory`(不单独落盘);
-- `agent_skill`(RCA)节点:`result/rca_input.json`(汇总输入)→ 由 fault-tree-rca 产出 `result/rca.json`。
+- `agent_skill`(RCA)节点:把汇总输入写到**结果目录**的 `rca_input.json` → 由 fault-tree-rca 产出同目录 `rca.json`。结果目录默认 `result/`,带 `--run-id`/`--new-run` 时为 `runs/<run-id>/`。**重跑同目录时,上一轮 `rca.json` 会被挪成 `rca.prev.json`**(避免模型读到过期根因)。
 
 `result/rca.json` 契约:
 ```json

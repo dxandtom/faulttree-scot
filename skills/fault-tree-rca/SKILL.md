@@ -5,7 +5,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 
 # fault-tree-rca —— 综合根因分析
 
-**本文件已加载,不要再次加载或调用本技能;"加载"≠"完成",真正产出根因 JSON 才算完成。** 现在立刻依据 `result/rca_input.json` 和下文规则产出根因、写到 `result/rca.json`。
+**本文件已加载,不要再次加载或调用本技能;"加载"≠"完成",真正产出根因 JSON 才算完成。** 现在立刻依据 runner 备好的 `rca_input.json` 和下文规则产出根因、写到**同目录**的 `rca.json`(路径以 runner 打印为准:默认 `result/`,带运行号时 `runs/<run-id>/`)。
 **若 `result/rca.json` 仍存在,那是上一轮的过期产物(runner 重跑时已把它挪成 `rca.prev.json`)——本轮必须基于当前 `rca_input.json` 重新产出并覆盖,绝不把已存在的旧 `rca.json` 当本轮答案读出来汇报。**
 
 > `result/` 目录已由 runner 建好——**直接写 `result/rca.json`,别再 `mkdir`**。Windows 路径用正斜杠 `/`,**勿以反斜杠结尾**(带引号路径写成 `"...\"` 会让 shell 一直等闭合引号而卡住)。
