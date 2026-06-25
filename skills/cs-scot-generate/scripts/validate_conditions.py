@@ -56,6 +56,41 @@ def _is_drop_col(col):
     return "drop" in c or "abnorm" in c or "release" in c or "掉线" in (col or "")
 
 
+def _coverage_warnings(conditions):
+    """覆盖度对账(泛化、零写死):对每个 C/G 类绑定用到的分类列,把"数据里出现过、却没被任何绑定
+    `targets` 认领"的取值(+记录数)列出来。只看"这次绑了哪些列、列里有哪些值、哪些没被认领"——
+    不认识任何具体列名/取值,换树换场景逻辑不变。用来逮"一整支故障没人绑、记录被悄悄漏诊"。
+    数据来自事实本身:C/G 事实带 `targets`(认领集) + `top`(同列取值分布,Counter.most_common)。"""
+    by_col = {}
+    for c in conditions:
+        f = c.get("fact") or {}
+        if f.get("status") != "ok":
+            continue
+        if str(c.get("class") or f.get("class") or "").upper() not in ("C", "G"):
+            continue
+        col = f.get("resolved_column")
+        if not col or f.get("targets") is None:
+            continue
+        ent = by_col.setdefault(col, {"binds": [], "dist": {}})
+        ent["binds"].append((f.get("match", "contains"),
+                             [str(t).strip().lower() for t in (f.get("targets") or [])]))
+        for val, cnt in (f.get("top") or []):              # top = [[值, 计数], ...]
+            ent["dist"][str(val)] = max(ent["dist"].get(str(val), 0), cnt)
+    warns = []
+    for col, ent in by_col.items():
+        uncovered = []
+        for val, cnt in sorted(ent["dist"].items(), key=lambda kv: -kv[1]):
+            v = val.strip().lower()
+            covered = any((any(t in v for t in tgts) if mode == "contains" else v in tgts)
+                          for mode, tgts in ent["binds"])
+            if not covered and v:
+                uncovered.append((val, cnt))
+        if uncovered:
+            warns.append((col, sum(cnt for _, cnt in uncovered),
+                          "、".join(f"{val}(×{cnt})" for val, cnt in uncovered[:8])))
+    return warns
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -123,6 +158,11 @@ def main() -> int:
         if col and f.get("status") == "ok":
             key_count[(col, f.get("op"), f.get("threshold"))] += 1
     proxies = [(k, n) for k, n in key_count.items() if n >= 5]
+
+    # 覆盖度对账(软告警,始终显示):分类列里出现却没被任何绑定认领的取值 → 多半有一整支故障没人绑、记录被漏诊
+    for col, tot, lst in _coverage_warnings(doc.get("conditions", [])):
+        print(f"⚠ 覆盖度:列「{col}」有 {tot} 条记录的取值未被任何绑定覆盖:{lst}")
+        print("   → 确认这些取值是否该各自路由到某个节点(或归入树里'非典型场景/其他'兜底节点),别让记录悄悄漏诊。")
 
     if problems:
         print(f"不合格:发现 {len(problems)} 处问题:")
