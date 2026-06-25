@@ -88,6 +88,42 @@ def _check_fabrication(rc, tier, hold_map, problems):
                 f"但它有判断条件、局部子树里却没有任何'成立'事实(也非 pass_through)→ 别给没数据的节点编成立")
 
 
+def _parent_map(input_path):
+    """从 rca_input.json 的 pruned_nodes 读 {node_id: parent_id}。剪枝时祖先全保留 → 链完整到根,
+    故沿 parent 上溯无缺口、不会因剪枝误判。读不到 → None,跳过路径校验。"""
+    try:
+        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+    except Exception:
+        return None
+    return {nid: n.get("parent") for nid, n in pruned.items()} if pruned else None
+
+
+def _ancestors(nid, pm, limit=400):
+    seen, cur, steps = set(), pm.get(nid), 0
+    while cur and cur not in seen and steps < limit:
+        seen.add(cur); cur = pm.get(cur); steps += 1
+    return seen
+
+
+def _check_path_chain(rc, tier, pm, problems):
+    """evidence_path 相邻两节点必须在同一条根→叶链上(一个是另一个的祖先,允许剪枝跳过中间节点)。
+    两者互不为祖先 = 跨了不同分支硬拼路径(典型:把某叶子挂到不相干的中间节点下,模型搞混树结构时常见)→ 揪。"""
+    if pm is None:
+        return
+    name = rc.get("Root_cause") or rc.get("root_cause") or f"(未命名{tier})"
+    ev = [n for n in _evidence(rc) if isinstance(n, dict) and n.get("node_id") in pm]
+    for a, b in zip(ev, ev[1:]):
+        pid, cid = a.get("node_id"), b.get("node_id")
+        if pid == cid:
+            continue
+        if pid not in _ancestors(cid, pm) and cid not in _ancestors(pid, pm):
+            problems.append(
+                f"[路径不实] {tier}「{name}」evidence_path 里「{a.get('node', pid)}」({pid}) 与"
+                f"「{b.get('node', cid)}」({cid}) 不在同一条根→叶链上(互不为祖先)——跨分支拼的路径,"
+                f"按 tree_index 真实层级重排,别把叶子挂到不相干的节点下")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -103,6 +139,7 @@ def main() -> int:
         print(f"无法读取/解析 {p}: {e}", file=sys.stderr)
         return 2
     hold_map = _holding_map(sys.argv[2]) if len(sys.argv) >= 3 else None
+    parent_map = _parent_map(sys.argv[2]) if len(sys.argv) >= 3 else None
 
     confirmed = _confirmed(doc)
     probables = doc.get("probable_causes", []) if isinstance(doc, dict) else []
@@ -134,6 +171,7 @@ def main() -> int:
                     f"[假根因] 确证根因「{name}」路径含'{tag}'节点「{nname}」"
                     f"→ 挪进 probable_causes 或 excluded,别凑路径、别造节点")
         _check_fabrication(rc, "确证根因", hold_map, problems)
+        _check_path_chain(rc, "确证根因", parent_map, problems)
 
     # 疑似:松——只查 ④理由齐不齐 + ⑤有没有伪造成立;路径含 不成立/数据不足 一律放行
     for rc in probables:
@@ -145,6 +183,7 @@ def main() -> int:
         if not (rc.get("support") or _evidence(rc)):
             problems.append(f"[疑似缺证据] 疑似「{name}」既无 `support` 也无 `evidence_path`——疑似也得摆出支撑它的正向证据")
         _check_fabrication(rc, "疑似", hold_map, problems)
+        _check_path_chain(rc, "疑似", parent_map, problems)
 
     if problems:
         print(f"不合格:发现 {len(problems)} 处问题:")
