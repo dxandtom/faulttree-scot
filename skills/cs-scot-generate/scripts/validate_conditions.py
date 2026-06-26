@@ -78,6 +78,9 @@ def _coverage_warnings(conditions):
             ent["dist"][str(val)] = max(ent["dist"].get(str(val), 0), cnt)
     warns = []
     for col, ent in by_col.items():
+        claimed = set().union(*(set(t) for _, t in ent["binds"])) if ent["binds"] else set()
+        if len(claimed) < 2:                 # 单值/二态列(如只认 Fault)→ 非判别列,跳过免误报健康值(Normal 等)
+            continue
         uncovered = []
         for val, cnt in sorted(ent["dist"].items(), key=lambda kv: -kv[1]):
             v = val.strip().lower()

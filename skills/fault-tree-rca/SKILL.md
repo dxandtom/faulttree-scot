@@ -15,7 +15,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 ## 上游喂给你什么(输入契约)
 通常由 `cs-scot-execute` 汇总在 `result/rca_input.json` 里:
 - **`fault_tree_md`**:故障子树正文(`#/##/###` 层级 + 条件)。**人工编写,可能不规整。** —— 或:
-- **`fault_tree`(压缩形态)**:`pruned_nodes`(只含相关节点,每个把事实挂在 `facts` 里 + `condition`/`combine`/`pass_through`/`node_id`),另带 `tree_issues`(覆盖报告)、`unmapped_facts`。两种形态法则一样;`pass_through` 节点不阻断路径;`node_id` 权威、别造不存在的节点。
+- **`fault_tree`(压缩形态)**:`pruned_nodes`(只含相关节点,每个把事实挂在 `facts` 里 + `condition`/`combine`/`pass_through`/`node_id`),另带 `tree_issues`(覆盖报告)、`unmapped_facts`、**`uncovered_values`(判别列里没被绑定认领的取值+条数 → 据此把漏绑的记录归到保留的"非典型/其他"兜底节点报出,别漏诊)**。两种形态法则一样;`pass_through` 节点不阻断路径;`node_id` 权威、别造不存在的节点。
 - **`indicator_results`**(完整形态时):dict,键是指标名(**任意、不固定**),值是该指标已解析好的**事实**(**只有数据、没有判断**):各字段/项的真实分布、数值摘要或取值。
   - 有的指标给的是**定义/规则**(某量怎么算、阈值多少),**不是实测值**。**定义不是测量。**
   - **解析端不下判断、也不替你做匹配;判断全是你的活。**

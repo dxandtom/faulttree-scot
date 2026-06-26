@@ -10,7 +10,7 @@
 - 多数情况下每个指标的结果是**逐条件事实**:`{indicator,source,summary,conditions:[{id,node,condition_text,class,mapping_reason,fact}]}`,
   `fact.predicate_satisfied` 是**仅在解析到的列上做的字面比较**、`fact.status` 可能是 `insufficient_data`/`manual`。
   - 这是**输入证据,不是最终结论**:你仍要 ① 看 `mapping_reason` 判**语义是否真等**(如 RSRP 顶 RSSI、单位不符 → 降置信/数据不足,别因 `predicate_satisfied:true` 就当成立);② `status:insufficient_data/manual` → 该节点判"数据不足";③ **跨源组合**(同一判据的合取项分散在不同指标结果里)由你 AND/OR 合;④ 路径回溯与数据不足传播。**字面为真 ≠ 该条件成立。**
-- 上下文可能已被**压缩成局部子树**:`fault_tree` 含 `outline`(`id→粗状态` 紧凑导航,**很小**)+ `pruned_nodes`(相关节点:`name/parent/level`、事实挂在 `facts` 里,另有 `condition`/`combine`/`pass_through`、**`is_leaf`(是不是叶子)/`uncovered_children`(下面带条件却没人绑的子因)**)+ `tree_issues` + `unmapped_facts`。没有 index 时退回 `fault_tree_md`。**两种形态法则一样。**
+- 上下文可能已被**压缩成局部子树**:`fault_tree` 含 `outline`(`id→粗状态` 紧凑导航,**很小**)+ `pruned_nodes`(相关节点:`name/parent/level`、事实挂在 `facts` 里,另有 `condition`/`combine`/`pass_through`、**`is_leaf`(是不是叶子)/`uncovered_children`(下面带条件却没人绑的子因)**)+ `tree_issues` + `unmapped_facts` + **`uncovered_values`(判别列里出现却没被任何绑定认领的取值+条数 —— 据此把漏绑的记录归到保留的兜底节点,见下"覆盖度兜底")**。没有 index 时退回 `fault_tree_md`。**两种形态法则一样。**
   - **⚠ 输入可能很大:别一次性把整个 rca_input 读进上下文(会超长报错)。** 用导航助手 `scripts/rca_query.py <rca_input.json>` 按需取:`--outline`(全局)/ `--holding`(有"成立"事实的候选节点 + 各自根→叶路径)/ `--node nX`(某分支整条路径的条件+事实)。据此判、拼路径,**别自己写脚本硬算**。
   - `outline.status`(`hold/fail/insufficient/pass/uncovered`)只是**粗导航**——仍要按 `pruned_nodes` 的条件+事实**重判**。
   - node_id 是短 id(`nN`);`pass_through:true` 节点(汇总/"测试")**永不阻断路径**;`combine` 是 `AND/OR/unknown` 提示。
@@ -54,7 +54,8 @@
 
 **只有这几条状态线是硬的(confirmed 必须全成立;有不成立就 excluded);其余全靠你判断:**
 - **哪些够格的路值得报"疑似"、信心多高(high/medium/low)、怎么排序、写什么 caveat —— 你说了算**(用你的泛化能力)。机器不卡强度。
-- **逐叶穷举、别过度合并(要报全)**:数据里每个有正向事实(matched>0 / 命中)的**不同**叶子或失败模式,都**各自**报一条(confirmed/probable;实在闭合不了至少进 `undetermined.observed` 逐条列),**别把几个不同叶子并成一条、也别只挑最强的一两条**——聚合数据常多种失败模式并存,尽量覆盖全。每条仍各自给真实事实 + caveat,**宁可多列几条带 caveat 的疑似,绝不为凑数编节点/编成立**。若上游覆盖度报告提示某列有"未覆盖取值"、而树里有"非典型场景/其他"兜底节点 → 按该兜底节点报一条、附上那些原始特征码(如 DCInnerCause 值),别让这批记录漏诊。
+- **逐叶穷举、别过度合并(要报全)**:数据里每个有正向事实(matched>0 / 命中)的**不同**叶子或失败模式,都**各自**报一条(confirmed/probable;实在闭合不了至少进 `undetermined.observed` 逐条列),**别把几个不同叶子并成一条、也别只挑最强的一两条**——聚合数据常多种失败模式并存,尽量覆盖全。每条仍各自给真实事实 + caveat,**宁可多列几条带 caveat 的疑似,绝不为凑数编节点/编成立**。
+- **别让"没绑上"的记录漏诊(覆盖度兜底)**:输入的 `fault_tree.uncovered_values` 列出了某**判别列**里出现过、却没被任何绑定认领的取值(+记录数)——这通常是生成侧漏绑了某一支。**即便绑定漏了,你也要据这些原始取值把记录归位**:剪枝**保留了**该支的"非典型场景/其他"兜底节点(在 `pruned_nodes` 里),按那个真实节点报一条(闭合不了就 probable / `undetermined.observed`),`actual` 附上原始特征码(如该 DCInnerCause 值 + 条数)。这正是"绑定错了、RCA 仍据事实救回来"的地方——别因为没人绑就当这些记录不存在。
 - **疑似必须诚实披露**:卡在哪个节点(数据不足)、叶子证据是什么 + **有效样本量/空值比例**(如"96% 满足,但仅 1814/20496 非空")、为什么仍只是"疑似"。
 - **绝不为了凑 confirmed 编节点/改路径**:路径只能用真实存在的节点;有数据不足节点就老实放 probable,**别造"测试""xx排查"之类不存在的节点把路凑完整**。
 - **疑似 ≠ 确证**:别把疑似说成"已定位根因";它是"证据强、但路径未闭合(上游缺数据)"。

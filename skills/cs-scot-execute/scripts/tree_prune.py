@@ -87,6 +87,18 @@ def prune(index: dict, results: dict) -> dict:
             cur = nodes[cur].get("parent")
     if index.get("root"):
         keep.add(index["root"])
+    # 兜底节点也留:任一保留节点的"非典型/其他/unspecified"子节点 → 留住,给未被具体兄弟认领的记录一个落点
+    # (绑定漏绑时,RCA 仍能据原始事实把那些记录归到这个真实节点上、可展示,不致随剪枝静默消失)。
+    _CATCHALL = ("非典型", "其他", "其它", "unspecified", "unknown", "other", "misc")
+
+    def _is_catchall(n):
+        tl = ((n.get("name") or "") + " " + (n.get("condition") or "")).lower()
+        return any(k in tl for k in _CATCHALL)
+
+    for nid in list(keep):
+        for c in (nodes[nid].get("children") or []):
+            if c in nodes and _is_catchall(nodes[c]):
+                keep.add(c)
 
     pruned, outline = {}, {}
     for nid in keep:
@@ -121,8 +133,39 @@ def prune(index: dict, results: dict) -> dict:
         unmapped.extend(facts[oid])
     unmapped = [_slim_fact(e) for e in unmapped]   # 孤儿事实也瘦身(同 pruned_nodes):去整条 condition_text、截 mapping_reason
 
+    # 覆盖度:分类列(C/G)里出现、却没被任何绑定 targets 认领的取值 + 记录数 → 显式喂给 RCA,
+    # 这样即便 bind 时漏绑/忽略告警,RCA 也拿到"这 N 条没着落",可归到上面保留的兜底节点、不致漏诊。
+    # 只对"多类判别列"(≥2 个不同认领值)做,避免 Fault/Normal 这种二态状态列的健康值误报。
+    col_claims, col_top, col_mode = defaultdict(set), defaultdict(dict), {}
+    for ent_list in facts.values():
+        for e in ent_list:
+            f = e.get("fact") or {}
+            if str(e.get("class") or f.get("class") or "").upper() not in ("C", "G"):
+                continue
+            col = f.get("resolved_column")
+            if not col or f.get("targets") is None or f.get("status") != "ok":
+                continue
+            col_claims[col].update(str(t).strip().lower() for t in (f.get("targets") or []))
+            col_mode[col] = f.get("match", "contains")
+            for val, cnt in (f.get("top") or []):
+                col_top[col][str(val)] = max(col_top[col].get(str(val), 0), cnt)
+    uncovered_values = {}
+    for col, claims in col_claims.items():
+        if len(claims) < 2:                              # 单值/二态列(如只认 Fault)→ 非判别列,跳过免噪
+            continue
+        mode = col_mode.get(col, "contains")
+        miss = []
+        for val, cnt in sorted(col_top[col].items(), key=lambda kv: -kv[1]):
+            v = val.strip().lower()
+            covered = (any(t in v for t in claims) if mode == "contains" else v in claims)
+            if not covered and v:
+                miss.append({"value": val, "count": cnt})
+        if miss:
+            uncovered_values[col] = miss[:8]
+
     return {"scenario": index.get("scenario"), "root": index.get("root"),
             "outline": outline, "pruned_nodes": pruned, "unmapped": unmapped,
+            "uncovered_values": uncovered_values,
             "coverage": {"total_nodes": len(nodes), "kept_nodes": len(pruned),
                          "uncovered_condition_nodes": uncovered,
                          "orphan_node_ids": orphans,
