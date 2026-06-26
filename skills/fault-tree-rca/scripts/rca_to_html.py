@@ -218,6 +218,7 @@ def _tree_issues(ti: dict) -> str:
 
 CSS = """
 *{box-sizing:border-box}
+html{color-scheme:light only;background:#eef0f3}
 body{font-family:'PingFang SC','Microsoft YaHei','Segoe UI',Arial,sans-serif;margin:0;
   background:#eef0f3;color:#23272e;line-height:1.65;font-size:14px}
 .wrap{max-width:1180px;margin:0 auto;padding:26px 20px 40px}
@@ -254,10 +255,10 @@ h2.h-prob{border-left-color:#d98008}h2.h-gray{border-left-color:#9aa1ab}
 .kv .v{color:#2b2f36}
 table.ev{width:100%;border-collapse:collapse;margin:13px 0 2px;font-size:13px}
 table.ev th{background:#363b44;color:#fff;text-align:left;padding:8px 10px;font-weight:600}
-table.ev td{padding:8px 10px;border-bottom:1px solid #edf0f4;vertical-align:top;color:#2b2f36}
-table.ev tr:hover{background:#f3f7fd}
-.ev-node{width:20%;font-weight:600;color:#1b1f24}.nid{color:#8a929c;font-weight:normal;font-size:11.5px}
-.ev-cond{width:42%}.mr{color:#5b626c;font-size:12px;margin-top:4px}.mr b{color:#7b828c;font-weight:600}
+table.ev td{padding:8px 10px;border-bottom:1px solid #edf0f4;vertical-align:top;color:#23272e;background:#fff}
+table.ev tr:hover td{background:#f3f7fd}
+.ev-node{width:20%;font-weight:600;color:#1b1f24}.nid{color:#7a828d;font-weight:normal;font-size:11.5px}
+.ev-cond{width:42%}.mr{color:#444a52;font-size:12px;margin-top:4px}.mr b{color:#2f6fb3;font-weight:600;margin-right:2px}
 .ev-act{width:24%}.ev-judg{width:14%}
 .judg{display:inline-block;padding:2px 9px;border-radius:11px;font-size:12px;white-space:nowrap;color:#fff;font-weight:600}
 .j-hold{background:#27924f}.j-fail{background:#cf4b34}.j-insuf{background:#9aa1ab}.j-other{background:#7b828c}
@@ -307,6 +308,7 @@ def render(doc, scenario: str, title: str, id_names: dict) -> str:
     parts.append("<footer>fault-tree-rca · rca_to_html</footer>")
     return (f"<!DOCTYPE html><html lang='zh-CN'><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            f"<meta name='color-scheme' content='light'>"
             f"<title>{h1}</title><style>{CSS}</style></head><body>"
             f"<div class='wrap'>{''.join(p for p in parts if p)}</div></body></html>")
 
