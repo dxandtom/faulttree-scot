@@ -63,7 +63,7 @@ def _str(d: dict, *keys):
 
 # ---------- 判定 / 置信上色 ----------
 def _judge_class(j: str) -> str:
-    j = j or ""
+    j = str(j or "")                                      # judgment 可能是数字等非字符串,强转免 'in' 崩
     if "成立" in j and not any(m in j for m in ("不成立", "数据不足", "未判定", "无法")):
         return "j-hold"
     if "不成立" in j:
@@ -89,19 +89,22 @@ def _evidence_table(ev) -> str:
         return ""
     rows = []
     for n in ev:
-        if not isinstance(n, dict):
+        if not isinstance(n, dict):                       # off-contract(字符串等)也如实带出,别静默丢证据
+            rows.append(f"<tr><td colspan='4' class='ev-raw'>{esc(n)}</td></tr>")
             continue
         node = esc(_str(n, "node", "node_id"))
         nid = esc(n.get("node_id"))
         nid_html = f" <span class='nid'>{nid}</span>" if nid else ""
         cond = esc(_str(n, "condition", "condition_text"))
+        mp = n.get("mapping")                             # 契约审计字段:树的量 X → 命中数据列(别只渲染 mapping_reason)
+        mp_html = f"<div class='mr'>映射:{esc(mp)}</div>" if mp else ""
         mr = n.get("mapping_reason")
         mr_html = f"<div class='mr'>映射依据:{esc(mr)}</div>" if mr else ""
         actual = esc(n.get("actual"))
         judg = _str(n, "judgment")
         rows.append(
             f"<tr><td class='ev-node'>{node}{nid_html}</td>"
-            f"<td class='ev-cond'>{cond}{mr_html}</td>"
+            f"<td class='ev-cond'>{cond}{mp_html}{mr_html}</td>"
             f"<td class='ev-act'>{actual}</td>"
             f"<td class='ev-judg'><span class='judg {_judge_class(judg)}'>{esc(judg)}</span></td></tr>")
     if not rows:
@@ -208,6 +211,7 @@ table.ev tr:hover{background:#f6f9ff}
 .judg{display:inline-block;padding:1px 8px;border-radius:9px;font-size:12px;white-space:nowrap}
 .j-hold{background:#d7f0e1;color:#1d7a44}.j-fail{background:#fbe0db;color:#b53b22}
 .j-insuf{background:#ececec;color:#666}.j-other{background:#eef1f5;color:#555}
+.ev-raw{color:#555;font-style:italic;background:#fafbfc}
 details{margin:8px 0}summary{cursor:pointer;font-weight:600;color:#555}
 ul.issue{margin:6px 0;font-size:13px;color:#555}ul.issue li{margin:2px 0}
 .empty{color:#8a8f99;font-size:14px;padding:8px 0}
@@ -284,9 +288,9 @@ def main() -> int:
     if not scenario and isinstance(doc, dict):
         for tier in ("rca_result", "probable_causes", "undetermined"):
             for rc in (doc.get(tier) or []):
-                p = isinstance(rc, dict) and rc.get("Fault_tree_path")
-                if p:
-                    scenario = p[0]
+                p = rc.get("Fault_tree_path") if isinstance(rc, dict) else None
+                if isinstance(p, list) and p:             # 容忍 path 非 list(LLM 产出不可信),只接受非空列表
+                    scenario = str(p[0])
                     break
             if scenario:
                 break
