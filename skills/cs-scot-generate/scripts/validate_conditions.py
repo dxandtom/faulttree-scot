@@ -71,19 +71,20 @@ def _coverage_warnings(conditions):
         col = f.get("resolved_column")
         if not col or f.get("targets") is None:
             continue
-        ent = by_col.setdefault(col, {"binds": [], "dist": {}})
+        ent = by_col.setdefault(col, {"binds": [], "dist": {}, "total": 0})
         ent["binds"].append((f.get("match", "contains"),
                              [str(t).strip().lower() for t in (f.get("targets") or [])]))
+        ent["total"] = max(ent["total"], f.get("total") or 0)
         for val, cnt in (f.get("top") or []):              # top = [[值, 计数], ...]
             ent["dist"][str(val)] = max(ent["dist"].get(str(val), 0), cnt)
     warns = []
     for col, ent in by_col.items():
-        claimed = set().union(*(set(t) for _, t in ent["binds"])) if ent["binds"] else set()
-        if len(claimed) < 2:                 # 单值/二态列(如只认 Fault)→ 非判别列,跳过免误报健康值(Normal 等)
-            continue
+        tot = ent["total"] or sum(ent["dist"].values())
         uncovered = []
         for val, cnt in sorted(ent["dist"].items(), key=lambda kv: -kv[1]):
             v = val.strip().lower()
+            if tot and cnt >= 0.5 * tot:     # 占比畸高的取值多半是该列"正常/健康"值(如 Normal)→ 跳过免噪
+                continue
             covered = any((any(t in v for t in tgts) if mode == "contains" else v in tgts)
                           for mode, tgts in ent["binds"])
             if not covered and v:

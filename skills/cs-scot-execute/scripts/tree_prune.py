@@ -135,8 +135,9 @@ def prune(index: dict, results: dict) -> dict:
 
     # 覆盖度:分类列(C/G)里出现、却没被任何绑定 targets 认领的取值 + 记录数 → 显式喂给 RCA,
     # 这样即便 bind 时漏绑/忽略告警,RCA 也拿到"这 N 条没着落",可归到上面保留的兜底节点、不致漏诊。
-    # 只对"多类判别列"(≥2 个不同认领值)做,避免 Fault/Normal 这种二态状态列的健康值误报。
-    col_claims, col_top, col_mode = defaultdict(set), defaultdict(dict), {}
+    # 去噪:跳过占比≥50% 的取值(多半是该列"正常/健康"值,如 Fault/Normal 的 Normal),
+    # 但**不**按"认领值个数"去噪——只绑了 1 个值却漏了一堆失败码,正是最该报的(别误伤)。
+    col_claims, col_top, col_mode, col_total = defaultdict(set), defaultdict(dict), {}, defaultdict(int)
     for ent_list in facts.values():
         for e in ent_list:
             f = e.get("fact") or {}
@@ -147,16 +148,18 @@ def prune(index: dict, results: dict) -> dict:
                 continue
             col_claims[col].update(str(t).strip().lower() for t in (f.get("targets") or []))
             col_mode[col] = f.get("match", "contains")
+            col_total[col] = max(col_total[col], f.get("total") or 0)
             for val, cnt in (f.get("top") or []):
                 col_top[col][str(val)] = max(col_top[col].get(str(val), 0), cnt)
     uncovered_values = {}
     for col, claims in col_claims.items():
-        if len(claims) < 2:                              # 单值/二态列(如只认 Fault)→ 非判别列,跳过免噪
-            continue
         mode = col_mode.get(col, "contains")
+        tot = col_total[col] or sum(col_top[col].values())
         miss = []
         for val, cnt in sorted(col_top[col].items(), key=lambda kv: -kv[1]):
             v = val.strip().lower()
+            if tot and cnt >= 0.5 * tot:                 # 占比畸高 → 该列"正常/健康"值(如 Normal),跳过免噪
+                continue
             covered = (any(t in v for t in claims) if mode == "contains" else v in claims)
             if not covered and v:
                 miss.append({"value": val, "count": cnt})
