@@ -259,7 +259,12 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
         comp.write_text(tree_note.strip() + "\n", encoding="utf-8")
         print(tree_note)
         print(f"  ↑ 压缩统计已落盘 → {comp}(终端把它折叠了也能去这文件看)")
-    print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能,依据该输入产出结果,"
+    # 兜底:技能没注册成 skill(如把技能嵌在产物目录里,Skill(name) 报 Unknown)时,提示改读其 SKILL.md 手工产出——
+    # fault-tree-rca 是 prompt-only,法则全在文件里,注册与否都能做。探测产物目录内的技能副本,探不到才省略兜底路径。
+    _skill_md = next((p for p in (base / name / "SKILL.md", base / "skills" / name / "SKILL.md") if p.exists()), None)
+    _fallback = (f";若 Skill(「{name}」) 报 Unknown(未注册成技能,如把技能嵌在产物目录里)→ 改读 {_skill_md} "
+                 f"按其法则 + 同目录 scripts/rca_query.py 手工产出(技能 prompt-only,法则全在文件里,注册与否都能做)") if _skill_md else ""
+    print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能{_fallback},依据该输入产出结果,"
           f"写到 {in_path.parent / 'rca.json'}(契约见 fault-tree-rca 技能)。")
     print(f"  注意:结果目录 {in_path.parent} 已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"
           "且别让带引号的路径以反斜杠结尾(`...\\\"` 会让 shell 一直等闭合引号而卡住)。")
