@@ -186,6 +186,35 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
                            ensure_ascii=False) + "\n")
 
 
+def _archive_previous_run(result_dir: Path, runs_dir: Path):
+    """复用产物目录重跑前:把 result/ 里**上一轮**的完整结果归档到 runs/<上轮run_id>/。
+    这样 result/ 永远=当前一轮(无歧义、无 .prev 杂物),历史在 runs/ 里按 run_id 版本留存——
+    agent 不会再被"已存在的 rca.json 是上轮还是本轮"困惑。返回归档目录,或 None(无上轮最终结果时)。"""
+    if not (result_dir / "rca.json").exists():
+        return None                                    # 没有上一轮的最终结果(首次跑/已归档)→ 无需归档
+    prev_id = None
+    rj = result_dir / "run.json"
+    if rj.exists():
+        try:
+            prev_id = json.loads(rj.read_text(encoding="utf-8")).get("run_id")
+        except Exception:                              # noqa: BLE001
+            prev_id = None
+    if not prev_id:                                    # 旧产物没有 run.json → 用 rca.json 修改时间编个号
+        import datetime
+        mt = (result_dir / "rca.json").stat().st_mtime
+        prev_id = "run-" + datetime.datetime.fromtimestamp(mt).strftime("%Y%m%dT%H%M%S")
+    dst = runs_dir / prev_id
+    n = 1
+    while dst.exists():
+        dst = runs_dir / f"{prev_id}-{n}"; n += 1
+    dst.mkdir(parents=True, exist_ok=True)
+    for name in ("rca_input.json", "rca.json", "run.json", "_compression.txt"):
+        f = result_dir / name
+        if f.exists():
+            f.replace(dst / name)
+    return dst
+
+
 def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_subdir: str = "result") -> Any:
     """执行 kind=agent_skill 节点:备好输入,交给该 prompt-only 技能(模型)执行。
 
@@ -222,16 +251,8 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
     in_path = base / result_subdir / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 复用产物目录重跑时:把上一轮的最终结果 <id>.json 挪开。RCA 结果由**模型**写(runner 只备输入),
-    # 旧文件留着会让模型看到「result/rca.json 已存在」就直接读了**过期结论**(与本轮绑定/数据不符,实测踩过)。
-    # 挪成 <id>.prev.json:不丢、可对比;本轮必须基于当前 rca_input.json 重新产出。
-    prev = in_path.parent / f"{node['id']}.json"
-    if prev.exists():
-        try:
-            prev.replace(in_path.parent / f"{node['id']}.prev.json")
-            print(f"  [stale] 上轮 {prev.name} 已挪为 {node['id']}.prev.json —— 本轮请基于新输入重产,别读旧的")
-        except Exception as e:  # noqa: BLE001
-            print(f"  [warn] 清理旧 {prev.name} 失败({e});请确认本轮是新写而非沿用旧结果", file=sys.stderr)
+    # 注:上一轮的最终结果已在 main() 启动时整体归档到 runs/<上轮run_id>/,result/ 此刻只剩本轮的新输入,
+    # 模型据此产出本轮 rca.json,不会读到过期结论。
     print(f"[agent_skill] {node['id']}: 已备好输入 → {in_path}")
     if tree_note:
         comp = in_path.parent / "_compression.txt"
@@ -260,10 +281,10 @@ def main() -> None:
     ap.add_argument("--data", action="append", default=[],
                     help="$input 绑定,如 --data kpi=path.csv(可多次)")
     ap.add_argument("--base", help="路径解析基准目录(默认取 plan.json 所在目录)")
-    ap.add_argument("--run-id", help="运行号:为本次执行单独建 runs/<run-id>/ 存 rca_input/rca.json + run.json 清单"
-                                     "(生产侧多输入隔离、可溯源);不给 → 沿用 result/(旧行为,eval/benchmark 不受影响)")
+    ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」)。result/ 始终=当前一轮;"
+                                     "重跑前自动把上一轮整体归档到 runs/<上轮run_id>/,history 不丢、不覆盖、无歧义")
     ap.add_argument("--new-run", action="store_true",
-                    help="自动生成「时间戳+随机」运行号(等价于 --run-id <自动>);与 --run-id 二选一")
+                    help="(已默认:每轮都自动归档上一轮并带 run_id)保留仅为兼容,无额外效果")
     args = ap.parse_args()
 
     plan_path = Path(args.plan).resolve()
@@ -292,15 +313,19 @@ def main() -> None:
     print(f"执行 SCoT: {plan.get('plan_id') or plan.get('meta', {}).get('goal', '')} "
           f"(version={plan.get('version')}, nodes={len(nodes)})")
 
-    # 结果目录:默认 result/(向后兼容,eval/benchmark 不变);给 --run-id/--new-run → runs/<run_id>/,
-    # 每份不同输入各占一个运行目录、互不覆盖,并落 run.json 清单(记是哪个产物+哪些输入数据)。
-    run_id = args.run_id or (_gen_run_id() if args.new_run else None)
-    result_subdir = f"runs/{run_id}" if run_id else "result"
-    if run_id:
-        run_dir = base / result_subdir
-        run_dir.mkdir(parents=True, exist_ok=True)
-        _write_run_manifest(run_dir, run_id, plan, data_map, base)
-        print(f"  运行号 run_id={run_id} → 本次产物目录 {run_dir}(已记 run.json + 追加 runs/index.jsonl)")
+    # 版本管理:result/ 永远=当前这一轮;重跑前把上一轮整体归档到 runs/<上轮run_id>/(留历史、不覆盖、无歧义),
+    # 每轮自动带 run_id(--run-id 可自定义),写 result/run.json 标明本轮身份 + 追加 runs/index.jsonl。
+    # eval/benchmark 仍读 result/(= 当前轮),不受影响。
+    run_id = args.run_id or _gen_run_id()
+    result_dir = base / "result"
+    archived = _archive_previous_run(result_dir, base / "runs")
+    result_dir.mkdir(parents=True, exist_ok=True)
+    _write_run_manifest(result_dir, run_id, plan, data_map, base)
+    result_subdir = "result"
+    if archived:
+        print(f"  run_id={run_id};上一轮已归档 → {archived}（result/ 即当前轮，历史在 runs/）")
+    else:
+        print(f"  run_id={run_id}（result/ 即当前轮，历史按 run_id 存 runs/，已记 run.json + runs/index.jsonl）")
 
     cur = plan.get("entry")
     visited = 0
