@@ -95,6 +95,37 @@ def _coverage_warnings(conditions):
     return warns
 
 
+def _proxy_warnings(conditions):
+    """代理三 signal(软告警、泛化、零写死),全部从事实本身算:
+    (a) 恒成立:某 ok 绑定命中占比 ratio≥0.9 → 在正常样本上也几乎恒为真、不分故障(如某值占满整列);
+    (b) 一值多挂:同一(列,取值集)被挂到 ≥2 个不同 node_id → 一把尺子量多个节点(也含'本源分不开这些子因');
+    (c) 共用阈值:多条**数值**绑定共用同一(列,op,阈值)≥5 → 把多判据塞给同一通用阈值。
+    关键:多条 C 类绑**不同取值**到同一列是**正常**的(逐码区分故障),绝不该报——所以 (c) 只数**有真实 op/阈值**的数值绑定,
+    不再像旧版那样按 (列,op,阈值) 把所有 C 类(op/阈值都是 None)算成'共用一列'而误伤。"""
+    from collections import defaultdict
+    heng, by_val, numkey = [], defaultdict(set), defaultdict(int)
+    for c in conditions:
+        f = c.get("fact") or {}
+        if f.get("status") != "ok":
+            continue
+        col, nid = f.get("resolved_column"), c.get("node_id")
+        cid = c.get("id") or nid or c.get("node") or "?"
+        ratio = f.get("ratio")
+        if ratio is None and f.get("total"):
+            ratio = (f.get("matched") or 0) / f["total"]
+        hit = f.get("matched") or f.get("count_satisfied") or 0
+        if ratio is not None and ratio >= 0.9 and hit:          # (a) 恒成立
+            heng.append((cid, nid, col, round(ratio, 3), hit, f.get("total")))
+        tgts = tuple(sorted(str(t).strip().lower() for t in (f.get("targets") or [])))
+        if col and nid and tgts:                                # (b) 一值多挂:按(列,取值集)聚 node_id
+            by_val[(col, tgts)].add(str(nid))
+        if col and f.get("op") is not None and f.get("threshold") is not None:  # (c) 只数真有阈值的数值绑定
+            numkey[(col, f.get("op"), f.get("threshold"))] += 1
+    multi = [(col, list(tgts), sorted(nids)) for (col, tgts), nids in by_val.items() if len(nids) >= 2]
+    num = [(k, n) for k, n in numkey.items() if n >= 5]
+    return heng, multi, num
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -153,15 +184,8 @@ def main() -> int:
             if any(k in ct.lower() for k in _radio) and not any(k in col.lower() for k in _radio):
                 problems.append(f"[丢了区分量]「{cid}」条件正文提到 RSRP/SINR 等无线量,绑定却只查了「{col}」——多半把'X 且 弱覆盖/干扰'绑成裸 X(丢区分条件、恒成立)。改 D 类组合(连无线量一起绑)或 decision:insufficient_data")
 
-    # 软告警(不致命):多条不同判据绑到同一(列,op,阈值)→ 疑似"通用代理",损泛化
-    from collections import Counter
-    key_count = Counter()
-    for c in doc.get("conditions", []):
-        f = c.get("fact") or {}
-        col = f.get("resolved_column")
-        if col and f.get("status") == "ok":
-            key_count[(col, f.get("op"), f.get("threshold"))] += 1
-    proxies = [(k, n) for k, n in key_count.items() if n >= 5]
+    # 代理软告警(不致命):恒成立 / 一值多挂 / 共用数值阈值——从事实算,零写死(修正旧版按列误伤多取值 C 类)
+    heng_w, multi_w, num_w = _proxy_warnings(doc.get("conditions", []))
 
     # 覆盖度对账(软告警,始终显示):分类列里出现却没被任何绑定认领的取值 → 多半有一整支故障没人绑、记录被漏诊
     for col, tot, lst in _coverage_warnings(doc.get("conditions", [])):
@@ -176,9 +200,14 @@ def main() -> int:
               "J 类用 manual;成立/不成立的最终裁决留给 fault-tree-rca。")
         return 1
 
-    for (col, op, thr), n in proxies:
-        print(f"⚠ 告警:{n} 条绑定共用「列={col} {op} {thr}」——疑似把多条不同判据塞给同一通用指标"
-              f"(语义错+恒成立+丢泛化)。对不上专属量的应 decision:insufficient_data。")
+    for cid, nid, col, ratio, hit, tot in heng_w:
+        print(f"⚠ 代理(恒成立):「{cid}」(node {nid}) 在「{col}」命中 {hit}/{tot}≈{ratio},几乎全体为真——"
+              "正常样本上也成立的值分不出故障,核实或改 decision:insufficient_data。")
+    for col, tgts, nids in multi_w:
+        print(f"⚠ 代理(一值多挂):同一「列={col} 取值={'/'.join(tgts[:3])}」被挂到 {len(nids)} 个节点 {nids}——"
+              "一把尺子量多个节点(恒成立+丢区分,或本源分不开这些子因)。最多留一个,其余换专属判据或 decision:insufficient_data。")
+    for (col, op, thr), n in num_w:
+        print(f"⚠ 代理(共用阈值):{n} 条数值绑定共用「列={col} {op} {thr}」——多判据塞同一通用阈值。对不上专属量的应 decision:insufficient_data。")
     s = doc.get("summary", {})
     print(f"通过:{s.get('total','?')} 条事实无静默编造(ok={s.get('ok')} "
           f"数据不足={s.get('insufficient_data')} 人工={s.get('manual')})。")
