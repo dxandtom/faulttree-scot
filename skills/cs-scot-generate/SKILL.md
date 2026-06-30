@@ -71,7 +71,7 @@ python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o /tmp/<ind>_over
 `--lean` 砍掉十分位+样例(填 CONDITIONS 用不到),只留**列名 / min·max·mean(定阈值/量纲)/ 类别取值(C 类匹配)**——读得快、上下文小、不影响正确性。多页签 xlsx:先不带 `--sheet` 看页签清单,再 `--sheet <名> --lean` 看某页详情。
 按 `references/condition_binding_schema.md`,把判据**路由到对应源**、填进该源脚本的 `CONDITIONS`(选 A–J 类、对哪列〔裸名即可〕、阈值/变换;对不上标 `decision:insufficient_data`)。**每条都填 `node_id`**(取自 `tree_index.json` 里的短 id `nN`)——RCA 靠它把事实挂回树、并把上下文压成局部子树。**默认套模板,非改不可才写 `custom`**。跨源的组合各源分别出子事实,AND/OR 留给 RCA 合。
 > **⚡ 切批 · 并行子 agent 填 · 中央汇总(别再让一个 agent 啃整棵树)**:整棵树丢给一个 agent → 注意力摊薄、长尾漏绑(欠绑定头号坑)。改用**分批 fan-out**:
-> 1. `python "<本目录>/scripts/make_binding_batches.py" "<OUT>/tree/<场景>.tree_index.json" --batch-size 20` → 产 `<OUT>/tree/batches/batch_*.json`(按分支聚合、每批 ≤20 个**待绑节点**〔带条件且非 pass_through,叶子或内部均算〕,兄弟尽量同批以减少跨批"一值多挂")。
+> 1. `python "<本目录>/scripts/make_binding_batches.py" "<OUT>/tree/<场景>.tree_index.json" --batch-size 20` → 产 `<OUT>/tree/batches/batch_*.json`(**按分支递归切**:整支装得下就一批、装不下就把兄弟子分支攒到 ≤20 一组、子分支自己超限再下钻 → 批大小随分支而变、但**每批永远是同一支的兄弟**,减少跨批"一值多挂"。**待绑节点** = 带条件且非 pass_through 的节点〔叶子或内部均算〕;每批 JSON 带 `covers`〔本批覆盖哪几支〕+ `nodes`〔本批节点〕)。
 > 2. **fan-out**:对每个 `batch_*.json` **开一个子 agent**。子 agent 输入 = 该批节点(树条件 + 根→叶路径 + `data_source` 源提示)+ 各源 `--lean` 概览 + 本绑定契约;输出 = 这些 `node_id` 的 `CONDITIONS`(Python 字面量、每条带 `source`)。**子 agent 只在回复里返回、绝不自己写文件**(写文件常因权限/路径失败、还拖很久——实测 1–2 小时)。
 > 3. **中央汇总**:主代理收齐所有批 → 按 `source` 分组、按 `node_id` 去重 → 用 Edit 机械写进各 `<ind>_analyzer.py`(模型只提案、落盘归主流程)。
 > 4. **校验 + 回炉**:跑步骤 3 的 `validate_conditions` + `check_tree_coverage`;**`❌ 漏绑` > 0 → 把漏的 `node_id` 单独切一批、再 fan-out 一轮**,直到漏绑 = 0(loop-until-dry)。
