@@ -70,7 +70,12 @@ python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o /tmp/<ind>_over
 ```
 `--lean` 砍掉十分位+样例(填 CONDITIONS 用不到),只留**列名 / min·max·mean(定阈值/量纲)/ 类别取值(C 类匹配)**——读得快、上下文小、不影响正确性。多页签 xlsx:先不带 `--sheet` 看页签清单,再 `--sheet <名> --lean` 看某页详情。
 按 `references/condition_binding_schema.md`,把判据**路由到对应源**、填进该源脚本的 `CONDITIONS`(选 A–J 类、对哪列〔裸名即可〕、阈值/变换;对不上标 `decision:insufficient_data`)。**每条都填 `node_id`**(取自 `tree_index.json` 里的短 id `nN`)——RCA 靠它把事实挂回树、并把上下文压成局部子树。**默认套模板,非改不可才写 `custom`**。跨源的组合各源分别出子事实,AND/OR 留给 RCA 合。
-> **⚡ 提速:并行填,但子代理只"返回"、不"写文件"**。三个源互相独立 → 每个源开一个子 agent 并行填(各自只看故障树 + 自己那份概览)。**关键:让子代理把它那份 `CONDITIONS`(Python 字面量列表)直接放在最终回复里返回,别让它自己写 `<ind>_analyzer.py`**——子代理写文件常因权限/路径失败、还拖很久(实测 1–2 小时);改由**主代理收齐后用 Edit 机械地把每份写进对应脚本**(模型只提案、落盘归主流程)。
+> **⚡ 切批 · 并行子 agent 填 · 中央汇总(别再让一个 agent 啃整棵树)**:整棵树丢给一个 agent → 注意力摊薄、长尾漏绑(欠绑定头号坑)。改用**分批 fan-out**:
+> 1. `python "<本目录>/scripts/make_binding_batches.py" "<OUT>/tree/<场景>.tree_index.json" --batch-size 20` → 产 `<OUT>/tree/batches/batch_*.json`(按分支聚合、每批 ≤20 个**待绑节点**〔带条件且非 pass_through,叶子或内部均算〕,兄弟尽量同批以减少跨批"一值多挂")。
+> 2. **fan-out**:对每个 `batch_*.json` **开一个子 agent**。子 agent 输入 = 该批节点(树条件 + 根→叶路径 + `data_source` 源提示)+ 各源 `--lean` 概览 + 本绑定契约;输出 = 这些 `node_id` 的 `CONDITIONS`(Python 字面量、每条带 `source`)。**子 agent 只在回复里返回、绝不自己写文件**(写文件常因权限/路径失败、还拖很久——实测 1–2 小时)。
+> 3. **中央汇总**:主代理收齐所有批 → 按 `source` 分组、按 `node_id` 去重 → 用 Edit 机械写进各 `<ind>_analyzer.py`(模型只提案、落盘归主流程)。
+> 4. **校验 + 回炉**:跑步骤 3 的 `validate_conditions` + `check_tree_coverage`;**`❌ 漏绑` > 0 → 把漏的 `node_id` 单独切一批、再 fan-out 一轮**,直到漏绑 = 0(loop-until-dry)。
+> 5. 待绑节点 ≤ batch-size → 切批器只出 1 批,退化成单 agent、不必并行;不能派子 agent 的 harness → 按批顺序填(每批仍 focus,强过一次性啃整棵)。
 > **⚠ 树驱动、要全覆盖(欠绑定是头号坑)**:**遍历 `tree_index` 里本源能答的每个叶子,逐个绑**——按树条件要的**列+值**绑(C 类 `contains` 那个码),**不管这次数据里出没出现**;别"翻数据里出现了哪些码、看到一个挂一个"(数据驱动 → 漏整支 + 过拟合本次数据)。值这次没出现 → 照绑、`matched=0`(确定排除),**不是** `insufficient_data`。`mapping_reason` 别只写"出现 N 次"(那是运行时结果,不是绑定依据)。
 > **⚠ 写进去后核对覆盖度(别只数条数)**:主代理写完,跑步骤3的 **`check_tree_coverage.py`** 机械核对——**`❌ 漏绑`>0(本源能答的叶子没绑)= 没写全,回去补,别往下跑**;**0 条或异常少**几乎一定是数据驱动/没收齐造成的欠绑定。
 > **泛化第一(重要)**:绑定按**格式+语义**,别被这次数据带偏。**节点级"整体有没有失败"若本源有该流程同事件的成功率列 → 直接用(A 类,阈值=100/按量纲),这是重述不是代理**;但**特定失败子因的计数器不在本源列里 → `decision:insufficient_data` 或换源,绝不拿通用率代理、绝不把多条判据塞给同一列**(语义错+恒成立+丢泛化)。判别看列**度量什么(建立 vs 掉线)**、别看名字。**绑率前机械自检:① 流程词逐字对上(UECntx/RRC/NGSig/QosFlow 不互代);② 计数器不含 `.FailEst.`(含=子因,禁率)。** 一次生成要能反复执行不同数据。
