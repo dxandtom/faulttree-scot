@@ -39,16 +39,17 @@
   "确证"语义,需另定升档规则(如:路径全 full-match 且逐节点能对上 rca_input 的成立事实)——
   建议拿评测数据说话后再定。
 
-## 四、三种得分机制 A/B/C(合作方要求的实测)
+## 四、三种得分机制 A/B/C(合作方要求的实测)——一键工具
 ```bash
-# 对 suite_v2 的每个场景(18 个,17 节点小树):
-python skills/fault-tree-rca-debate/scripts/run_debate_rca.py \
-  --rca-input skills/cs-scot-eval/suite_v2/scenarios/S01/rca_input.json \
-  --tree-index <suite_v2 的 tree_index> --out-dir /tmp/ab/S01 --mechanism all
-# 三份结果分别打分(打分器容忍 probable-only 输出):
-python skills/cs-scot-eval/scripts/score_v2.py ... /tmp/ab/S01/rca.original.json   # 同理 softmax/ratio
+# mock 先验管线(已在仓库内跑通 30 场景),真引擎就绪后换 --engine real:
+python skills/fault-tree-rca-debate/scripts/ab_test_mechanisms.py --engine real --k 3 \
+    [--only synth_中]   # 先小树标定成本,再放全量
 ```
-汇总四维(命中/档位/无假阳/诚实)出对比表 → 赢者写进 run_debate_rca 的默认 `--mechanism`。
+数据集 = `cs-scot-eval/suite_real` 的 30 个冻结场景(rca_input/树/答案全部已入库,开箱即测)。
+**指标口径(重要)**:机制对比用**档位无关的排名指标**(hit@1 / hit@3 / MRR / FP进榜)——
+eval 的四档打分要求确证根因落在 `rca_result` 档,而本引擎是纯排序器、适配层诚实全放 probable 档,
+四档分数量的是"排序器 vs 事实闭环"的语义差,不是三种机制谁好。真值="不报根因"的场景(excluded/honest)
+排序器结构性做不到(无弃权),工具单列为「弃权能力缺口」——这是全盘替代要付的语义代价,与机制优劣分开看。
 注:eval 的"禁止脚本批量产 rca.json"红线是防**考模型**作弊;这里被测对象就是程序引擎,属正当用法,
 但成绩必须标注 `engine=debate`,与模型手工 RCA 的成绩分表呈现。
 

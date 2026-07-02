@@ -70,6 +70,7 @@ def main() -> int:
     ap.add_argument("--vendor-dir", default=str(_HERE.parent / "vendor"))
     ap.add_argument("--config", help="vendor 配置(默认 <vendor-dir>/config.yaml)")
     ap.add_argument("--leaf-only", action="store_true", help="生成 xlsx 时中间节点条件不单独成行")
+    ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
     a = ap.parse_args()
 
     rca_input = json.loads(Path(a.rca_input).read_text(encoding="utf-8"))
@@ -107,8 +108,20 @@ def main() -> int:
     (out_dir / "rca.json").write_text(
         (out_dir / f"rca.{chosen}.json").read_text(encoding="utf-8"), encoding="utf-8")
     print(f"[4/4] rca.json(机制={chosen})+ {', '.join('rca.' + m + '.json' for m in mechs)} → {out_dir}/")
-    print("      建议:python skills/fault-tree-rca/scripts/validate_rca.py "
-          f"{out_dir / 'rca.json'} {a.rca_input}  # 机械自检")
+
+    # 顺手机械自检(与老路径同一道闸门;闸门脚本不在预期位置就只提示、不阻断)
+    if not a.no_validate:
+        vr = _HERE.parent.parent / "fault-tree-rca" / "scripts" / "validate_rca.py"
+        if vr.exists():
+            import subprocess
+            r = subprocess.run([sys.executable, str(vr), str(out_dir / "rca.json"), a.rca_input],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace")
+            tailline = (r.stdout or r.stderr or "").strip().splitlines()
+            print(f"[validate_rca] exit {r.returncode}:{tailline[-1] if tailline else ''}")
+            if r.returncode != 0:
+                return r.returncode
+        else:
+            print(f"[validate_rca] 未找到 {vr},跳过自检(手动跑:validate_rca.py <rca.json> <rca_input.json>)")
     return 0
 
 

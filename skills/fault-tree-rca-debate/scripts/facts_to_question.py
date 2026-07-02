@@ -24,12 +24,15 @@ from pathlib import Path
 
 
 def _fmt_fact(f: dict) -> str:
-    """一条 fact → 简短实测描述(只挑有意义的量)。"""
+    """一条 fact → 简短实测描述(只挑有意义的量)。
+    D 类组合等瘦身后无数值字段的事实 → 回退成"判定为真(class X)",别渲染出空的「实测:」。"""
     bits = []
     for k in ("resolved_column", "value", "matched", "total", "ratio",
               "count_satisfied", "matched_sessions", "op", "threshold"):
         if f.get(k) is not None:
             bits.append(f"{k}={f[k]}")
+    if not bits:
+        return f"判定为真(class {f.get('class', '?')},组合/无数值型判据)"
     return ", ".join(bits)
 
 
