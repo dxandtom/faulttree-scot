@@ -189,7 +189,11 @@ def compose_rca_payload(index: dict, results: dict, md_text: str = "") -> dict:
     cov = pr["coverage"]
     cand = {"fault_tree": {"scenario": pr["scenario"], "root": pr["root"],
                            "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
-            "unmapped_facts": pr["unmapped"], "tree_issues": cov}
+            "unmapped_facts": pr["unmapped"], "tree_issues": cov,
+            # 判别列里没被绑定认领的取值 —— prune() 已算好,必须随压缩形态一起送给 RCA
+            # (fault-tree-rca 契约据此把漏绑记录归到"非典型/其他"兜底节点报出、防漏诊);
+            # 键恒在(空则空 dict),别再在这里静默丢掉。
+            "uncovered_values": pr["uncovered_values"]}
     md_payload = {"fault_tree_md": md_text, "indicator_results": results}
     before = len(json.dumps(md_payload, ensure_ascii=False))
     after = len(json.dumps(cand, ensure_ascii=False))
