@@ -1,0 +1,4 @@
+# 上游交付物(含 API 密钥的 config.yaml)一律不入库;本目录只提交 README 和本文件
+*
+!README.md
+!.gitignore
