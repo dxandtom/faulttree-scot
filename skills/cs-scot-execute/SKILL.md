@@ -31,11 +31,17 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 - `script` 节点产出存入 `$memory`(不单独落盘);
 - `agent_skill`(RCA)节点:把汇总输入写到 `result/rca_input.json` → 由 fault-tree-rca 产出 `result/rca.json`。**`result/` 永远=当前一轮**(干净、无 `.prev` 杂物);重跑前**上一轮整体自动归档到 `runs/<run-id>/`**,历史按版本留存——agent 不会再被"已存在的 rca.json 是上轮还是本轮"困惑。
 
-`result/rca.json` 契约:
+`result/rca.json` 契约:**权威定义在 fault-tree-rca 技能**——四档 dict(不是裸数组),顶层四键恒在:
 ```json
-[{"Root_cause":"根因节点","Fault_tree_path":["父1","父2","根因节点"],
-  "evidence_path":[{"node":"父1","condition":"<逐字判断条件>","actual":"<实际数值>","judgment":"<代入比较 → 成立/不成立>"}]}]
+{
+  "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
+     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实>","judgment":"成立/不成立/数据不足"}]} ],
+  "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low","blocked_at":"…","caveats":"…","support":"…","evidence_path":[…]} ],
+  "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…"]} ],
+  "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }
+}
 ```
+`rca_result` 为 `[]` 是**正常输出**(上游缺话统/信令时,强证据在 `probable_causes`),不是失败。
 
 ## 设计要点
 - 启动先比对**产物铭牌** `manifest.json` 的格式契约版本:产物较旧 / 缺铭牌只**告警不阻断**(提示"由旧工具链生成,建议重新 generate"),避免旧产物配新执行器静默跑出怪结果。
