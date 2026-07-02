@@ -187,22 +187,23 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
 
 
 def _archive_previous_run(result_dir: Path, runs_dir: Path):
-    """复用产物目录重跑前:把 result/ 里**上一轮**的完整结果归档到 runs/<上轮run_id>/。
-    这样 result/ 永远=当前一轮(无歧义、无 .prev 杂物),历史在 runs/ 里按 run_id 版本留存——
-    agent 不会再被"已存在的 rca.json 是上轮还是本轮"困惑。返回归档目录,或 None(无上轮最终结果时)。"""
-    if not (result_dir / "rca.json").exists():
-        return None                                    # 没有上一轮的最终结果(首次跑/已归档)→ 无需归档
-    prev_id = None
+    """复用产物目录重跑前:把 result/ 里**上一轮**的结果归档到 runs/<上轮run_id>/。
+    以 **run.json 是否存在**为准(每轮启动即写它)——这样即便上一轮在 RCA 完成前中断(没 rca.json),
+    它的运行指纹与已产出的中间结果也照样归档、不被本轮 run.json 覆写、result/ 不会两轮混血。
+    result/ 因此永远=当前一轮,历史在 runs/ 里按 run_id 版本留存。返回归档目录,或 None(首次跑)。"""
     rj = result_dir / "run.json"
-    if rj.exists():
-        try:
-            prev_id = json.loads(rj.read_text(encoding="utf-8")).get("run_id")
-        except Exception:                              # noqa: BLE001
-            prev_id = None
-    if not prev_id:                                    # 旧产物没有 run.json → 用 rca.json 修改时间编个号
+    if not rj.exists():
+        return None                                    # 首次跑 / 已归档 → 无上一轮可归
+    prev_id = None
+    try:
+        prev_id = json.loads(rj.read_text(encoding="utf-8")).get("run_id")
+    except Exception:                                  # noqa: BLE001
+        prev_id = None
+    if not prev_id:                                    # run.json 损坏/无 run_id → 用可得的最新 mtime 编个号
         import datetime
-        mt = (result_dir / "rca.json").stat().st_mtime
-        prev_id = "run-" + datetime.datetime.fromtimestamp(mt).strftime("%Y%m%dT%H%M%S")
+        mts = [(result_dir / f).stat().st_mtime for f in ("rca.json", "run.json") if (result_dir / f).exists()]
+        stamp = (datetime.datetime.fromtimestamp(max(mts)).strftime("%Y%m%dT%H%M%S") if mts else "unknown")
+        prev_id = "run-" + stamp
     dst = runs_dir / prev_id
     n = 1
     while dst.exists():
@@ -259,11 +260,13 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
         comp.write_text(tree_note.strip() + "\n", encoding="utf-8")
         print(tree_note)
         print(f"  ↑ 压缩统计已落盘 → {comp}(终端把它折叠了也能去这文件看)")
-    # 兜底:技能没注册成 skill(如把技能嵌在产物目录里,Skill(name) 报 Unknown)时,提示改读其 SKILL.md 手工产出——
-    # fault-tree-rca 是 prompt-only,法则全在文件里,注册与否都能做。探测产物目录内的技能副本,探不到才省略兜底路径。
-    _skill_md = next((p for p in (base / name / "SKILL.md", base / "skills" / name / "SKILL.md") if p.exists()), None)
-    _fallback = (f";若 Skill(「{name}」) 报 Unknown(未注册成技能,如把技能嵌在产物目录里)→ 改读 {_skill_md} "
-                 f"按其法则 + 同目录 scripts/rca_query.py 手工产出(技能 prompt-only,法则全在文件里,注册与否都能做)") if _skill_md else ""
+    # 兜底**永远给出**:技能没注册成 skill(Skill(name) 报 Unknown)时,改读其 SKILL.md 手工产出——
+    # fault-tree-rca 是 prompt-only,法则全在文件里,注册与否都能做。优先产物目录内的技能副本;探不到就给
+    # 标准候选位置(别再因"产物目录里本就没有 fault-tree-rca"而把兜底静默省略——最弱的 harness 恰恰需要它)。
+    _found = next((p for p in (base / name / "SKILL.md", base / "skills" / name / "SKILL.md") if p.exists()), None)
+    _where = str(_found) if _found else f"{name}/SKILL.md(如 ~/.claude/skills/{name}/SKILL.md 或本仓 skills/{name}/SKILL.md)"
+    _fallback = (f";若 Skill(「{name}」) 报 Unknown(未注册成技能)→ 改读 {_where} "
+                 f"按其法则 + 同目录 scripts/rca_query.py 手工产出(技能 prompt-only,法则全在文件里,注册与否都能做)")
     print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能{_fallback},依据该输入产出结果,"
           f"写到 {in_path.parent / 'rca.json'}(契约见 fault-tree-rca 技能)。")
     print(f"  注意:结果目录 {in_path.parent} 已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"
