@@ -56,11 +56,35 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
                          f"把同事的两个文件放进 vendor/(见其 README),或先用 --mock 自测适配层。")
     import dataclasses
     known = {f.name for f in dataclasses.fields(EvaluationConfig)}
-    dropped = sorted(set(cfg) - known)
-    if dropped:
-        print(f"[warn] config.yaml 里有 EvaluationConfig 不认识的键,已忽略:{dropped}")
-    return FaultTreeProcessor(EvaluationConfig(**{k: v for k, v in cfg.items() if k in known})), \
-        f"vendor 引擎(config={cfg_file})"
+
+    # 展平配置:合作方 config.yaml 常见嵌套结构(如 llm:{api_key,base_url,model_name}、evaluation:{top_k,...}),
+    # 而 EvaluationConfig 是扁平字段(llm_api_key/top_k/...)。子键按「父_子」和「子」两种拼法都试着对。
+    flat = {}
+    for k, v in cfg.items():
+        if isinstance(v, dict):
+            for sk, sv in v.items():
+                for cand in (f"{k}_{sk}", str(sk)):
+                    if cand in known:
+                        flat.setdefault(cand, sv)
+                        break
+        elif k in known:
+            flat.setdefault(k, v)
+    unmapped = sorted(set(cfg) - set(flat) - {k for k in cfg if isinstance(cfg[k], dict)})
+    if unmapped:
+        print(f"[warn] config.yaml 有映射不到引擎字段的键,已忽略:{unmapped}")
+
+    # 硬门禁:LLM 关键字段一个都没映射到 → 引擎会拿空配置"静默降级"成不调 LLM 的兜底模式,
+    # 跑出看似正常实则无效的结果(实测 0.03s/场景、debate_records 全空)。宁可当场报错。
+    llm_fields = [f for f in ("llm_api_key", "llm_base_url", "llm_model_name") if f in known]
+    missing = [f for f in llm_fields if not flat.get(f)]
+    if missing:
+        raise SystemExit(
+            f"config.yaml 未能映射出引擎必需的 LLM 配置字段:{missing}。\n"
+            f"  config 顶层键 = {sorted(cfg)};已映射到 = {sorted(flat)}。\n"
+            f"  请核对 config.yaml 的嵌套层级/键名(或在 vendor/bridge.py 里自行构造配置)。"
+            f"**不要**让引擎拿空配置跑——那会静默降级、不调 LLM、产出无效结果。")
+    return FaultTreeProcessor(EvaluationConfig(**flat)), \
+        f"vendor 引擎(config={cfg_file},已映射 {len(flat)} 个字段)"
 
 
 def main() -> int:

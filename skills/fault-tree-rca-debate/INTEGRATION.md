@@ -25,7 +25,7 @@
 | ② | 其 loader 接受我们生成的 xlsx(列:`Ln Code / Ln / Ln(Chinese)` + `Judgment Condition(Chinese)`;**无 Module Id/Product 列**);**带条件的中间节点单独成行**且按 Code 合并、不会被当成叶子 | 用 `tree_to_vendor_xlsx.py` 生成后让其 load,打印树规模对比 tree_index 节点数 | 缺列→在 `write_xlsx` 补常量列;中间行异常→加 `--leaf-only` 并把中间条件并到子行文本 |
 | ③ | `find_top_k_paths` 输出路径里节点带 `code`(=我们的 node_id)、`node_score`、`match_type`,路径尾巴带三个 `*_path_score` | 看 `rca_debate_full.json` | 改 `result_adapter._split_path/_judgment` 的取键 |
 | ④ | 空 `judgment_conditions` 的节点(纯结构节点/根)不把路径得分打零 | 冒烟看 top 路径得分是否全为 0 | 与合作方确认其空条件语义;必要时 xlsx 里给结构节点填"无条件进入" |
-| ⑤ | `EvaluationConfig(**config.yaml 的键)` 能构造(壳只传 dataclass 认识的键,多余键丢弃并告警) | 冒烟即验 | 对 yaml 键名做映射 |
+| ⑤ | config.yaml 能映射到 `EvaluationConfig`(壳会自动**展平嵌套结构**如 `llm:{api_key}`→`llm_api_key`;LLM 关键字段一个都映射不到会**硬报错**,绝不让引擎拿空配置静默降级) | 冒烟即验(成功会打印"已映射 N 个字段") | 报错信息里有顶层键与已映射键对照,按它改 yaml 层级,或在 bridge.py 自行构造 |
 | ⑥ | LLM 连通:config.yaml 的 base_url/model 在你环境可达(公司路由/MiniMax) | 单跑一个小场景 | 只改 config.yaml,不动代码 |
 
 ## 三、已知风险(壳已按此设计,但要人知道)
