@@ -38,15 +38,24 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
         from mock_vendor import FaultTreeProcessor
         return FaultTreeProcessor({}), "mock(确定性假引擎,不调 LLM)"
     sys.path.insert(0, str(vendor_dir))
+    import yaml
+    cfg_file = config_path or (vendor_dir / "config.yaml")
+    cfg = (yaml.safe_load(Path(cfg_file).read_text(encoding="utf-8")) or {}) if Path(cfg_file).exists() else {}
+    if not cfg:
+        print(f"[warn] 未读到配置 {cfg_file}(不存在或为空)——引擎参数将全用默认/空。")
+
+    # 接口适配钩子:真引擎接口与文档不符时,本地**只新建** vendor/bridge.py 包一层(暴露文档形状的
+    # FaultTreeProcessor(cfg_dict) 三方法),不改本壳、不改引擎原件。有 bridge 就优先走 bridge。
+    if (vendor_dir / "bridge.py").exists():
+        from bridge import FaultTreeProcessor as BridgeProcessor  # type: ignore
+        return BridgeProcessor(cfg), f"vendor 引擎(经 vendor/bridge.py 适配,config={cfg_file})"
+
     try:
         from fault_tree_evaluator_bfs_advanced import FaultTreeProcessor, EvaluationConfig  # type: ignore
     except ImportError as e:
         raise SystemExit(f"未找到真实引擎:{vendor_dir}/fault_tree_evaluator_bfs_advanced.py({e})。"
                          f"把同事的两个文件放进 vendor/(见其 README),或先用 --mock 自测适配层。")
     import dataclasses
-    import yaml
-    cfg_file = config_path or (vendor_dir / "config.yaml")
-    cfg = yaml.safe_load(Path(cfg_file).read_text(encoding="utf-8")) or {}
     known = {f.name for f in dataclasses.fields(EvaluationConfig)}
     dropped = sorted(set(cfg) - known)
     if dropped:
