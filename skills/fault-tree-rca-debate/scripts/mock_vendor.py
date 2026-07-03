@@ -26,8 +26,11 @@ class FaultTreeProcessor:
     # ---- 装载:xlsx → 行 dict 列表(充当"df") ----
     def load_fault_tree(self, xlsx_path):
         from openpyxl import load_workbook
-        ws = load_workbook(xlsx_path, read_only=True).active
-        rows = list(ws.iter_rows(values_only=True))
+        wb = load_workbook(xlsx_path, read_only=True)
+        try:
+            rows = list(wb.active.iter_rows(values_only=True))
+        finally:
+            wb.close()   # read_only 模式必须显式关句柄:Windows 上不关,删该文件会 WinError 32
         header = [str(h or "") for h in rows[0]]
         return [dict(zip(header, r)) for r in rows[1:]]
 

@@ -22,7 +22,6 @@ import argparse
 import datetime
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -91,13 +90,14 @@ def main() -> int:
     print(f"[1/4] 证据 question 已渲染({len(question)} 字符)")
 
     proc, desc = _load_processor(Path(a.vendor_dir), Path(a.config) if a.config else None, a.mock)
-    with tempfile.TemporaryDirectory() as td:
-        xlsx = Path(td) / "fault_tree.xlsx"
-        n_rows = write_xlsx(tree_index, xlsx, a.leaf_only)
-        print(f"[2/4] vendor 格式故障树已生成({n_rows} 行);引擎={desc}")
-        df = proc.load_fault_tree(str(xlsx))
-        tree = proc.build_tree_structure(df)
-        top_orig, top_soft, top_ratio, debate_records = proc.find_top_k_paths(tree, question, a.k)
+    # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
+    # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
+    xlsx = out_dir / "vendor_fault_tree.xlsx"
+    n_rows = write_xlsx(tree_index, xlsx, a.leaf_only)
+    print(f"[2/4] vendor 格式故障树已生成({n_rows} 行 → {xlsx.name});引擎={desc}")
+    df = proc.load_fault_tree(str(xlsx))
+    tree = proc.build_tree_structure(df)
+    top_orig, top_soft, top_ratio, debate_records = proc.find_top_k_paths(tree, question, a.k)
 
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k,

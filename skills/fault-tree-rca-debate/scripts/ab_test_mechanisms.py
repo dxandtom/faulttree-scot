@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import tempfile
+
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -108,10 +108,11 @@ def main() -> int:
         question = build_question(rca_input, tree_index)
         t0 = time.time()
         if tree_name not in tree_cache:                       # 同一棵树的 xlsx/建树只做一次
-            with tempfile.TemporaryDirectory() as td:
-                xlsx = Path(td) / "t.xlsx"
-                write_xlsx(tree_index, xlsx)
-                tree_cache[tree_name] = proc.build_tree_structure(proc.load_fault_tree(str(xlsx)))
+            work = Path(a.out).resolve().parent / "_ab_xlsx"  # 落盘不删:免 Windows 句柄清理坑 + 可审计
+            work.mkdir(parents=True, exist_ok=True)
+            xlsx = work / f"{tree_name}.xlsx"
+            write_xlsx(tree_index, xlsx)
+            tree_cache[tree_name] = proc.build_tree_structure(proc.load_fault_tree(str(xlsx)))
         top = dict(zip(MECHS, proc.find_top_k_paths(tree_cache[tree_name], question, a.k)[:3]))
         dt = time.time() - t0
 
