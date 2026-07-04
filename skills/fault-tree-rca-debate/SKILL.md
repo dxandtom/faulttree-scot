@@ -6,8 +6,8 @@ description: 辩论式根因分析引擎(合作方算法)的集成壳:吃 cs-sco
 # fault-tree-rca-debate —— 辩论式 RCA 引擎(集成壳)
 
 **这是一个"脚本引擎",不是 prompt-only 技能**:它自己调 LLM API(见 vendor/config.yaml),
-不需要 harness 里的模型来判断。核心算法来自合作方,原样放在 `vendor/`(**永不修改**,本仓不携带,
-本地放入,见 `INTEGRATION.md`);本目录其余文件都是适配壳。
+不需要 harness 里的模型来判断。核心算法来自合作方,原样放在 `vendor/`(**永不修改**;引擎 .py
+已随仓携带,`config.yaml` 含密钥须本地放入 `vendor/`,见 `INTEGRATION.md`);其余文件都是适配壳。
 
 ## 在流水线里的位置(与 fault-tree-rca 同一接缝、可互换)
 ```
@@ -37,5 +37,7 @@ python "<本目录>/scripts/run_debate_rca.py" \
 ## 三种得分机制(original / softmax / ratio)怎么选
 合作方要求实测。用本仓评测当裁判:对 `cs-scot-eval` 的带答案场景逐个跑本引擎
 (`--mechanism all`),三份结果分别按四维打分(命中/档位/无假阳/诚实),赢者当默认。
+注意 original 机制自带引擎的层级偏置(L2/L3 零匹配节点是单节点辩论、无兄弟惩罚,
+浅层落败分支偏高;softmax/ratio 不受影响,详见 INTEGRATION.md 已知风险),对比时别误读。
 注意:引擎属程序化被测对象,成绩标注 `engine=debate`,别与"模型手工 RCA"的成绩混表;
 且它每个无匹配兄弟组都要调 LLM 辩论,先在 suite_v2(18 场景、17 节点小树)上估好耗时/成本再上大树。

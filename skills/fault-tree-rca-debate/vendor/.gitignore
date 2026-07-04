@@ -1,4 +1,5 @@
-# 上游交付物(含 API 密钥的 config.yaml)一律不入库;本目录只提交 README 和本文件
+# config.yaml 含 API 密钥,一律不入库;引擎 .py 经用户确认后随仓携带(上游发新版直接覆盖)
 *
 !README.md
 !.gitignore
+!fault_tree_evaluator_bfs_advanced.py

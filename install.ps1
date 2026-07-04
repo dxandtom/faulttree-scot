@@ -31,7 +31,7 @@ if (-not $Target) {
 $Source = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SkillsSrc = Join-Path $Source "skills"
 $Mode = if ($Link) { "link" } else { "copy" }
-$Dirs = @("cs-scot-generate", "cs-scot-execute", "fault-tree-rca", "cs-scot-benchmark", "cs-scot-eval")
+$Dirs = @("cs-scot-generate", "cs-scot-execute", "fault-tree-rca", "fault-tree-rca-debate", "cs-scot-benchmark", "cs-scot-eval")
 
 Write-Step "source:  $SkillsSrc"
 Write-Step "target:  $Target"

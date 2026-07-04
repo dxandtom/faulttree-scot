@@ -107,6 +107,13 @@ def build_rows(index: dict, leaf_only: bool = False):
     if not conditioned:
         raise ValueError("该 tree_index 没有任何带判据的节点,无法给辩论引擎出题"
                          "(评测树需先用 enrich_conditions 把判据从 rca_input/binding_question 合回)")
+    # 引擎建树硬止于 L6(_build_deeper_levels 在 level>6 直接返回空):更深的行会被**静默丢弃**,
+    # 深层真根因无声消失、幸存链全按"无条件进入"得 1.0 高置信——宁可当场报错也不出这种假结果。
+    too_deep = sorted(nid for nid in conditioned if depth[nid] > 6)
+    if too_deep:
+        raise ValueError(
+            f"引擎只支持 6 层(L1–L6),以下带判据节点重定基后深度>6,会被引擎静默截丢:{too_deep}。"
+            f"请截更小的子树(generate 时把 --start-node 下移到更深的根)再喂辩论引擎。")
     keep = {root}
     for nid in conditioned:                          # 带判据节点 + 一路到根的祖先
         cur = nid
