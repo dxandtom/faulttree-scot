@@ -84,11 +84,16 @@ def enrich_conditions(index: dict, rca_input: dict | None = None,
 
 
 def build_rows(index: dict, leaf_only: bool = False):
-    """→ (max_depth, rows, dropped);row = [(nid, name), ...](根→端点), 端点条件文本。
+    """→ (max_depth, rows, dropped);row = [(nid, name), ...](根→端点), 端点条件文本(可为空)。
 
-    **只收带判据的端点**:无判据/pass_through 的叶子一律不进 xlsx——辩论引擎对"空判据节点"
-    默认给满分 1.0(full match),这些叶子会以 1.0×1.0 的路径分屠榜 Top-K,把带判据的真路径
-    全部挤出去、且永远轮不到触发辩论(实测:真引擎与 mock 因此跑出一模一样的假排名)。"""
+    行布局按引擎建树的真实取法设计(读过引擎源码后定下,两条都是硬约束):
+    1. **每个保留节点自带一行**(路径止于该节点,判据=它自己的,没有就空)——引擎按
+       「分组第一行」提取该层节点的判据;若某节点没有自己的行,它会**偷走第一个子孙行的
+       判据**,判据沿整条链被涂抹(评分语义全错+多烧 LLM 匹配调用)。自带行按深度排序
+       恒在其分组第一行,保证每层取到的都是节点自己的判据。
+    2. **保留集 = 带判据节点 ∪ 其全部祖先**:无判据叶子/整支无判据的分支不进 xlsx——
+       引擎对空判据节点白给满分 1.0(full),会屠榜 Top-K;而空判据的**中间**自带行无害
+       (引擎语义=无条件进入,路径乘 1.0,正是结构节点该有的行为)。"""
     nodes = index.get("nodes") or {}
     root = index.get("root")
     if not nodes or root not in nodes:
@@ -98,22 +103,26 @@ def build_rows(index: dict, leaf_only: bool = False):
     def _has_cond(n):
         return bool(str(n.get("condition") or "").strip()) and not n.get("pass_through")
 
-    leaves = [nid for nid, n in nodes.items() if not (n.get("children") or [])]
-    ends = [nid for nid in leaves if _has_cond(nodes[nid])]            # 带判据的真叶子
-    dropped = len(leaves) - len(ends)
-    if not leaf_only:                                                   # + 带条件的中间节点
-        ends += [nid for nid, n in nodes.items()
-                 if (n.get("children") or []) and _has_cond(n)]
-    if not ends:
-        raise ValueError("该 tree_index 没有任何带判据的节点,无法给辩论引擎出题")
+    conditioned = [nid for nid, n in nodes.items() if nid in depth and _has_cond(n)]
+    if not conditioned:
+        raise ValueError("该 tree_index 没有任何带判据的节点,无法给辩论引擎出题"
+                         "(评测树需先用 enrich_conditions 把判据从 rca_input/binding_question 合回)")
+    keep = {root}
+    for nid in conditioned:                          # 带判据节点 + 一路到根的祖先
+        cur = nid
+        while cur and cur in nodes and cur not in keep:
+            keep.add(cur)
+            cur = nodes[cur].get("parent")
+    leaves_all = [nid for nid, n in nodes.items() if not (n.get("children") or [])]
+    dropped = sum(1 for nid in leaves_all if nid not in keep)
+
     rows, maxd = [], 0
-    for nid in sorted(set(ends), key=lambda x: (depth.get(x, 99), x)):
-        if nid not in depth:
-            continue
+    for nid in sorted(keep, key=lambda x: (depth.get(x, 99), x)):   # 浅在前:自带行恒居分组首行
         path = _path(nodes, nid)
         maxd = max(maxd, len(path))
-        cond = str(nodes[nid].get("condition") or "").strip()
+        cond = str(nodes[nid].get("condition") or "").strip() if _has_cond(nodes[nid]) else ""
         rows.append(([(p, nodes[p].get("name") or p) for p in path], cond))
+    maxd = max(maxd, 3)                              # 引擎建树硬依赖 L1–L3 列存在,不足则补空列
     return maxd, rows, dropped
 
 
@@ -137,8 +146,9 @@ def write_xlsx(index: dict, out_path: Path, leaf_only: bool = False) -> int:
                 nid, name = path[i]
                 row += [nid, name, name]          # Code=node_id(主键载体);中英名都填中文名(无英文源)
             else:
-                row += ["", "", ""]
-        row.append(cond)
+                row += [None, None, None]         # 必须是真空单元格(None):引擎用 pandas groupby,
+                                                  # NaN 组会被丢弃;写 "" 会生出 code="" 的幽灵节点
+        row.append(cond if cond else None)
         ws.append(row)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)

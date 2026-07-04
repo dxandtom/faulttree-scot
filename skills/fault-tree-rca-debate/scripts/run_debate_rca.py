@@ -83,6 +83,18 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
             f"  config 顶层键 = {sorted(cfg)};已映射到 = {sorted(flat)}。\n"
             f"  请核对 config.yaml 的嵌套层级/键名(或在 vendor/bridge.py 里自行构造配置)。"
             f"**不要**让引擎拿空配置跑——那会静默降级、不调 LLM、产出无效结果。")
+
+    # 引擎的 LLM 客户端用 requests,会吃 HTTP(S)_PROXY 代理环境变量——不同 shell 代理配置不同,
+    # 是"同一台机器有时通有时不通"的元凶。把 LLM 主机塞进 NO_PROXY,内网直连、与 shell 无关。
+    import os
+    from urllib.parse import urlparse
+    host = urlparse(str(flat.get("llm_base_url") or "")).hostname
+    if host:
+        for var in ("NO_PROXY", "no_proxy"):
+            cur = os.environ.get(var, "")
+            if host not in cur:
+                os.environ[var] = f"{cur},{host}" if cur else host
+        print(f"[net] 已把 LLM 主机加入 NO_PROXY(内网直连,不走 shell 代理)")
     return FaultTreeProcessor(EvaluationConfig(**flat)), \
         f"vendor 引擎(config={cfg_file},已映射 {len(flat)} 字段:{','.join(sorted(flat))})"
 
@@ -138,12 +150,20 @@ def main() -> int:
     finally:
         os.chdir(prev_cwd)
 
+    # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——
+    # 转成 dict;sibling_nodes 里嵌着整棵子树引用,序列化会爆体积,丢掉(名字已在 debate 正文里)。
+    import dataclasses
+    recs = []
+    for r in debate_records or []:
+        d = dataclasses.asdict(r) if dataclasses.is_dataclass(r) else (r if isinstance(r, dict) else {"repr": str(r)})
+        d.pop("sibling_nodes", None)
+        recs.append(d)
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k,
             "top_k_paths_original": top_orig, "top_k_paths_softmax": top_soft,
-            "top_k_paths_ratio": top_ratio, "debate_records": debate_records}
-    (out_dir / "rca_debate_full.json").write_text(json.dumps(full, ensure_ascii=False, indent=2),
-                                                  encoding="utf-8")
+            "top_k_paths_ratio": top_ratio, "debate_records": recs}
+    (out_dir / "rca_debate_full.json").write_text(
+        json.dumps(full, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     print(f"[3/4] 引擎原始输出 → {out_dir / 'rca_debate_full.json'}"
           f"(路径 {len(top_orig)}/{len(top_soft)}/{len(top_ratio)},辩论 {len(debate_records)} 节点)")
 
