@@ -55,7 +55,7 @@ fi
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SKILLS_SRC="$SRC/skills"
-DIRS=(cs-scot-generate cs-scot-execute fault-tree-rca cs-scot-benchmark cs-scot-eval)
+DIRS=(cs-scot-generate cs-scot-execute fault-tree-rca fault-tree-rca-debate cs-scot-benchmark cs-scot-eval)
 
 echo "[install] source:  $SKILLS_SRC"
 echo "[install] target:  $TARGET"

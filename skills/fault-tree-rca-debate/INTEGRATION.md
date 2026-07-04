@@ -1,13 +1,13 @@
 # 本地组装与核对清单(把合作方引擎接进来)
 
-> 背景:合作方交付 = `fault_tree_evaluator_bfs_advanced.py` + `config.yaml` 两个文件,
-> **不入本仓**(含密钥/内部代码)。本仓携带的是全部适配壳 + 假引擎自测。
-> 壳已在 mock 模式下端到端验证(xlsx 生成 → question 渲染 → 引擎 → rca.json → validate_rca 通过);
-> 真引擎侧的接口假设**全部来自其文档**,以下清单帮你在本地半小时内核完。
+> 背景:合作方交付 = `fault_tree_evaluator_bfs_advanced.py` + `config.yaml` 两个文件。
+> 引擎 .py **已原样入库**(vendor/,不含密钥);`config.yaml` 含 API 密钥,**不入库**、须本地放入。
+> 下方核对清单 ①-⑤ 已按真实引擎源码逐条核毕(含真引擎离线冒烟:xlsx 生成 → question 渲染 →
+> 真引擎 fallback 模式 → 三机制 rca.json → validate_rca 通过);只剩 ⑥(LLM 连通)依赖你的本地网络。
 
-## 一、组装步骤(5 分钟)
-1. 把两个文件原样放进 `skills/fault-tree-rca-debate/vendor/`(目录已备好,gitignore 会挡住它们)。
-2. `pip install pyyaml openpyxl numpy`(引擎用 numpy;壳用前两个)。
+## 一、组装步骤(1 分钟)
+1. 把合作方的 `config.yaml` 原样放进 `skills/fault-tree-rca-debate/vendor/`(引擎 .py 已在,gitignore 只挡 config)。
+2. `pip install pandas numpy pyyaml openpyxl requests`(引擎用 pandas/numpy/requests;壳用 yaml/openpyxl)。
 3. 冒烟(不调 LLM,先验壳):
    ```bash
    python skills/fault-tree-rca-debate/scripts/run_debate_rca.py \
@@ -29,6 +29,12 @@
 | ⑥ | LLM 连通:config.yaml 的 base_url/model 在你环境可达(公司路由/MiniMax) | 单跑一个小场景 | 只改 config.yaml,不动代码 |
 
 ## 三、已知风险(壳已按此设计,但要人知道)
+- **层级偏置(引擎语义,壳无法修)**:引擎建树只给 L4+ 节点设 sibling_nodes,L2/L3 节点该键缺失
+  → 这两层零匹配节点走"单节点辩论"(无竞争辩护、无兄弟匹配惩罚),original 机制下浅层落败分支
+  得分系统性偏高、可能挤进 Top-K;softmax/ratio **不受影响**(其兄弟分组由 bfs_evaluate 按
+  parent_code 全层级正确计算)。解读 A/B/C 机制评测时把这一偏置与机制优劣分开看。
+- **深度上限 L6(引擎语义)**:引擎建树止于 6 层,更深的行被静默丢弃;壳已加硬守卫——带判据节点
+  重定基深度>6 时当场报错,提示截更小的子树,绝不无声出假结果。
 - **文本回声假阳**:引擎靠"判据文本 ∈ question"判匹配。壳的 question **只复述成立的判据**;
   被排除/数据不足的只报节点名。若合作方的 condition_matcher 是语义级(LLM)而非字面包含,
   这个策略依然安全(宁缺勿滥),但 full-match 率可能偏低——观察后可放宽。

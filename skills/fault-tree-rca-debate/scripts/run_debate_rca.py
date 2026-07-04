@@ -53,25 +53,32 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
         from fault_tree_evaluator_bfs_advanced import FaultTreeProcessor, EvaluationConfig  # type: ignore
     except ImportError as e:
         raise SystemExit(f"未找到真实引擎:{vendor_dir}/fault_tree_evaluator_bfs_advanced.py({e})。"
-                         f"把同事的两个文件放进 vendor/(见其 README),或先用 --mock 自测适配层。")
+                         f"引擎 .py 已随仓携带——缺失请用 git checkout 恢复或核对 --vendor-dir;"
+                         f"config.yaml 须本地放入 vendor/(见其 README);或先用 --mock 自测适配层。")
     import dataclasses
     known = {f.name for f in dataclasses.fields(EvaluationConfig)}
 
-    # 展平配置:合作方 config.yaml 常见嵌套结构(如 llm:{api_key,base_url,model_name}、evaluation:{top_k,...}),
-    # 而 EvaluationConfig 是扁平字段(llm_api_key/top_k/...)。子键按「父_子」和「子」两种拼法都试着对。
-    flat = {}
-    for k, v in cfg.items():
-        if isinstance(v, dict):
-            for sk, sv in v.items():
-                for cand in (f"{k}_{sk}", str(sk)):
-                    if cand in known:
-                        flat.setdefault(cand, sv)
-                        break
-        elif k in known:
-            flat.setdefault(k, v)
-    unmapped = sorted(set(cfg) - set(flat) - {k for k in cfg if isinstance(cfg[k], dict)})
+    # 展平配置:合作方 config.yaml 是嵌套结构,且**深达两层**——引擎自己的 main() 读的就是
+    # evaluation.debate.num_debate_agents / evaluation.thresholds.sibling_match_threshold,
+    # 而 EvaluationConfig 是扁平字段(llm_api_key/top_k/num_debate_agents/...)。
+    # 递归下钻到叶子,按「路径后缀」从长到短试拼(llm.api_key→llm_api_key;evaluation.debate.
+    # num_debate_agents→num_debate_agents),只走一层会把 debate 调参静默丢回默认值。
+    flat, unmapped = {}, []
+    def _walk(prefix: list, d: dict):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                _walk(prefix + [str(k)], v)
+                continue
+            parts = prefix + [str(k)]
+            cand = next(("_".join(parts[i:]) for i in range(len(parts))
+                         if "_".join(parts[i:]) in known), None)
+            if cand:
+                flat.setdefault(cand, v)
+            else:
+                unmapped.append(".".join(parts))
+    _walk([], cfg)
     if unmapped:
-        print(f"[warn] config.yaml 有映射不到引擎字段的键,已忽略:{unmapped}")
+        print(f"[warn] config.yaml 有映射不到引擎字段的键,已忽略:{sorted(unmapped)}")
 
     # 硬门禁:LLM 关键字段一个都没映射到 → 引擎会拿空配置"静默降级"成不调 LLM 的兜底模式,
     # 跑出看似正常实则无效的结果(实测 0.03s/场景、debate_records 全空)。宁可当场报错。
