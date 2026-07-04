@@ -73,7 +73,11 @@ def main() -> int:
     ap.add_argument("--config")
     a = ap.parse_args()
 
-    suite, trees = Path(a.suite), Path(a.trees)
+    # 路径全转绝对:真引擎运行时工作目录会切到 vendor/(复刻"右键直跑"环境),相对路径会失效
+    suite, trees = Path(a.suite).resolve(), Path(a.trees).resolve()
+    a.out = str(Path(a.out).resolve())
+    vendor_dir = Path(a.vendor_dir).resolve()
+    cfg_path = Path(a.config).resolve() if a.config else None
     answers_dir = suite / "_answers"
     scens = sorted(d for d in suite.iterdir()
                    if d.is_dir() and d.name != "_answers" and (d / "rca_input.json").exists()
@@ -82,8 +86,11 @@ def main() -> int:
         print("没有匹配的场景", file=sys.stderr)
         return 2
 
-    proc, desc = _load_processor(Path(a.vendor_dir), Path(a.config) if a.config else None,
-                                 a.engine == "mock")
+    import os
+    prev_cwd = os.getcwd()
+    if a.engine == "real":
+        os.chdir(vendor_dir)          # 引擎内部相对路径(自读 config.yaml 等)按 vendor/ 解析
+    proc, desc = _load_processor(vendor_dir, cfg_path, a.engine == "mock")
     print(f"引擎 = {desc};场景 {len(scens)} 个;k={a.k}")
     if a.engine == "mock":
         print("⚠ MOCK 引擎:以下数字只验证管线与指标口径,机制优劣以真引擎结果为准。\n")
@@ -168,6 +175,7 @@ def main() -> int:
         {"engine": a.engine, "k": a.k, "overall": overall, "by_tier": by_tier,
          "rows": rows, "abstention_gap": gap_rows}, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n明细已写 {a.out}")
+    os.chdir(prev_cwd)
     return 0
 
 

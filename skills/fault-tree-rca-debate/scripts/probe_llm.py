@@ -57,35 +57,51 @@ def main() -> int:
     print(f"目标: {_mask(base)}  model={model}  api_key={'已提供' if key else '空!'}")
     print(f"代理环境变量(只报名字): {proxies or '无'}")
 
-    url = base.rstrip("/") + "/chat/completions"
-    payload = {"model": model, "messages": [{"role": "user", "content": "ping,只回复 pong"}],
-               "max_tokens": 8}
     try:
         import requests
     except ImportError:
         print("[3] 缺 requests(引擎也依赖它):pip install requests")
         return 3
-    try:
-        import urllib3
-        urllib3.disable_warnings()
-        r = requests.post(url, json=payload, headers={"Authorization": f"Bearer {key}"},
-                          timeout=20, verify=False)
-        body = (r.text or "")[:150]
-        if key:
-            body = body.replace(key, "***")
-        print(f"HTTP {r.status_code};响应片段:{body}")
-        if r.status_code == 200:
-            print("结论:LLM 可达且能出话。若引擎仍 0 辩论/毫秒级完成 → 引擎内部没走到 LLM(找同事核对触发条件/静默兜底)。")
-            return 0
-        print("结论:网络通,但服务/路径/鉴权有问题(按状态码排查:401/403=鉴权,404=路径,5xx=服务端)。")
-        return 1
-    except Exception as e:
-        msg = str(e)
-        if key:
-            msg = msg.replace(key, "***")
-        print(f"[2] 网络异常:{type(e).__name__}: {msg[:200]}")
-        print("结论:从 Python 也连不上——不是引擎问题,是网络/VPN/代理;引擎此前的'成功'是静默降级。")
+    import urllib3
+    urllib3.disable_warnings()
+
+    b = base.rstrip("/")
+    msg = [{"role": "user", "content": "ping,只回复 pong"}]
+    # 路由器(modelrouter)通常按「路径+格式」路由,不同引擎用不同调用风格——逐个试,谁 200 谁就是引擎该用的
+    attempts = [
+        ("OpenAI 风格 /chat/completions", b + "/chat/completions",
+         {"model": model, "messages": msg, "max_tokens": 8},
+         {"Authorization": f"Bearer {key}"}),
+        ("Anthropic 风格 /messages(x-api-key)", b + "/messages",
+         {"model": model, "messages": msg, "max_tokens": 8},
+         {"x-api-key": key, "anthropic-version": "2023-06-01"}),
+        ("Anthropic 风格 /messages(Bearer)", b + "/messages",
+         {"model": model, "messages": msg, "max_tokens": 8},
+         {"Authorization": f"Bearer {key}", "anthropic-version": "2023-06-01"}),
+    ]
+    net_fail = 0
+    for name, url, payload, headers in attempts:
+        try:
+            r = requests.post(url, json=payload, headers=headers, timeout=20, verify=False)
+            body = (r.text or "")[:120]
+            if key:
+                body = body.replace(key, "***")
+            print(f"  [{name}] HTTP {r.status_code};片段:{body}")
+            if r.status_code == 200:
+                print(f"结论:LLM 可达,路由器认「{name}」这种调用格式。"
+                      "若引擎仍 0 辩论/毫秒级完成 → 问题在引擎内部没走到 LLM(工作目录/静默兜底),不在网络。")
+                return 0
+        except Exception as e:
+            emsg = str(e)
+            if key:
+                emsg = emsg.replace(key, "***")
+            print(f"  [{name}] 网络异常:{type(e).__name__}: {emsg[:140]}")
+            net_fail += 1
+    if net_fail == len(attempts):
+        print("结论:从 Python 全都连不上——网络/VPN/代理问题;引擎此前的'成功'是静默降级。")
         return 2
+    print("结论:网络通,但三种常见格式都没被路由/接受——引擎用的是别的调用方式,需要看引擎发请求的那段代码。")
+    return 1
 
 
 if __name__ == "__main__":

@@ -105,23 +105,37 @@ def main() -> int:
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
     a = ap.parse_args()
 
+    # 全部路径先转绝对:真引擎运行时我们会把工作目录切到 vendor/(见下),相对路径会失效
+    a.rca_input = str(Path(a.rca_input).resolve())
+    a.tree_index = str(Path(a.tree_index).resolve())
+    out_dir = Path(a.out_dir).resolve()
+    vendor_dir = Path(a.vendor_dir).resolve()
+    cfg_path = Path(a.config).resolve() if a.config else None
     rca_input = json.loads(Path(a.rca_input).read_text(encoding="utf-8"))
     tree_index = json.loads(Path(a.tree_index).read_text(encoding="utf-8"))
-    out_dir = Path(a.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     question = build_question(rca_input, tree_index)
     print(f"[1/4] 证据 question 已渲染({len(question)} 字符)")
 
-    proc, desc = _load_processor(Path(a.vendor_dir), Path(a.config) if a.config else None, a.mock)
-    # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
-    # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
-    xlsx = out_dir / "vendor_fault_tree.xlsx"
-    n_rows = write_xlsx(tree_index, xlsx, a.leaf_only)
-    print(f"[2/4] vendor 格式故障树已生成({n_rows} 行 → {xlsx.name});引擎={desc}")
-    df = proc.load_fault_tree(str(xlsx))
-    tree = proc.build_tree_structure(df)
-    top_orig, top_soft, top_ratio, debate_records = proc.find_top_k_paths(tree, question, a.k)
+    # 真引擎:把工作目录切到 vendor/,**复刻"右键直跑"的运行环境**——引擎内部若有相对路径操作
+    # (自行读 config.yaml、写结果目录等),都按 vendor/ 解析;否则在仓库根下运行会静默读不到而降级。
+    import os
+    prev_cwd = os.getcwd()
+    if not a.mock:
+        os.chdir(vendor_dir)
+    try:
+        proc, desc = _load_processor(vendor_dir, cfg_path, a.mock)
+        # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
+        # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
+        xlsx = out_dir / "vendor_fault_tree.xlsx"
+        n_rows = write_xlsx(tree_index, xlsx, a.leaf_only)
+        print(f"[2/4] vendor 格式故障树已生成({n_rows} 行 → {xlsx.name});引擎={desc}")
+        df = proc.load_fault_tree(str(xlsx))
+        tree = proc.build_tree_structure(df)
+        top_orig, top_soft, top_ratio, debate_records = proc.find_top_k_paths(tree, question, a.k)
+    finally:
+        os.chdir(prev_cwd)
 
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k,
