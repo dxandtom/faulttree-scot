@@ -33,10 +33,10 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent.parent.parent
 sys.path.insert(0, str(_HERE))
-from facts_to_question import build_question            # noqa: E402
-from result_adapter import _MECH_KEY                    # noqa: E402
-from run_debate_rca import _load_processor              # noqa: E402
-from tree_to_vendor_xlsx import write_xlsx              # noqa: E402
+from facts_to_question import build_question                    # noqa: E402
+from result_adapter import _MECH_KEY                            # noqa: E402
+from run_debate_rca import _load_processor                      # noqa: E402
+from tree_to_vendor_xlsx import enrich_conditions, write_xlsx   # noqa: E402
 
 MECHS = list(_MECH_KEY)
 
@@ -96,7 +96,6 @@ def main() -> int:
         print("⚠ MOCK 引擎:以下数字只验证管线与指标口径,机制优劣以真引擎结果为准。\n")
 
     rows, gap_rows = [], []
-    tree_cache = {}
     for sd in scens:
         ans_p = answers_dir / f"{sd.name}.json"
         if not ans_p.exists():
@@ -111,16 +110,20 @@ def main() -> int:
             continue
         tree_index = json.loads(ti_p.read_text(encoding="utf-8"))
         rca_input = json.loads((sd / "rca_input.json").read_text(encoding="utf-8"))
+        # 评测树 condition 全空,判据文本在各场景的 rca_input/binding_question 里 → 逐场景合回。
+        # 因此 xlsx/建树也逐场景做(不能按树缓存:同树不同场景的判据集不同)。
+        bq_p = sd / "binding_question.json"
+        bq = json.loads(bq_p.read_text(encoding="utf-8")) if bq_p.exists() else None
+        enriched = enrich_conditions(tree_index, rca_input, bq)
 
-        question = build_question(rca_input, tree_index)
+        question = build_question(rca_input, enriched)
         t0 = time.time()
-        if tree_name not in tree_cache:                       # 同一棵树的 xlsx/建树只做一次
-            work = Path(a.out).resolve().parent / "_ab_xlsx"  # 落盘不删:免 Windows 句柄清理坑 + 可审计
-            work.mkdir(parents=True, exist_ok=True)
-            xlsx = work / f"{tree_name}.xlsx"
-            write_xlsx(tree_index, xlsx)
-            tree_cache[tree_name] = proc.build_tree_structure(proc.load_fault_tree(str(xlsx)))
-        top = dict(zip(MECHS, proc.find_top_k_paths(tree_cache[tree_name], question, a.k)[:3]))
+        work = Path(a.out).resolve().parent / "_ab_xlsx"      # 落盘不删:免 Windows 句柄清理坑 + 可审计
+        work.mkdir(parents=True, exist_ok=True)
+        xlsx = work / f"{sd.name}.xlsx"
+        write_xlsx(enriched, xlsx)
+        tree = proc.build_tree_structure(proc.load_fault_tree(str(xlsx)))
+        top = dict(zip(MECHS, proc.find_top_k_paths(tree, question, a.k)[:3]))
         dt = time.time() - t0
 
         base = {"scenario": sd.name, "tree": tree_name, "nodes": ans.get("tree_nodes"),

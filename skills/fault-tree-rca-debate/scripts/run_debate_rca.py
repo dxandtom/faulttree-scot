@@ -26,9 +26,9 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
-from facts_to_question import build_question          # noqa: E402
-from result_adapter import to_rca_json, _MECH_KEY     # noqa: E402
-from tree_to_vendor_xlsx import write_xlsx            # noqa: E402
+from facts_to_question import build_question                    # noqa: E402
+from result_adapter import to_rca_json, _MECH_KEY               # noqa: E402
+from tree_to_vendor_xlsx import enrich_conditions, write_xlsx   # noqa: E402
 
 
 def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
@@ -113,6 +113,7 @@ def main() -> int:
     cfg_path = Path(a.config).resolve() if a.config else None
     rca_input = json.loads(Path(a.rca_input).read_text(encoding="utf-8"))
     tree_index = json.loads(Path(a.tree_index).read_text(encoding="utf-8"))
+    tree_index = enrich_conditions(tree_index, rca_input)   # 评测树判据在 rca_input 里,合回;生产树无感
     out_dir.mkdir(parents=True, exist_ok=True)
 
     question = build_question(rca_input, tree_index)
