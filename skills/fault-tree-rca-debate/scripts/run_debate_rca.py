@@ -84,7 +84,7 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
             f"  请核对 config.yaml 的嵌套层级/键名(或在 vendor/bridge.py 里自行构造配置)。"
             f"**不要**让引擎拿空配置跑——那会静默降级、不调 LLM、产出无效结果。")
     return FaultTreeProcessor(EvaluationConfig(**flat)), \
-        f"vendor 引擎(config={cfg_file},已映射 {len(flat)} 个字段)"
+        f"vendor 引擎(config={cfg_file},已映射 {len(flat)} 字段:{','.join(sorted(flat))})"
 
 
 def main() -> int:
