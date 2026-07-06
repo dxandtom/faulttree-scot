@@ -158,7 +158,8 @@ def write_xlsx(index: dict, out_path: Path, leaf_only: bool = False, allowed: se
     n_cond_rows = sum(1 for _, c in rows if c)
     n_cond_lines = sum(_est_cond_lines(c) for _, c in rows if c)
     print(f"  [成本预估] 带判据行 {n_cond_rows}、判据约 {n_cond_lines} 条 → 引擎至少 ≈{n_cond_lines} 次"
-          f"条件匹配 LLM 调用;每个零匹配兄弟组再加(组员数+评委数)次辩论/评分调用。大树先用 --pruned-only。")
+          f"条件匹配 LLM 调用;每个零匹配兄弟组再加(组员数+评委数)次辩论/评分调用,大树一跑几十分钟——"
+          f"执行环境的超时要给足(见 SKILL.md 执行手册)。")
     wb = Workbook()
     ws = wb.active
     ws.title = "fault_tree"
