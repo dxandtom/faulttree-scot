@@ -267,7 +267,10 @@ def _wrap_debate_memo(eng) -> bool:
     memo, lock = {}, threading.Lock()
 
     def debate(self, my_node, sibling_nodes, question):
-        key = (my_node.get("code"), tuple(n.get("code") for n in sibling_nodes), question)
+        # 组键按 code 排序:引擎每场辩论把目标节点排在组首(同一组在 m 场辩论里顺序各不同),
+        # 有序元组永远对不上;组是集合语义,排序后同组即同键
+        key = (my_node.get("code"),
+               tuple(sorted(str(n.get("code")) for n in sibling_nodes)), question)
         with lock:
             if key in memo:
                 return memo[key]
