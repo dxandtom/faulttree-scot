@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""三种得分机制(original / softmax / ratio)的一键 A/B/C 测评(合作方点名要的实测)。
+"""三种得分机制(original / softmax / ratio)的一键 A/B/C 测评(定默认机制的实测依据)。
 
 数据集 = cs-scot-eval/suite_real:30 个**带标准答案**的冻结场景(5 棵树 17–320 节点 × 6 类情形),
 每个场景的 rca_input.json / tree_index / 答案都已入库 —— 开箱即测,不必重造数据。

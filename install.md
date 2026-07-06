@@ -7,8 +7,8 @@
 - **cs-scot-generate** — 把故障树 Excel 编译成场景诊断 skill(生成解析脚本 + SCoT 计划)
 - **cs-scot-execute** — 按 `plan.json` 顺序执行 SCoT 计划
 - **fault-tree-rca** — 综合根因分析
-- **fault-tree-rca-debate** — 辩论式 RCA 引擎(合作方算法)的集成壳,fault-tree-rca 的可切换平替
-  (真跑需把含密钥的 `vendor/config.yaml` 本地放入,见该技能 INTEGRATION.md;`--mock` 自测不需要)
+- **fault-tree-rca-debate** — 辩论式多代理 RCA 技能,fault-tree-rca 的可切换平替
+  (真跑需把含密钥的 `vendor/config.yaml` 本地放入,见该技能 SKILL.md;`--mock` 自测不需要)
 - **cs-scot-benchmark** — 对 generate 产物跑基准(压缩/稳定/可复现/护栏),出报告 txt
 - **cs-scot-eval** — 合成故障注入测诊断准确率(自带 ground truth),出准确率表
 

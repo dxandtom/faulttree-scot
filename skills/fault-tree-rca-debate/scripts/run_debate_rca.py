@@ -45,10 +45,11 @@ def _coerce(s: str):
 
 
 def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
-                    overrides: dict | None = None):
-    """→ (processor, 描述串)。真实 vendor 的接口差异只会打到这一个函数里(见 INTEGRATION.md)。
+                    overrides: dict | None = None, shield: bool = False):
+    """→ (processor, 描述串)。引擎的接口差异只会打到这一个函数里(见 references/engine_ops.md 升级核对)。
     overrides:命令行 --set 的引擎字段覆盖(如 num_judging_agents=2),盖在 config.yaml 之上——
-    临时调参不用动同事的 config 文件。"""
+    临时调参不用动配置文件。
+    shield=True 时自动收敛引擎内层重试(见下),--set 显式指定的不动。"""
     if mock:
         from mock_vendor import FaultTreeProcessor
         return FaultTreeProcessor({}), "mock(确定性假引擎,不调 LLM)"
@@ -74,7 +75,7 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
     import dataclasses
     known = {f.name for f in dataclasses.fields(EvaluationConfig)}
 
-    # 展平配置:合作方 config.yaml 是嵌套结构,且**深达两层**——引擎自己的 main() 读的就是
+    # 展平配置:引擎的 config.yaml 是嵌套结构,且**深达两层**——引擎自己的 main() 读的就是
     # evaluation.debate.num_debate_agents / evaluation.thresholds.sibling_match_threshold,
     # 而 EvaluationConfig 是扁平字段(llm_api_key/top_k/num_debate_agents/...)。
     # 递归下钻到叶子,按「路径后缀」从长到短试拼(llm.api_key→llm_api_key;evaluation.debate.
@@ -103,6 +104,20 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
         flat[k] = v
     if overrides:
         print(f"[override] 命令行覆盖引擎参数:{overrides}")
+
+    # 重试收敛:引擎内层重试间隔按 retry_delay×次数 递增,config 常见 30 次/15s 之类的
+    # 豪放配置——光睡眠就 >100 分钟/调用,再叠加壳的外层加固(shield)纯属双重重试。
+    # shield 开着时把内层收敛成"快失败",重试交给外层退避;--set 显式指定的尊重不动。
+    if shield:
+        clamped = {}
+        for k, cap in (("max_retries", 2), ("retry_delay", 1.0)):
+            v = flat.get(k)
+            if k not in (overrides or {}) and isinstance(v, (int, float)) and v > cap:
+                clamped[k] = f"{v}→{cap}"
+                flat[k] = cap
+        if clamped:
+            print(f"[retry收敛] 外层加固已接管重试,引擎内层重试参数已收敛:{clamped}"
+                  f"(要保留 config 原值请 --set 显式指定,或 --no-llm-shield)")
 
     # 硬门禁:LLM 关键字段一个都没映射到 → 引擎会拿空配置"静默降级"成不调 LLM 的兜底模式,
     # 跑出看似正常实则无效的结果(实测 0.03s/场景、debate_records 全空)。宁可当场报错。
@@ -180,6 +195,11 @@ def main() -> int:
                          "--set num_judging_agents=2 --set llm_temperature=0.2")
     ap.add_argument("--no-llm-shield", action="store_true",
                     help="关闭壳层 LLM 传输加固(默认开:外层重试+成功撤销降级标记,防一阵 502 毁全程)")
+    ap.add_argument("--parallel", type=int, default=4, metavar="N",
+                    help="并发 LLM 调用数(默认 4;--parallel 1 退回纯串行;评分公式零改动,"
+                         "过高易压垮网关吃 502)")
+    ap.add_argument("--no-match-cache", action="store_true",
+                    help="关闭匹配记忆化缓存(默认开:同一节点判据只问一次 LLM,辩论里的重复兄弟检查全走缓存)")
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
     a = ap.parse_args()
 
@@ -221,11 +241,15 @@ def main() -> int:
         overrides[k.strip()] = _coerce(v)
 
     try:
-        proc, desc = _load_processor(vendor_dir, cfg_path, a.mock, overrides)
+        proc, desc = _load_processor(vendor_dir, cfg_path, a.mock, overrides,
+                                     shield=not a.no_llm_shield)
         if not a.mock and not a.no_llm_shield:
             if _shield_llm(proc):
                 print("[llm加固] 已启用外层重试(×3,退避 2s/4s):瞬时 502/超时不再让引擎永久降级"
                       "关键词匹配;--no-llm-shield 可关闭")
+        if not a.mock:
+            from engine_boost import apply as _boost
+            _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache)
         # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
         # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
         xlsx = out_dir / "vendor_fault_tree.xlsx"
@@ -245,6 +269,12 @@ def main() -> int:
     if degraded:
         print("⚠ [降级警告] 运行中 LLM 连接曾失败,引擎已自动退回关键词匹配 fallback 续跑——"
               "本次结果的匹配语义已受损,建议排查网络/服务(probe_llm.py)后重跑。")
+    # 瞬时失败可见化:shield 恢复后"中途失败过"不再触发降级,但个别调用走了兜底
+    # (单条判据关键词匹配/辩护缺席/评委默认分)。计数>0 就要知道,多了该重跑。
+    n_fail = getattr(getattr(ev, "llm_client", None), "_boost_fail_count", 0)
+    if n_fail and not degraded:
+        print(f"⚠ [瞬时失败] 运行期间 {n_fail} 次 LLM 调用重试耗尽(相应判据/辩护/评委走了兜底,"
+              f"受影响的匹配结果已拒绝入缓存);整体未降级,失败数偏多时建议重跑。")
 
     # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——
     # 转成 dict;sibling_nodes 里嵌着整棵子树引用,序列化会爆体积,丢掉(名字已在 debate 正文里)。
@@ -256,6 +286,7 @@ def main() -> int:
         recs.append(d)
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k, "llm_degraded": degraded,
+            "llm_call_failures": n_fail,
             "top_k_paths_original": top_orig, "top_k_paths_softmax": top_soft,
             "top_k_paths_ratio": top_ratio, "debate_records": recs}
     (out_dir / "rca_debate_full.json").write_text(
