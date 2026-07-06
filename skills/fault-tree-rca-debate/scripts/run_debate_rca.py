@@ -10,9 +10,11 @@
       result_adapter 出 rca.json(--mechanism all 时三份都出,便于 A/B/C 评测)→
       原始引擎输出落 rca_debate_full.json(排查/审计用)。
 
-用法:
-  run_debate_rca.py --rca-input <result/rca_input.json> --tree-index <tree/<场景>.tree_index.json> \
-      --out-dir <result/> [--mechanism original|softmax|ratio|all] [--k 3] [--mock] \
+用法(标准产物布局下最小命令,tree-index/out-dir 自动推断):
+  run_debate_rca.py --rca-input <OUT>/result/rca_input.json [--mechanism all]
+完整参数(非标准布局/调参时):
+  run_debate_rca.py --rca-input <...> [--tree-index <...>] [--out-dir <...>]
+      [--mechanism original|softmax|ratio|all] [--k 3] [--mock] [--set K=V ...]
       [--vendor-dir <默认 ../vendor>] [--config <默认 vendor/config.yaml>]
 产物:<out-dir>/rca.json(=所选机制;all 时=original)+ rca.<机制>.json ×3(all 时)+ rca_debate_full.json
 """
@@ -178,9 +180,12 @@ def main() -> int:
     except Exception:
         pass
     ap = argparse.ArgumentParser(description="辩论式 RCA 执行壳(rca_input → rca.json)")
-    ap.add_argument("--rca-input", required=True)
-    ap.add_argument("--tree-index", required=True)
-    ap.add_argument("--out-dir", required=True, help="通常就是产物的 result/ 目录")
+    ap.add_argument("--rca-input", "--input", dest="rca_input", required=True,
+                    help="result/rca_input.json(--input 是别名,写错参数名的容错)")
+    ap.add_argument("--tree-index",
+                    help="<OUT>/tree/<场景>.tree_index.json;缺省时按标准布局自动发现"
+                         "(rca_input 上两级的 tree/ 下唯一的 *.tree_index.json)")
+    ap.add_argument("--out-dir", help="产物目录;缺省=rca_input 所在目录(通常就是 result/)")
     ap.add_argument("--mechanism", default="all", choices=list(_MECH_KEY) + ["all"])
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--mock", action="store_true", help="用确定性假引擎跑通适配层(不调 LLM)")
@@ -205,6 +210,22 @@ def main() -> int:
 
     # 全部路径先转绝对:真引擎运行时我们会把工作目录切到 vendor/(见下),相对路径会失效
     a.rca_input = str(Path(a.rca_input).resolve())
+    # tree-index / out-dir 按标准产物布局(<OUT>/result/rca_input.json + <OUT>/tree/*.tree_index.json)
+    # 自动推断——最小命令只需 --rca-input;非标准布局(如评测场景)才需要显式传。
+    ri_path = Path(a.rca_input)
+    if not a.out_dir:
+        a.out_dir = str(ri_path.parent)
+        print(f"[默认] --out-dir 未给,用 rca_input 所在目录:{a.out_dir}")
+    if not a.tree_index:
+        tree_dir = ri_path.parent.parent / "tree"
+        cands = sorted(tree_dir.glob("*.tree_index.json")) if tree_dir.is_dir() else []
+        if len(cands) == 1:
+            a.tree_index = str(cands[0])
+            print(f"[默认] --tree-index 未给,按标准布局自动发现:{a.tree_index}")
+        else:
+            raise SystemExit(
+                f"--tree-index 未给,且无法自动发现:{tree_dir} 下找到 {len(cands)} 个候选"
+                f"{[c.name for c in cands] if cands else ''}。请显式传 --tree-index <tree_index.json>。")
     a.tree_index = str(Path(a.tree_index).resolve())
     out_dir = Path(a.out_dir).resolve()
     vendor_dir = Path(a.vendor_dir).resolve()
