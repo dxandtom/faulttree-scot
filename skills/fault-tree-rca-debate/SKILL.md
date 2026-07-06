@@ -23,6 +23,9 @@ python "<本目录>/scripts/run_debate_rca.py" \
 ```
 - 产物:`rca.json`(默认=original 机制)+ `rca.original/softmax/ratio.json` 三份 +
   `rca_debate_full.json`(引擎原始输出,含辩论记录,审计用)。
+- **版本管理**:重跑时上一轮 debate 产物自动归档到 `<out-dir>/debate_runs/<时间戳>/`,
+  out-dir 里永远只有当前轮(与 runner 的 runs/ 同一哲学)——已存在的 rca*.json 一律是
+  上一轮的,要新结论直接重跑即可,别把旧产物当本轮结果汇报。
 - 跑完自动过与手工路径同一道闸门:`fault-tree-rca/scripts/validate_rca.py`。
 
 ## 一次性配置(**只在首次使用/换机器/换 config 时做**;做过就跳过,别每次重复)

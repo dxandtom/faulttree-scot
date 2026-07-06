@@ -214,6 +214,19 @@ def main() -> int:
     tree_index = enrich_conditions(tree_index, rca_input)   # 评测树判据在 rca_input 里,合回;生产树无感
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # 版本管理(与 runner 的 runs/ 同一哲学):out-dir 里永远只有**当前轮** debate 产物。
+    # 重跑前把上一轮整体归档到 debate_runs/<时间戳>/——否则新旧 rca.json 混在一起,
+    # agent 会把上一轮结果误当本轮汇报(本地真跑实锤过)。
+    products = ["rca.json", "rca_debate_full.json", "vendor_fault_tree.xlsx"] \
+        + [f"rca.{m}.json" for m in _MECH_KEY]
+    stale = [p for p in products if (out_dir / p).exists()]
+    if stale:
+        arch = out_dir / "debate_runs" / datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        arch.mkdir(parents=True, exist_ok=True)
+        for p in stale:
+            (out_dir / p).rename(arch / p)
+        print(f"[归档] 上一轮 debate 产物 {len(stale)} 个 → {arch}(out-dir 只保留当前轮)")
+
     question = build_question(rca_input, tree_index)
     print(f"[1/4] 证据 question 已渲染({len(question)} 字符)")
 
