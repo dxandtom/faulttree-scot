@@ -16,13 +16,16 @@ runner 跑完 script 节点 → result/rca_input.json
   └─ 本技能  :跑下面这条命令,辩论引擎评分       → rca.json(评分排序,恒 probable 档)
 ```
 ```bash
-python "<本目录>/scripts/run_debate_rca.py" \
-  --rca-input "<OUT>/result/rca_input.json" \
-  --tree-index "<OUT>/tree/<场景>.tree_index.json" \
-  --out-dir "<OUT>/result" --mechanism all [--set K=V ...] [--pruned-only] [--mock]
+python "<本目录>/scripts/run_debate_rca.py" --rca-input "<OUT>/result/rca_input.json" --mechanism all
 ```
+参数名精确是 `--rca-input`(`--input` 也认);标准产物布局下 `--tree-index`(自动在
+`<OUT>/tree/` 找唯一的 `*.tree_index.json`)和 `--out-dir`(默认=rca_input 所在目录)
+**不用传**;评测场景等非标准布局才需要显式给这两个参数。
 - 产物:`rca.json`(默认=original 机制)+ `rca.original/softmax/ratio.json` 三份 +
   `rca_debate_full.json`(引擎原始输出,含辩论记录,审计用)。
+- **版本管理**:重跑时上一轮 debate 产物自动归档到 `<out-dir>/debate_runs/<时间戳>/`,
+  out-dir 里永远只有当前轮(与 runner 的 runs/ 同一哲学)——已存在的 rca*.json 一律是
+  上一轮的,要新结论直接重跑即可,别把旧产物当本轮结果汇报。
 - 跑完自动过与手工路径同一道闸门:`fault-tree-rca/scripts/validate_rca.py`。
 
 ## 一次性配置(**只在首次使用/换机器/换 config 时做**;做过就跳过,别每次重复)
@@ -44,7 +47,11 @@ python "<本目录>/scripts/run_debate_rca.py" \
 4. **结果合格线**:输出出现「检测到API连接失败,自动切换到fallback模式」或结尾 ⚠ 降级警告
    → 本次结果**作废**,如实报告、别拿它下结论;`rca_debate_full.json` 的 `llm_call_failures`
    占总调用比例偏高(>10%)也要报告并建议错峰重跑。零星几次属正常(外层加固已自愈)。
-5. **汇报口径**:validate_rca 结果 + `rca.original/softmax/ratio.json` 三份的 Top-K 根因
+5. **LLM 连续 5xx/超时的处置**:开跑就成串地报 500/502/超时 → **停下来**(别硬跑到降级出废结果),
+   跑一次 `python <本目录>/scripts/probe_llm.py` 定位:探针也 5xx = 网关侧故障/过载,报告用户、
+   建议错峰(harness 与引擎共用网关,harness 干重活时尤其容易挤兑);探针通 = 瞬时抖动,直接重跑
+   (壳会自动归档上一轮产物)。这是探针的正确用途——诊断,不是每次跑前的仪式。
+6. **汇报口径**:validate_rca 结果 + `rca.original/softmax/ratio.json` 三份的 Top-K 根因
    路径**并排对比**(三种机制的分数横向不可比,只比各自的排序;详见 references/engine_ops.md)。
 
 ## 常用开关(细节见 references/engine_ops.md;默认值已按"开箱即最优"配好,通常一个开关都不用带)
