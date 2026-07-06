@@ -45,10 +45,11 @@ def _coerce(s: str):
 
 
 def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
-                    overrides: dict | None = None):
+                    overrides: dict | None = None, shield: bool = False):
     """→ (processor, 描述串)。引擎的接口差异只会打到这一个函数里(见 references/engine_ops.md 升级核对)。
     overrides:命令行 --set 的引擎字段覆盖(如 num_judging_agents=2),盖在 config.yaml 之上——
-    临时调参不用动配置文件。"""
+    临时调参不用动配置文件。
+    shield=True 时自动收敛引擎内层重试(见下),--set 显式指定的不动。"""
     if mock:
         from mock_vendor import FaultTreeProcessor
         return FaultTreeProcessor({}), "mock(确定性假引擎,不调 LLM)"
@@ -103,6 +104,20 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
         flat[k] = v
     if overrides:
         print(f"[override] 命令行覆盖引擎参数:{overrides}")
+
+    # 重试收敛:引擎内层重试间隔按 retry_delay×次数 递增,config 常见 30 次/15s 之类的
+    # 豪放配置——光睡眠就 >100 分钟/调用,再叠加壳的外层加固(shield)纯属双重重试。
+    # shield 开着时把内层收敛成"快失败",重试交给外层退避;--set 显式指定的尊重不动。
+    if shield:
+        clamped = {}
+        for k, cap in (("max_retries", 2), ("retry_delay", 1.0)):
+            v = flat.get(k)
+            if k not in (overrides or {}) and isinstance(v, (int, float)) and v > cap:
+                clamped[k] = f"{v}→{cap}"
+                flat[k] = cap
+        if clamped:
+            print(f"[retry收敛] 外层加固已接管重试,引擎内层重试参数已收敛:{clamped}"
+                  f"(要保留 config 原值请 --set 显式指定,或 --no-llm-shield)")
 
     # 硬门禁:LLM 关键字段一个都没映射到 → 引擎会拿空配置"静默降级"成不调 LLM 的兜底模式,
     # 跑出看似正常实则无效的结果(实测 0.03s/场景、debate_records 全空)。宁可当场报错。
@@ -180,8 +195,8 @@ def main() -> int:
                          "--set num_judging_agents=2 --set llm_temperature=0.2")
     ap.add_argument("--no-llm-shield", action="store_true",
                     help="关闭壳层 LLM 传输加固(默认开:外层重试+成功撤销降级标记,防一阵 502 毁全程)")
-    ap.add_argument("--parallel", type=int, default=1, metavar="N",
-                    help="并发 LLM 调用数(默认 1=串行;推荐 4;evaluator 加速补丁,评分公式零改动,"
+    ap.add_argument("--parallel", type=int, default=4, metavar="N",
+                    help="并发 LLM 调用数(默认 4;--parallel 1 退回纯串行;评分公式零改动,"
                          "过高易压垮网关吃 502)")
     ap.add_argument("--no-match-cache", action="store_true",
                     help="关闭匹配记忆化缓存(默认开:同一节点判据只问一次 LLM,辩论里的重复兄弟检查全走缓存)")
@@ -226,7 +241,8 @@ def main() -> int:
         overrides[k.strip()] = _coerce(v)
 
     try:
-        proc, desc = _load_processor(vendor_dir, cfg_path, a.mock, overrides)
+        proc, desc = _load_processor(vendor_dir, cfg_path, a.mock, overrides,
+                                     shield=not a.no_llm_shield)
         if not a.mock and not a.no_llm_shield:
             if _shield_llm(proc):
                 print("[llm加固] 已启用外层重试(×3,退避 2s/4s):瞬时 502/超时不再让引擎永久降级"

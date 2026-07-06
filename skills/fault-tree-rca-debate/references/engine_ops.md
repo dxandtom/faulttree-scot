@@ -24,7 +24,7 @@
 引擎对组里**每个**零匹配成员都各自发起一轮"全组辩护+评委打分"(9 兄弟全零匹配 ≈ 9×(9+3) >100 次
 调用/组,组内还嵌套 _quick_check_match 重复匹配兄弟判据)。数据没命中的分支越多,越慢。
 
-0. **`--parallel N` + 匹配缓存(提速第一杠杆,scripts/engine_boost.py)**:
+0. **并行 + 匹配缓存(提速第一杠杆,scripts/engine_boost.py;默认开 `--parallel 4`)**:
    - 并行:把三处**彼此独立**的串行 LLM 循环(逐条件匹配、逐成员辩护、逐评委打分、逐兄弟
      quick check)换成线程池并发,全局并发由信号量封顶在 N——嵌套并行也不会超发。
    - 缓存(默认开):同一(question, 判据集)只问一次 LLM——引擎在每个零匹配成员的辩论里
@@ -34,10 +34,12 @@
      Top-K 与路径分和串行**逐位一致**,小样 4.4× 提速、HTTP 调用 44→32。
    - N 别贪:与 harness 共用网关时并发越高越容易 502,推荐 4;`--no-match-cache` 关缓存。
 1. **`--set K=V` 临时调参(盖在 config.yaml 之上,不动配置文件)**:最实惠的是
-   `--set num_judging_agents=2`(每组省 1/3 评委轮)与 `--set llm_temperature=0.2`
-   (评委 JSON 更稳、少解析失败兜底);配 llm加固(见 4)时建议 `--set max_retries=1
-   --set retry_delay=0.5`(内层快失败,重试交给外层退避)。引擎单请求超时 180s 写死改不了;
-   `num_debate_agents` **调了没用**——引擎按兄弟组成员数起辩护 agent,该配置项不参与。
+   `--set num_judging_agents=2`(每组省 1/3 评委轮);评委 JSON 不稳可降 llm_temperature。
+   内层重试不用再手调:llm加固(见 4)开启时,config 里过猛的 max_retries/retry_delay
+   (如 30 次/15s——重试间隔按次数递增,光睡眠就 >100 分钟/调用)会**自动收敛**为
+   快失败(2 次/1s),重试全权交给外层退避;--set 显式指定则尊重原值。
+   引擎单请求超时 180s 写死改不了;`num_debate_agents` **调了没用**——引擎按兄弟组
+   成员数起辩护 agent,该配置项不参与。
 2. **`--pruned-only`(只在覆盖不全时有肉)**:只喂 `rca_input.fault_tree.pruned_nodes`
    (有事实节点+祖先)。**注意**:标准 generate→execute 流水线的覆盖闸门强制全叶绑定,
    绑定即有事实 → pruned_nodes ≈ 全树,本开关基本 no-op;它在局部绑定/覆盖率低走完整形态、
@@ -63,11 +65,13 @@
    并发调用——这些都动到引擎核心的执行结构,须与算法上游商定后由其改版,本仓不越界。
 
 ## 三、疑难速查(真跑撞见的怪日志,每条都有实锤复现)
-- **`LLM调用最终失败: None`(None!不是网络错)**:HTTP 200 拿到了响应,但 content 里
-  **只有 thinking 块、没有 text 块**——思考型模型(MiniMax-M2 等)把 `max_tokens` 全烧在
-  推理上,正文没写就被截断;引擎解析只认 `type=="text"`,取不到→重试耗尽→last_error 还是
-  None→照样置 connection_failed(与断网同罪)。**对策:`--set llm_max_tokens=8192`**
-  (思考型模型 2000 远远不够);时好时坏=思考长度不定,别当成网络抖动排查。
+- **`LLM调用最终失败: None`(None!不是网络异常抛错)**:HTTP 200 拿到了响应,但 content 里
+  **没有 text 块**——常见两因:思考型模型(MiniMax-M2 等)把 `max_tokens` 烧完、正文被截断
+  (确保 config max_tokens ≥ 8192,思考型模型 2000 远远不够);或网关高负载时返回空/仅思考
+  内容(瞬时,shield 外层重试会自愈,散发属正常)。引擎解析只认 `type=="text"`,取不到→
+  重试耗尽→last_error 还是 None→照样置 connection_failed(与断网同罪,shield 会在下次
+  成功时撤销)。跑完看 `rca_debate_full.json.llm_call_failures`:个位数散发可接受,
+  偏多(如 >10%调用)建议错峰重跑。
 - **评委打分出现 `reason="默认分数"`**:该评委的 LLM 调用失败(或 JSON 解析失败),引擎兜底
   给 `1/组员数`。**单节点辩论组兜底分=1.0 满分**——两个评委失败+一个真评 0.75,均值能虚高到
   0.92(真跑实录)。看到"默认分数"要打折读,别把兜底当共识;失败次数多先按上一条修 max_tokens。
