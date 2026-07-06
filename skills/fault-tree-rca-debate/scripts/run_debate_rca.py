@@ -187,7 +187,9 @@ def main() -> int:
                          "(rca_input 上两级的 tree/ 下唯一的 *.tree_index.json)")
     ap.add_argument("--out-dir", help="产物目录;缺省=rca_input 所在目录(通常就是 result/)")
     ap.add_argument("--mechanism", default="all", choices=list(_MECH_KEY) + ["all"])
-    ap.add_argument("--k", type=int, default=3)
+    ap.add_argument("--k", type=int, default=10,
+                    help="每种机制输出的 Top-K 根因路径数(默认 10)。只影响最后对排序结果的切片,"
+                         "不增加任何 LLM 调用;这是唯一生效的 k(引擎签名默认与 config 的 top_k 均被本参数覆盖)")
     ap.add_argument("--mock", action="store_true", help="用确定性假引擎跑通适配层(不调 LLM)")
     ap.add_argument("--vendor-dir", default=str(_HERE.parent / "vendor"))
     ap.add_argument("--config", help="vendor 配置(默认 <vendor-dir>/config.yaml)")
