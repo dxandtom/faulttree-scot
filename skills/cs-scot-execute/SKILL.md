@@ -21,7 +21,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 1. 从 `entry` 节点开始,用 `memory_init` 初始化工作记忆;
 2. 按节点 `kind` 分派:
    - **`script`**:`name`→`scripts/<name>.py`(generate 生成的逐条件分析脚本),解析 `inputs.data`→数据文件,跑脚本,产出该源**逐条件事实** JSON 按 `outputs` 写入 `$memory`;
-   - **`agent_skill`**:把解析好的 inputs(故障树读成正文 + 各源逐条件事实)备到 `result/rca_input.json`,由 `name` 指定的技能(**fault-tree-rca**)产出结果;
+   - **`agent_skill`**:把解析好的 inputs(故障树读成正文 + 各源逐条件事实)备到 `result/rca_input.json`,由 `name` 指定的技能(**fault-tree-rca**)产出结果。该步有**两条可互换路径**:默认模型手工判断(fault-tree-rca),或改跑辩论引擎(**fault-tree-rca-debate** 技能的 `run_debate_rca.py`)——两者吃同一个 rca_input、写同一个 rca.json、过同一个 validate_rca;
 3. 沿 `transition.next_on_success` 前进,`end=true` 结束;
 4. 节点间数据全靠 `$input`/`$memory`/`$step`/`$output` 引用传递。
 

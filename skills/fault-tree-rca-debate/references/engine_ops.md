@@ -1,36 +1,9 @@
-# 本地组装与核对清单(把合作方引擎接进来)
+# 引擎运维手册(风险 / 提速 / 疑难 / 机制评测 / 升级核对)
 
-> 背景:合作方交付 = `fault_tree_evaluator_bfs_advanced.py` + `config.yaml` 两个文件。
-> 引擎 .py **已原样入库**(vendor/,不含密钥);`config.yaml` 含 API 密钥,**不入库**、须本地放入。
-> 下方核对清单 ①-⑤ 已按真实引擎源码逐条核毕(含真引擎离线冒烟:xlsx 生成 → question 渲染 →
-> 真引擎 fallback 模式 → 三机制 rca.json → validate_rca 通过);只剩 ⑥(LLM 连通)依赖你的本地网络。
+> 本技能的评分引擎核心在 `vendor/`(算法不在本仓修改,详见 vendor/README.md)。
+> 日常使用看 SKILL.md 就够;本文是深水区:真跑踩过的坑、调参依据、升级引擎时的核对方法。
 
-## 一、组装步骤(1 分钟)
-1. 把合作方的 `config.yaml` 原样放进 `skills/fault-tree-rca-debate/vendor/`(引擎 .py 已在,gitignore 只挡 config)。
-   **放好后再跑 install**(install 是整目录拷贝,会把引擎+config 一起带到 `~/.claude/skills/`)——
-   之后固定用装好的路径跑本技能脚本,仓库目录搬家/改名也不受影响;仓库更新后重放 config 再重装。
-2. `pip install pandas numpy pyyaml openpyxl requests`(引擎用 pandas/numpy/requests;壳用 yaml/openpyxl)。
-3. 冒烟(不调 LLM,先验壳):
-   ```bash
-   python skills/fault-tree-rca-debate/scripts/run_debate_rca.py \
-     --rca-input <某场景>/result/rca_input.json \
-     --tree-index <某场景>/tree/<场景>.tree_index.json \
-     --out-dir /tmp/debate_test --mechanism all --mock
-   python skills/fault-tree-rca/scripts/validate_rca.py /tmp/debate_test/rca.json <...>/rca_input.json
-   ```
-4. 去掉 `--mock` 换真引擎,重复第 3 步。
-
-## 二、真引擎核对清单(接口假设逐条验证;不符只改 `run_debate_rca._load_processor` 一处)
-| # | 假设(来自其文档) | 验证方法 | 不符时 |
-|---|---|---|---|
-| ① | `FaultTreeProcessor(EvaluationConfig)` / `load_fault_tree(path)→df` / `build_tree_structure(df)→tree` / `find_top_k_paths(tree, question, k)→(orig, softmax, ratio, debate_records)` | 直接跑一步冒烟 | 改 `_load_processor` 与调用三行 |
-| ② | 其 loader 接受我们生成的 xlsx(列:`Ln Code / Ln / Ln(Chinese)` + `Judgment Condition(Chinese)`;**无 Module Id/Product 列**);**带条件的中间节点单独成行**且按 Code 合并、不会被当成叶子 | 用 `tree_to_vendor_xlsx.py` 生成后让其 load,打印树规模对比 tree_index 节点数 | 缺列→在 `write_xlsx` 补常量列;中间行异常→加 `--leaf-only` 并把中间条件并到子行文本 |
-| ③ | `find_top_k_paths` 输出路径里节点带 `code`(=我们的 node_id)、`node_score`、`match_type`,路径尾巴带三个 `*_path_score` | 看 `rca_debate_full.json` | 改 `result_adapter._split_path/_judgment` 的取键 |
-| ④ | 空 `judgment_conditions` 的节点(纯结构节点/根)不把路径得分打零 | 冒烟看 top 路径得分是否全为 0 | 与合作方确认其空条件语义;必要时 xlsx 里给结构节点填"无条件进入" |
-| ⑤ | config.yaml 能映射到 `EvaluationConfig`(壳会自动**展平嵌套结构**如 `llm:{api_key}`→`llm_api_key`;LLM 关键字段一个都映射不到会**硬报错**,绝不让引擎拿空配置静默降级) | 冒烟即验(成功会打印"已映射 N 个字段") | 报错信息里有顶层键与已映射键对照,按它改 yaml 层级,或在 bridge.py 自行构造 |
-| ⑥ | LLM 连通:config.yaml 的 base_url/model 在你环境可达(公司路由/MiniMax) | 单跑一个小场景 | 只改 config.yaml,不动代码 |
-
-## 三、已知风险(壳已按此设计,但要人知道)
+## 一、已知风险(壳已按此设计,但要人知道)
 - **层级偏置(引擎语义,壳无法修)**:引擎建树只给 L4+ 节点设 sibling_nodes,L2/L3 节点该键缺失
   → 这两层零匹配节点走"单节点辩论"(无竞争辩护、无兄弟匹配惩罚),original 机制下浅层落败分支
   得分系统性偏高、可能挤进 Top-K;softmax/ratio **不受影响**(其兄弟分组由 bfs_evaluate 按
@@ -38,17 +11,20 @@
 - **深度上限 L6(引擎语义)**:引擎建树止于 6 层,更深的行被静默丢弃;壳已加硬守卫——带判据节点
   重定基深度>6 时当场报错,提示截更小的子树,绝不无声出假结果。
 - **文本回声假阳**:引擎靠"判据文本 ∈ question"判匹配。壳的 question **只复述成立的判据**;
-  被排除/数据不足的只报节点名。若合作方的 condition_matcher 是语义级(LLM)而非字面包含,
+  被排除/数据不足的只报节点名。若引擎的 condition_matcher 是语义级(LLM)而非字面包含,
   这个策略依然安全(宁缺勿滥),但 full-match 率可能偏低——观察后可放宽。
+- **确证档缺失**:评分制输出全进 probable_causes(见 result_adapter docstring)。若业务需要
+  "确证"语义,需另定升档规则(如:路径全 full-match 且逐节点能对上 rca_input 的成立事实)——
+  建议拿评测数据说话后再定。
 - **成本**:每条判据 = 1 次匹配 LLM 调用;每个"零匹配兄弟组"再加(组员数辩护 + 评委数打分)次调用,
-  全部串行、引擎内单次请求超时写死 180s。大树直跑动辄几十分钟,提速见下节「提速手册」。
+  全部串行、引擎内单次请求超时写死 180s。大树直跑动辄几十分钟,提速见下节。
 
-## 三‑2、提速手册(实测慢就按这个顺序调)
+## 二、提速手册(实测慢就按这个顺序调)
 先认清**成本大头**:不是逐条判据匹配(线性,~1 次调用/条),而是**零匹配兄弟组的平方级辩论**——
 引擎对组里**每个**零匹配成员都各自发起一轮"全组辩护+评委打分"(9 兄弟全零匹配 ≈ 9×(9+3) >100 次
 调用/组,组内还嵌套 _quick_check_match 重复匹配兄弟判据)。数据没命中的分支越多,越慢。
 
-1. **`--set K=V` 临时调参(盖在 config.yaml 之上,不动同事的文件)**:最实惠的是
+1. **`--set K=V` 临时调参(盖在 config.yaml 之上,不动配置文件)**:最实惠的是
    `--set num_judging_agents=2`(每组省 1/3 评委轮)与 `--set llm_temperature=0.2`
    (评委 JSON 更稳、少解析失败兜底);配 llm加固(见 4)时建议 `--set max_retries=1
    --set retry_delay=0.5`(内层快失败,重试交给外层退避)。引擎单请求超时 180s 写死改不了;
@@ -67,20 +43,17 @@
    要么单开终端手动跑,要么在 `settings.json` 加
    `{"env": {"BASH_DEFAULT_TIMEOUT_MS": "3600000", "BASH_MAX_TIMEOUT_MS": "3600000"}}`(改完重启)。
 4. **瞬时 502 不再毁全程(llm加固,默认开)**:引擎原设计"一次调用把内层重试耗尽 → 置
-   connection_failed → 整程永久降级关键词匹配"。壳现在给 LLMClient.chat 套了外层重试
+   connection_failed → 整程永久降级关键词匹配"。壳给 LLMClient.chat 套了外层重试
    (×3、退避 2s/4s,成功即撤销降级标记)——只包运输、零碰评分算法;`--no-llm-shield` 可关。
-   哄骗网关的根因还得治:harness 与引擎共用同一 LLM 网关时,两边并发挤兑就容易 502,
+   根因还得治:harness 与引擎共用同一 LLM 网关时,两边并发挤兑就容易 502,
    大树尽量在 harness 空闲时跑、或错开时间手动跑。
 5. **降级要知情**:若 LLM **持续**失败,引擎仍会降级续跑(匹配语义已变)。壳的检测会打印 ⚠、
    `rca_debate_full.json` 落 `llm_degraded: true`、rca.json caveats 追加说明——
    看到就修网重跑,别拿降级结果做结论。
 6. **还嫌慢?那得动算法**:每组辩一轮、组内成员共享评委打分(而不是每个零匹配成员各辩一轮)、
-   并发调用——这些都动到核心算法执行结构,须与合作方商定后由其改版,壳不越界。
-- **确证档缺失**:评分制输出全进 probable_causes(见 result_adapter docstring)。若业务需要
-  "确证"语义,需另定升档规则(如:路径全 full-match 且逐节点能对上 rca_input 的成立事实)——
-  建议拿评测数据说话后再定。
+   并发调用——这些都动到引擎核心的执行结构,须与算法上游商定后由其改版,本仓不越界。
 
-## 三‑3、疑难速查(真跑撞见的怪日志,每条都有实锤复现)
+## 三、疑难速查(真跑撞见的怪日志,每条都有实锤复现)
 - **`LLM调用最终失败: None`(None!不是网络错)**:HTTP 200 拿到了响应,但 content 里
   **只有 thinking 块、没有 text 块**——思考型模型(MiniMax-M2 等)把 `max_tokens` 全烧在
   推理上,正文没写就被截断;引擎解析只认 `type=="text"`,取不到→重试耗尽→last_error 还是
@@ -93,7 +66,7 @@
   关键词而非 LLM(辩论/评委不受影响,仍会尝试调 LLM)。本次结果结尾必带 ⚠ 降级警告与
   `llm_degraded: true`——端到端"干净跑通"的标准是全程不出现这行。
 
-## 四、三种得分机制 A/B/C(合作方要求的实测)——一键工具
+## 四、三种得分机制 A/B/C——一键评测
 ```bash
 # mock 先验管线(已在仓库内跑通 30 场景),真引擎就绪后换 --engine real:
 python skills/fault-tree-rca-debate/scripts/ab_test_mechanisms.py --engine real --k 3 \
@@ -109,6 +82,26 @@ eval 的四档打分要求确证根因落在 `rca_result` 档,而本引擎是纯
 
 ## 五、切换/回退
 - 用辩论引擎:runner 之后跑 `run_debate_rca.py`(见 SKILL.md)。
-- 回老路径:照旧用 `fault-tree-rca` 技能手工产出。两者写同一个 `result/rca.json`、
-  过同一个 `validate_rca`、被同一套 eval 打分——**保留老路径当基线**(难度一 100% / 纠错 73%),
+- 回手工路径:照旧用 `fault-tree-rca` 技能产出。两者写同一个 `result/rca.json`、
+  过同一个 `validate_rca`、被同一套 eval 打分——**保留手工路径当基线**(难度一 100% / 纠错 73%),
   引擎赢了评测再谈"全盘替代"。
+
+## 六、引擎升级核对清单(vendor 换新版时跑一遍;当前版本已逐条核毕)
+接口假设逐条验证;不符只改 `run_debate_rca._load_processor` 一处(或新建 vendor/bridge.py)。
+
+| # | 假设 | 验证方法 | 不符时 |
+|---|---|---|---|
+| ① | `FaultTreeProcessor(EvaluationConfig)` / `load_fault_tree(path)→df` / `build_tree_structure(df)→tree` / `find_top_k_paths(tree, question, k)→(orig, softmax, ratio, debate_records)` | 直接跑一步冒烟 | 改 `_load_processor` 与调用三行 |
+| ② | loader 接受壳生成的 xlsx(列:`Ln Code / Ln / Ln(Chinese)` + `Judgment Condition(Chinese)`);**带条件的中间节点单独成行**且按 Code 合并、不会被当成叶子 | `tree_to_vendor_xlsx.py` 生成后让其 load,打印树规模对比 tree_index 节点数 | 缺列→`write_xlsx` 补常量列;中间行异常→`--leaf-only` |
+| ③ | 输出路径里节点带 `code`(=node_id)、`node_score`、`match_type`,路径尾巴带三个 `*_path_score` | 看 `rca_debate_full.json` | 改 `result_adapter._split_path/_judgment` 取键 |
+| ④ | 空 `judgment_conditions` 的节点(纯结构节点/根)不把路径得分打零 | 冒烟看 top 路径得分是否全 0 | 与上游确认空条件语义;必要时 xlsx 给结构节点填"无条件进入" |
+| ⑤ | config.yaml 能映射到 `EvaluationConfig`(壳自动递归展平嵌套;LLM 关键字段全缺会**硬报错**) | 冒烟即验(成功打印"已映射 N 个字段") | 按报错对照改 yaml 层级,或 bridge.py 自行构造 |
+| ⑥ | LLM 连通:config.yaml 的 base_url/model 本机可达 | `scripts/probe_llm.py` | 只改 config.yaml,不动代码 |
+
+冒烟命令(先 `--mock` 验壳,再去掉换真引擎):
+```bash
+python skills/fault-tree-rca-debate/scripts/run_debate_rca.py \
+  --rca-input <某场景>/result/rca_input.json \
+  --tree-index <某场景>/tree/<场景>.tree_index.json \
+  --out-dir <临时目录> --mechanism all --mock
+```

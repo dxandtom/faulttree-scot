@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""vendor 引擎的**确定性假实现**(按其文档 6.1 的接口形状)。
+"""vendor 引擎的**确定性假实现**(与真引擎同接口形状)。
 
-用途:真 vendor 代码不在本仓(见 vendor/README.md)——这个 mock 让适配层(xlsx 生成 →
-question 渲染 → 结果适配 → validate_rca)能在没有真引擎、不调 LLM 的情况下端到端自测。
+用途:让 I/O 适配层(xlsx 生成 → question 渲染 → 结果适配 → validate_rca)能在
+**不调 LLM、不需要 config.yaml** 的情况下端到端自测(CI/冒烟用)。
 **它不是算法复刻**:评分逻辑是最简单的确定性文本包含匹配 + 哈希伪随机"辩论分",
-只保证输出**形状**与 vendor 文档 5.2 一致(top_k×3 + debate_records)。
+只保证输出**形状**与真引擎一致(top_k×3 + debate_records)。
 
-接口(与文档 6.1 对齐):
+接口(与 vendor/fault_tree_evaluator_bfs_advanced.py 对齐):
     p = FaultTreeProcessor(config_dict_or_none)
     df = p.load_fault_tree("tree.xlsx")
     tree = p.build_tree_structure(df)

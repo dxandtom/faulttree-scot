@@ -12,7 +12,7 @@
 
 条件的挂法:每个叶子一行(条件=叶子的);**带条件的中间节点另出一行**(路径止于该节点,
 条件挂它)——若 vendor loader 对"短行"处理有异(把中间节点当叶子),用 --leaf-only 关掉,
-并见 INTEGRATION.md 核对项 ②。
+并见 references/engine_ops.md 升级核对项 ②。
 
 用法:tree_to_vendor_xlsx.py <tree_index.json> -o <out.xlsx> [--leaf-only]
 """

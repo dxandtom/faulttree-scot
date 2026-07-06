@@ -46,9 +46,9 @@ def _coerce(s: str):
 
 def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
                     overrides: dict | None = None):
-    """→ (processor, 描述串)。真实 vendor 的接口差异只会打到这一个函数里(见 INTEGRATION.md)。
+    """→ (processor, 描述串)。引擎的接口差异只会打到这一个函数里(见 references/engine_ops.md 升级核对)。
     overrides:命令行 --set 的引擎字段覆盖(如 num_judging_agents=2),盖在 config.yaml 之上——
-    临时调参不用动同事的 config 文件。"""
+    临时调参不用动配置文件。"""
     if mock:
         from mock_vendor import FaultTreeProcessor
         return FaultTreeProcessor({}), "mock(确定性假引擎,不调 LLM)"
@@ -74,7 +74,7 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
     import dataclasses
     known = {f.name for f in dataclasses.fields(EvaluationConfig)}
 
-    # 展平配置:合作方 config.yaml 是嵌套结构,且**深达两层**——引擎自己的 main() 读的就是
+    # 展平配置:引擎的 config.yaml 是嵌套结构,且**深达两层**——引擎自己的 main() 读的就是
     # evaluation.debate.num_debate_agents / evaluation.thresholds.sibling_match_threshold,
     # 而 EvaluationConfig 是扁平字段(llm_api_key/top_k/num_debate_agents/...)。
     # 递归下钻到叶子,按「路径后缀」从长到短试拼(llm.api_key→llm_api_key;evaluation.debate.
