@@ -7,6 +7,8 @@
 
 ## 一、组装步骤(1 分钟)
 1. 把合作方的 `config.yaml` 原样放进 `skills/fault-tree-rca-debate/vendor/`(引擎 .py 已在,gitignore 只挡 config)。
+   **放好后再跑 install**(install 是整目录拷贝,会把引擎+config 一起带到 `~/.claude/skills/`)——
+   之后固定用装好的路径跑本技能脚本,仓库目录搬家/改名也不受影响;仓库更新后重放 config 再重装。
 2. `pip install pandas numpy pyyaml openpyxl requests`(引擎用 pandas/numpy/requests;壳用 yaml/openpyxl)。
 3. 冒烟(不调 LLM,先验壳):
    ```bash
@@ -38,9 +40,30 @@
 - **文本回声假阳**:引擎靠"判据文本 ∈ question"判匹配。壳的 question **只复述成立的判据**;
   被排除/数据不足的只报节点名。若合作方的 condition_matcher 是语义级(LLM)而非字面包含,
   这个策略依然安全(宁缺勿滥),但 full-match 率可能偏低——观察后可放宽。
-- **成本**:每个"无匹配兄弟组"都触发 debate(N 辩论 agent + M 评委 × LLM 调用)。400 节点大树
-  别直接上;先 suite_v2 小树标定单场景成本,再决定大树是否只喂剪枝后的局部子树
-  (`rca_input.fault_tree.pruned_nodes` 里的节点集,壳可加 `--pruned-only`,目前未实现)。
+- **成本**:每条判据 = 1 次匹配 LLM 调用;每个"零匹配兄弟组"再加(组员数辩护 + 评委数打分)次调用,
+  全部串行、引擎内单次请求超时写死 180s。大树直跑动辄几十分钟,提速见下节「提速手册」。
+
+## 三‑2、提速手册(实测慢就按这个顺序调)
+1. **`--pruned-only`(最大杠杆,壳已实现)**:只喂 `rca_input.fault_tree.pruned_nodes`
+   (runner 剪枝定下的"有事实节点+祖先")的局部子树。只对**生产树**(判据全量自带)真正缩树;
+   评测树判据本来就从 pruned_nodes 合回,开不开都一样(实测 30 场景 no-op)。
+   rca_input 是完整形态(无 pruned_nodes)时自动回退全树、只提示不报错。
+   语义边界(实测核定):成立/不成立/数据不足的**有事实**节点全保留,被砍的只有**从未被绑定**
+   (uncovered)的分支——漏诊线索仍经 tree_issues.uncovered_condition_nodes 透传,不丢。
+   两个代价要知道:① Top-K 只在局部子树内排;② **分数会膨胀**——debate/softmax/ratio 都是
+   兄弟组相对量,剪掉未绑定兄弟后幸存路径分数上浮(mock 实测同一路径 softmax 0.45→0.63),
+   confidence 档位又按绝对阈值定 → 开/关两种模式的分数与档位**互不可比**,机制 A/B 评测
+   全程固定一种模式,且只用排名指标(hit@k/MRR)对比。
+2. **config.yaml 调参(不改代码)**:`num_judging_agents: 3→2`(每个辩论组省 1/3 评委调用);
+   `max_retries: 3→2`、`retry_delay: 1.0→0.5`(引擎单请求超时 180s 写死,retries=3 时一次
+   网络卡死最多白等 ~9 分钟)。注意 `num_debate_agents` **调了没用**——引擎实际按兄弟组成员数
+   起辩护 agent,该配置项不参与。
+3. **别在会掐超时的环境里跑大树**:Claude Code 的 Bash 默认 10 分钟超时,大树必被拦腰杀掉
+   (症状:进程消失、无 rca 产物、输出停在某个 Debate 中途)。要么单开终端手动跑,要么在
+   `settings.json` 里加 `{"env": {"BASH_DEFAULT_TIMEOUT_MS": "3600000", "BASH_MAX_TIMEOUT_MS": "3600000"}}`。
+4. **降级要知情**:LLM 连接彻底失败一次后,引擎会**永久**切关键词匹配 fallback 静默续跑
+   (匹配语义变了、结果照出)。壳已加检测:打印 ⚠ 警告、`rca_debate_full.json` 落
+   `llm_degraded: true`、rca.json 的 caveats 追加降级说明——看到就该修网重跑,别拿降级结果做结论。
 - **确证档缺失**:评分制输出全进 probable_causes(见 result_adapter docstring)。若业务需要
   "确证"语义,需另定升档规则(如:路径全 full-match 且逐节点能对上 rca_input 的成立事实)——
   建议拿评测数据说话后再定。

@@ -121,6 +121,9 @@ def main() -> int:
     ap.add_argument("--vendor-dir", default=str(_HERE.parent / "vendor"))
     ap.add_argument("--config", help="vendor 配置(默认 <vendor-dir>/config.yaml)")
     ap.add_argument("--leaf-only", action="store_true", help="生成 xlsx 时中间节点条件不单独成行")
+    ap.add_argument("--pruned-only", action="store_true",
+                    help="只喂 rca_input.fault_tree.pruned_nodes(有事实节点+祖先)的剪枝局部子树——"
+                         "大树控 LLM 耗时/成本的主开关;rca_input 无 pruned_nodes 时自动回退全树")
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
     a = ap.parse_args()
 
@@ -138,6 +141,16 @@ def main() -> int:
     question = build_question(rca_input, tree_index)
     print(f"[1/4] 证据 question 已渲染({len(question)} 字符)")
 
+    # --pruned-only:只喂剪枝局部子树(runner 的 tree_prune 已确定"有事实节点+祖先"=相关分支),
+    # 引擎的匹配/辩论调用量随树规模线性到超线性增长,这是大树最有效的提速手段。
+    allowed = None
+    if a.pruned_only:
+        pn = set(((rca_input.get("fault_tree") or {}).get("pruned_nodes")) or {})
+        allowed = {nid for nid in pn if nid in (tree_index.get("nodes") or {})}
+        if not allowed:
+            print("[pruned-only] rca_input 没有 pruned_nodes(完整形态?),回退喂全树")
+            allowed = None
+
     # 真引擎:把工作目录切到 vendor/,**复刻"右键直跑"的运行环境**——引擎内部若有相对路径操作
     # (自行读 config.yaml、写结果目录等),都按 vendor/ 解析;否则在仓库根下运行会静默读不到而降级。
     import os
@@ -149,13 +162,22 @@ def main() -> int:
         # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
         # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
         xlsx = out_dir / "vendor_fault_tree.xlsx"
-        n_rows = write_xlsx(tree_index, xlsx, a.leaf_only)
+        n_rows = write_xlsx(tree_index, xlsx, a.leaf_only, allowed)
         print(f"[2/4] vendor 格式故障树已生成({n_rows} 行 → {xlsx.name});引擎={desc}")
         df = proc.load_fault_tree(str(xlsx))
         tree = proc.build_tree_structure(df)
         top_orig, top_soft, top_ratio, debate_records = proc.find_top_k_paths(tree, question, a.k)
     finally:
         os.chdir(prev_cwd)
+
+    # 降级检测:引擎在 LLM 连接彻底失败一次后会**永久**切到关键词匹配 fallback 静默续跑——
+    # 结果看着正常实则匹配语义已经变了。这里把降级状态显式暴露出来(打印 + 落盘 + rca.json caveat)。
+    ev = getattr(proc, "evaluator", None)
+    degraded = bool(getattr(ev, "use_fallback", False)
+                    or getattr(getattr(ev, "llm_client", None), "connection_failed", False))
+    if degraded:
+        print("⚠ [降级警告] 运行中 LLM 连接曾失败,引擎已自动退回关键词匹配 fallback 续跑——"
+              "本次结果的匹配语义已受损,建议排查网络/服务(probe_llm.py)后重跑。")
 
     # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——
     # 转成 dict;sibling_nodes 里嵌着整棵子树引用,序列化会爆体积,丢掉(名字已在 debate 正文里)。
@@ -166,7 +188,7 @@ def main() -> int:
         d.pop("sibling_nodes", None)
         recs.append(d)
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "question": question, "k": a.k,
+            "question": question, "k": a.k, "llm_degraded": degraded,
             "top_k_paths_original": top_orig, "top_k_paths_softmax": top_soft,
             "top_k_paths_ratio": top_ratio, "debate_records": recs}
     (out_dir / "rca_debate_full.json").write_text(

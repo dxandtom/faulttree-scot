@@ -19,9 +19,11 @@ runner 跑完 script 节点 → result/rca_input.json
 python "<本目录>/scripts/run_debate_rca.py" \
   --rca-input "<OUT>/result/rca_input.json" \
   --tree-index "<OUT>/tree/<场景>.tree_index.json" \
-  --out-dir "<OUT>/result" --mechanism all [--mock]
+  --out-dir "<OUT>/result" --mechanism all [--pruned-only] [--mock]
 ```
 - 产物:`rca.json`(默认=original 机制)+ `rca.original/softmax/ratio.json` 三份 + `rca_debate_full.json`(引擎原始输出,含辩论记录)。
+- `--pruned-only`:只喂 runner 剪枝出的局部子树(有事实节点+祖先)——**大树提速主开关**,
+  引擎每条判据都要调一次 LLM,全树直跑动辄几十分钟(详见 INTEGRATION.md 提速手册)。
 - `--mock`:用确定性假引擎跑通适配层(不调 LLM、不需要 vendor 文件)——自测/CI 用。
 - 跑完照旧机械自检:`python skills/fault-tree-rca/scripts/validate_rca.py <rca.json> <rca_input.json>`。
 

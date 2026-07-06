@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -83,8 +84,11 @@ def enrich_conditions(index: dict, rca_input: dict | None = None,
     return {**index, "nodes": out_nodes}
 
 
-def build_rows(index: dict, leaf_only: bool = False):
+def build_rows(index: dict, leaf_only: bool = False, allowed: set | None = None):
     """→ (max_depth, rows, dropped);row = [(nid, name), ...](根→端点), 端点条件文本(可为空)。
+
+    allowed:只把这个集合里的带判据节点当种子(祖先照常补齐)——`--pruned-only` 用它把树缩到
+    剪枝局部子树,是大树控 LLM 成本的主开关;None = 全部带判据节点(默认,行为不变)。
 
     行布局按引擎建树的真实取法设计(读过引擎源码后定下,两条都是硬约束):
     1. **每个保留节点自带一行**(路径止于该节点,判据=它自己的,没有就空)——引擎按
@@ -104,9 +108,14 @@ def build_rows(index: dict, leaf_only: bool = False):
         return bool(str(n.get("condition") or "").strip()) and not n.get("pass_through")
 
     conditioned = [nid for nid, n in nodes.items() if nid in depth and _has_cond(n)]
+    if allowed is not None:
+        n_all = len(conditioned)
+        conditioned = [nid for nid in conditioned if nid in allowed]
+        print(f"  [pruned-only] 带判据种子 {n_all} → {len(conditioned)}(只留剪枝局部子树内的)")
     if not conditioned:
-        raise ValueError("该 tree_index 没有任何带判据的节点,无法给辩论引擎出题"
-                         "(评测树需先用 enrich_conditions 把判据从 rca_input/binding_question 合回)")
+        raise ValueError("没有任何带判据的节点可喂引擎"
+                         + ("(pruned-only 过滤后为空——rca_input 的 pruned_nodes 与树对不上?)" if allowed is not None
+                           else "(评测树需先用 enrich_conditions 把判据从 rca_input/binding_question 合回)"))
     # 引擎建树硬止于 L6(_build_deeper_levels 在 level>6 直接返回空):更深的行会被**静默丢弃**,
     # 深层真根因无声消失、幸存链全按"无条件进入"得 1.0 高置信——宁可当场报错也不出这种假结果。
     too_deep = sorted(nid for nid in conditioned if depth[nid] > 6)
@@ -133,11 +142,23 @@ def build_rows(index: dict, leaf_only: bool = False):
     return maxd, rows, dropped
 
 
-def write_xlsx(index: dict, out_path: Path, leaf_only: bool = False) -> int:
+def _est_cond_lines(cond: str) -> int:
+    """按引擎 _extract_conditions 的解析规则估算一格判据会拆成几条(=几次匹配 LLM 调用)。"""
+    lines = [l.strip() for l in str(cond).split("\n") if l.strip()]
+    n = sum(1 for l in lines
+            if re.match(r'^\d+[.、:：]\s*', l) or l.startswith(("如果", "当", "满足", "检查", "确认")))
+    return n if n else 1
+
+
+def write_xlsx(index: dict, out_path: Path, leaf_only: bool = False, allowed: set | None = None) -> int:
     from openpyxl import Workbook
-    maxd, rows, dropped = build_rows(index, leaf_only)
+    maxd, rows, dropped = build_rows(index, leaf_only, allowed)
     if dropped:
         print(f"  [tree→xlsx] 已排除 {dropped} 个无判据/pass_through 叶子(空判据会被引擎白给满分、屠榜 Top-K)")
+    n_cond_rows = sum(1 for _, c in rows if c)
+    n_cond_lines = sum(_est_cond_lines(c) for _, c in rows if c)
+    print(f"  [成本预估] 带判据行 {n_cond_rows}、判据约 {n_cond_lines} 条 → 引擎至少 ≈{n_cond_lines} 次"
+          f"条件匹配 LLM 调用;每个零匹配兄弟组再加(组员数+评委数)次辩论/评分调用。大树先用 --pruned-only。")
     wb = Workbook()
     ws = wb.active
     ws.title = "fault_tree"

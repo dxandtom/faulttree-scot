@@ -94,7 +94,9 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
             "caveats": "; ".join(
                 [f"排序机制={mechanism}(路径得分 {tail.get(_SCORE_KEY[mechanism])});"
                  f"original 路径得分 {orig}(confidence 依据)"] + debate_caveats)
-                 + ";得分机制孰优待 cs-scot-eval 评测确认",
+                 + ";得分机制孰优待 cs-scot-eval 评测确认"
+                 + (";⚠ 本次运行 LLM 曾连接失败、引擎降级为关键词匹配续跑,结果可信度受损,建议重跑"
+                    if vendor_result.get("llm_degraded") else ""),
             "support": f"辩论引擎 Top-K 路径(k 内排名按 {mechanism});"
                        f"路径节点匹配/辩论详情见 evidence_path 与 result/rca_debate_full.json",
             "evidence_path": ev,
