@@ -31,8 +31,24 @@ from result_adapter import to_rca_json, _MECH_KEY               # noqa: E402
 from tree_to_vendor_xlsx import enrich_conditions, write_xlsx   # noqa: E402
 
 
-def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
-    """→ (processor, 描述串)。真实 vendor 的接口差异只会打到这一个函数里(见 INTEGRATION.md)。"""
+def _coerce(s: str):
+    """--set 的值串 → int/float/bool/str(按最贴切的类型)。"""
+    low = s.strip().lower()
+    if low in ("true", "false"):
+        return low == "true"
+    for cast in (int, float):
+        try:
+            return cast(s)
+        except ValueError:
+            pass
+    return s
+
+
+def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
+                    overrides: dict | None = None):
+    """→ (processor, 描述串)。真实 vendor 的接口差异只会打到这一个函数里(见 INTEGRATION.md)。
+    overrides:命令行 --set 的引擎字段覆盖(如 num_judging_agents=2),盖在 config.yaml 之上——
+    临时调参不用动同事的 config 文件。"""
     if mock:
         from mock_vendor import FaultTreeProcessor
         return FaultTreeProcessor({}), "mock(确定性假引擎,不调 LLM)"
@@ -80,6 +96,14 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
     if unmapped:
         print(f"[warn] config.yaml 有映射不到引擎字段的键,已忽略:{sorted(unmapped)}")
 
+    # --set 覆盖(盖在 config.yaml 之上;键必须是引擎认识的字段,拼错当场报错防静默无效)
+    for k, v in (overrides or {}).items():
+        if k not in known:
+            raise SystemExit(f"--set {k}=... 不是引擎字段。可用字段:{sorted(known)}")
+        flat[k] = v
+    if overrides:
+        print(f"[override] 命令行覆盖引擎参数:{overrides}")
+
     # 硬门禁:LLM 关键字段一个都没映射到 → 引擎会拿空配置"静默降级"成不调 LLM 的兜底模式,
     # 跑出看似正常实则无效的结果(实测 0.03s/场景、debate_records 全空)。宁可当场报错。
     llm_fields = [f for f in ("llm_api_key", "llm_base_url", "llm_model_name") if f in known]
@@ -106,6 +130,33 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool):
         f"vendor 引擎(config={cfg_file},已映射 {len(flat)} 字段:{','.join(sorted(flat))})"
 
 
+def _shield_llm(proc, outer_retries: int = 3, base_delay: float = 2.0) -> bool:
+    """壳层传输加固(只包运输、不碰评分算法):给 vendor LLMClient.chat 套一层外层重试。
+
+    治的是引擎的"永久降级"设计:一次 502/超时把内层重试耗尽后,引擎置 connection_failed、
+    下个节点起**整程**切关键词匹配 fallback——一阵网关抖动就毁掉整次运行的匹配语义。
+    本层:chat 空响应(=内层全败)→ 退避后再给整轮机会;任何一次成功 → 撤销 connection_failed。
+    只有**持续**故障才会真降级(且会被降级检测报出来)。实例级包装,vendor 文件零改动。"""
+    client = getattr(getattr(proc, "evaluator", None), "llm_client", None)
+    if client is None or not callable(getattr(client, "chat", None)):
+        return False
+    import time as _time
+    orig = client.chat
+
+    def chat(messages, temperature=None):
+        for i in range(outer_retries):
+            resp = orig(messages, temperature)
+            if resp:
+                client.connection_failed = False   # 成功即撤销"永久降级"标记
+                return resp
+            if i < outer_retries - 1:
+                _time.sleep(base_delay * (i + 1))
+        return ""
+
+    client.chat = chat
+    return True
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -124,6 +175,11 @@ def main() -> int:
     ap.add_argument("--pruned-only", action="store_true",
                     help="只喂 rca_input.fault_tree.pruned_nodes(有事实节点+祖先)的剪枝局部子树——"
                          "大树控 LLM 耗时/成本的主开关;rca_input 无 pruned_nodes 时自动回退全树")
+    ap.add_argument("--set", dest="overrides", action="append", default=[], metavar="K=V",
+                    help="临时覆盖引擎参数(盖在 config.yaml 之上,可多次),如 "
+                         "--set num_judging_agents=2 --set llm_temperature=0.2")
+    ap.add_argument("--no-llm-shield", action="store_true",
+                    help="关闭壳层 LLM 传输加固(默认开:外层重试+成功撤销降级标记,防一阵 502 毁全程)")
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
     a = ap.parse_args()
 
@@ -157,8 +213,19 @@ def main() -> int:
     prev_cwd = os.getcwd()
     if not a.mock:
         os.chdir(vendor_dir)
+    overrides = {}
+    for kv in a.overrides:
+        if "=" not in kv:
+            raise SystemExit(f"--set 格式应为 key=value,收到:{kv!r}")
+        k, v = kv.split("=", 1)
+        overrides[k.strip()] = _coerce(v)
+
     try:
-        proc, desc = _load_processor(vendor_dir, cfg_path, a.mock)
+        proc, desc = _load_processor(vendor_dir, cfg_path, a.mock, overrides)
+        if not a.mock and not a.no_llm_shield:
+            if _shield_llm(proc):
+                print("[llm加固] 已启用外层重试(×3,退避 2s/4s):瞬时 502/超时不再让引擎永久降级"
+                      "关键词匹配;--no-llm-shield 可关闭")
         # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
         # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
         xlsx = out_dir / "vendor_fault_tree.xlsx"

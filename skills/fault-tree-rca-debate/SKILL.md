@@ -22,8 +22,10 @@ python "<本目录>/scripts/run_debate_rca.py" \
   --out-dir "<OUT>/result" --mechanism all [--pruned-only] [--mock]
 ```
 - 产物:`rca.json`(默认=original 机制)+ `rca.original/softmax/ratio.json` 三份 + `rca_debate_full.json`(引擎原始输出,含辩论记录)。
-- `--pruned-only`:只喂 runner 剪枝出的局部子树(有事实节点+祖先)——**大树提速主开关**,
-  引擎每条判据都要调一次 LLM,全树直跑动辄几十分钟(详见 INTEGRATION.md 提速手册)。
+- 提速/抗抖:`--set num_judging_agents=2` 等临时调参(盖在 config.yaml 上,不动同事文件);
+  LLM 传输加固默认开(瞬时 502 不再让引擎永久降级);`--pruned-only` 只在绑定覆盖不全时才真缩树。
+  引擎调用量大头是"零匹配兄弟组的平方级辩论",全树直跑动辄几十分钟且别在 10 分钟超时的
+  harness Bash 里跑——先读 INTEGRATION.md「提速手册」。
 - `--mock`:用确定性假引擎跑通适配层(不调 LLM、不需要 vendor 文件)——自测/CI 用。
 - 跑完照旧机械自检:`python skills/fault-tree-rca/scripts/validate_rca.py <rca.json> <rca_input.json>`。
 
