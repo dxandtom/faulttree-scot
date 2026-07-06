@@ -25,11 +25,27 @@ python "<本目录>/scripts/run_debate_rca.py" \
   `rca_debate_full.json`(引擎原始输出,含辩论记录,审计用)。
 - 跑完自动过与手工路径同一道闸门:`fault-tree-rca/scripts/validate_rca.py`。
 
-## 一次性配置(没配过先做这个)
+## 一次性配置(**只在首次使用/换机器/换 config 时做**;做过就跳过,别每次重复)
 1. 把含 API 密钥的 `config.yaml` 放进本技能 `vendor/`(gitignore 挡住不入库);
    **放好后再 install**(整目录拷贝,引擎+config 一起带走,之后固定用装好的路径)。
 2. `pip install pandas numpy pyyaml openpyxl requests`。
-3. 连通性:`python scripts/probe_llm.py`(exit 0=通);先 `--mock` 冒烟验壳,再上真引擎。
+3. 验一次:`python scripts/probe_llm.py`(exit 0=通)→ `--mock` 冒烟 → 真引擎。
+
+## 执行手册(跑本技能的 agent 按此操作;这些约束不需要用户在提示词里重复)
+1. **别把探针/冒烟当仪式**:probe_llm 与 `--mock` 只在首次配置、或真引擎行为异常
+   (0 辩论、毫秒级完成、连续失败)时用于诊断;日常直接跑真引擎那一条命令。
+2. **超时给足**:真引擎大树一跑几十分钟,Bash 的 timeout 必须设到**环境允许的最大值**
+   (BASH_MAX_TIMEOUT_MS,通常 3600000=1 小时;**不要**自作聪明给 10 分钟),或后台运行、
+   每几分钟看一次 `<out-dir>` 是否出现 rca.json。若仍被超时杀(exit 143):**不要原地重试**
+   ——把完整命令写进 `<OUT>\run_debate.bat`,请用户在自己的终端跑,等确认完成再继续。
+3. **别加没让加的开关、别改配置**:默认值已按最优配好(并行×4、匹配缓存、LLM 加固、
+   重试收敛,开跑头几行会打印这些状态)。`--pruned-only` 在标准全绑定流水线上是 no-op,
+   不要主动加;任何情况下不要修改 vendor/config.yaml。
+4. **结果合格线**:输出出现「检测到API连接失败,自动切换到fallback模式」或结尾 ⚠ 降级警告
+   → 本次结果**作废**,如实报告、别拿它下结论;`rca_debate_full.json` 的 `llm_call_failures`
+   占总调用比例偏高(>10%)也要报告并建议错峰重跑。零星几次属正常(外层加固已自愈)。
+5. **汇报口径**:validate_rca 结果 + `rca.original/softmax/ratio.json` 三份的 Top-K 根因
+   路径**并排对比**(三种机制的分数横向不可比,只比各自的排序;详见 references/engine_ops.md)。
 
 ## 常用开关(细节见 references/engine_ops.md;默认值已按"开箱即最优"配好,通常一个开关都不用带)
 - 并行**默认开**(`--parallel 4`;`--parallel 1` 退回纯串行):匹配/辩护/评委等独立 LLM
