@@ -45,8 +45,30 @@ def _wrap_chat_semaphore(client, n: int):
     client.chat = chat
 
 
-def _wrap_match_cache(matcher):
-    """实例级记忆化:key=(question, 判据元组, 当前 fallback 态)。线程安全。"""
+def _wrap_chat_failcounter(client):
+    """给 chat 挂一个单调递增的失败计数(空响应=该调用重试耗尽)。
+    用途:① 缓存防污染(见 _wrap_match_cache);② 运行结束时报告瞬时失败次数——
+    shield 撤销降级标记后,'中途失败过'这件事否则对外不可见。"""
+    orig = client.chat
+    client._boost_fail_count = 0
+    lock = threading.Lock()
+
+    def chat(messages, temperature=None):
+        resp = orig(messages, temperature)
+        if not resp:
+            with lock:
+                client._boost_fail_count += 1
+        return resp
+
+    client.chat = chat
+
+
+def _wrap_match_cache(matcher, client):
+    """实例级记忆化:key=(question, 判据元组, 当前 fallback 态)。线程安全。
+
+    防污染(对抗审查实锤的坑):某次匹配恰逢故障窗口,单条判据会静默走关键词兜底,
+    结果与健康 LLM 不同——若缓存,网络恢复后污染值被永久复用且无降级记录。
+    故:计算期间 chat 失败计数只要动过,该结果**只用不缓存**(下次重算)。"""
     orig = matcher.match_conditions
     cache, lock = {}, threading.Lock()
 
@@ -55,9 +77,11 @@ def _wrap_match_cache(matcher):
         with lock:
             if key in cache:
                 return cache[key]
+        before = getattr(client, "_boost_fail_count", 0)
         result = orig(question, conditions)
-        with lock:
-            cache.setdefault(key, result)
+        if getattr(client, "_boost_fail_count", 0) == before:   # 期间零失败才可信
+            with lock:
+                cache.setdefault(key, result)
         return result
 
     matcher.match_conditions = cached
@@ -198,10 +222,13 @@ def apply(proc, parallel: int = 1, match_cache: bool = True) -> None:
         import fault_tree_evaluator_bfs_advanced as eng
     except ImportError:
         return
-    if not isinstance(ev, eng.FaultTreeEvaluator):
+    # 严格同类才打补丁:bridge/子类可能覆写了这些方法,基类拷贝会把覆写静默顶掉
+    if type(ev) is not eng.FaultTreeEvaluator or type(matcher) is not eng.ConditionMatcher:
+        print("[boost] 引擎实例非原生类型(bridge/子类?),加速补丁整体跳过、保持原行为")
         return
 
     applied = []
+    _wrap_chat_failcounter(client)   # 恒开:失败计数是缓存防污染与瞬时失败报告的地基
     if parallel and parallel > 1:
         if _src_hash(eng.ConditionMatcher.match_conditions) == _HASH_MATCH:
             _parallel_match(matcher, parallel)
@@ -214,8 +241,8 @@ def apply(proc, parallel: int = 1, match_cache: bool = True) -> None:
         else:
             print("[boost] ⚠ vendor._debate_evaluation 源码已变(引擎升级?),辩论并行补丁跳过、保持串行")
     if match_cache:
-        _wrap_match_cache(matcher)   # 包在(可能已并行的)match_conditions 外层:先查缓存再并行
-        applied.append("匹配缓存")
+        _wrap_match_cache(matcher, client)   # 包在(可能已并行的)match_conditions 外层:先查缓存再并行
+        applied.append("匹配缓存(带失败防污染)")
     if parallel and parallel > 1:
         _wrap_chat_semaphore(client, parallel)   # 最外层:全局并发封顶,嵌套并行不超发
         applied.append(f"并发封顶{parallel}")

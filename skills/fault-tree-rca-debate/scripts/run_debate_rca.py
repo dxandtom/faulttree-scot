@@ -253,6 +253,12 @@ def main() -> int:
     if degraded:
         print("⚠ [降级警告] 运行中 LLM 连接曾失败,引擎已自动退回关键词匹配 fallback 续跑——"
               "本次结果的匹配语义已受损,建议排查网络/服务(probe_llm.py)后重跑。")
+    # 瞬时失败可见化:shield 恢复后"中途失败过"不再触发降级,但个别调用走了兜底
+    # (单条判据关键词匹配/辩护缺席/评委默认分)。计数>0 就要知道,多了该重跑。
+    n_fail = getattr(getattr(ev, "llm_client", None), "_boost_fail_count", 0)
+    if n_fail and not degraded:
+        print(f"⚠ [瞬时失败] 运行期间 {n_fail} 次 LLM 调用重试耗尽(相应判据/辩护/评委走了兜底,"
+              f"受影响的匹配结果已拒绝入缓存);整体未降级,失败数偏多时建议重跑。")
 
     # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——
     # 转成 dict;sibling_nodes 里嵌着整棵子树引用,序列化会爆体积,丢掉(名字已在 debate 正文里)。
@@ -264,6 +270,7 @@ def main() -> int:
         recs.append(d)
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k, "llm_degraded": degraded,
+            "llm_call_failures": n_fail,
             "top_k_paths_original": top_orig, "top_k_paths_softmax": top_soft,
             "top_k_paths_ratio": top_ratio, "debate_records": recs}
     (out_dir / "rca_debate_full.json").write_text(
