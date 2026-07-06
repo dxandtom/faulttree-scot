@@ -36,6 +36,36 @@ def _fmt_fact(f: dict) -> str:
     return ", ".join(bits)
 
 
+def _fmt_fail(entries: list) -> str:
+    """不成立节点的**安全**实测摘要:只报列名+命中计数/比例,绝不带判据的目标值/op/阈值——
+    那些是判据文本的组成部分,进 question 会被引擎的文本匹配误配成"成立"(回声策略红线)。"""
+    for e in entries or []:
+        f = e.get("fact") or e
+        if f.get("status") == "ok" and f.get("predicate_satisfied") is False:
+            col = f.get("resolved_column")
+            if f.get("matched") is not None and f.get("total") is not None:
+                m = f"命中 {f['matched']}/{f['total']}"
+            elif f.get("count_satisfied") is not None:
+                m = f"count={f['count_satisfied']}"
+            elif f.get("ratio") is not None:
+                m = f"ratio={f['ratio']}"
+            else:
+                continue
+            return f"{col} {m}" if col else m
+    return ""
+
+
+def _insuf_reason(entries: list) -> str:
+    """数据不足节点的缺数原因(mapping_reason)——评委据此能建议补什么数据,不给就只剩个名字。"""
+    for e in entries or []:
+        f = e.get("fact") or e
+        if f.get("status") in ("insufficient_data", "manual"):
+            r = str(e.get("mapping_reason") or f.get("mapping_reason") or "").strip()
+            if r:
+                return r[:80]
+    return ""
+
+
 def _classify(entries: list) -> tuple:
     """节点的事实列表 → (held?, failed?, insufficient?, 实测串列表)。"""
     held = failed = insuf = False
@@ -73,10 +103,12 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
             if held:
                 cond_part = f"(判据:{cond})" if cond else ""
                 held_lines.append(f"- 「{name}」条件成立{cond_part};实测:{'; '.join(obs)}")
-            elif failed:
-                excluded.append(name)                                        # 只报名,不回声判据
+            elif failed:                                                     # 只报名+安全计数,不回声判据
+                d = _fmt_fail(facts)
+                excluded.append(f"{name}({d})" if d else name)
             elif insuf:
-                insufficient.append(name)
+                r = _insuf_reason(facts)
+                insufficient.append(f"{name}(缺:{r})" if r else name)
     else:                                                                     # 完整形态
         scenario = ""
         for ind, res in (rca_input.get("indicator_results") or {}).items():
@@ -87,9 +119,11 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
                 if held:
                     held_lines.append(f"- 「{name}」条件成立(判据:{cond});实测({ind}):{'; '.join(obs)}")
                 elif failed:
-                    excluded.append(name)
+                    d = _fmt_fail([c])
+                    excluded.append(f"{name}({d})" if d else name)
                 elif insuf:
-                    insufficient.append(name)
+                    r = _insuf_reason([c])
+                    insufficient.append(f"{name}(缺:{r})" if r else name)
 
     parts = [f"故障场景:{scenario or (tree_index or {}).get('scenario', '')}。",
              "以下为各数据源**已由代码算好的确定性事实**(非人工主诉),请据此定位最可能的根因路径。"]
@@ -99,6 +133,15 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
         parts.append("\n【已用数据排除的节点(其判据实测不成立,此处不复述判据)】\n- " + "、".join(sorted(set(excluded))))
     if insufficient:
         parts.append("\n【数据不足、无法判定的节点】\n- " + "、".join(sorted(set(insufficient))))
+    # 从未被检查的分支(有判据但无任何绑定):防漏诊信号,此前在辩论通道上归零——只报名字,零回声风险
+    unc_nodes = ((rca_input.get("tree_issues") or {}).get("uncovered_condition_nodes")) or []
+    unc_names = [(u.get("name") or u.get("id")) if isinstance(u, dict) else names.get(u, str(u))
+                 for u in unc_nodes]
+    unc_names = [n for n in unc_names if n]
+    if unc_names:
+        more = f" …等共 {len(unc_names)} 个" if len(unc_names) > 40 else ""
+        parts.append("\n【从未被检查的分支(有判据但无任何数据绑定,可能藏漏诊)】\n- "
+                     + "、".join(unc_names[:40]) + more)
     unc = rca_input.get("uncovered_values") or {}
     if unc:
         lines = [f"- {col}: " + ", ".join(f"{m['value']}(×{m['count']})" for m in miss)

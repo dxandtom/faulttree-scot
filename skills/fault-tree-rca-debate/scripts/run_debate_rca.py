@@ -29,7 +29,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from facts_to_question import build_question                    # noqa: E402
-from result_adapter import to_rca_json, _MECH_KEY               # noqa: E402
+from result_adapter import to_rca_json, _MECH_KEY, _facts_index  # noqa: E402
 from tree_to_vendor_xlsx import enrich_conditions, write_xlsx   # noqa: E402
 
 
@@ -205,6 +205,11 @@ def main() -> int:
     ap.add_argument("--parallel", type=int, default=4, metavar="N",
                     help="并发 LLM 调用数(默认 4;--parallel 1 退回纯串行;评分公式零改动,"
                          "过高易压垮网关吃 502)")
+    ap.add_argument("--no-seed-match", action="store_true",
+                    help="关闭匹配预播种(默认开:把 execute 已判定的节点结论直接写进匹配缓存,"
+                         "匹配层不再调 LLM 重新发现已知答案;实测与理想 LLM 匹配零分歧)")
+    ap.add_argument("--no-debate-cache", action="store_true",
+                    help="关闭辩护记忆化(默认开:同一辩论组里同(节点,组,question)的辩护只生成一次)")
     ap.add_argument("--no-match-cache", action="store_true",
                     help="关闭匹配记忆化缓存(默认开:同一节点判据只问一次 LLM,辩论里的重复兄弟检查全走缓存)")
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
@@ -285,7 +290,32 @@ def main() -> int:
                       "关键词匹配;--no-llm-shield 可关闭")
         if not a.mock:
             from engine_boost import apply as _boost
-            _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache)
+            _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache,
+                   debate_cache=not a.no_debate_cache)
+
+        # 心跳:每次 LLM 调用完成刷新单行文件——长跑时用它区分"还在跑(单次调用就是慢)"
+        # 与"真挂了"(心跳超过 ~20 分钟不动才值得怀疑,180s 超时×重试的最坏栈就这么长)。
+        hb_file = out_dir / "debate_heartbeat.txt"
+        _hb_client = getattr(getattr(proc, "evaluator", None), "llm_client", None)
+        if _hb_client is not None and callable(getattr(_hb_client, "chat", None)):
+            import threading as _th
+            _orig_chat_hb, _hb = _hb_client.chat, {"n": 0}
+            _hb_lock = _th.Lock()
+
+            def _chat_hb(messages, temperature=None):
+                r = _orig_chat_hb(messages, temperature)
+                with _hb_lock:
+                    _hb["n"] += 1
+                    n = _hb["n"]
+                try:
+                    hb_file.write_text(
+                        f"{datetime.datetime.now().strftime('%H:%M:%S')} 第 {n} 次 LLM 调用完成"
+                        f"(累计失败 {getattr(_hb_client, '_boost_fail_count', 0)})\n", encoding="utf-8")
+                except Exception:
+                    pass
+                return r
+
+            _hb_client.chat = _chat_hb
         # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
         # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
         xlsx = out_dir / "vendor_fault_tree.xlsx"
@@ -322,6 +352,16 @@ def main() -> int:
 
         df = proc.load_fault_tree(str(xlsx))
         tree = proc.build_tree_structure(df)
+
+        # P2a 预播种:execute 已判定的节点结论直接进匹配缓存(见 engine_boost.seed_match_cache)
+        if not a.mock and not a.no_seed_match and not a.no_match_cache:
+            from engine_boost import seed_match_cache
+            fx_seed = _facts_index(rca_input)
+            nf, nz = seed_match_cache(proc, tree, question, {k: v["st"] for k, v in fx_seed.items()})
+            if nf or nz:
+                print(f"[seed] 已按 execute 事实预播种匹配结果:{nf} 节点满配(成立)+ {nz} 节点零配"
+                      f"(排除/数据不足)——匹配层不再调 LLM 重新发现已知答案;--no-seed-match 关闭")
+
         top_orig, top_soft, top_ratio, debate_records = proc.find_top_k_paths(tree, question, a.k)
         _plog("全部节点评估完成,正在写产物")
     finally:
