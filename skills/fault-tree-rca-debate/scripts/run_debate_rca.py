@@ -289,9 +289,38 @@ def main() -> int:
         xlsx = out_dir / "vendor_fault_tree.xlsx"
         n_rows = write_xlsx(tree_index, xlsx, a.leaf_only, allowed)
         print(f"[2/4] vendor 格式故障树已生成({n_rows} 行 → {xlsx.name});引擎={desc}")
+
+        # 进度可见化:长跑时另开终端看 <out-dir>/debate_progress.txt 即知跑到哪了。
+        # BFS 每评估完一个节点刷新一行(单行覆盖);评估在主线程串行,无并发写。
+        # 实例级包装、只记数不碰返回值,评分零影响;mock/bridge 无 evaluator 时自动跳过。
+        ev_obj = getattr(proc, "evaluator", None)
+        prog_file = out_dir / "debate_progress.txt"
+        if ev_obj is not None and callable(getattr(ev_obj, "evaluate_node", None)):
+            _orig_eval, _n = ev_obj.evaluate_node, {"v": 0}
+
+            def _eval_with_progress(node, question, sibling_nodes=None):
+                r = _orig_eval(node, question, sibling_nodes)
+                _n["v"] += 1
+                try:
+                    prog_file.write_text(
+                        f"{datetime.datetime.now().strftime('%H:%M:%S')} 已评估 {_n['v']}/{n_rows} 节点;"
+                        f"最新:{node.get('name', '?')}(得分 {getattr(r, 'score', 0):.2f},"
+                        f" {getattr(r, 'match_type', '?')})\n", encoding="utf-8")
+                except Exception:
+                    pass
+                return r
+
+            ev_obj.evaluate_node = _eval_with_progress
+            print(f"[进度] 实时进度写在 {prog_file}(每评估一个节点刷新,可另开终端查看)")
+
         df = proc.load_fault_tree(str(xlsx))
         tree = proc.build_tree_structure(df)
         top_orig, top_soft, top_ratio, debate_records = proc.find_top_k_paths(tree, question, a.k)
+        try:
+            prog_file.write_text(f"{datetime.datetime.now().strftime('%H:%M:%S')} "
+                                 f"全部节点评估完成,正在写产物\n", encoding="utf-8")
+        except Exception:
+            pass
     finally:
         os.chdir(prev_cwd)
 
