@@ -180,6 +180,11 @@ def main() -> int:
                          "--set num_judging_agents=2 --set llm_temperature=0.2")
     ap.add_argument("--no-llm-shield", action="store_true",
                     help="关闭壳层 LLM 传输加固(默认开:外层重试+成功撤销降级标记,防一阵 502 毁全程)")
+    ap.add_argument("--parallel", type=int, default=1, metavar="N",
+                    help="并发 LLM 调用数(默认 1=串行;推荐 4;evaluator 加速补丁,评分公式零改动,"
+                         "过高易压垮网关吃 502)")
+    ap.add_argument("--no-match-cache", action="store_true",
+                    help="关闭匹配记忆化缓存(默认开:同一节点判据只问一次 LLM,辩论里的重复兄弟检查全走缓存)")
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
     a = ap.parse_args()
 
@@ -226,6 +231,9 @@ def main() -> int:
             if _shield_llm(proc):
                 print("[llm加固] 已启用外层重试(×3,退避 2s/4s):瞬时 502/超时不再让引擎永久降级"
                       "关键词匹配;--no-llm-shield 可关闭")
+        if not a.mock:
+            from engine_boost import apply as _boost
+            _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache)
         # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
         # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
         xlsx = out_dir / "vendor_fault_tree.xlsx"

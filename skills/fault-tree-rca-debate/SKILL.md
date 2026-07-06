@@ -32,12 +32,15 @@ python "<本目录>/scripts/run_debate_rca.py" \
 3. 连通性:`python scripts/probe_llm.py`(exit 0=通);先 `--mock` 冒烟验壳,再上真引擎。
 
 ## 常用开关(细节见 references/engine_ops.md)
+- `--parallel 4`:**提速第一杠杆**——匹配/辩护/评委三处独立 LLM 循环并发执行 + 匹配
+  记忆化缓存(默认也开,`--no-match-cache` 关)。评分公式逐字保留、实测结果与串行一致,
+  小样 4.4×提速;并发过高易压垮网关吃 502,推荐 4。
 - `--set K=V`:临时覆盖引擎参数(盖在 config.yaml 上),如 `--set llm_max_tokens=8192`
   (思考型模型必配,防"LLM调用最终失败: None")、`--set num_judging_agents=2`(提速)。
 - LLM 传输加固默认开(瞬时 502 不再让引擎永久降级;`--no-llm-shield` 关)。
 - `--pruned-only`:只喂剪枝局部子树——仅在绑定覆盖不全时才真缩树。
 - `--mock`:确定性假引擎跑通适配层(不调 LLM、不需要 config)——自测/CI 用。
-- 耗时大头是"零匹配兄弟组的平方级辩论",全树直跑动辄几十分钟,别在 10 分钟超时的
+- 耗时大头是"零匹配兄弟组的平方级辩论",全树串行直跑动辄几十分钟,别在 10 分钟超时的
   harness Bash 里跑——先读 `references/engine_ops.md`「提速手册」。
 
 ## 内部构造(谁负责什么)
