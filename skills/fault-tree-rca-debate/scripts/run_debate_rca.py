@@ -382,13 +382,20 @@ def main() -> int:
         print(f"⚠ [瞬时失败] 运行期间 {n_fail} 次 LLM 调用重试耗尽(相应判据/辩护/评委走了兜底,"
               f"受影响的匹配结果已拒绝入缓存);整体未降级,失败数偏多时建议重跑。")
 
-    # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——
-    # 转成 dict;sibling_nodes 里嵌着整棵子树引用,序列化会爆体积,丢掉(名字已在 debate 正文里)。
+    # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——转 dict。
+    # **必须先剔 sibling_nodes 再转**:引擎给 L4+ 兄弟节点互相塞引用(A.sibling_nodes 含 B,
+    # B.sibling_nodes 含 A,循环引用),dataclasses.asdict 深递归遇环必爆 RecursionError
+    # (本地真跑实锤:只在"L4+ 多兄弟组真的辩论了"时触发,之前 asdict 后再 pop 是顺序反了)。
+    # 逐字段浅取,跳过环源字段;其余字段(str/float/评分 dict)都是无环平结构。
     import dataclasses
     recs = []
     for r in debate_records or []:
-        d = dataclasses.asdict(r) if dataclasses.is_dataclass(r) else (r if isinstance(r, dict) else {"repr": str(r)})
-        d.pop("sibling_nodes", None)
+        if dataclasses.is_dataclass(r):
+            d = {f.name: getattr(r, f.name) for f in dataclasses.fields(r) if f.name != "sibling_nodes"}
+        elif isinstance(r, dict):
+            d = {k: v for k, v in r.items() if k != "sibling_nodes"}
+        else:
+            d = {"repr": str(r)}
         recs.append(d)
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k, "llm_degraded": degraded,
