@@ -29,7 +29,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from facts_to_question import build_question                    # noqa: E402
-from result_adapter import to_rca_json, _MECH_KEY               # noqa: E402
+from result_adapter import to_rca_json, _MECH_KEY, _facts_index  # noqa: E402
 from tree_to_vendor_xlsx import enrich_conditions, write_xlsx   # noqa: E402
 
 
@@ -205,6 +205,11 @@ def main() -> int:
     ap.add_argument("--parallel", type=int, default=4, metavar="N",
                     help="并发 LLM 调用数(默认 4;--parallel 1 退回纯串行;评分公式零改动,"
                          "过高易压垮网关吃 502)")
+    ap.add_argument("--no-seed-match", action="store_true",
+                    help="关闭匹配预播种(默认开:把 execute 已判定的节点结论直接写进匹配缓存,"
+                         "匹配层不再调 LLM 重新发现已知答案;实测与理想 LLM 匹配零分歧)")
+    ap.add_argument("--no-debate-cache", action="store_true",
+                    help="关闭辩护记忆化(默认开:同一辩论组里同(节点,组,question)的辩护只生成一次)")
     ap.add_argument("--no-match-cache", action="store_true",
                     help="关闭匹配记忆化缓存(默认开:同一节点判据只问一次 LLM,辩论里的重复兄弟检查全走缓存)")
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
@@ -285,44 +290,80 @@ def main() -> int:
                       "关键词匹配;--no-llm-shield 可关闭")
         if not a.mock:
             from engine_boost import apply as _boost
-            _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache)
+            _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache,
+                   debate_cache=not a.no_debate_cache)
+
+        # 心跳:每次 LLM 调用完成刷新单行文件——长跑时用它区分"还在跑(单次调用就是慢)"
+        # 与"真挂了"(心跳超过 ~20 分钟不动才值得怀疑,180s 超时×重试的最坏栈就这么长)。
+        hb_file = out_dir / "debate_heartbeat.txt"
+        _hb_client = getattr(getattr(proc, "evaluator", None), "llm_client", None)
+        if _hb_client is not None and callable(getattr(_hb_client, "chat", None)):
+            import threading as _th
+            _orig_chat_hb, _hb = _hb_client.chat, {"n": 0}
+            _hb_lock = _th.Lock()
+
+            def _chat_hb(messages, temperature=None):
+                r = _orig_chat_hb(messages, temperature)
+                with _hb_lock:
+                    _hb["n"] += 1
+                    n = _hb["n"]
+                try:
+                    hb_file.write_text(
+                        f"{datetime.datetime.now().strftime('%H:%M:%S')} 第 {n} 次 LLM 调用完成"
+                        f"(累计失败 {getattr(_hb_client, '_boost_fail_count', 0)})\n", encoding="utf-8")
+                except Exception:
+                    pass
+                return r
+
+            _hb_client.chat = _chat_hb
         # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
         # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
         xlsx = out_dir / "vendor_fault_tree.xlsx"
         n_rows = write_xlsx(tree_index, xlsx, a.leaf_only, allowed)
         print(f"[2/4] vendor 格式故障树已生成({n_rows} 行 → {xlsx.name});引擎={desc}")
 
-        # 进度可见化:长跑时另开终端看 <out-dir>/debate_progress.txt 即知跑到哪了。
-        # BFS 每评估完一个节点刷新一行(单行覆盖);评估在主线程串行,无并发写。
-        # 实例级包装、只记数不碰返回值,评分零影响;mock/bridge 无 evaluator 时自动跳过。
+        # 进度可见化:长跑时另开终端 tail <out-dir>/debate_progress.txt 即知跑到哪了。
+        # BFS 每评估完一个节点**追加**一行(日志式,保留全程轨迹;每轮运行开头写分隔行);
+        # 评估在主线程串行,无并发写。实例级包装、只记数不碰返回值,评分零影响;
+        # mock/bridge 无 evaluator 时自动跳过。
         ev_obj = getattr(proc, "evaluator", None)
         prog_file = out_dir / "debate_progress.txt"
+
+        def _plog(line: str):
+            try:
+                with open(prog_file, "a", encoding="utf-8") as f:
+                    f.write(f"{datetime.datetime.now().strftime('%H:%M:%S')} {line}\n")
+            except Exception:
+                pass
+
         if ev_obj is not None and callable(getattr(ev_obj, "evaluate_node", None)):
+            _plog(f"===== 新一轮 debate 开始(共 {n_rows} 节点)=====")
             _orig_eval, _n = ev_obj.evaluate_node, {"v": 0}
 
             def _eval_with_progress(node, question, sibling_nodes=None):
                 r = _orig_eval(node, question, sibling_nodes)
                 _n["v"] += 1
-                try:
-                    prog_file.write_text(
-                        f"{datetime.datetime.now().strftime('%H:%M:%S')} 已评估 {_n['v']}/{n_rows} 节点;"
-                        f"最新:{node.get('name', '?')}(得分 {getattr(r, 'score', 0):.2f},"
-                        f" {getattr(r, 'match_type', '?')})\n", encoding="utf-8")
-                except Exception:
-                    pass
+                _plog(f"已评估 {_n['v']}/{n_rows};{node.get('name', '?')}"
+                      f"(得分 {getattr(r, 'score', 0):.2f}, {getattr(r, 'match_type', '?')})")
                 return r
 
             ev_obj.evaluate_node = _eval_with_progress
-            print(f"[进度] 实时进度写在 {prog_file}(每评估一个节点刷新,可另开终端查看)")
+            print(f"[进度] 实时进度日志:{prog_file}(每评估一个节点追加一行,tail 即可跟踪)")
 
         df = proc.load_fault_tree(str(xlsx))
         tree = proc.build_tree_structure(df)
+
+        # P2a 预播种:execute 已判定的节点结论直接进匹配缓存(见 engine_boost.seed_match_cache)
+        if not a.mock and not a.no_seed_match and not a.no_match_cache:
+            from engine_boost import seed_match_cache
+            fx_seed = _facts_index(rca_input)
+            nf, nz = seed_match_cache(proc, tree, question, {k: v["st"] for k, v in fx_seed.items()})
+            if nf or nz:
+                print(f"[seed] 已按 execute 事实预播种匹配结果:{nf} 节点满配(成立)+ {nz} 节点零配"
+                      f"(排除/数据不足)——匹配层不再调 LLM 重新发现已知答案;--no-seed-match 关闭")
+
         top_orig, top_soft, top_ratio, debate_records = proc.find_top_k_paths(tree, question, a.k)
-        try:
-            prog_file.write_text(f"{datetime.datetime.now().strftime('%H:%M:%S')} "
-                                 f"全部节点评估完成,正在写产物\n", encoding="utf-8")
-        except Exception:
-            pass
+        _plog("全部节点评估完成,正在写产物")
     finally:
         os.chdir(prev_cwd)
 
@@ -341,13 +382,20 @@ def main() -> int:
         print(f"⚠ [瞬时失败] 运行期间 {n_fail} 次 LLM 调用重试耗尽(相应判据/辩护/评委走了兜底,"
               f"受影响的匹配结果已拒绝入缓存);整体未降级,失败数偏多时建议重跑。")
 
-    # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——
-    # 转成 dict;sibling_nodes 里嵌着整棵子树引用,序列化会爆体积,丢掉(名字已在 debate 正文里)。
+    # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——转 dict。
+    # **必须先剔 sibling_nodes 再转**:引擎给 L4+ 兄弟节点互相塞引用(A.sibling_nodes 含 B,
+    # B.sibling_nodes 含 A,循环引用),dataclasses.asdict 深递归遇环必爆 RecursionError
+    # (本地真跑实锤:只在"L4+ 多兄弟组真的辩论了"时触发,之前 asdict 后再 pop 是顺序反了)。
+    # 逐字段浅取,跳过环源字段;其余字段(str/float/评分 dict)都是无环平结构。
     import dataclasses
     recs = []
     for r in debate_records or []:
-        d = dataclasses.asdict(r) if dataclasses.is_dataclass(r) else (r if isinstance(r, dict) else {"repr": str(r)})
-        d.pop("sibling_nodes", None)
+        if dataclasses.is_dataclass(r):
+            d = {f.name: getattr(r, f.name) for f in dataclasses.fields(r) if f.name != "sibling_nodes"}
+        elif isinstance(r, dict):
+            d = {k: v for k, v in r.items() if k != "sibling_nodes"}
+        else:
+            d = {"repr": str(r)}
         recs.append(d)
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k, "llm_degraded": degraded,

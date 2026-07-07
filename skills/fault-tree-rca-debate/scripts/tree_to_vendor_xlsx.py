@@ -46,16 +46,21 @@ def _path(nodes: dict, nid: str) -> list:
     return list(reversed(out))
 
 
+_ANON_NAME = re.compile(r"^L\d+节点_\d+$")
+
+
 def enrich_conditions(index: dict, rca_input: dict | None = None,
                       binding_question: dict | None = None) -> dict:
-    """把判据文本合回树(只填空缺,不覆盖已有)。
+    """把判据文本(和真名)合回树(只填空缺/匿名占位,不覆盖真实内容)。
 
     为什么需要:评测树(cs-scot-eval 的 make_trees 产物)节点 condition **全为 null**——判据文本
     住在 rca_input(pruned_nodes[].condition / indicator_results[].condition_text)和
     binding_question(to_bind[].condition_text)里。不合回去,xlsx 全空判据,引擎对每个节点
-    白给满分、排名无意义。生产树(excel_to_tree 产)自带判据,本函数是无害空操作。"""
+    白给满分、排名无意义。名字同理:评测树是匿名名(L3节点_001)而 rca_input 存真名,
+    不合回去 question 的排除/数据不足名单与引擎树完全失联、rca.json 也输出匿名名。
+    生产树(excel_to_tree 产)自带判据与真名,本函数是无害空操作。"""
     nodes = index.get("nodes") or {}
-    fill = {}
+    fill, name_fill = {}, {}
     for b in (binding_question or {}).get("to_bind") or []:
         nid, ct = b.get("node_id"), str(b.get("condition_text") or "").strip()
         if nid and ct:
@@ -66,21 +71,33 @@ def enrich_conditions(index: dict, rca_input: dict | None = None,
             ct = str((n or {}).get("condition") or "").strip()
             if ct:
                 fill.setdefault(nid, ct)
+            nm = str((n or {}).get("name") or "").strip()
+            if nm:
+                name_fill.setdefault(nid, nm)
         for res in (rca_input.get("indicator_results") or {}).values():
             for c in (res.get("conditions") or []) if isinstance(res, dict) else []:
                 nid, ct = c.get("node_id"), str(c.get("condition_text") or "").strip()
                 if nid and ct:
                     fill.setdefault(nid, ct)
-    if not fill:
+                nm = str(c.get("node") or "").strip()
+                if nid and nm:
+                    name_fill.setdefault(nid, nm)
+    if not fill and not name_fill:
         return index
-    out_nodes, changed = {}, 0
+    out_nodes, changed, renamed = {}, 0, 0
     for nid, n in nodes.items():
         if nid in fill and not str(n.get("condition") or "").strip():
             n = {**n, "condition": fill[nid]}
             changed += 1
+        truth = name_fill.get(nid)
+        if truth and truth != n.get("name") and _ANON_NAME.match(str(n.get("name") or "")):
+            n = {**n, "name": truth}      # 只替换匿名占位名,真名永不覆盖
+            renamed += 1
         out_nodes[nid] = n
     if changed:
         print(f"  [tree补判据] 从 rca_input/binding_question 合回 {changed} 个节点的判据文本(该树 condition 原为空)")
+    if renamed:
+        print(f"  [tree补名字] 从 rca_input 合回 {renamed} 个节点的真名(替换匿名占位,评测树名单不再失联)")
     return {**index, "nodes": out_nodes}
 
 

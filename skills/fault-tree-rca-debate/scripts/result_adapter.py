@@ -25,6 +25,40 @@ _MECH_KEY = {"original": "top_k_paths_original", "softmax": "top_k_paths_softmax
              "ratio": "top_k_paths_ratio"}
 _SCORE_KEY = {"original": "original_path_score", "softmax": "softmax_path_score",
               "ratio": "ratio_path_score"}
+_ST_CN = {"held": "成立", "refuted": "不成立", "insufficient": "数据不足"}
+
+
+def _facts_index(rca_input: dict | None) -> dict:
+    """rca_input → {node_id: {"st": held|refuted|insufficient, "obs": 实测摘要}}。
+
+    与 facts_to_question 同一塌缩优先级(held>refuted>insufficient)。这是回程事实感知的
+    地基:证据引擎的确定性结论此前只用于渲染 question,产出侧全弃——confidence 校准、
+    证伪旗标、blocked_at 回填、弃权垫片都从这张表读。"""
+    from facts_to_question import _classify
+    idx: dict = {}
+    rank = {"held": 2, "refuted": 1, "insufficient": 0}
+
+    def _put(nid, held, failed, insuf, obs):
+        st = "held" if held else ("refuted" if failed else ("insufficient" if insuf else None))
+        if not nid or st is None:
+            return
+        prev = idx.get(nid)
+        if prev is None or rank[st] > rank[prev["st"]]:
+            idx[nid] = {"st": st, "obs": "; ".join(obs) if obs else ""}
+
+    ft = (rca_input or {}).get("fault_tree")
+    if isinstance(ft, dict) and ft.get("pruned_nodes"):
+        for nid, node in ft["pruned_nodes"].items():
+            facts = (node or {}).get("facts")
+            if facts:
+                held, failed, insuf, obs = _classify(facts)
+                _put(nid, held, failed, insuf, obs)
+    else:
+        for res in ((rca_input or {}).get("indicator_results") or {}).values():
+            for c in (res or {}).get("conditions", []) if isinstance(res, dict) else []:
+                held, failed, insuf, obs = _classify([c])
+                _put(c.get("node_id"), held, failed, insuf, obs)
+    return idx
 
 
 def _split_path(path: list) -> tuple:
@@ -60,8 +94,12 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         raise ValueError(f"mechanism 应为 {list(_MECH_KEY)},收到 {mechanism!r}")
     nodes_idx = (tree_index or {}).get("nodes") or {}
     dbg = {r.get("node_code"): r for r in vendor_result.get("debate_records") or [] if isinstance(r, dict)}
+    fx = _facts_index(rca_input)          # 证据引擎的确定性结论(回程事实感知的地基)
+    # 弃权垫片:全场景没有任何"成立"事实(excluded/honest 情形,正确答案="别报根因")时,
+    # 排序候选降入 undetermined 而非硬吐 probable——补上评分制引擎的弃权能力缺口。
+    abstain = bool(fx) and not any(v["st"] == "held" for v in fx.values())
 
-    probable = []
+    probable, undetermined = [], []
     for path in vendor_result.get(_MECH_KEY[mechanism]) or []:
         nodes, tail = _split_path(path)
         if not nodes:
@@ -71,13 +109,24 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         leaf_name = idx_n.get("name") or leaf.get("chinese_name") or leaf.get("name") or leaf.get("code")
 
         ev, debate_caveats = [], []
+        blocked_node = None                    # 路径上第一个"数据不足"节点 = 最可指认的阻塞点
+        refuted_nodes = []
         for n in nodes:
             nid = n.get("code")
             ti_n = nodes_idx.get(nid) or {}
+            f = fx.get(nid)
+            if f:                              # actual 回填实测事实(老契约语义);判据词不进 judgment,防伪造检查误触
+                actual = f"证据引擎实测[{_ST_CN[f['st']]}]" + (f":{f['obs']}" if f["obs"] else "")
+                if f["st"] == "insufficient" and blocked_node is None:
+                    blocked_node = ti_n.get("name") or nid
+                if f["st"] == "refuted":
+                    refuted_nodes.append(ti_n.get("name") or nid)
+            else:
+                actual = f"引擎评分 {n.get('node_score')}(match_type={n.get('match_type', '?')})"
             ev.append({"node": ti_n.get("name") or n.get("chinese_name") or n.get("name") or nid,
                        "node_id": nid,
                        "condition": str(ti_n.get("condition") or "").strip() or "(无独立判据)",
-                       "actual": f"引擎评分 {n.get('node_score')}(match_type={n.get('match_type', '?')})",
+                       "actual": actual,
                        "judgment": _judgment(n)})
             if nid in dbg:
                 r = dbg[nid]
@@ -86,29 +135,63 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
                     f"(评委分歧越大越该存疑)")
 
         orig = tail.get("original_path_score")
-        probable.append({
+        leaf_st = (fx.get(leaf.get("code")) or {}).get("st")
+        # confidence 校准(修对抗审查实锤的失真):引擎给 debate 节点的分上限 0.5,连乘让
+        # "叶子已实证成立、只是祖先数据不足"的路径掉到 low——叶子实证成立且路径无证伪时
+        # 托底 medium;叶子被数据证伪则封顶 low(评分再高也不该高于被证伪的置信)。
+        conf = _confidence(orig)
+        if leaf_st == "refuted":
+            conf = "low"
+        elif leaf_st == "held" and not refuted_nodes and conf == "low":
+            conf = "medium"
+
+        conflict = ([f"⚠ 与证据引擎冲突:「{'、'.join(refuted_nodes)}」的判据实测不成立(已被数据排除),"
+                     f"本条仅为评分排序结果"] if refuted_nodes else [])
+        entry = {
             "Root_cause": leaf_name,
             "Fault_tree_path": [e["node"] for e in ev],
-            "confidence": _confidence(orig),
-            "blocked_at": "评分式引擎输出:节点由文本匹配/辩论打分,未做逐节点事实闭环验证",
+            "confidence": conf,
+            "blocked_at": (f"受阻于「{blocked_node}」(数据不足,判据未验证);评分式引擎输出,未做逐节点事实闭环"
+                           if blocked_node else
+                           "评分式引擎输出:节点由文本匹配/辩论打分,未做逐节点事实闭环验证"),
             "caveats": "; ".join(
-                [f"排序机制={mechanism}(路径得分 {tail.get(_SCORE_KEY[mechanism])});"
-                 f"original 路径得分 {orig}(confidence 依据)"] + debate_caveats)
-                 + ";得分机制孰优待 cs-scot-eval 评测确认"
-                 + (";⚠ 本次运行 LLM 曾连接失败、引擎降级为关键词匹配续跑,结果可信度受损,建议重跑"
-                    if vendor_result.get("llm_degraded") else ""),
+                conflict
+                + [f"排序机制={mechanism}(路径得分 {tail.get(_SCORE_KEY[mechanism])});"
+                   f"original 路径得分 {orig}(confidence 依据"
+                   + (",叶子判据经证据引擎实测成立,已托底 medium" if leaf_st == "held" and conf == "medium" else "")
+                   + ")"]
+                + debate_caveats)
+                + ";得分机制孰优待 cs-scot-eval 评测确认"
+                + (";⚠ 本次运行 LLM 曾连接失败、引擎降级为关键词匹配续跑,结果可信度受损,建议重跑"
+                   if vendor_result.get("llm_degraded") else ""),
             "support": f"辩论引擎 Top-K 路径(k 内排名按 {mechanism});"
                        f"路径节点匹配/辩论详情见 evidence_path 与 result/rca_debate_full.json",
             "evidence_path": ev,
             "_engine": {"name": "fault-tree-rca-debate", "mechanism": mechanism},
-        })
+        }
+        if abstain:
+            undetermined.append({
+                "node": leaf_name,
+                "Fault_tree_path": entry["Fault_tree_path"],
+                "reason": f"弃权:证据引擎在本场景没有任何'成立'事实,评分排序候选不足以立为疑似"
+                          f"(排序机制={mechanism},路径得分 {tail.get(_SCORE_KEY[mechanism])};"
+                          f"卡点:{entry['blocked_at']})",
+                "support": entry["support"],
+                "evidence_path": ev,
+            })
+        else:
+            probable.append(entry)
+
+    if abstain and undetermined:
+        print(f"  [弃权] 证据引擎无任何'成立'事实——{len(undetermined)} 条排序候选降入 undetermined"
+              f"(评分制引擎的弃权垫片,防止无据硬报根因)")
 
     tree_issues = {}
     if rca_input:
         tree_issues = dict(rca_input.get("tree_issues") or {})
     out = {"rca_result": [],                       # 评分制引擎不产"事实闭环确证"——诚实置空(见模块 docstring)
            "probable_causes": probable,
-           "undetermined": [],
+           "undetermined": undetermined,
            "tree_issues": {"uncovered_condition_nodes": tree_issues.get("uncovered_condition_nodes", []),
                            "orphan_node_ids": tree_issues.get("orphan_node_ids", [])}}
     return out

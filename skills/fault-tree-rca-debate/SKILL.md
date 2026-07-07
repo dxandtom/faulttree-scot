@@ -42,7 +42,10 @@ python "<本目录>/scripts/run_debate_rca.py" --rca-input "<OUT>/result/rca_inp
 2. **超时给足**:真引擎大树一跑几十分钟,Bash 的 timeout 必须设到**环境允许的最大值**
    (BASH_MAX_TIMEOUT_MS,通常 3600000=1 小时,这是 Claude Code 的硬上限、设更大也会被钳;
    **不要**自作聪明给 10 分钟),或后台运行。进度看 `<out-dir>/debate_progress.txt`
-   (每评估一个节点刷新一行"已评估 N/总数"),长跑时每隔几分钟读一次即可向用户播报进度。
+   (日志式追加,每评估一个节点一行"HH:MM:SS 已评估 N/总数;节点名(得分,类型)",可 tail 跟踪;
+   每轮运行有分隔行),长跑时每隔几分钟读末尾几行即可向用户播报进度。分不清"还在跑"还是
+   "挂了"看 `<out-dir>/debate_heartbeat.txt`(每次 LLM 调用完成刷新;超过 ~20 分钟不动
+   才值得怀疑真挂——180s 超时×重试的最坏栈就这么长)。
    若仍被超时杀(exit 143):**不要原地重试**——把完整命令写进 `<OUT>\run_debate.bat`,
    请用户在自己的终端跑,等确认完成再继续。
 3. **别加没让加的开关、别改配置**:默认值已按最优配好(并行×4、匹配缓存、LLM 加固、
@@ -62,6 +65,13 @@ python "<本目录>/scripts/run_debate_rca.py" --rca-input "<OUT>/result/rca_inp
 - 并行**默认开**(`--parallel 4`;`--parallel 1` 退回纯串行):匹配/辩护/评委等独立 LLM
   循环并发执行 + 匹配记忆化缓存(默认开,`--no-match-cache` 关)。评分公式逐字保留、
   实测结果与串行逐位一致,小样 4.4×提速;并发调大易压垮网关吃 502。
+- **匹配预播种**(默认开,`--no-seed-match` 关):execute 已判定的节点结论直接写进匹配
+  缓存,匹配层不再调 LLM 重新发现已知答案(30 场景实测与理想 LLM 匹配零分歧,还消除
+  采样随机性);**辩护记忆化**(默认开,`--no-debate-cache` 关):同(节点,组,question)
+  的辩护只生成一次(引擎原样会重复采样 m 次)。
+- **回程事实感知**:rca.json 的 evidence_path.actual 回填证据引擎实测;叶子实证成立
+  托底 medium、被数据证伪封顶 low 并挂 ⚠ 冲突旗标;blocked_at 指名"数据不足"节点;
+  全场景无任何成立事实时(该弃权的场景)候选降入 undetermined 而非硬报 probable。
 - `--set K=V`:临时覆盖引擎参数(盖在 config.yaml 上),如 `--set num_judging_agents=2`(提速)、
   `--set llm_max_tokens=16384`(思考型模型要给足,防"LLM调用最终失败: None")。
 - LLM 传输加固默认开(瞬时 502 不再让引擎永久降级;`--no-llm-shield` 关);加固接管重试后,

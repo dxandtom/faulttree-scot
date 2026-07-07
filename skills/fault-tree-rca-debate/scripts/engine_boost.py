@@ -23,6 +23,7 @@ from types import MethodType
 
 # 补丁对应的 vendor 方法源码指纹(升级引擎后不符 → 该补丁自动跳过)
 _HASH_MATCH = "0ed35b2e565ae694b389db3c60e4eb34faf9d30c20fd089fa2d41e788ac1b076"
+_HASH_DEFENSE = "590833df0cdd43925f9a429060b2e260917380cef27c937fbf1b5133d6c5ab80"
 _HASH_DEBATE = "3015fe469f70617c57918e6ee03154cf44808fd5fda1c526f64091e725d3f6b2"
 
 
@@ -71,6 +72,7 @@ def _wrap_match_cache(matcher, client):
     故:计算期间 chat 失败计数只要动过,该结果**只用不缓存**(下次重算)。"""
     orig = matcher.match_conditions
     cache, lock = {}, threading.Lock()
+    matcher._boost_match_cache = cache   # 暴露给 seed_match_cache(P2a 预播种)用
 
     def cached(question, conditions):
         key = (question, tuple(conditions or ()), bool(getattr(matcher, "use_fallback", False)))
@@ -210,7 +212,80 @@ def _parallel_debate(evaluator, eng, workers: int):
     evaluator._debate_evaluation = MethodType(_debate_evaluation, evaluator)
 
 
-def apply(proc, parallel: int = 1, match_cache: bool = True) -> None:
+def seed_match_cache(proc, tree, question: str, facts_status: dict) -> tuple:
+    """P2a 预播种:把 execute 已判定的节点结论直接写进匹配缓存——匹配层不再让 LLM
+    重新发现已知答案(30 场景实测:与'理想字面 LLM 匹配'零分歧,还消除了采样噪声与
+    '\"是\" in response' 解析脆弱性)。
+
+    播种规则(=回声策略的确定性收口):held→满配(N,N,1.0);refuted/insufficient→零配
+    (0,N,0.0)(它们的判据本就不回声进 question,理想字面匹配即零命中)。
+    无事实节点(uncovered)不播,留给 LLM——rca_input 对它们确实没有结论。
+    前置:匹配缓存已开(_wrap_match_cache 已挂);vendor match_conditions 源码哈希
+    不符(引擎升级)则整体跳过、交回 LLM。返回 (满配数, 零配数)。"""
+    matcher = getattr(getattr(proc, "evaluator", None), "condition_matcher", None)
+    cache = getattr(matcher, "_boost_match_cache", None)
+    if cache is None or not isinstance(tree, dict):
+        return 0, 0
+    try:
+        import fault_tree_evaluator_bfs_advanced as eng
+    except ImportError:
+        return 0, 0
+    if _src_hash(eng.ConditionMatcher.match_conditions) != _HASH_MATCH:
+        print("[seed] ⚠ vendor.match_conditions 源码已变(引擎升级?),预播种跳过、匹配交回 LLM")
+        return 0, 0
+
+    n_full = n_zero = 0
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.get("children") or [])
+        conds = node.get("judgment_conditions") or []
+        st = facts_status.get(node.get("code"))
+        if not conds or conds == ["无条件进入"] or conds == ["N/A"] or st is None:
+            continue                       # 无判据/无事实结论的节点不播,行为与原来一致
+        key = (question, tuple(conds), False)   # 只播非降级键;降级路径行为不变
+        if st == "held":
+            cache.setdefault(key, (len(conds), len(conds), 1.0))
+            n_full += 1
+        elif st in ("refuted", "insufficient"):
+            cache.setdefault(key, (0, len(conds), 0.0))
+            n_zero += 1
+    return n_full, n_zero
+
+
+def _wrap_debate_memo(eng) -> bool:
+    """P2b 辩护记忆化:引擎对 m 人零匹配组的每个成员各开一场辩论,每场都为全组每人**重新**
+    生成辩护——同 (节点, 组, question) 的辩护被采样 m 次(实测 -47% 辩护调用可省)。
+    与匹配缓存同一论证:同参数重复调用不再重采样,反而更自洽。失败占位串不缓存。
+    类级包装(DebateAgent 每次调用都新建实例,无法实例级);哈希守卫,引擎升级自动跳过。"""
+    if getattr(eng.DebateAgent.debate, "_boost_memo", False):
+        return True                       # 已包装过(同进程多次 apply),不叠加
+    if _src_hash(eng.DebateAgent.debate) != _HASH_DEFENSE:
+        print("[boost] ⚠ vendor.DebateAgent.debate 源码已变(引擎升级?),辩护记忆化跳过")
+        return False
+    orig = eng.DebateAgent.debate
+    memo, lock = {}, threading.Lock()
+
+    def debate(self, my_node, sibling_nodes, question):
+        # 组键按 code 排序:引擎每场辩论把目标节点排在组首(同一组在 m 场辩论里顺序各不同),
+        # 有序元组永远对不上;组是集合语义,排序后同组即同键
+        key = (my_node.get("code"),
+               tuple(sorted(str(n.get("code")) for n in sibling_nodes)), question)
+        with lock:
+            if key in memo:
+                return memo[key]
+        r = orig(self, my_node, sibling_nodes, question)
+        if r and not r.startswith("[Agent"):   # 失败占位不缓存,下次重试
+            with lock:
+                memo.setdefault(key, r)
+        return r
+
+    debate._boost_memo = True
+    eng.DebateAgent.debate = debate
+    return True
+
+
+def apply(proc, parallel: int = 1, match_cache: bool = True, debate_cache: bool = True) -> None:
     """给真引擎实例打加速补丁。形状不符(mock/bridge/新版结构变化)时逐项安全跳过。"""
     ev = getattr(proc, "evaluator", None)
     matcher = getattr(ev, "condition_matcher", None)
@@ -243,6 +318,8 @@ def apply(proc, parallel: int = 1, match_cache: bool = True) -> None:
     if match_cache:
         _wrap_match_cache(matcher, client)   # 包在(可能已并行的)match_conditions 外层:先查缓存再并行
         applied.append("匹配缓存(带失败防污染)")
+    if debate_cache and _wrap_debate_memo(eng):
+        applied.append("辩护记忆化")
     if parallel and parallel > 1:
         _wrap_chat_semaphore(client, parallel)   # 最外层:全局并发封顶,嵌套并行不超发
         applied.append(f"并发封顶{parallel}")
