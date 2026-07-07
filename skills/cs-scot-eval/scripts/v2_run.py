@@ -110,13 +110,22 @@ def main() -> int:
     scn_dir = suite / "scenarios"
     scns = sorted(d for d in scn_dir.iterdir() if d.is_dir())
     for d in scns:
+        # 评测题面必须全量数据:runner 已支持缺源跳过(部分数据运行),但那是生产便利;
+        # 评测里缺 csv 若静默变成"部分数据题面",score 仍按全量 truth 打分 → 系统性误判模型。这里硬挡。
+        lost = [ind for ind in indicators if not (d / "data" / f"{ind}.csv").exists()]
+        if lost:
+            raise RuntimeError(f"场景 {d.name} 缺数据文件: {', '.join(lost)}(评测题面必须全量数据;"
+                               "补齐 csv 或重新生成该场景,别让它以部分数据入题)")
         data_args = []
         for ind in indicators:
             f = d / "data" / f"{ind}.csv"
-            if f.exists():
-                data_args += ["--data", f"{ind}={f.resolve()}"]
+            data_args += ["--data", f"{ind}={f.resolve()}"]
         _run([str(EXE / "runner.py"), "--plan", str(prod / "plan.json"), "--base", str(prod), *data_args])
         src = prod / "result" / "rca_input.json"
+        ri = json.loads(src.read_text(encoding="utf-8"))
+        if ri.get("missing_indicators"):                 # 双保险:runner 侧任何原因导致缺源都不许入题
+            raise RuntimeError(f"场景 {d.name} 的 rca_input 带 missing_indicators="
+                               f"{sorted(ri['missing_indicators'])},评测题面不接受部分数据")
         shutil.move(str(src), str(d / "rca_input.json"))
     print(f"5) runner 逐场景执行:{len(scns)} 个场景 → 各自 rca_input.json")
 

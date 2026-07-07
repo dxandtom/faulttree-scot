@@ -14,6 +14,12 @@ description: 执行一份 SCoT 计划 plan.json(cs-scot-generate 产出的场景
 python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> --data chr=<chr数据>
 ```
 - `--data <指标>=<文件>`:绑定计划里 `$input.<指标>` 引用到实际数据文件(xlsx/csv);有几个指标传几次。
+- **部分数据也能跑**:plan 需要的数据源(如 rb/chr/config)用户只给了一部分时,**不报错**——缺源的解析
+  步骤自动 `[skip]`,其余步骤照跑,结尾打印「⚠ 数据源缺口汇总」(缺了啥、跳过了哪些步骤、补数命令);
+  缺口同时写进 `result/run.json`(`missing_inputs`)和 `rca_input.json`(顶层 `missing_indicators`),
+  RCA/辩论引擎把这些源的判据按「数据不足」对待(**不是**"已排除")。**向用户汇报结果时必须带上缺口**:
+  结论只代表已提供数据能看到的部分。注意:一个数据源都没给仍是硬报错(用法错误);`--data` 的 key 打错
+  会触发「plan 用不到的数据源」告警——看到它先核对 key 名,别让 typo 静默变成跳过。
 - `--base <dir>`:相对路径基准目录,默认是 `plan.json` 所在目录。
 - `--run-id <id>`(可选):本次运行号(**默认自动**「时间戳+随机」)。**版本管理是默认行为**:`result/` 永远=当前这一轮;重跑前 runner 把**上一轮整体归档到 `runs/<上轮run-id>/`**(`rca_input.json`/`rca.json`/`run.json`),历史不丢、不覆盖、无歧义。每轮写 `result/run.json`(本轮 run_id + 输入数据指纹:路径/大小/sha1)并追加 `runs/index.jsonl`,可溯源、可检索。eval/benchmark 仍读 `result/`(=当前轮),不受影响。(`--new-run` 已是默认,保留仅为兼容。)
 

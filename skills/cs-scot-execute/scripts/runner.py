@@ -100,6 +100,12 @@ def resolve_inputs(inputs: dict, ctx: Dict[str, Any]) -> dict:
     return {k: resolve_ref(v, ctx) for k, v in (inputs or {}).items()}
 
 
+def _input_key(node: dict) -> Any:
+    """script 节点 inputs.data 若是 $input.<key> 引用,返回 key;否则 None。"""
+    ref = (node.get("inputs") or {}).get("data")
+    return ref[len("$input."):] if isinstance(ref, str) and ref.startswith("$input.") else None
+
+
 def store_outputs(outputs: dict, value: Any, ctx: Dict[str, Any]) -> None:
     """把节点产出(一个 JSON 对象)按 outputs 映射写入 $memory / $output。
 
@@ -126,6 +132,8 @@ def run_script_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
     data_path = Path(ins["data"])
     if not data_path.is_absolute():
         data_path = base / data_path
+    if not data_path.exists():
+        raise FileNotFoundError(f"节点 {node['id']} 的数据文件不存在: {data_path}(--data 的路径打错了?)")
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "out.json"
         cmd = [sys.executable, str(script), str(data_path), "-o", str(out)]
@@ -170,13 +178,16 @@ def _file_fingerprint(path: str) -> dict:
     return info
 
 
-def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[str, str], base: Path) -> None:
+def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[str, str], base: Path,
+                        missing_inputs=None) -> None:
     """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs/index.jsonl 追加一行,供生产侧管理。"""
     import datetime
     created = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    inputs = {k: _file_fingerprint(v) for k, v in data_map.items()}
+    inputs = {k: _file_fingerprint(v) for k, v in data_map.items() if v}  # 空值=没提供:归 missing_inputs,不指纹(Path('') 会指到 CWD)
     manifest = {"run_id": run_id, "created_at": created, "plan_id": plan.get("plan_id"),
                 "product_dir": str(base), "inputs": inputs}
+    if missing_inputs:                                   # 部分数据运行:铭牌上写明缺口,事后一看便知这轮少了啥
+        manifest["missing_inputs"] = sorted(missing_inputs)
     (run_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     idx = base / "runs" / "index.jsonl"
     idx.parent.mkdir(parents=True, exist_ok=True)
@@ -225,6 +236,29 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
     """
     name = node.get("name") or node["id"]
     ins = resolve_inputs(node.get("inputs"), ctx)
+    # 上游没产出的指标输入(典型:数据源没提供、解析步骤被跳过)→ 从 indicator_results 剔除、
+    # 改记 missing_indicators:RCA 把这些源的判据按「数据不足/未覆盖」对待,而不是收到 None
+    # 或被跳过步骤的内部占位 dict。三种引用形态都要认:$memory.<路径>(解析为 None)、
+    # 整体 $step.<id>(解析为占位 dict)、字段级 $step.<id>.<field>(解析为 None)。
+    skipped_mem = ctx.get("_skipped_memory") or {}
+    missing_ind: Dict[str, str] = {}
+    for k, ref in (node.get("inputs") or {}).items():
+        if k == "fault_tree_md":
+            continue
+        v = ins.get(k)
+        src = v.get("_skipped_missing_input") if isinstance(v, dict) and "_skipped_missing_input" in v else None
+        if v is not None and src is None:
+            continue                                     # 正常解析出的事实,保留
+        if src is None and isinstance(ref, str):         # None:顺引用找是哪个源缺了
+            if ref.startswith("$memory."):
+                src = skipped_mem.get(ref[len("$memory."):])
+            elif ref.startswith("$step."):
+                st = ctx["step"].get(ref[len("$step."):].split(".", 1)[0])
+                if isinstance(st, dict):
+                    src = st.get("_skipped_missing_input")
+        missing_ind[k] = (f"数据源 '{src}' 未通过 --data 提供,解析步骤已跳过" if src
+                          else "上游步骤未产出结果")
+        ins.pop(k, None)
     # 约定:fault_tree_md 输入若是 .md 路径则读成正文;其余输入视为各指标解析结果
     ft = ins.pop("fault_tree_md", None)
     md_path = None
@@ -248,6 +282,8 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
     if payload is None:  # 无 index / 剪枝异常 → 完整 md + 全量 indicator_results
         ft_text = md_path.read_text(encoding="utf-8") if (md_path and md_path.exists()) else ft
         payload = {"fault_tree_md": ft_text, "indicator_results": ins}
+    if missing_ind:      # 两种形态都带上缺数标记(顶层键,下游 RCA/辩论桥都能看到)
+        payload["missing_indicators"] = missing_ind
 
     in_path = base / result_subdir / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
@@ -255,6 +291,9 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
     # 注:上一轮的最终结果已在 main() 启动时整体归档到 runs/<上轮run_id>/,result/ 此刻只剩本轮的新输入,
     # 模型据此产出本轮 rca.json,不会读到过期结论。
     print(f"[agent_skill] {node['id']}: 已备好输入 → {in_path}")
+    if missing_ind:
+        print(f"  ⚠ 本轮缺失的数据源已写进输入的 missing_indicators: {', '.join(missing_ind)}"
+              "(其判据按「数据不足」对待,别当「不成立」)")
     if tree_note:
         comp = in_path.parent / "_compression.txt"
         comp.write_text(tree_note.strip() + "\n", encoding="utf-8")
@@ -313,10 +352,33 @@ def main() -> None:
         print("plan 里没有 nodes —— 这看起来不是 SCoT 计划", file=sys.stderr)
         sys.exit(2)
 
+    # 数据源核对:plan 的 script 节点各需要哪个 $input.<key>,与本次 --data 实际提供的对照。
+    # 缺的**跳过对应步骤**而不是整轮崩掉(用户只有部分数据也能跑出部分结论),结尾统一汇总缺口。
+    required: Dict[str, list] = {}
+    for n in plan.get("nodes", []):
+        k = _input_key(n)
+        if n.get("kind") == "script" and k:
+            required.setdefault(k, []).append(n["id"])
+    provided = {k for k, v in data_map.items() if v}
+    missing = {k: ids for k, ids in required.items() if k not in provided}
+    unused = sorted(provided - set(required))
+    if unused:                                          # typo 防线:key 打错会变成"静默跳过",这里点破
+        print(f"[warn] --data 里有 plan 用不到的数据源: {', '.join(unused)}"
+              f"(plan 需要: {', '.join(required)})——key 是不是打错了?这些文件本轮不会被使用。")
+    if required and not set(required) & provided:       # 一个都没给:大概率用法错误,仍硬报错并给指引
+        print(f"没有绑定任何 plan 需要的数据源(需要: {', '.join(required)});"
+              f"用 --data <指标>=<文件> 提供,如 --data {next(iter(required))}=<文件>。", file=sys.stderr)
+        sys.exit(2)
+    if missing:
+        print(f"[warn] 缺少数据源: {', '.join(missing)} —— 相应解析步骤将跳过,"
+              "其判据本轮无事实(RCA 按「数据不足」对待);结尾有缺口汇总。")
+
     # 工作记忆初始化(memory_init 里的引用也解析一遍)
     ctx: Dict[str, Any] = {"input": data_map, "memory": {}, "step": {}, "output": {}}
     for k, v in (plan.get("memory_init") or {}).items():
         ctx["memory"][k] = resolve_ref(v, ctx)
+    skipped_memory: Dict[str, str] = {}                 # 被跳过步骤没产出的 $memory 路径 → 缺的数据源 key
+    ctx["_skipped_memory"] = skipped_memory
 
     print(f"执行 SCoT: {plan.get('plan_id') or plan.get('meta', {}).get('goal', '')} "
           f"(version={plan.get('version')}, nodes={len(nodes)})")
@@ -328,7 +390,7 @@ def main() -> None:
     result_dir = base / "result"
     archived = _archive_previous_run(result_dir, base / "runs")
     result_dir.mkdir(parents=True, exist_ok=True)
-    _write_run_manifest(result_dir, run_id, plan, data_map, base)
+    _write_run_manifest(result_dir, run_id, plan, data_map, base, missing_inputs=missing)
     result_subdir = "result"
     if archived:
         print(f"  run_id={run_id};上一轮已归档 → {archived}（result/ 即当前轮，历史在 runs/）")
@@ -343,7 +405,15 @@ def main() -> None:
         node = nodes[cur]
         kind = node.get("kind")
         if kind == "script":
-            result = run_script_node(node, ctx, base)
+            mk = _input_key(node)
+            if mk and mk in missing:                    # 该步的数据源没提供 → 跳过,继续走后面的步骤
+                print(f"[skip] {cur}: 数据源 '{mk}' 未提供(--data {mk}=<文件>),跳过该解析步骤")
+                for t in (node.get("outputs") or {}).values():
+                    if isinstance(t, str) and t.startswith("$memory."):
+                        skipped_memory[t[len("$memory."):]] = mk
+                result = {"_skipped_missing_input": mk}  # 只进 $step 占位;不写 $memory,下游解析为 None
+            else:
+                result = run_script_node(node, ctx, base)
         elif kind == "agent_skill":
             result = run_agent_skill_node(node, ctx, base, result_subdir)
         else:
@@ -355,6 +425,15 @@ def main() -> None:
         tr = node.get("transition") or {}
         cur = None if tr.get("end") else tr.get("next_on_success")
 
+    if missing:                                          # 收尾汇总:这轮缺了啥、影响了啥、怎么补
+        prov = sorted(set(required) & provided)
+        print("\n⚠ 数据源缺口汇总(本轮为**部分数据**运行):")
+        print(f"  plan 需要: {', '.join(required)};本次提供: {', '.join(prov) if prov else '(无)'}")
+        for k, ids in missing.items():
+            print(f"  - 缺 {k} → 已跳过步骤: {', '.join(ids)};该源绑定的判据本轮无事实,"
+                  "RCA 按「数据不足/未覆盖」对待(rca_input 已标 missing_indicators)")
+        print("  结论只代表已提供数据能看到的部分;补齐后重跑: "
+              + " ".join(f"--data {k}=<文件>" for k in missing) + "(runner 会自动归档本轮)。")
     print("SCoT 执行流程完成(script 步骤已跑;agent_skill/RCA 待对应技能完成,见上方提示)。")
 
 
