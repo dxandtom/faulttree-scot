@@ -34,16 +34,70 @@ def _src_hash(fn) -> str:
         return ""
 
 
-def _wrap_chat_semaphore(client, n: int):
-    """并发封顶:所有 LLM 调用(含 shield 的外层重试)同时在飞的不超过 n。"""
-    sem = threading.Semaphore(n)
-    orig = client.chat
+class _AdaptiveGate:
+    """自适应并发闸(AIMD,本地真跑 429 挤爆网关后引入):
+    - 网关回 429/503 → 并发上限**减半**(乘性降,最低 1);
+    - 连续 8 次成功 → 上限 **+1**(加性升,封顶初始值)——错误消失后逐步回升。
+    闸在 HTTP 层(requests.post),重试间隙会释放名额,比 chat 级信号量更不压网关。"""
 
-    def chat(messages, temperature=None):
-        with sem:
-            return orig(messages, temperature)
+    def __init__(self, max_limit: int):
+        self.max = max(1, int(max_limit))
+        self.limit = float(self.max)
+        self.active, self._ok = 0, 0
+        self.cv = threading.Condition()
 
-    client.chat = chat
+    def __enter__(self):
+        with self.cv:
+            while self.active >= max(1, int(self.limit)):
+                self.cv.wait(timeout=5)
+            self.active += 1
+        return self
+
+    def __exit__(self, *exc):
+        with self.cv:
+            self.active -= 1
+            self.cv.notify_all()
+
+    def on_throttle(self):
+        with self.cv:
+            new = max(1.0, self.limit / 2)
+            if int(new) < int(self.limit):
+                print(f"[自适应并发] 网关限流(429/503),并发 {int(self.limit)}→{int(new)}")
+            self.limit, self._ok = new, 0
+
+    def on_success(self):
+        with self.cv:
+            if self.limit >= self.max:
+                return
+            self._ok += 1
+            if self._ok >= 8:
+                self._ok = 0
+                new = min(float(self.max), self.limit + 1)
+                if int(new) > int(self.limit):
+                    print(f"[自适应并发] 网关恢复,并发 {int(self.limit)}→{int(new)}")
+                self.limit = new
+                self.cv.notify_all()
+
+
+def _wrap_post_adaptive(eng, n: int):
+    """把并发闸装在 vendor 模块的 requests.post 上(vendor 文件零改动):
+    比包 chat 更贴近网关——能看见真实状态码(429 才降档,连接错误不降,那不是流控信号),
+    且 vendor 内层重试的 sleep 间隙不占名额。"""
+    gate = _AdaptiveGate(n)
+    orig_post = eng.requests.post
+
+    def post(url, **kw):
+        with gate:
+            resp = orig_post(url, **kw)
+        code = getattr(resp, "status_code", 200)
+        if code in (429, 503):
+            gate.on_throttle()
+        elif 200 <= code < 300:
+            gate.on_success()
+        return resp
+
+    eng.requests.post = post
+    return gate
 
 
 def _wrap_chat_failcounter(client):
@@ -321,7 +375,7 @@ def apply(proc, parallel: int = 1, match_cache: bool = True, debate_cache: bool 
     if debate_cache and _wrap_debate_memo(eng):
         applied.append("辩护记忆化")
     if parallel and parallel > 1:
-        _wrap_chat_semaphore(client, parallel)   # 最外层:全局并发封顶,嵌套并行不超发
-        applied.append(f"并发封顶{parallel}")
+        _wrap_post_adaptive(eng, parallel)   # HTTP 层自适应闸:429/503 减半,连续成功回升
+        applied.append(f"自适应并发≤{parallel}(429 降档/恢复回升)")
     if applied:
         print(f"[boost] 加速补丁已生效:{' + '.join(applied)}(vendor 原件零改动,评分公式逐字保留)")

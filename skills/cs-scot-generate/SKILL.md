@@ -43,7 +43,7 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<�
 ```
 - **不带 `-o`**:子树写到 `<OUT>/tree/<场景名>.md`,并打印「本场景产物目录: `<OUT>`」——**记住这个 `<OUT>`,步骤 2-4 都用它**。
 - 同时产 **`<OUT>/tree/<场景名>.tree_index.json`**:权威拓扑(用 `Ln Code` 当稳定 **node_id** + 父子 + 条件 + AND/OR 提示 + 数据源)。后面填 `node_id`、RCA 压缩上下文都靠它。
-- 场景默认在 L2(`--start-level` 默认 2);`--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`。出来应是几十 KB 的单场景子树。
+- 场景默认在 L2(`--start-level` 默认 2);**用户提示词明确要以 L3/L4 更深层为起点时**,加 `--start-level N`(老/新脚本同参),从那层锚定 `--start-node`、截更小子树;用户没提层级就默认 L2。`--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`。出来应是几十 KB 的单场景子树。
 
 > **⚠ 两种 Excel 格式,务必选对脚本(选错会报错):**
 > - **老格式**(单页签、层级列写成 `L1(Chinese)`、判断挤在一列 `Judgment Condition(Chinese)`)→ 上面的 `excel_to_tree.py`。
@@ -54,6 +54,12 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<�
 >   ```
 >   输出契约与老脚本一致(`<场景>.md` + `<场景>.tree_index.json`),判断按 `CHR/X2/RB/配置/DBG/信令/话统` **源标签**落进节点 `data_source`、给步骤 2.5 绑定**预路由**,步骤 2-4 照旧。
 > - **怎么判断用哪个**:**先跑 v2 的 `--list`**——能列出场景=新格式、继续用 v2;若老脚本报 `未找到 Ln(Chinese) 层级列`,就是把新格式喂给了老脚本,换 v2。`--sheet`/`--list` 是 v2 独有,老脚本没有(传了会报 `unrecognized arguments`)。
+> - **起始层级(默认 L2,可选 L3/L4…)**:`--start-node` 默认把场景名当 **L2** 找。**用户提示词里明确要以 L3/L4 等更深层级为起点时**,加 `--start-level N`——`--list` 会改列**那一层**的场景名,`--start-node` 也从那层锚定,截出更小的子树(v2 老脚本同参)。用法:
+>   ```bash
+>   python "<本目录>/scripts/excel_to_tree_v2.py" "<故障树xlsx>" --start-level 3 --list                 # 列出所有 L3 场景名(核对用户要的名字在不在)
+>   python "<本目录>/scripts/excel_to_tree_v2.py" "<故障树xlsx>" --start-node "<L3场景名>" --start-level 3
+>   ```
+>   注:不加 `--start-level` 时,若给的名字在 L2 找不到,脚本会**自动在更深层兜底匹配**从该节点起截——所以"直接给 L3 名字"多数也能通;但名字可能跨层重名(L2、L3 都有同名节点)时,**务必显式 `--start-level`** 消歧,别靠兜底。用户没提层级 = 默认 L2,不要自作主张下钻。
 
 ### 步骤 2:归集产物(拷模板库 + 写待填脚本骨架 + 生成 SCoT 计划)
 ```bash
