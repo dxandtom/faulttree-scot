@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -133,6 +134,16 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
         parts.append("\n【已用数据排除的节点(其判据实测不成立,此处不复述判据)】\n- " + "、".join(sorted(set(excluded))))
     if insufficient:
         parts.append("\n【数据不足、无法判定的节点】\n- " + "、".join(sorted(set(insufficient))))
+    # 整个数据源没提供(execute 部分数据运行,解析步骤被跳过):只报源名+原因,不含判据文本——
+    # 名字级暴露与既有小节(排除/数据不足)同级;再给 ASCII 源名(kpi/chr/config…)插零宽空格断词,
+    # 引擎的关键词兜底是**子串匹配**,防止「CHR 异常」这类短判据被源名 token 翻成假阳命中
+    # (兜底只在 LLM 失败时启用,LLM 主路径读零宽空格无碍)。
+    # 让评委知道"这些源的判据既未证实也未证伪",而不是把静默无事实误读成"查过没问题"。
+    mi = rca_input.get("missing_indicators") or {}
+    if mi:
+        zw = lambda s: re.sub(r"[0-9A-Za-z_\-]{3,}", lambda m: "\u200b".join(m.group(0)), str(s))
+        parts.append("\n【本轮未提供的数据源(其判据既未证实也未证伪,勿当已排除)】\n"
+                     + "\n".join(f"- {zw(k)}: {zw(v)}" for k, v in mi.items()))
     # 从未被检查的分支(有判据但无任何绑定):防漏诊信号,此前在辩论通道上归零——只报名字,零回声风险
     unc_nodes = ((rca_input.get("tree_issues") or {}).get("uncovered_condition_nodes")) or []
     unc_names = [(u.get("name") or u.get("id")) if isinstance(u, dict) else names.get(u, str(u))

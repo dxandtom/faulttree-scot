@@ -9,7 +9,9 @@
    - **`script`**:`name`→`scripts/<name>.py`;解析 `inputs`(`data` 解析成数据文件),
      跑 `python scripts/<name>.py <数据> -o <临时>`,产出 JSON 按 `outputs` 写入 `$memory`。
    - **`agent_skill`**:解析 `inputs`(`fault_tree_md` 路径读成正文,其余归到
-     `indicator_results`),备到 `result/rca_input.json`,由 `name` 指定的技能(fault-tree-rca)产出结果。
+     `indicator_results`;上游被跳过/未产出的输入**不进** `indicator_results`,改记到顶层
+     `missing_indicators`(键→原因),RCA 按「数据不足」对待),备到 `result/rca_input.json`,
+     由 `name` 指定的技能(fault-tree-rca)产出结果。
 3. 沿 `transition.next_on_success` 走到下一节点;`transition.end=true` 结束。
 
 ## 引用
