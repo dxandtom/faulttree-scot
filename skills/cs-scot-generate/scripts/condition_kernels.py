@@ -19,8 +19,15 @@ import csv
 import io
 import math
 import operator
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
+
+# 命令回显类 CSV(如数通 cmd/diag 模板)的引号包裹多行字段可达数 MB,csv 默认单字段上限 128KB 会当场抛错。
+try:
+    csv.field_size_limit(sys.maxsize)
+except OverflowError:                                    # Windows 的 C long 是 32 位,sys.maxsize 会溢出
+    csv.field_size_limit(2**31 - 1)
 
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
 _NULLISH = {"", "na", "n/a", "null", "none", "nil", "-"}
@@ -465,9 +472,47 @@ _KERNELS = {"A": k_threshold, "B": k_difference, "C": k_match, "E": k_proportion
             "F": k_config, "G": lambda t, b: k_match(t, b, "G"), "H": k_signaling, "I": k_feature}
 
 
+def _apply_filter(table, flt):
+    """行级预过滤——为「EAV 窄表」(一行一个量,如 DataItem/DataValue/Unit 形状)服务:
+    先把行缩到 filter 命中的子集,再让内核对子集算。子句 {column, equals:值|[值…] 或 contains:值|[值…]};
+    多子句(list)= AND,同一行须全满足;大小写不敏感。语义与 E 类内建 filter、H 类 where 同族。
+    返回 (过滤后table, None) 或 (None, 错误串)(列解析不到 → 上层判数据不足)。"""
+    header, rows = table
+    clauses = flt if isinstance(flt, list) else [flt]
+    resolved = []
+    for c in clauses:
+        if not isinstance(c, dict):                      # 畸形子句(如写成字符串)→ 数据不足,绝不乱配、绝不崩
+            return None, f"filter 子句应为对象 {{column, equals|contains}},收到 {type(c).__name__}: {str(c)[:40]!r}"
+        col, how = resolve_column(header, c.get("column", ""))
+        if not col:
+            return None, f"filter 未找到列「{c.get('column')}」({how})"
+        if c.get("equals") is None and c.get("contains") is None:   # 缺目标值 → 数据不足(不许退化成 contains:"none")
+            return None, f"filter 子句缺 equals/contains(列「{c.get('column')}」)"
+        mode = "equals" if c.get("equals") is not None else "contains"
+        tgt = c.get(mode)
+        tgts = [str(t).strip().lower() for t in (tgt if isinstance(tgt, list) else [tgt])]
+        if not any(tgts):
+            return None, f"filter 子句的 {mode} 为空(列「{c.get('column')}」)"
+        resolved.append((col, mode, tgts))
+    keep = []
+    for r in rows:
+        for col, mode, tgts in resolved:
+            v = str(r.get(col, "")).strip().lower()
+            if not ((v in tgts) if mode == "equals" else any(t and t in v for t in tgts)):
+                break
+        else:
+            keep.append(r)
+    return (header, keep), None
+
+
+# filter 只作用于这些类:E 有内建 filter、H 有内建 where(会话内语义),各自保持不变;D/J 不碰数据。
+_FILTERABLE = ("A", "B", "C", "F", "G", "I")
+
+
 def evaluate_binding(b, sources, source_name):
     """按 b['class'] 分派到对应内核;D 递归,J 人工,无源/未知类别 → 数据不足。
-    若绑定带 `decision`(模型生成时已判本条无法机械评估)→ 直接按该判定出 status,**不跑内核、不给判断**。"""
+    若绑定带 `decision`(模型生成时已判本条无法机械评估)→ 直接按该判定出 status,**不跑内核、不给判断**。
+    带 `filter`(A/B/C/F/G/I)→ 先行级预过滤再算(EAV 窄表:先选中"哪个量"的行,再对值做统计)。"""
     cls = str(b.get("class", "")).upper()
     decided = b.get("decision")
     if decided in ("insufficient_data", "manual", "not_applicable"):
@@ -478,12 +523,36 @@ def evaluate_binding(b, sources, source_name):
     if cls == "J" or b.get("manual"):
         return k_manual(b)
     if cls == "D":
+        if b.get("filter"):                              # 静默忽略会让 sub 在全表上算出假阳,响亮拒绝
+            return _insuf("D", "filter 不作用于 D 类顶层——把 filter 写进各 sub 子绑定(各自选行再合成)")
         return k_combo(b, sources, source_name)
     table = sources.get(source_name)
     if table is None:
         return _insuf(cls or "?", f"无数据源「{source_name}」(用 --data {source_name}=<文件> 提供)",
                       resolved_column=None)
+    if not table[1]:                                     # 空表(仅表头、0 行):没数据 ≠ 排除——
+        return _insuf(cls or "?",                        # 别让 matched=0/0 冒充"确定不成立"
+                      "数据源为空表(仅表头、0 行数据),无从判定——不当'不成立'处理")
     fn = _KERNELS.get(cls)
     if not fn:
         return _insuf(cls or "?", f"未知条件类别「{cls}」(应为 A–J 之一)")
+    flt = b.get("filter")
+    if flt:
+        if cls in _FILTERABLE:
+            table, err = _apply_filter(table, flt)
+            if err:
+                return _insuf(cls, err, resolved_column=None)
+            if not table[1]:                             # 过滤后 0 行 = 该指标项/取值本次没采集到
+                fact = _insuf(cls, "filter 命中 0 行(该指标项/取值本次未采集),无从判定——不当'不成立'处理")
+                fact["filter"] = flt
+                return fact
+            fact = fn(table, b)
+            fact["filter"], fact["filter_rows"] = flt, len(table[1])
+            return fact
+        if cls == "E":
+            if isinstance(flt, list):                    # E 的内建 filter 只吃单 dict,list 会崩内核 → 拦成数据不足
+                return _insuf("E", "E 类内建 filter 只接受单个子句(dict);多子句请拆分或改 A/C + filter")
+            # 单 dict → 交给 k_proportion 内建处理(注意其语义独立:大小写敏感、命中 0 行按'排除'算)
+        else:                                            # H/未知类:静默忽略会在全表上算出假阳,响亮拒绝
+            return _insuf(cls, f"filter 不作用于 {cls} 类(H 用内建 where;适用 filter 的是 A/B/C/F/G/I)")
     return fn(table, b)

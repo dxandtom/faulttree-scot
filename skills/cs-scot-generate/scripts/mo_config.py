@@ -121,6 +121,21 @@ def extract_kv(blob, key):
     return re.findall(re.escape(key) + r"=([^,}\s]+)", str(blob or ""))
 
 
+def extract_metric(text, pattern, group=1):
+    """从命令回显/日志长文本里按正则抽数值:返回所有命中的 float 列表(抽不到 → 空列表,调用方判数据不足)。
+
+    用途:回显里「CRC: 52366 packets」这类**标签恒在、数值才是信号**的判据——
+    G 类子串匹配对它必假阳(值为 0 的回显也含 'CRC:' 这个子串),必须抽出数值再比较。
+    例:extract_metric(echo, r"CRC:\\s*([\\d,]+)\\s*packets") → [52366.0, 0.0, …]"""
+    out = []
+    for m in re.finditer(pattern, str(text or ""), re.IGNORECASE):
+        try:
+            out.append(float(str(m.group(group)).replace(",", "")))
+        except (ValueError, IndexError):
+            pass
+    return out
+
+
 def ip_to_int(ip):
     p = str(ip or "").strip().split(".")
     if len(p) != 4:

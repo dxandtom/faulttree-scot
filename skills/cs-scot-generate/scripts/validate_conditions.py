@@ -68,6 +68,8 @@ def _coverage_warnings(conditions):
             continue
         if str(c.get("class") or f.get("class") or "").upper() not in ("C", "G"):
             continue
+        if f.get("filter") is not None:                  # 行级 filter 事实(EAV 窄表):同列各看不同行子集,
+            continue                                     # 取值分布不可跨绑定合并——不参与按列覆盖对账
         col = f.get("resolved_column")
         if not col or f.get("targets") is None:
             continue
@@ -116,13 +118,16 @@ def _proxy_warnings(conditions):
         hit = f.get("matched") or f.get("count_satisfied") or 0
         if ratio is not None and ratio >= 0.9 and hit:          # (a) 恒成立
             heng.append((cid, nid, col, round(ratio, 3), hit, f.get("total")))
+        # 带行级 filter 的事实(EAV 窄表):同列不同指标子集是不同的量,聚合键必须带上 filter,
+        # 否则"不同 DataItem 都绑 Abnormal/都用 >80"这类**正常**绑法会被误报成一值多挂/共用阈值。
+        fkey = json.dumps(f.get("filter"), ensure_ascii=False, sort_keys=True) if f.get("filter") is not None else ""
         tgts = tuple(sorted(str(t).strip().lower() for t in (f.get("targets") or [])))
-        if col and nid and tgts:                                # (b) 一值多挂:按(列,取值集)聚 node_id
-            by_val[(col, tgts)].add(str(nid))
+        if col and nid and tgts:                                # (b) 一值多挂:按(列,filter,取值集)聚 node_id
+            by_val[(col, fkey, tgts)].add(str(nid))
         if col and f.get("op") is not None and f.get("threshold") is not None:  # (c) 只数真有阈值的数值绑定
-            numkey[(col, f.get("op"), f.get("threshold"))] += 1
-    multi = [(col, list(tgts), sorted(nids)) for (col, tgts), nids in by_val.items() if len(nids) >= 2]
-    num = [(k, n) for k, n in numkey.items() if n >= 5]
+            numkey[(col, fkey, f.get("op"), f.get("threshold"))] += 1
+    multi = [(col, list(tgts), sorted(nids)) for (col, _fk, tgts), nids in by_val.items() if len(nids) >= 2]
+    num = [((col, op, thr), n) for (col, _fk, op, thr), n in numkey.items() if n >= 5]
     return heng, multi, num
 
 

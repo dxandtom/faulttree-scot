@@ -19,7 +19,9 @@ DEFAULT_OUT_CONTAINER = "scot产物"
 
 # 产物格式契约版本(写进出厂铭牌 manifest.json):**只在改动使旧产物与新执行器不兼容时才 +1**
 # (修 bug、改文案不动它)。bump 时同步 bump cs-scot-execute/scripts/runner.py 的 EXPECTED_PRODUCT_FORMAT。
-PRODUCT_FORMAT_VERSION = 1
+# v2:绑定新增 filter 字段(EAV 行级预过滤)+ 空表守卫——旧产物里的旧 condition_kernels 副本会
+#     **静默忽略 filter、在全表上算出假阳**,必须重新 assemble 刷新内核副本。
+PRODUCT_FORMAT_VERSION = 2
 
 # 每个指标一份"逐条件分析脚本"的骨架:模型在 generate 时按 A–J 模板填 CONDITIONS。
 # 默认直接套预制内核(evaluate_binding);模板不够用时,模型才为个别条件写 custom。

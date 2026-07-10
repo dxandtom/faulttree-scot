@@ -24,6 +24,12 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+# 命令回显类 CSV 的引号包裹多行字段可达数 MB,csv 默认单字段上限 128KB 会当场抛错。
+try:
+    csv.field_size_limit(sys.maxsize)
+except OverflowError:                                    # Windows 的 C long 是 32 位
+    csv.field_size_limit(2**31 - 1)
+
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
 # 空值/缺测标记:含 kpiData 常见的 NIL(大小写不敏感)。NIL 视为缺测,绝不当一个类别值。
 _NULLISH = {"", "na", "n/a", "null", "none", "nil", "-"}
