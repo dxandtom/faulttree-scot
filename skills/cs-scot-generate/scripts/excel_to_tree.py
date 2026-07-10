@@ -381,6 +381,16 @@ def main() -> None:
     if output_path:
         print(f"已输出子树: {output_path}")
         print(f"已输出权威 index(压缩/RCA 用): {Path(output_path).with_suffix('.tree_index.json')}")
+        try:                                             # 与 v2 同款:亮出判据数,0 判据当场喊停
+            _idx = json.loads(Path(output_path).with_suffix(".tree_index.json").read_text(encoding="utf-8"))
+            _n = sum(1 for nd in (_idx.get("nodes") or {}).values() if nd.get("condition"))
+            print(f"节点数 {len(_idx.get('nodes') or {})},带判据节点 {_n}")
+            if _n == 0:
+                print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是判据列没被识别"
+                      "(本脚本只认表头「Judgment Condition(Chinese)」)——**停下检查 Excel 表头,"
+                      "别往下绑定**;0 判据的树绑出来的只能是瞎猜。", file=sys.stderr)
+        except Exception:  # noqa: BLE001 — 计数只是提示,不阻断
+            pass
         if out_dir is not None:
             print(f"本场景产物目录(后续步骤 2-4 都写到这里): {out_dir}")
     else:

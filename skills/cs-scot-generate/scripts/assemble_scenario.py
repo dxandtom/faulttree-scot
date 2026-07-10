@@ -228,6 +228,30 @@ def main() -> None:
     work = Path(args.work) if args.work else out  # 默认 work==out,产物只此一处
     tree_rel = f"tree/{scenario}.md"
 
+    # 硬闸门:0 判据的树不许归集——判据是整条流水线的原料,0 判据多半是步骤1格式识别问题
+    # (判据列没被认出被静默丢弃)。此时继续会诱发"模型自由发挥硬绑/写脚本量产绑定"的事故,
+    # 必须在这里停下、回去查 Excel 表头,而不是往下走。
+    ti_path = work / "tree" / f"{scenario}.tree_index.json"
+    if not ti_path.exists():                             # 步骤1产物缺失/错位:比 0 判据更糟,同样硬拦
+        print(f"不合格:找不到步骤1产物 {ti_path}。\n"
+              "  排查:① 步骤1(excel_to_tree*)跑过了吗;② --scenario 与步骤1的 --start-node 名字\n"
+              "  完全一致吗(含空格/括号全半角);③ --out/--work 是否指向步骤1的产物目录。\n"
+              "  先把步骤1产物放对,再归集——没有树的产物只会诱发下游自由发挥。", file=sys.stderr)
+        sys.exit(1)
+    try:
+        _ti = json.loads(ti_path.read_text(encoding="utf-8"))
+        _n_cond = sum(1 for nd in (_ti.get("nodes") or {}).values() if nd.get("condition"))
+    except Exception as e:  # noqa: BLE001
+        print(f"tree_index 读取失败({e}),无法核验判据数——先修复步骤1产物再归集。", file=sys.stderr)
+        sys.exit(1)
+    if _n_cond == 0:
+        print(f"不合格:tree_index 里 {len(_ti.get('nodes') or {})} 个节点**一条判据都没有**。\n"
+              "  多半是步骤1没认出判据列(如混血表的 Judgment Condition 单列/自定义列名)——\n"
+              "  升级 excel_to_tree_v2.py 重跑步骤1,确认输出里「带判据节点 N>0」再归集。\n"
+              "  **不要**继续绑定、更不要自己读 Excel 写脚本量产绑定(那会产出无法审计的假绑定)。",
+              file=sys.stderr)
+        sys.exit(1)
+
     for sub in ("scripts", "tree"):
         (out / sub).mkdir(parents=True, exist_ok=True)
 

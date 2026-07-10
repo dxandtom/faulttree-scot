@@ -6,7 +6,9 @@
   页签名带 `old`/`旧` 的默认跳过(过期版),`--include-old` 可保留。
 - **判断列按源分列**:`CHR判断方法 / X2 cause / RB日志判断方法 / 配置数据(核查/判断方法) /
   DBG日志(DEBUG) / 信令判断方法 / 话统(PFM) …` —— 表头**模糊匹配**成规范源标签
-  (CHR/X2/RB/配置/DBG/信令/话统),落进节点的 `data_source`,**列头自带"查哪个源"、给绑定预路由**。
+  (CHR/X2/RB/配置/DBG/信令/话统),落进节点的 `data_source`,**列头自带"查哪个源"、给绑定预路由**;
+  判据没按源分列的(混血表的 `Judgment Condition` 单列/「判断条件」)归 **通用** 标签(无预路由,
+  路由靠模型读判据原文);同层 L n 与 L n(Chinese) 双列只取中文列(空格逐格回退英文格)。
 - **按场景名(L2)跨页签提取**:输入 `--start-node "NSA场景接入失败"`,把**所有树页签**里该 L2
   场景的行收集起来,按"根→叶"路径合并成**一棵**从 L2 起的子树;同一节点的判断按"源标签 + 出处页签"累积。
   (同名场景散在 NSA NR / NSA LTE 等多页 = 不同侧视角,合并成超集;喂数据时缺的源自动数据不足、自然剪掉。)
@@ -63,22 +65,63 @@ def classify(h: str) -> Tuple[str, Any]:
     for kw, tag in _SRC_KEYWORDS:                            # 含源关键词 → 判断方法列
         if kw.lower() in h.lower():
             return ("method", tag)
+    # 通用判据列(老格式单列判据,常见于"混血"表:v2 层级列 + v1 判据列,如数通树)——不认它
+    # 会把整棵树的判据**静默丢光**(建出 0 判据的空壳树,下游只能瞎猜)。
+    # 标签"通用"= 判据未按源分列,路由靠模型读判据原文。
+    if "judgment condition" in h.lower() or "判断条件" in h:
+        return ("method", "通用")
     return ("drop", None)
 
 
 def sheet_schema(header: List[str]):
-    """表头 → (层级列[(列名,层级)]升序, 判断列{列名:源标签}, 元数据列{列名:名})。"""
+    """表头 → (层级列[(列名,层级)]升序, 判断列{列名:源标签}, 元数据列{列名:名}, 层级备选列{层级:[列名]})。
+
+    「混血」表(同层有 L1 与 L1(Chinese) 双列、判据中英双列)的双列处理:
+    - 同一层级多列 → 主列取「(Chinese)」那列(业务语言);其余列进**备选表**,取值时逐格回退
+      (某行中文格空、英文格有值 → 用英文格,不整列丢弃)——否则中英文名会被当成两层节点
+      串进路径,树深翻倍;整列取舍又会把漏译的行静默挤层/丢支。
+    - **仅「通用」标签**(Judgment Condition 中英双列=同一判据的翻译)去重:优先留列名带
+      Chinese 的那列,防同一判据中英文拼接。其他源标签的多列(如 话统+PFM、DBG+DEBUG)是
+      **不同的判断列**,全部保留、由 build_index 按标签累积——别按标签收敛(会静默丢整列判据)。"""
     levels, methods, metas = [], {}, {}
     for h in header:
         kind, tag = classify(h)
         if kind == "level":
             levels.append((h, tag))
         elif kind == "method":
-            methods[h] = tag
+            if tag == "通用" and tag in methods.values():    # 通用判据中英双列:留 Chinese 那列
+                cur = next(c for c, t in methods.items() if t == tag)
+                if "chinese" in h.lower() and "chinese" not in cur.lower():
+                    del methods[cur]
+                    methods[h] = tag
+            else:
+                methods[h] = tag
         elif kind == "meta":
             metas[h] = tag
-    levels.sort(key=lambda x: x[1])
-    return levels, methods, metas
+    by_lvl: Dict[int, List[str]] = {}
+    for c, l in levels:
+        by_lvl.setdefault(l, []).append(c)
+    primary, fallback = [], {}
+    for l, cols in by_lvl.items():
+        pick = next((c for c in cols if "chinese" in c.lower()), cols[0])
+        primary.append((pick, l))
+        rest = [c for c in cols if c != pick]
+        if rest:
+            fallback[l] = rest
+    primary.sort(key=lambda x: x[1])
+    return primary, methods, metas, fallback
+
+
+def _lvl_value(row, col: str, fb_cols) -> str:
+    """某行某层的取值:主列(中文)优先,空则逐格回退备选列(英文)——漏译一格不丢一支。"""
+    v = (row.get(col) or "").strip()
+    if v:
+        return v
+    for c in fb_cols or ():
+        v = (row.get(c) or "").strip()
+        if v:
+            return v
+    return ""
 
 
 def is_tree_sheet(header: List[str]) -> bool:
@@ -105,12 +148,13 @@ def list_scenarios(tree_sheets, start_level: int) -> Dict[str, List[str]]:
     """场景名(start_level 层,默认 L2)→ 出现在哪些页签。"""
     sc: Dict[str, set] = {}
     for name, header, rows in tree_sheets:
-        levels, _, _ = sheet_schema(header)
+        levels, _, _, fb = sheet_schema(header)
         l2 = next((c for c, l in levels if l == start_level), None)
         if not l2:
             continue
+        fb_cols = fb.get(start_level)
         for row in rows:
-            v = (row.get(l2) or "").strip()
+            v = _lvl_value(row, l2, fb_cols)
             if v:
                 sc.setdefault(v, set()).add(name)
     return {k: sorted(v) for k, v in sorted(sc.items())}
@@ -129,11 +173,11 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
         return short[chain]
 
     for name, header, rows in tree_sheets:
-        levels, methods, metas = sheet_schema(header)
+        levels, methods, metas, fb = sheet_schema(header)
         if not levels:
             continue
         for row in rows:
-            full = [(lvl, (row.get(c) or "").strip()) for c, lvl in levels]
+            full = [(lvl, _lvl_value(row, c, fb.get(lvl))) for c, lvl in levels]
             full = [(lvl, v) for lvl, v in full if v]
             if not full:
                 continue
@@ -263,7 +307,12 @@ def main() -> None:
     print(f"已输出子树: {output_path}")
     print(f"已输出权威 index: {outp.with_suffix('.tree_index.json')}")
     src_sheets = sorted({s for nd in index["nodes"].values() for s in nd.get("sheets", [])})
-    print(f"场景「{args.start_node}」合并自页签: {src_sheets};节点数 {len(index['nodes'])}")
+    n_cond = sum(1 for nd in index["nodes"].values() if nd.get("condition"))
+    print(f"场景「{args.start_node}」合并自页签: {src_sheets};节点数 {len(index['nodes'])},带判据节点 {n_cond}")
+    if n_cond == 0:
+        print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是格式没被识别"
+              "(判据列表头对不上关键词/通用判据列),**停下检查 Excel 表头,别往下绑定**"
+              "——0 判据的树绑出来的只能是瞎猜。", file=sys.stderr)
     if out_dir is not None:
         print(f"本场景产物目录: {out_dir}")
 
