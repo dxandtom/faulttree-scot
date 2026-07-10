@@ -20,6 +20,7 @@
 | `source` | 数据源逻辑名(对应 `--data <name>=<file>`);J 类可为 null |
 | `mapping_reason` | **为何这么对/语义或单位差异/为何判数据不足**(必写,可审) |
 | `decision`(可选) | 模型**已判本条无法机械评估**时填 `"insufficient_data"`(或 `"manual"`):直接出该状态、**不跑内核、不给判断**。**比写一堆 has/lacks/column 再在 reason 里说"数据不足"既更诚实、又更快、又更短。** |
+| `filter`(可选) | **行级预过滤**,给「EAV 窄表」(一行一个量,如 `DataItem/DataValue/Unit` 形状)用:先把行缩到命中子集、内核再对子集算。子句 `{column, equals:值\|[值…]}` 或 `{column, contains:…}`,list=AND。**只作用于 A/B/C/F/G/I**(E 有内建 `filter`、H 有内建 `where`,语义不变);过滤后 0 行=该指标项本次未采集 → 数据不足(不是"不成立")。 |
 | …类参数… | 见下表,直接平铺在本对象上 |
 
 ## 类别 → 内核参数
@@ -95,6 +96,30 @@
 2. **NIL/空 = 缺测**,计入 `nulls`,**不当"不成立"、不当 0**。
 3. **路由要诚实**:树的量在别的源(如 RSRP 在 CHR 不在 KPI)→ 写清 `mapping_reason` 并标数据不足/换源,**不拿本源相近列顶**(别重蹈 `SINR→语音用户数`)。
 
+## EAV 窄表(一行一个量)与空表的语义
+- **EAV 窄表**:有的源不是"一列一个量"的宽表,而是「指标名列 + 取值列」的窄表(如数通 diag 的
+  `DataItem`(282 种指标名)/`DataValue`/`Unit`)。绑法:`filter` 先选中"哪个量"的行,`column` 指向取值列。
+  例:「CPU 占用率>80%」→ `{"class":"A","filter":{"column":"DataItem","equals":"SYS_CpuUsage"},
+  "column":"DataValue","op":">","threshold":80,"scope":"count_rows"}`。
+- **空表(仅表头、0 行)→ 一律「数据不足」**(所有读表类),**filter 命中 0 行 → 「数据不足」**
+  (A/B/C/F/G/I),内核自动兜住——没数据≠排除,别让 `matched=0/0` 冒充"确定不成立"。
+  (非空表上 `matched=0` 仍是**确定排除**,语义不变。)
+- **E 类例外**:E 的内建 `filter` 语义独立——只接受**单个子句**(list 会被拦成数据不足)、
+  **大小写敏感**、命中 0 行按"排除"算。EAV 场景要占比/TopN 时,优先把行选窄的活交给 A/C+filter。
+- **D/H 顶层不吃 filter**(响亮报数据不足,不静默忽略):D 把 filter 写进各 `sub` 子绑定;H 用内建 `where`。
+- **回显计数器红线**:「回显里出现某告警名」可用 G(告警名只在发生时出现);「回显里某计数器>阈值」
+  **禁用 G**——`CRC:` 这类标签恒在、值为 0 也会子串命中(假阳),必须 custom 用 `mo_config.extract_metric`
+  抽出数值再比较。详见 `references/datacom_log_adapter.md`。
+
+## 一个节点多条判据怎么绑
+- **同源多条(尤其 AND)**:**优先 D 类**组合成一条绑定(AND/OR 语义由内核合成:有假即假、有缺即缺)。
+  拆成多条独立绑定虽也支持(同 node_id 全挂上),但辩论通道对多条独立事实按"任一成立即成立"塌缩,
+  AND 节点会被高估;D 类的 `predicate_satisfied` 本身就是合成结论,无此问题。
+- **跨源组合**:把各合取项填进**各自源**的脚本(同 node_id),AND/OR 留给 RCA 合(单脚本只见一个源)。
+- 覆盖闸门(check_tree_coverage)是**节点级**的:它保证每个叶子至少被认领,但"一个节点的第 2、3 条
+  判据漏没漏"没有机械闸门——多判据节点用 D 类,就把"绑没绑全"收敛回了节点级,闸门看得住。
+
 > 真实例子见 `examples/kpi-tabular/scripts/kpi_analyzer.py`(填好的 `CONDITIONS` + 一条 `custom`)。
-> 跨源组合:把各合取项填进**各自源**的脚本,AND/OR 留给 RCA 合(单脚本只见一个源)。
 > **接入类「配置拓扑」场景**(NSA 的 S1/X2 链路、路由、EPGroup、多运营商等):配置常是 `MOName:key=val,...;` **文本**(非表格)→ 用 `.txt` 直接喂、每个 MO 类型当**页签**、`source=<MO类型>` 套 F/A/C;模板搞不定的(IP 网段匹配、跨 MO 追溯、分号多值、动态表头)写 custom + 用 `mo_config` 原语。**详见 `references/nsa_config_adapter.md`(4 个可照抄的 custom 例子)。**
+> **数通「诊断文件包」场景**(路由器/交换机的 cmd/diag/config/dblg/log/opr/bas 一包 CSV,老格式故障树):
+> 7 类文件的内核对号表、EAV 窄表 `filter` 绑法、回显计数器红线、空表语义——**详见 `references/datacom_log_adapter.md`。**

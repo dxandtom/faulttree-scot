@@ -37,7 +37,7 @@ def _facts_by_node(results: dict, alias: dict) -> dict:
 
 _FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "value",
               "matched", "total", "ratio", "top", "count_satisfied", "top1", "top1_ratio",
-              "top1_count", "valid", "n", "n_rows", "filtered_n", "distinct",
+              "top1_count", "valid", "n", "n_rows", "filtered_n", "filter_rows", "distinct",
               "matched_sessions", "lacks_never_seen", "nulls", "op", "threshold")
 
 
@@ -143,6 +143,8 @@ def prune(index: dict, results: dict) -> dict:
             f = e.get("fact") or {}
             if str(e.get("class") or f.get("class") or "").upper() not in ("C", "G"):
                 continue
+            if f.get("filter") is not None:              # 带行级 filter 的事实(EAV 窄表):同列多绑定各看不同行
+                continue                                 # 子集,取值分布不可跨绑定合并——不参与按列的覆盖对账
             col = f.get("resolved_column")
             if not col or f.get("targets") is None or f.get("status") != "ok":
                 continue

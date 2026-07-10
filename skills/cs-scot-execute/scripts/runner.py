@@ -31,7 +31,8 @@ _TOK = re.compile(r"[^.\[\]]+|\[\d+\]")
 
 # 产物格式契约:执行器"认识"的版本。与 cs-scot-generate/scripts/assemble_scenario.py 的
 # PRODUCT_FORMAT_VERSION 成对维护——产物结构有破坏性变化时两边一起 +1。比对只告警不阻断(知情,不是门禁)。
-EXPECTED_PRODUCT_FORMAT = 1
+# v2:绑定 filter 字段 + 空表守卫(旧产物的旧内核副本会静默忽略 filter → 假阳,提示重新 generate)。
+EXPECTED_PRODUCT_FORMAT = 2
 
 
 def check_product_format(base: Path) -> None:
