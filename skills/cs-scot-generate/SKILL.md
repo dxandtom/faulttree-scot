@@ -32,8 +32,8 @@ description: 把故障树(Excel)+ 若干指标数据编译成场景诊断产物:
 ```
 <OUT> = <故障树 xlsx 所在目录>/scot产物/<场景名>/
 ```
-- 步骤 1 的 `excel_to_tree.py` 会**自动算出并打印** `<OUT>`;**后续步骤 2-4 全部用同一个 `<OUT>`**,不要另起临时目录。
-- 改位置:给步骤 1 / 4 传 `--out-base "<根目录>"`(产物 = `<根目录>/scot产物/<场景名>`),或给步骤 4 传 `--out "<目录>"` 直接指定。
+- 步骤 1 的 `excel_to_tree.py` 会**自动算出并打印** `<OUT>`;**后续步骤(2/2.5/3)全部用同一个 `<OUT>`**,不要另起临时目录。
+- 改位置:给步骤 1 / 2 传 `--out-base "<根目录>"`(产物 = `<根目录>/scot产物/<场景名>`),或给步骤 2 的 assemble 传 `--out "<目录>"` 直接指定。
 
 ## 流水线
 
@@ -41,18 +41,18 @@ description: 把故障树(Excel)+ 若干指标数据编译成场景诊断产物:
 ```bash
 python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<场景名>"
 ```
-- **不带 `-o`**:子树写到 `<OUT>/tree/<场景名>.md`,并打印「本场景产物目录: `<OUT>`」——**记住这个 `<OUT>`,步骤 2-4 都用它**。
+- **不带 `-o`**:子树写到 `<OUT>/tree/<场景名>.md`,并打印「本场景产物目录: `<OUT>`」——**记住这个 `<OUT>`,后续步骤都用它**。
 - 同时产 **`<OUT>/tree/<场景名>.tree_index.json`**:权威拓扑(用 `Ln Code` 当稳定 **node_id** + 父子 + 条件 + AND/OR 提示 + 数据源)。后面填 `node_id`、RCA 压缩上下文都靠它。
-- 场景默认在 L2(`--start-level` 默认 2);**用户提示词明确要以 L3/L4 更深层为起点时**,加 `--start-level N`(老/新脚本同参),从那层锚定 `--start-node`、截更小子树;用户没提层级就默认 L2。`--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`。出来应是几十 KB 的单场景子树。
+- 场景默认在 L2(`--start-level` 默认 2);**用户提示词明确要以 L3/L4 更深层为起点时**,加 `--start-level N`(老/新脚本同参),从那层锚定 `--start-node`、截更小子树;用户没提层级就默认 L2。`--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`(**仅老脚本有此参**;v2 无、不排噪声节点)。出来应是几十 KB 的单场景子树。
 
 > **⚠ 两种 Excel 格式,务必选对脚本(选错会报错):**
 > - **老格式**(单页签、层级列写成 `L1(Chinese)`、判断挤在一列 `Judgment Condition(Chinese)`)→ 上面的 `excel_to_tree.py`。
 > - **新格式**(**多页签**、层级列是纯 `L1`…`L6`、判断**按源分列** `CHR判断方法 / X2 cause / RB日志判断方法 / 配置数据判断方法 / DBG日志判断方法 / 信令判断方法 / 话统辅助判断方法 …`)→ 用 **`excel_to_tree_v2.py`**:
 >   ```bash
->   python "<本目录>/scripts/excel_to_tree_v2.py" "<故障树xlsx>" --list                              # 先探:列出可输入场景名(L2)+ 各自出处页签(非树页/旧页 -old 自动跳过)
+>   python "<本目录>/scripts/excel_to_tree_v2.py" "<故障树xlsx>" --list                              # 先探:列出可输入场景名(L2)+ 各自出处页签(非树页/旧页 -old 自动跳过;要保留旧页加 --include-old)
 >   python "<本目录>/scripts/excel_to_tree_v2.py" "<故障树xlsx>" --start-node "<场景名>" [--sheet "<页签名>"]   # 跨页签合并出该场景子树;--sheet 限定只用某一页
 >   ```
->   输出契约与老脚本一致(`<场景>.md` + `<场景>.tree_index.json`),判断按 `CHR/X2/RB/配置/DBG/信令/话统` **源标签**落进节点 `data_source`、给步骤 2.5 绑定**预路由**;判据没按源分列的(混血表的 `Judgment Condition` 单列)归 `通用` 标签——**通用无预路由**,路由靠绑定时模型读判据原文。步骤 2-4 照旧。
+>   输出契约与老脚本一致(`<场景>.md` + `<场景>.tree_index.json`),判断按 `CHR/X2/RB/配置/DBG/信令/话统` **源标签**落进节点 `data_source`、给步骤 2.5 绑定**预路由**;判据没按源分列的(混血表的 `Judgment Condition` 单列)归 `通用` 标签——**通用无预路由**,路由靠绑定时模型读判据原文。后续步骤照旧。
 > - **怎么判断用哪个**:**先跑 v2 的 `--list`**——能列出场景=新格式、继续用 v2;若老脚本报 `未找到 Ln(Chinese) 层级列`,就是把新格式喂给了老脚本,换 v2。`--sheet`/`--list` 是 v2 独有,老脚本没有(传了会报 `unrecognized arguments`)。
 > - **起始层级(默认 L2,可选 L3/L4…)**:`--start-node` 默认把场景名当 **L2** 找。**用户提示词里明确要以 L3/L4 等更深层级为起点时**,加 `--start-level N`——`--list` 会改列**那一层**的场景名,`--start-node` 也从那层锚定,截出更小的子树(v2 老脚本同参)。用法:
 >   ```bash
@@ -67,6 +67,7 @@ python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
 它把 A–J 模板库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览引擎 `analyzer.py`、绑定契约拷进 `<OUT>/scripts/`(**这几个库每次重跑都刷新**),为每个指标写一份**待填骨架** `<ind>_analyzer.py`,并产出 `plan.json`(`各<ind>_analyzer(script)→rca(agent_skill)`)。`--out` 用步骤 1 打印的 `<OUT>`。格式见 `references/plan_schema.md`。
+> **assemble 有两道硬闸门(退出码 1)**:①找不到 `tree/<场景>.tree_index.json`(步骤 1 没跑/场景名不一致/目录错位);②树 0 判据。报错里带排查指引——拦的是"步骤 1 没跑好就往下绑"的病根,别绕。
 > **重跑 = 重新编译**:已存在的 `<ind>_analyzer.py` 默认**会被当前版本的空骨架覆盖**(旧的先备份成 `.py.bak`),所以**更新 skill 后直接重跑就能生效,不用手删旧脚本**;模型随后在步骤 2.5 重新填。确需保留上次填好的脚本 → 加 `--keep`。
 
 ### 步骤 2.5(关键的一步):为每个 `<ind>_analyzer.py` 填 `CONDITIONS`
@@ -81,7 +82,7 @@ python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o /tmp/<ind>_over
 > **⚠ 树驱动、要全覆盖(欠绑定是头号坑)**:**遍历 `tree_index` 里本源能答的每个叶子,逐个绑**——按树条件要的**列+值**绑(C 类 `contains` 那个码),**不管这次数据里出没出现**;别"翻数据里出现了哪些码、看到一个挂一个"(数据驱动 → 漏整支 + 过拟合本次数据)。值这次没出现 → 照绑、`matched=0`(确定排除),**不是** `insufficient_data`。`mapping_reason` 别只写"出现 N 次"(那是运行时结果,不是绑定依据)。
 > **⚠ 写进去后核对覆盖度(别只数条数)**:主代理写完,跑步骤3的 **`check_tree_coverage.py`** 机械核对——**`❌ 漏绑`>0(本源能答的叶子没绑)= 没写全,回去补,别往下跑**;**0 条或异常少**几乎一定是数据驱动/没收齐造成的欠绑定。
 > **泛化第一(重要)**:绑定按**格式+语义**,别被这次数据带偏。**节点级"整体有没有失败"若本源有该流程同事件的成功率列 → 直接用(A 类,阈值=100/按量纲),这是重述不是代理**;但**特定失败子因的计数器不在本源列里 → `decision:insufficient_data` 或换源,绝不拿通用率代理、绝不把多条判据塞给同一列**(语义错+恒成立+丢泛化)。判别看列**度量什么(建立 vs 掉线)**、别看名字。**绑率前机械自检:① 流程词逐字对上(UECntx/RRC/NGSig/QosFlow 不互代);② 计数器不含 `.FailEst.`(含=子因,禁率)。** 一次生成要能反复执行不同数据。
-> **信令 / H 类先认消息词汇**:多页签信令源,先 `analyzer.py "<数据>" --sheet <带 MessageType 的页签(如 detailInfoRight)> --lean` 看 `MessageType`/`InterfaceType`/cause 的**真实取值**;`has`/`lacks`/`where` 只能绑**数据里真出现过**的消息名,**别照故障树正文猜**(猜错 → matched 恒 0 → 该路径假阴性、整源白填)。
+> **信令 / H 类先认消息词汇**:多页签信令源,先 `analyzer.py "<数据>" --sheet <带 MessageType 的页签(如 detailInfoRight)> --lean -o /tmp/<页签>_overview.json` 看 `MessageType`/`InterfaceType`/cause 的**真实取值**;`has`/`lacks`/`where` 只能绑**数据里真出现过**的消息名,**别照故障树正文猜**(`has` 猜错内核守卫会改判数据不足并附真实词汇样例;`lacks`/`where` 猜错则**静默**退化——恒真/恒 0,该路径假阴性、整源白填)。
 
 ### 步骤 3:用真实数据验证每个生成脚本
 ```bash
@@ -103,8 +104,11 @@ python "<本目录>/scripts/check_tree_coverage.py" "<OUT>/tree/<场景>.tree_in
 ├── manifest.json                          # 产物铭牌:格式契约版本+生成时间(execute/benchmark 启动比对,旧产物只告警)
 ├── scripts/<ind>_analyzer.py              # 逐条件分析脚本(模型填 CONDITIONS,产物②)
 ├── scripts/condition_kernels.py           # A–J 模板库(脚本 import 它)
-├── scripts/condition_binding_schema.md    # 绑定契约 + analyzer.py 概览引擎
-└── tree/<场景>.md                          # 故障树 md(产物③)
+├── scripts/mo_config.py                   # 配置拓扑适配器(MO 文本→表 + custom 原语)
+├── scripts/analyzer.py                    # 概览引擎(步骤 2.5 模型看列用)
+├── scripts/condition_binding_schema.md    # 绑定契约副本
+├── tree/<场景>.md                          # 故障树 md(产物③)
+└── tree/<场景>.tree_index.json            # 权威拓扑:node_id/父子/判据/数据源(绑定与 RCA 压缩都靠它)
 ```
 跑它:`python "<cs-scot-execute 目录>/scripts/runner.py" --plan "<OUT>/plan.json" --data <ind>=<数据文件> ...`
 

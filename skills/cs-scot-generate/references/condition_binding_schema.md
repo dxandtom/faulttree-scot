@@ -19,14 +19,14 @@
 | `class` | `A`–`J`,决定用哪个内核 |
 | `source` | 数据源逻辑名(对应 `--data <name>=<file>`);J 类可为 null |
 | `mapping_reason` | **为何这么对/语义或单位差异/为何判数据不足**(必写,可审) |
-| `decision`(可选) | 模型**已判本条无法机械评估**时填 `"insufficient_data"`(或 `"manual"`):直接出该状态、**不跑内核、不给判断**。**比写一堆 has/lacks/column 再在 reason 里说"数据不足"既更诚实、又更快、又更短。** |
+| `decision`(可选) | 模型**已判本条无法机械评估**时填 `"insufficient_data"`(或 `"manual"`;也认 `"not_applicable"`,按数据不足出):直接出该状态、**不跑内核、不给判断**。**比写一堆 has/lacks/column 再在 reason 里说"数据不足"既更诚实、又更快、又更短。** |
 | `filter`(可选) | **行级预过滤**,给「EAV 窄表」(一行一个量,如 `DataItem/DataValue/Unit` 形状)用:先把行缩到命中子集、内核再对子集算。子句 `{column, equals:值\|[值…]}` 或 `{column, contains:…}`,list=AND。**只作用于 A/B/C/F/G/I**(E 有内建 `filter`、H 有内建 `where`,语义不变);过滤后 0 行=该指标项本次未采集 → 数据不足(不是"不成立")。 |
 | …类参数… | 见下表,直接平铺在本对象上 |
 
 ## 类别 → 内核参数
 | 类 | 名称 | 关键参数 | 产出事实 |
 |---|---|---|---|
-| **A** | 阈值比较 | `column`,`op`(`< <= > >= == !=`),`threshold`,`scope`(`aggregate`/`count_rows`),`agg`(mean/min/max/last/sum),`transforms` | aggregate 给 `value`;count_rows 给 `count_satisfied`/`ratio` |
+| **A** | 阈值比较 | `column`,`op`(`< <= > >= == !=`,`=`同`==`),`threshold`,`scope`(`aggregate`/`count_rows`),`agg`(mean/min/max/first/last/sum),`transforms` | aggregate 给 `value`;count_rows 给 `count_satisfied`/`ratio` |
 | **B** | 差值计算 | `minuend`:[列…],`subtrahend`:[列…],`op`,`threshold`,`scope`,`transforms` | `value`=Σ被减−Σ减;**缺任一原始计数列→数据不足** |
 | **C** | 字段匹配 | `column`,`equals`:[值…] 或 `contains`:[子串…],`match`,`case_insensitive`,`require`(默认1) | `matched` 命中行数 + 样例 |
 | **D** | 多条件组合 | `combine`(`AND`/`OR`),`sub`:[子绑定…](每个子绑定自带 `class`,可自带 `source`) | AND:有子False→False、有数据不足→数据不足、否则True;OR 对称 |

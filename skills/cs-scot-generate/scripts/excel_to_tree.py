@@ -392,7 +392,7 @@ def main() -> None:
         except Exception:  # noqa: BLE001 — 计数只是提示,不阻断
             pass
         if out_dir is not None:
-            print(f"本场景产物目录(后续步骤 2-4 都写到这里): {out_dir}")
+            print(f"本场景产物目录(后续步骤都写到这里): {out_dir}")
     else:
         sys.stdout.write(md)
 

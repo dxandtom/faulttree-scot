@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """把 cs-scot-generate 的中间产物归集成一个场景的诊断产物(资产,不是 skill)。
 
-产物 = plan.json(真正的 SCoT 计划)+ scripts/<指标>_analyzer.py(自包含解析脚本)
-       + tree/<场景>.md + codegen_prompts/(留痕)。由 cs-scot-execute 来跑。
+产物 = plan.json(真正的 SCoT 计划)+ manifest.json(格式契约铭牌)
+       + scripts/<指标>_analyzer.py(逐条件分析骨架,模型在步骤 2.5 填 CONDITIONS)
+       + 内核/适配器/概览引擎/绑定契约副本 + tree/<场景>.md。由 cs-scot-execute 来跑。
 """
 from __future__ import annotations
 

@@ -11,7 +11,9 @@
    - **`agent_skill`**:解析 `inputs`(`fault_tree_md` 路径读成正文,其余归到
      `indicator_results`;上游被跳过/未产出的输入**不进** `indicator_results`,改记到顶层
      `missing_indicators`(键→原因),RCA 按「数据不足」对待),备到 `result/rca_input.json`,
-     由 `name` 指定的技能(fault-tree-rca)产出结果。
+     由 `name` 指定的技能(fault-tree-rca)产出结果。注:`indicator_results` 是**回退形态**——
+     产物带 `tree_index.json` 时(常态),runner 把 rca_input 剪成局部子树形态
+     (`fault_tree.outline`/`pruned_nodes` 等,无 `indicator_results` 键),权威定义见 fault-tree-rca 的 SKILL.md。
 3. 沿 `transition.next_on_success` 走到下一节点;`transition.end=true` 结束。
 
 ## 引用

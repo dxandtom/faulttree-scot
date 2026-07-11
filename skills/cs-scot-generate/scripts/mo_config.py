@@ -11,7 +11,8 @@
 
 谁用:
   · load_table 读 .txt 配置 → parse_mo_text(返回 (header, rows),与 csv/xlsx 同形,F/C/A 类直接能用);
-  · custom 函数里:parse_mo_grouped(按 MO 分组)+ ip_in_subnet / split_multi / extract_kv / trace_refs 这些原语。
+  · custom 函数里:parse_mo_grouped(按 MO 分组)+ ipv4_in_subnet / split_multi / extract_kv / mo_get /
+    extract_metric 这些原语(跨 MO 追溯 = mo_get + extract_kv 链式拼,见文末自测)。
 """
 from __future__ import annotations
 import re

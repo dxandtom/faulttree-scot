@@ -43,6 +43,9 @@
 - runner 解析 inputs(`fault_tree_md` 若是 md 路径则读成正文,其余按指标名归到 `indicator_results`;
   上游被跳过/未产出的输入不进 `indicator_results`,改记顶层 `missing_indicators`(键→原因)),
   备到 `result/rca_input.json`,由 **fault-tree-rca 技能**依据它产出根因。
+  注:`indicator_results` 是**回退形态**——产物带 `tree_index.json` 时(常态),runner 会把 rca_input
+  剪成局部子树形态(`fault_tree.outline`/`pruned_nodes` 等,无 `indicator_results` 键),
+  两种形态的权威定义见 fault-tree-rca 的 SKILL.md。
 
 ## 典型流水线(本项目)
 `各 <指标>_analyzer(script,读表→逐条件统计)` → `rca(agent_skill,唯一模型步骤)`。
