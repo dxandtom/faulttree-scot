@@ -271,6 +271,7 @@ def k_match(table, b, cls="C"):
     tnorm = [norm(t) for t in targets]
     idc = _id_col(header)
     matched, nulls, samples, dist = 0, 0, [], Counter()
+    by_target = Counter()                               # 每个 target 各命中多少行(多 target 时的可审计分解)
     for i, r in enumerate(rows):
         v = r.get(col, "")
         if _is_null(v):
@@ -278,17 +279,26 @@ def k_match(table, b, cls="C"):
             continue
         dist[str(v).strip()] += 1                       # 同列取值分布(给 RCA 判分量/主次)
         nv = norm(v)
-        hit = any(t in nv for t in tnorm) if mode == "contains" else (nv in tnorm)
-        if hit:
+        if mode == "contains":
+            hits = [j for j, t in enumerate(tnorm) if t in nv]
+        else:
+            hits = [j for j, t in enumerate(tnorm) if nv == t]
+        if hits:
             matched += 1
+            for j in hits:
+                by_target[str(targets[j])] += 1
             if len(samples) < 3:
                 samples.append(str(r.get(idc)) if idc else f"row#{i}")
     total = sum(dist.values())                          # 纳入统计的非空行数 = 占比分母
-    return {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
+    fact = {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
             "match": mode, "targets": targets, "matched": matched, "total": total,
             "ratio": round(matched / total, 4) if total else None, "nulls": nulls,
             "top": dist.most_common(5), "samples": samples,
             "predicate_satisfied": matched >= b.get("require", 1)}
+    if len(targets) > 1:                                # 单 target 时分解=matched,冗余不输出
+        # 只进校验/审计层:不在 tree_prune._FACT_KEEP 白名单、不被 question 渲染——不会流进 RCA 上下文
+        fact["matched_by_target"] = {str(t): by_target.get(str(t), 0) for t in targets}
+    return fact
 
 
 # ---------- D:多条件组合 ----------

@@ -37,6 +37,17 @@
 | **I** | 特征分析 | `feature`/`column`,`metric`(`row_threshold`/`all_same`/`all_null`),`op`,`threshold`,`require`(默认1),`transforms` | TA 距离 `156*TA/2`=`scale:78`;`/100`=`scale:0.01` |
 | **J** | 人工确认 | `note` | `status:"manual"`,不给判断 |
 
+> **C/G 的 `contains` 三条铁规**(违者=假阳/假阴,validate 只能软告警,规矩在这就得守):
+> ① **每个 target 都必须独立是"判据成立的充分信号"**(任一命中→判据确实成立):多个等价错误码/告警名
+> 的不同写法=合法 OR;**字段标签(`CRC:`/`Rx Power`)、命令名、协议名(`LLDP`/`BFD`)、章节标题=禁**——
+> 命中了也不代表成立,而 contains 是任一命中即命中,一个泛词毒整条。超短 ASCII 串(≤3字符)几乎必踩
+> (`"NP"` 是 `"snmp"` 的子串)。
+> ② **否定/为空语义禁 G**("字段为空/查不到/未建立/状态非UP"):标签存在≠字段为空,存在性匹配表达不了
+> 否定——写 custom(抽值判空)或 `decision:insufficient_data`。
+> ③ **趋势语义(增长/震荡/刷新)看有没有现成检测码**:判据给出了对应检测告警/日志码(如
+> `hwIfMonitorCrcErrorRising`,设备自己已判过"增长")→ 绑告警名合法;要人比较两次数值的 → 单快照数据
+> 判不了,`decision:insufficient_data`(注明"需两次采样对比")。
+
 > **F 类极性**:让 `predicate_satisfied` 永远表示"**故障成立**"。树写"参数=坏值才算故障"→ `equals:坏值`;树写"参数**≠**好值才算故障"(如 `SsbPeriod≠20ms`、`TxRxMode≠64T64R`)→ 用 `not_equals:好值`(或 `negate:true`+`equals`),**别绑好值再靠 `mapping_reason` 反推**(那样 `predicate_satisfied` 含义反了,RCA 一不留神就判错)。
 >
 > **标签 = 路由分类,不是 N 个互斥实现**:A–J 对齐的是**故障树的说话方式**(树写"日志"→G、"配置"→F、"特征"→I),方便选型;底层原语共享——**G 就是 C**(同一匹配内核)、F≈C 的"全等"版、I 的 `row_threshold`≈A 的 `count_rows`。所以遇到"日志/配置/特征"别硬塞进 C/A,**按树的措辞选标签**;也别去"合并去重"它们,标签稳定才好绑。`require`:A/B/I 的 `count_rows`/`row_threshold` 统一为"满足行数 ≥ require 才算成立"(默认1)。
