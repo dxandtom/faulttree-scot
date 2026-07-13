@@ -31,8 +31,11 @@
 | `*_BasInfo.csv`(bas,用户会话) | 规整表,可能**空壳** | `FaultType/FaultReason` | C 直绑;空壳自动数据不足 |
 
 ## 三、cmd 回显的两类判据(红线,别混)
+> 通用规矩见 binding schema「C/G 的 contains 三条铁规」:每个 target 必须独立是充分信号,
+> 禁标签/命令名/协议名泛词;否定语义禁 G;趋势语义看有没有检测告警码。
 - **「存在某告警/事件名」**(如回显出现 `hwBaseSocAttackTrap`):G 类 `contains` **可用**——
-  告警名只在发生时才出现在回显里,子串命中即事实。
+  告警名只在发生时才出现在回显里,子串命中即事实。**优先级:这类判据先绑 log/dblg 的 `Summary`
+  码值列和 diag 的 `Alarm*` 结构化字段(EAV filter),cmd 回显只当兜底**(回显里捞子串最糙)。
 - **「某计数器异常」**(如 CRC 错包>0):**禁用 G**——`CRC:` 标签在回显里**恒在**,值为 0 的健康
   回显也会子串命中(假阳)。必须 custom 抽值再比:
 ```python
@@ -74,6 +77,9 @@ CUSTOM = {"L4-crc": _crc_error}
 - `filter` 命中 0 行 = 该指标本次未采集 → 自动数据不足(不是"不成立")。
 - 选 `DataItem` 名字时**以概览/实际枚举为准**(先跑 `analyzer.py` 看 distinct),别按树正文猜。
 - 多个指标同判一个节点 → D 类组合(见 binding schema「一个节点多条判据怎么绑」)。
+- **"diag 一条都不用绑"这种全空结论,必须先把 `DataItem` 枚举对着树判据逐个核过再下**
+  (`Alarm*`/`BFD_*`/`INTF_*`/`FIB_*`/`SYS_*` 这些结构化字段常能替代回显捞子串),
+  并在汇报里附上"核对了哪些、为什么都不适用"——不许因为 cmd 好绑就把 diag 一笔带过。
 
 ## 五、日志类(dblg/log)绑定要点
 - 首选 **`Summary` 列**(告警/日志码的干净枚举,如 `RDS_ACCT_SERVER_PROB`、`hwArpsGatewayConflict`):

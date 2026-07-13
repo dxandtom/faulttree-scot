@@ -121,6 +121,16 @@ CASES = [
     {"name": "G 日志含告警码成立", "table": _t(["log"], ["...ALM-21582 Path拥塞..."], ["normal"]),
      "binding": {"class": "G", "column": "log", "contains": ["ALM-21582"], "require": 1},
      "expect": {"status": "ok", "matched": 1, "predicate_satisfied": True}},
+    # 多 target 时输出逐 target 命中分解(审计层字段;一行命中两个 target → matched 记 1、分解各记 1)
+    {"name": "G 多 target 报 matched_by_target 分解", "table": _t(
+        ["log"], ["ALM-111 occurred"], ["ALM-222 twice"], ["both ALM-111 ALM-222"], ["normal"]),
+     "binding": {"class": "G", "column": "log", "contains": ["ALM-111", "ALM-222"]},
+     "expect": {"status": "ok", "matched": 3,
+                "matched_by_target": {"ALM-111": 2, "ALM-222": 2}}},
+    # 单 target 分解=matched 纯冗余 → 不输出(fact.get 返回 None 即字段不存在)
+    {"name": "G 单 target 不输出 matched_by_target", "table": _t(["log"], ["ALM-111 occurred"]),
+     "binding": {"class": "G", "column": "log", "contains": ["ALM-111"]},
+     "expect": {"status": "ok", "matched": 1, "matched_by_target": None}},
 
     # ---- H 信令(会话级 has)----
     {"name": "H 会话含某消息→匹配", "table": _t(["CallID", "MessageType"], ["1", "RRCSetupRequest"], ["1", "RRCSetupFailure"]),

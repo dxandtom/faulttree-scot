@@ -5,9 +5,9 @@
 - 数值列(>=90% 可转数)→ count/min/max/mean + **十分位 p0..p100** + nulls;
 - 类别列 → top-N 计数 + distinct + 每个 top 值几个样例标识 + nulls。
 
-绝不输出 hit / judgment / conditions:是否成立、根因、以及"故障树的量 ↔ 数据列"的映射,
-全部由 fault-tree-rca 拿着故障树去做(且映射要按**语义**、显式可审,见 rca_rules.md)。
-本引擎只产**事实**。
+绝不输出 hit / judgment / conditions:"故障树的量 ↔ 数据列"的映射在 generate 步骤 2.5 绑定时由模型
+按语义、显式可审地写进 CONDITIONS(见 condition_binding_schema.md),成立与否的最终裁决由 fault-tree-rca 做。
+本引擎只产**事实**,主要用途是给步骤 2.5 出概览(--lean/--sheet)让模型看清列再绑。
 
 自包含:除可选的 mo_config(仅当数据是 .txt/.cfg MO 配置文本时按需 import,缺失则降级当 csv)外,不 import 本仓自定义模块。读 xlsx 需 openpyxl;csv 用标准库。
 用法:python analyzer.py <数据文件> -o <输出.json> [--indicator <标签>] [--fault-tree <故障树.md>]

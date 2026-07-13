@@ -19,14 +19,14 @@
 | `class` | `A`–`J`,决定用哪个内核 |
 | `source` | 数据源逻辑名(对应 `--data <name>=<file>`);J 类可为 null |
 | `mapping_reason` | **为何这么对/语义或单位差异/为何判数据不足**(必写,可审) |
-| `decision`(可选) | 模型**已判本条无法机械评估**时填 `"insufficient_data"`(或 `"manual"`):直接出该状态、**不跑内核、不给判断**。**比写一堆 has/lacks/column 再在 reason 里说"数据不足"既更诚实、又更快、又更短。** |
+| `decision`(可选) | 模型**已判本条无法机械评估**时填 `"insufficient_data"`(或 `"manual"`;也认 `"not_applicable"`,按数据不足出):直接出该状态、**不跑内核、不给判断**。**比写一堆 has/lacks/column 再在 reason 里说"数据不足"既更诚实、又更快、又更短。** |
 | `filter`(可选) | **行级预过滤**,给「EAV 窄表」(一行一个量,如 `DataItem/DataValue/Unit` 形状)用:先把行缩到命中子集、内核再对子集算。子句 `{column, equals:值\|[值…]}` 或 `{column, contains:…}`,list=AND。**只作用于 A/B/C/F/G/I**(E 有内建 `filter`、H 有内建 `where`,语义不变);过滤后 0 行=该指标项本次未采集 → 数据不足(不是"不成立")。 |
 | …类参数… | 见下表,直接平铺在本对象上 |
 
 ## 类别 → 内核参数
 | 类 | 名称 | 关键参数 | 产出事实 |
 |---|---|---|---|
-| **A** | 阈值比较 | `column`,`op`(`< <= > >= == !=`),`threshold`,`scope`(`aggregate`/`count_rows`),`agg`(mean/min/max/last/sum),`transforms` | aggregate 给 `value`;count_rows 给 `count_satisfied`/`ratio` |
+| **A** | 阈值比较 | `column`,`op`(`< <= > >= == !=`,`=`同`==`),`threshold`,`scope`(`aggregate`/`count_rows`),`agg`(mean/min/max/first/last/sum),`transforms` | aggregate 给 `value`;count_rows 给 `count_satisfied`/`ratio` |
 | **B** | 差值计算 | `minuend`:[列…],`subtrahend`:[列…],`op`,`threshold`,`scope`,`transforms` | `value`=Σ被减−Σ减;**缺任一原始计数列→数据不足** |
 | **C** | 字段匹配 | `column`,`equals`:[值…] 或 `contains`:[子串…],`match`,`case_insensitive`,`require`(默认1) | `matched` 命中行数 + 样例 |
 | **D** | 多条件组合 | `combine`(`AND`/`OR`),`sub`:[子绑定…](每个子绑定自带 `class`,可自带 `source`) | AND:有子False→False、有数据不足→数据不足、否则True;OR 对称 |
@@ -36,6 +36,18 @@
 | **H** | 信令流程 | `msg_column`,`key`(会话/callid),`has`:[消息…],`lacks`:[消息…],`where`:{column,equals/contains}(或其列表;同一行须满足全部,表达"某消息**且携带** cause=X") | `matched_sessions`;需 trace;无→数据不足 |
 | **I** | 特征分析 | `feature`/`column`,`metric`(`row_threshold`/`all_same`/`all_null`),`op`,`threshold`,`require`(默认1),`transforms` | TA 距离 `156*TA/2`=`scale:78`;`/100`=`scale:0.01` |
 | **J** | 人工确认 | `note` | `status:"manual"`,不给判断 |
+
+> **C/G 的 `contains` 三条铁规**(违者=假阳/假阴,validate 只能软告警,规矩在这就得守):
+> ① **每个 target 都必须独立是"判据成立的充分信号"**(任一命中→判据确实成立):多个等价错误码/告警名
+> 的不同写法=合法 OR;**字段标签(`CRC:`/`Rx Power`)、命令名、协议名(`LLDP`/`BFD`)、章节标题=禁**——
+> 命中了也不代表成立,而 contains 是任一命中即命中,一个泛词毒整条。超短 ASCII 串(≤3字符)几乎必踩
+> (`"NP"` 是 `"snmp"` 的子串)。
+> ② **否定/为空语义禁 G**("字段为空/查不到/未建立/状态非UP"):标签存在≠字段为空,文本捞子串表达不了
+> 否定——**数据有携带极性的状态枚举列(值如 `Down`/`FAILED`)→ 直绑 `equals` 或 F 类 `not_equals` 最轻**;
+> 没有才写 custom(抽值判空)或 `decision:insufficient_data`。
+> ③ **趋势语义(增长/震荡/刷新)看有没有现成检测码**:判据给出了对应检测告警/日志码(如
+> `hwIfMonitorCrcErrorRising`,设备自己已判过"增长")→ 绑告警名合法;要人比较两次数值的 → 单快照数据
+> 判不了,`decision:insufficient_data`(注明"需两次采样对比")。
 
 > **F 类极性**:让 `predicate_satisfied` 永远表示"**故障成立**"。树写"参数=坏值才算故障"→ `equals:坏值`;树写"参数**≠**好值才算故障"(如 `SsbPeriod≠20ms`、`TxRxMode≠64T64R`)→ 用 `not_equals:好值`(或 `negate:true`+`equals`),**别绑好值再靠 `mapping_reason` 反推**(那样 `predicate_satisfied` 含义反了,RCA 一不留神就判错)。
 >
