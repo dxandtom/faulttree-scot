@@ -78,6 +78,11 @@ CUSTOM = {"L4-crc": _crc_error}
 ```
 - `filter` 命中 0 行 = 该指标本次未采集 → 自动数据不足(不是"不成立")。
 - 选 `DataItem` 名字时**以概览/实际枚举为准**(先跑 `analyzer.py` 看 distinct),别按树正文猜。
+  **注意:`DataItem` 常有上万个 distinct,lean 概览会把这种超大枚举列瘦身掉(field_stats 里没有它)**——
+  别懵、也别猜,直接抽全量枚举落到产物目录(子代理照读):
+  ```bash
+  python -c "import csv,sys;csv.field_size_limit(10**9);print('\n'.join(sorted({r.get('DataItem','') for r in csv.DictReader(open(sys.argv[1],encoding='utf-8',errors='ignore'))})))" "<diag的csv>" > "<OUT>/overview/diag_dataitem枚举.txt"
+  ```
 - 多个指标同判一个节点 → D 类组合(见 binding schema「一个节点多条判据怎么绑」)。
 - **"diag 一条都不用绑"这种全空结论,必须先把 `DataItem` 枚举对着树判据逐个核过再下**
   (`Alarm*`/`BFD_*`/`INTF_*`/`FIB_*`/`SYS_*` 这些结构化字段常能替代回显捞子串),
