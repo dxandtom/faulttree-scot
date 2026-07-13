@@ -132,22 +132,27 @@ def _proxy_warnings(conditions):
 
 
 # ---- C/G contains 的两条窄软告警(只提示不拦;判断权留给人/模型) ----
+# 只对 match=contains 检查:两类病理都源于"子串任一命中即命中"。equals 精确匹配没有子串假阳,
+# 且状态枚举列的短值(UP/Down/OK)本身携带极性——equals 绑它们是正确且最轻的绑法,不许对其报噪声。
 # 超短 ASCII target:如 "TM"/"NP"("np" 是 "snmp" 的子串)——短子串几乎必是泛词假阳。中文不受限(两字中文有实义)。
 _SHORT_ASCII = re.compile(r"^[A-Za-z0-9._:\-]{1,3}$")
-# 否定/趋势词:这类语义靠"存在性匹配"表达不了(为空≠标签出现;增长需两次采样)——除非绑的是设备
+# 否定/趋势词:这类语义靠"文本里捞子串"表达不了(为空≠标签出现;增长需两次采样)——除非绑的是设备
 # 自带的检测告警/日志码(设备已判过,告警名出现=事件发生),那是合法的。
 _NEG_TREND = ("为空", "不存在", "未建立", "未迭代", "查不到", "无对应", "未配置", "不通",
               "增长", "震荡", "刷新", "抖动", "flap")
-_ALARM_SHAPE = re.compile(r"hw[A-Z]|_active|_clear|^[A-Z][A-Z0-9_/]{5,}$|^\d{5,}$")   # 告警/日志码长相
+# 告警/日志码长相;全大写分支含 \-(ALM-26106 这类连字符码是本仓文档认证的规范格式,必须豁免)
+_ALARM_SHAPE = re.compile(r"hw[A-Z]|_active|_clear|^[A-Z][A-Z0-9_/\-]{5,}$|^\d{5,}$")
 
 
 def _target_warnings(conditions):
-    """C/G 绑定的 contains 质量软告警:(a) 超短 ASCII target;(b) 否定/趋势判据无告警码形 target。
+    """C/G contains 绑定的质量软告警:(a) 超短 ASCII target;(b) 否定/趋势判据无告警码形 target。
     命中时若 fact 带 matched_by_target,附上分解,让复核者一眼看出命中都来自哪个 target。"""
     warns = []
     for c in conditions:
         f = c.get("fact") or {}
         if f.get("status") != "ok" or str(c.get("class") or f.get("class") or "").upper() not in ("C", "G"):
+            continue
+        if f.get("match") != "contains":                # equals 精确匹配无子串假阳,不检查
             continue
         cid = c.get("id") or c.get("node") or "?"
         targets = [str(t) for t in (f.get("targets") or [])]
@@ -162,8 +167,9 @@ def _target_warnings(conditions):
         ct = str(c.get("condition_text") or "")
         if any(w in ct for w in _NEG_TREND) and not any(_ALARM_SHAPE.search(t) for t in targets):
             warns.append(f"⚠ 语义错配嫌疑:「{cid}」判据含否定/趋势词(为空/未建立/增长/震荡…),"
-                         f"但绑定是纯存在性匹配且无告警码形 target——存在性表达不了这类语义,"
-                         f"改绑检测告警名、写 custom 抽值,或 decision:insufficient_data{detail}")
+                         f"但绑定是文本捞子串且无告警码形 target——子串命中表达不了这类语义。"
+                         f"数据有携带极性的状态枚举列(值如 Down/FAILED)→ 改绑 equals/F 类 not_equals 最轻;"
+                         f"否则改绑检测告警名、写 custom 抽值,或 decision:insufficient_data{detail}")
     return warns
 
 
