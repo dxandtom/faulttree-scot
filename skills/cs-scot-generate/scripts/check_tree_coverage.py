@@ -15,6 +15,10 @@
 是"缺源"(判据要信令跟踪/配置等本次没喂的数据),只列出来知会,不阻断。无论是否被启发式标记,未绑节点
 都会**全量列出**,真正的价值是"让漏绑可见、不可静默"。
 
+另附**跨源认领对账**(软提示,不改退出码):各源各认领了哪些节点;"判据像多个子条件却只有 1 条绑定认领"
+和"告警类判据多源在场却单源认领"两类最隐蔽的欠绑定会被点名(子代理按源并行、互相看不见,
+碰了一条就算认领整个节点 / 互相谦让,值级和节点级检查都看不出来,这里机械对账兜底)。
+
 退出码:0=无漏绑;1=有漏绑(条件提到已喂列却没绑);2=闸门无法判定(树里没有任何带条件节点 / 参数缺失)。
 
 用法:
@@ -44,34 +48,80 @@ def _diagnostic(node: dict) -> bool:
     return _has_cond(node) and not node.get("pass_through")
 
 
-def _ids_from_analyzer(path: Path) -> set:
-    """从 <ind>_analyzer.py 静态抽 CONDITIONS 里每个 dict 的 node_id(AST 走读,
-    只取 node_id 的字符串字面量——某个**别的**字段是 f-string/常量引用等非字面量也不会整份丢失)。"""
+def _claims_from_analyzer(path: Path) -> dict:
+    """从 <ind>_analyzer.py 静态抽 CONDITIONS:node_id → 绑定单元数(AST 走读,只取字符串字面量)。
+    「绑定单元」= 该节点被认领了几个子条件:普通绑定记 1,D 组合按 sub 条数记——
+    一个节点的判据常是多个子条件都要满足,绑定单元数才能看出"只碰了其中一条"。"""
     try:
         mod = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as e:
         print(f"[warn] 读不了/解析失败 {path}: {e}", file=sys.stderr)
-        return set()
-    ids = set()
+        return {}
+    units = {}
     for stmt in mod.body:
-        if isinstance(stmt, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == "CONDITIONS" for t in stmt.targets):
-            for d in ast.walk(stmt.value):          # 走读 CONDITIONS 里所有 dict 字面量
+        if not (isinstance(stmt, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "CONDITIONS" for t in stmt.targets)):
+            continue
+        elems = stmt.value.elts if isinstance(stmt.value, (ast.List, ast.Tuple)) else []
+        for el in elems:
+            if not isinstance(el, ast.Dict):
+                continue
+            nid, n_sub = None, 0
+            for k, v in zip(el.keys, el.values):
+                if not isinstance(k, ast.Constant):
+                    continue
+                if k.value == "node_id" and isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    nid = v.value
+                elif k.value == "sub" and isinstance(v, (ast.List, ast.Tuple)):
+                    n_sub = len(v.elts)
+            if nid:
+                units[nid] = units.get(nid, 0) + max(1, n_sub)
+        if not elems:                                   # 兜底:CONDITIONS 不是字面量列表 → 全走读只计次数
+            for d in ast.walk(stmt.value):
                 if isinstance(d, ast.Dict):
                     for k, v in zip(d.keys, d.values):
                         if (isinstance(k, ast.Constant) and k.value == "node_id"
                                 and isinstance(v, ast.Constant) and isinstance(v.value, str)):
-                            ids.add(v.value)
-    return ids
+                            units[v.value] = units.get(v.value, 0) + 1
+    return units
 
 
-def _ids_from_facts(path: Path) -> set:
+def _claims_from_facts(path: Path):
+    """<ind>_facts.json → (源标签, {node_id: 绑定单元数});D 组合按 sub/sub_facts 条数记。"""
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         print(f"[warn] 读不了/解析失败 {path}: {e}", file=sys.stderr)
-        return set()
-    return {str(c["node_id"]) for c in doc.get("conditions", []) if c.get("node_id")}
+        return None, {}
+    label = str(doc.get("indicator") or path.stem)
+    units = {}
+    for c in doc.get("conditions", []):
+        nid = c.get("node_id")
+        if not nid:
+            continue
+        n_sub = len(c.get("sub") or (c.get("fact") or {}).get("sub_facts") or [])
+        units[str(nid)] = units.get(str(nid), 0) + max(1, n_sub)
+    return label, units
+
+
+# 判据"像几个子条件"的保守估计:只按强分隔切(换行/;/①…⑩/且/并且/以及)。
+# 特意**不切"或"**——"A 或 B"常是同列多取值、一条 equals/contains 列表就是正确绑法,切了会误报。
+_CLAUSE_SPLIT = re.compile(r"[\n;;]|[①②③④⑤⑥⑦⑧⑨⑩]|且|并且|以及")
+_ALARMISH = re.compile(r"告警|[Aa]larm|ALM-|_active|_clear|hw[A-Z]")
+
+
+def _clause_count(cond: str) -> int:
+    parts = [p.strip() for p in _CLAUSE_SPLIT.split(str(cond))]
+    return sum(1 for p in parts if len(p) >= 4)
+
+
+def _renorm(units: dict, code2nid: dict) -> dict:
+    """把以 code 写的键归一回短 id,同键累加。"""
+    out = {}
+    for k, v in units.items():
+        nk = code2nid.get(k, k)
+        out[nk] = out.get(nk, 0) + v
+    return out
 
 
 def main() -> int:
@@ -99,14 +149,22 @@ def main() -> int:
         print("至少给一个 --analyzer 或 --facts", file=sys.stderr)
         return 2
 
-    claimed = set()
+    per_source = {}                                     # 源标签 → {node_id: 绑定单元数}(跨源认领对账用)
+    def _merge(label, units):
+        d = per_source.setdefault(label, {})
+        for k, v in units.items():
+            d[k] = d.get(k, 0) + v
     for a in args.analyzer:
-        claimed |= _ids_from_analyzer(Path(a))
+        p = Path(a)
+        _merge(p.stem.replace("_analyzer", "") or p.stem, _claims_from_analyzer(p))
     for fp in args.facts:
-        claimed |= _ids_from_facts(Path(fp))
+        label, units = _claims_from_facts(Path(fp))
+        if label is not None:
+            _merge(label, units)
     # node_id 兼容 code 形式:把 claimed 里写成 code 的归一回短 id（schema 明确两者都认,闸门也要认,否则误报漏绑）
     code2nid = {str(n["code"]): nid for nid, n in nodes.items() if n.get("code")}
-    claimed = {code2nid.get(x, x) for x in claimed}
+    per_source = {lab: _renorm(d, code2nid) for lab, d in per_source.items()}
+    claimed = set().union(*per_source.values()) if per_source else set()
 
     cols = [c.strip() for c in args.columns.split(",") if c.strip()]
 
@@ -179,6 +237,44 @@ def main() -> int:
 
     if leaf_only:
         print(f"\nℹ 分支已入、未细绑 {len(leaf_only)} 个(分支级已绑、定不到具体子因;多因缺信令/配置,确认无碍即可)。")
+
+    # ---- 跨源认领对账(软提示,不改退出码)----
+    # 子代理按源并行绑、互相看不见:一个节点的判据常是**多个子条件都要满足**、且同一事实可能落在多个源里。
+    # 这里从"谁认领了几条"机械对账,逮两种最隐蔽的漏绑:碰了一条就算认领了整个节点 / 该多源都绑却只有一源绑。
+    if len(per_source) >= 1 and covered:
+        dist = " / ".join(f"{lab} 认领 {len(d)} 个节点" for lab, d in sorted(per_source.items()))
+        multi = sum(1 for nid in covered if sum(1 for d in per_source.values() if nid in d) >= 2)
+        print(f"\n跨源认领分布:{dist}" + (f"(其中 {multi} 个节点被多源同绑)" if len(per_source) >= 2 else ""))
+        # (a) 判据像多个子条件(强分隔:换行/;/①…/且),全部源加起来却只有 1 条绑定单元 → 多半只碰了其中一条
+        under = []
+        for nid in covered:
+            n = targets[nid]
+            est = _clause_count(str(n.get("condition") or ""))
+            tot = sum(d.get(nid, 0) for d in per_source.values())
+            if est >= 2 and tot == 1:
+                under.append((nid, n, est))
+        if under:
+            print(f"⚠ 多子条件疑漏 {len(under)} 个:判据看着有 ≥2 段(换行/;/且分隔),却只有 1 条绑定认领——"
+                  "逐个确认其余子条件已被 D 组合/其他源覆盖,或确属缺源(decision:insufficient_data 也算认领,别静默丢):")
+            for nid, n, est in sorted(under, key=lambda x: x[0])[:20]:
+                print(f"  - {nid} 「{n.get('name','')[:34]}」 约{est}段/1条绑定\n      cond: {_snip(n, 88)}")
+            if len(under) > 20:
+                print(f"  …(还有 {len(under) - 20} 个,略)")
+        # (b) 告警类判据在多源在场时只有单源认领 → 告警可能同时落 cmd 回显 / dblg·log Summary / diag Alarm*,
+        #     子代理互相看不见,"让别的源去绑"=谦让漏绑。软提示过一眼,不是硬错。
+        if len(per_source) >= 2:
+            lonely = []
+            for nid in covered:
+                n = targets[nid]
+                srcs = [lab for lab, d in per_source.items() if nid in d]
+                if len(srcs) == 1 and _ALARMISH.search(str(n.get("condition") or "")):
+                    lonely.append((nid, n, srcs[0]))
+            if lonely:
+                print(f"ℹ 告警类判据单源认领 {len(lonely)} 个(多源在场;告警常同时落多源,确认其他源是否也该绑——都能答就都绑,不许谦让):")
+                for nid, n, lab in sorted(lonely, key=lambda x: x[0])[:20]:
+                    print(f"  - {nid} 「{n.get('name','')[:34]}」 仅 {lab} 认领")
+                if len(lonely) > 20:
+                    print(f"  …(还有 {len(lonely) - 20} 个,略)")
 
     print("\n要点:绑定要**树驱动**——遍历每个叶子按树条件要的值绑(C 类 contains 那个码),"
           "不管这次数据出没出现;值没出现=matched=0(确定排除),不是 insufficient_data。"
