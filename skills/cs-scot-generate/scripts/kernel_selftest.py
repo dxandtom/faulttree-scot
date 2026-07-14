@@ -131,6 +131,11 @@ CASES = [
     {"name": "G 单 target 不输出 matched_by_target", "table": _t(["log"], ["ALM-111 occurred"]),
      "binding": {"class": "G", "column": "log", "contains": ["ALM-111"]},
      "expect": {"status": "ok", "matched": 1, "matched_by_target": None}},
+    # C/G 缺 contains/equals(op/target 等野字段)→ 响亮数据不足,绝不静默 matched=0 变假排除
+    {"name": "C/G 空 targets→数据不足(op/target 野字段不认,防假排除)",
+     "table": _t(["Summary"], ["hwLinkHeartbeatDropAlarm_active"]),
+     "binding": {"class": "C", "column": "Summary", "op": "contains", "target": "hwLinkHeartbeatDropAlarm"},
+     "expect": {"status": "insufficient_data", "predicate_satisfied": None}},
 
     # ---- H 信令(会话级 has)----
     {"name": "H 会话含某消息→匹配", "table": _t(["CallID", "MessageType"], ["1", "RRCSetupRequest"], ["1", "RRCSetupFailure"]),
