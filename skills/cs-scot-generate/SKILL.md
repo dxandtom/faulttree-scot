@@ -103,6 +103,13 @@ python "<本目录>/scripts/check_tree_coverage.py" "<OUT>/tree/<场景>.tree_in
 
 > **步骤 3.5(可选,有健康数据包时做——假阳的实锤检验)**:把各 analyzer 对一份**同格式的健康设备数据**再跑一遍。健康数据上 `status:ok` 且 `predicate_satisfied:true` 的绑定 = 正常样本也成立 = **高度可疑,逐条复核**(契约"通用尺子"的可执行版):故障语义的判据在健康包上成立基本就是假阳,改绑;但"是否启用某特性/某配置"这类**分支/开关判据**健康设备上本可成立,不算假阳。这是机械筛查,比任何软告警都硬。没有健康包就跳过。
 
+### 步骤 4(交付前清场):删掉只在生成期有用的中间件
+步骤 3 全绿、产物定稿后,把**绑定期中间件**删掉再交付/归档——执行侧(runner/RCA)从头到尾不碰它们,而且**概览/枚举里带着真实数据的统计与取值样本**(交付脱敏隐患),别让它们跟着产物流出去:
+```bash
+python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview', ignore_errors=True); [os.remove(f) for p in ('/tree/conditions_all.json','/tree/*_conditions*.py','/scripts/*_analyzer.py.bak') for f in glob.glob(O+p)]" "<OUT>"
+```
+删的是:`overview/`(各源概览+枚举)、`tree/conditions_all.json`(判据清单)、`tree/*_conditions*.py`(子代理交货文件)、`scripts/*.py.bak`(骨架备份)。**还在迭代绑定就别删**;删了也不心疼——`analyzer.py` 引擎在 `scripts/` 里,想再看概览一条命令重生成。
+
 ## 输出目录(就是 `<OUT>`)
 ```
 <OUT>/                                       # = <故障树目录>/scot产物/<场景名>/
@@ -112,6 +119,7 @@ python "<本目录>/scripts/check_tree_coverage.py" "<OUT>/tree/<场景>.tree_in
 ├── scripts/condition_kernels.py           # A–J 模板库(脚本 import 它)
 ├── scripts/mo_config.py                   # 配置拓扑适配器(MO 文本→表 + custom 原语)
 ├── scripts/analyzer.py                    # 概览引擎(步骤 2.5 模型看列用)
+├── overview/                              # 各源概览/枚举——仅绑定期用,含真实数据样本,步骤 4 交付前删
 ├── scripts/condition_binding_schema.md    # 绑定契约副本
 ├── tree/<场景>.md                          # 故障树 md(产物③)
 └── tree/<场景>.tree_index.json            # 权威拓扑:node_id/父子/判据/数据源(绑定与 RCA 压缩都靠它)
