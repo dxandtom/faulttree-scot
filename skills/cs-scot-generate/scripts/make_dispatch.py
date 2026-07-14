@@ -109,6 +109,7 @@ def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_te
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")   # 拒产信息走 stderr,漏配会在 Windows 上变乱码(实测)
     except Exception:
         pass
     ap = argparse.ArgumentParser(description="机械生成并行绑定的子代理简报(判据切批+概览/枚举嵌入+固定规约)")
