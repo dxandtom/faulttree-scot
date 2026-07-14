@@ -266,6 +266,10 @@ def k_match(table, b, cls="C"):
         return _insuf(cls, f"未找到列「{b.get('column')}」({how})", resolved_column=None)
     mode = "contains" if b.get("contains") else b.get("match", "exact")
     targets = b.get("contains") or b.get("equals") or []
+    if not targets:                                     # C/G 只认 contains/equals 列表;op/target 等野字段内核不读。
+        return _insuf(cls, "绑定缺 contains/equals 参数(op/target 等野字段无效)——若不拦,"
+                           "空 targets 会静默 matched=0、整源变假排除;修绑定格式",
+                      resolved_column=col)
     ci = b.get("case_insensitive", mode == "contains")
     norm = (lambda x: str(x).strip().lower()) if ci else (lambda x: str(x).strip())
     tnorm = [norm(t) for t in targets]
