@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """三种得分机制(original / softmax / ratio)的一键 A/B/C 测评(定默认机制的实测依据)。
 
-数据集 = cs-scot-eval/suite_real:30 个**带标准答案**的冻结场景(5 棵树 17–320 节点 × 6 类情形),
-每个场景的 rca_input.json / tree_index / 答案都已入库 —— 开箱即测,不必重造数据。
+数据集:原配的 cs-scot-eval/suite_real 冻结场景已随 cs-scot-eval 技能从本仓移除,
+现需**自备带标准答案的场景**,用 --suite/--trees 显式传入。目录结构约定:
+  <suite>/<场景名>/rca_input.json          每个场景一个子目录
+  <suite>/_answers/<场景名>.json           答案:{"truth": {...}, "tree": "<树名>"}
+  <trees>/<树名>.tree_index.json           场景引用的树索引
 
 ⚠ 实验设计要点(为什么不用 eval 的四档打分来比机制):
 - 本引擎是**纯排序器**:输出 Top-K 评分假设,没有"确证/弃权"语义(适配层诚实地全放 probable 档)。
@@ -31,7 +34,6 @@ from collections import defaultdict
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-_REPO = _HERE.parent.parent.parent
 sys.path.insert(0, str(_HERE))
 from facts_to_question import build_question                    # noqa: E402
 from result_adapter import _MECH_KEY                            # noqa: E402
@@ -66,8 +68,8 @@ def main() -> int:
     ap.add_argument("--engine", default="mock", choices=["mock", "real"])
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--only", default="", help="只跑名字含该子串的场景(如 synth_中 / confirmed)")
-    ap.add_argument("--suite", default=str(_REPO / "skills/cs-scot-eval/suite_real"))
-    ap.add_argument("--trees", default=str(_REPO / "skills/cs-scot-eval/trees"))
+    ap.add_argument("--suite", required=True, help="带答案场景目录(原内置评测集已移除,需自备;结构见脚本 docstring)")
+    ap.add_argument("--trees", required=True, help="树索引目录(<树名>.tree_index.json 所在)")
     ap.add_argument("--out", default="/tmp/ab_result.json")
     ap.add_argument("--vendor-dir", default=str(_HERE.parent / "vendor"))
     ap.add_argument("--config")
@@ -78,6 +80,11 @@ def main() -> int:
     a.out = str(Path(a.out).resolve())
     vendor_dir = Path(a.vendor_dir).resolve()
     cfg_path = Path(a.config).resolve() if a.config else None
+    if not suite.is_dir():
+        print(f"评测集目录不存在:{suite}\n"
+              "(原配的 cs-scot-eval 评测集已从本仓移除;请自备带答案场景,"
+              "用 --suite/--trees 显式传入,目录结构见脚本 docstring)", file=sys.stderr)
+        return 2
     answers_dir = suite / "_answers"
     scens = sorted(d for d in suite.iterdir()
                    if d.is_dir() and d.name != "_answers" and (d / "rca_input.json").exists()

@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # FaultTree-SCoT skills installer (quick copy).
 #
-# 作用:把本仓 skills/ 下的三个 skill 拷贝(或 --link 软链)到外层 harness
+# 作用:把本仓 skills/ 下的四个 skill 拷贝(或 --link 软链)到外层 harness
 # 的 skills 目录,让 Claude Code / OpenClaw 等能加载它们:
-#   - cs-scot-generate   把故障树 Excel 编译成场景诊断 skill(解析脚本 + SCoT 计划)
-#   - cs-scot-execute    按 plan.json 顺序执行 SCoT 计划
-#   - fault-tree-rca     综合根因分析
-#   - cs-scot-benchmark  对 generate 产物跑基准(压缩/稳定/可复现/护栏),出报告
-#   - cs-scot-eval       合成故障注入测诊断准确率(自带 ground truth)
+#   - cs-scot-generate      把故障树 Excel 编译成场景诊断 skill(解析脚本 + SCoT 计划)
+#   - cs-scot-execute       按 plan.json 顺序执行 SCoT 计划
+#   - fault-tree-rca        综合根因分析
+#   - fault-tree-rca-debate 辩论式多代理 RCA(fault-tree-rca 的可切换平替)
 #
 # 用法:
 #   ./install.sh                    # 拷贝到 ~/.claude/skills(默认)
@@ -55,7 +54,7 @@ fi
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SKILLS_SRC="$SRC/skills"
-DIRS=(cs-scot-generate cs-scot-execute fault-tree-rca fault-tree-rca-debate cs-scot-benchmark cs-scot-eval)
+DIRS=(cs-scot-generate cs-scot-execute fault-tree-rca fault-tree-rca-debate)
 
 echo "[install] source:  $SKILLS_SRC"
 echo "[install] target:  $TARGET"
@@ -100,12 +99,11 @@ done
 
 cat <<EOF
 
-[install] DONE. 已安装 5 个 skill 到:$TARGET
-  - cs-scot-generate   生成场景诊断 skill(故障树 → 解析脚本 + SCoT 计划)
-  - cs-scot-execute    执行 SCoT 计划(按 plan.json 顺序跑)
-  - fault-tree-rca     综合根因分析
-  - cs-scot-benchmark  对 generate 产物跑基准(压缩/稳定/可复现/护栏)
-  - cs-scot-eval       合成故障注入测诊断准确率(自带 ground truth)
+[install] DONE. 已安装 4 个 skill 到:$TARGET
+  - cs-scot-generate      生成场景诊断 skill(故障树 → 解析脚本 + SCoT 计划)
+  - cs-scot-execute       执行 SCoT 计划(按 plan.json 顺序跑)
+  - fault-tree-rca        综合根因分析
+  - fault-tree-rca-debate 辩论式多代理 RCA(fault-tree-rca 的可切换平替)
 
 依赖:skill 脚本仅用 Python 标准库;只有读取 .xlsx 才需要 openpyxl(csv 开箱即用)。
       需要 xlsx 时:pip install openpyxl

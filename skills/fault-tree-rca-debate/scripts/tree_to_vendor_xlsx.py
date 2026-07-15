@@ -5,7 +5,7 @@
 - tree_index 是本仓的**归一化拓扑**——老格式(excel_to_tree)/新格式(v2 多页签)都会产它,
   从它出发,辩论引擎对上游 Excel 格式零感知;
 - **`Ln Code` 列填我们的 node_id(nN)**:引擎输出的路径因此天然携带全链主键,
-  结果适配回 rca.json 时能挂回树、能被 validate_rca / cs-scot-eval 消费。
+  结果适配回 rca.json 时能挂回树、能被 validate_rca 消费。
 
 生成的列(按 vendor 文档的必填集):`L1 Code / L1 / L1(Chinese)` … + `Judgment Condition(Chinese)`。
 层级**重定基**:树根记 L1(我们的 tree_index 根常在 L2 起,引擎按 L1 起读)。
@@ -53,7 +53,7 @@ def enrich_conditions(index: dict, rca_input: dict | None = None,
                       binding_question: dict | None = None) -> dict:
     """把判据文本(和真名)合回树(只填空缺/匿名占位,不覆盖真实内容)。
 
-    为什么需要:评测树(cs-scot-eval 的 make_trees 产物)节点 condition **全为 null**——判据文本
+    为什么需要:合成评测树这类产物的节点 condition 可能**全为 null**——判据文本
     住在 rca_input(pruned_nodes[].condition / indicator_results[].condition_text)和
     binding_question(to_bind[].condition_text)里。不合回去,xlsx 全空判据,引擎对每个节点
     白给满分、排名无意义。名字同理:评测树是匿名名(L3节点_001)而 rca_input 存真名,

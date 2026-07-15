@@ -94,10 +94,10 @@ vendor/README.md);`scripts/` 是本技能的 I/O 层:
 | `scripts/run_debate_rca.py` | 编排 + 引擎装载(`_load_processor` 是唯一接口耦合点)+ 配置展平/--set 覆盖 + LLM 加固 + 降级检测。 |
 | `scripts/mock_vendor.py` | 引擎的确定性假实现(形状对、算法不复刻),支撑无 LLM 自测。 |
 | `scripts/probe_llm.py` | LLM 连通性探针(脱敏输出)。 |
-| `scripts/ab_test_mechanisms.py` | 三种得分机制的一键 A/B/C 评测(吃 cs-scot-eval 冻结场景)。 |
+| `scripts/ab_test_mechanisms.py` | 三种得分机制的一键 A/B/C 评测。原配的 cs-scot-eval 冻结场景已随该技能从本仓移除,需自备带答案场景并用 `--suite/--trees` 显式传入。 |
 
 ## 三种得分机制(original / softmax / ratio)怎么选
-需实测定夺。用本仓评测当裁判:对 `cs-scot-eval` 的带答案场景逐个跑本引擎
-(`--mechanism all`),用**排名指标**(hit@1/hit@3/MRR)对比,赢者当默认——一键工具与
-指标口径、original 机制的层级偏置等注意事项,见 `references/engine_ops.md`。
-成绩标注 `engine=debate`,别与"模型手工 RCA"的成绩混表。
+需实测定夺(原内置评测集 cs-scot-eval 已从本仓移除,需自备带标准答案的场景):
+逐场景跑本引擎(`--mechanism all`),用**排名指标**(hit@1/hit@3/MRR)对比,
+赢者当默认——一键工具与指标口径、original 机制的层级偏置等注意事项,
+见 `references/engine_ops.md`。成绩标注 `engine=debate`,别与"模型手工 RCA"的成绩混表。

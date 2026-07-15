@@ -55,6 +55,6 @@
 
 ## 四、维护约定
 
-- **新增内核 = 同时新增 `kernel_selftest.py` 用例**(成立/不成立/数据不足/边界各覆盖),并接入 `cs-scot-benchmark` 第 6 项;无真实数据可验的内核**不进主干**。
+- **新增内核 = 同时新增 `kernel_selftest.py` 用例**(成立/不成立/数据不足/边界各覆盖);无真实数据可验的内核**不进主干**。
 - 新增判别若改变产物结构 → bump `assemble_scenario.py` 的 `PRODUCT_FORMAT_VERSION`(与 `runner.py` 的 `EXPECTED_PRODUCT_FORMAT` 成对)。
 - 本表随取证更新;"树上原话"务必逐字引用、注明出处,不得推断或编造。
