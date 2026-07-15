@@ -70,6 +70,27 @@ def _holding_map(input_path):
     return out
 
 
+def _node_universe(input_path):
+    """pruned 形态下,rca_input 全文出现过的 nN 就是节点宇宙——evidence 里冒出宇宙外的 nN 必是编造。
+    实测漏洞:伪造核对对"不认识的节点"豁免、路径链核对把它过滤,纯捏造 node_id 的确证曾全绿通过。"""
+    try:
+        text = Path(input_path).read_text(encoding="utf-8")
+    except Exception:
+        return None
+    return set(re.findall(r"\bn\d+\b", text))
+
+
+def _check_unknown_nodes(rc, tier, universe, problems):
+    if universe is None:
+        return
+    name = rc.get("Root_cause") or rc.get("root_cause") or f"(未命名{tier})"
+    for node in _evidence(rc):
+        nid = str(node.get("node_id") or "") if isinstance(node, dict) else ""
+        if re.fullmatch(r"n\d+", nid) and nid not in universe:
+            problems.append(f"[未知节点] {tier}「{name}」evidence_path 里的 node_id「{nid}」"
+                            f"在 rca_input 全文中不存在——编造的节点,删掉或改用真实节点(名字引用不受此限)")
+
+
 def _unaddressed_holds(input_path, rca_path):
     """候选对账(软提示):有成立事实、有真条件、非 pass_through 的候选节点,
     在 rca.json **全文**里(node_id 按词边界认,防 n13 命中 n136;节点全名也认——契约允许只写名字)
@@ -172,6 +193,7 @@ def main() -> int:
         return 2
     hold_map = _holding_map(sys.argv[2]) if len(sys.argv) >= 3 else None
     parent_map = _parent_map(sys.argv[2]) if len(sys.argv) >= 3 else None
+    universe = _node_universe(sys.argv[2]) if (len(sys.argv) >= 3 and hold_map is not None) else None
 
     confirmed = _confirmed(doc)
     probables = doc.get("probable_causes", []) if isinstance(doc, dict) else []
@@ -204,6 +226,7 @@ def main() -> int:
                     f"→ 挪进 probable_causes 或 excluded,别凑路径、别造节点")
         _check_fabrication(rc, "确证根因", hold_map, problems)
         _check_path_chain(rc, "确证根因", parent_map, problems)
+        _check_unknown_nodes(rc, "确证根因", universe, problems)
 
     # 疑似:松——只查 ④理由齐不齐 + ⑤有没有伪造成立;路径含 不成立/数据不足 一律放行
     for rc in probables:
@@ -216,6 +239,7 @@ def main() -> int:
             problems.append(f"[疑似缺证据] 疑似「{name}」既无 `support` 也无 `evidence_path`——疑似也得摆出支撑它的正向证据")
         _check_fabrication(rc, "疑似", hold_map, problems)
         _check_path_chain(rc, "疑似", parent_map, problems)
+        _check_unknown_nodes(rc, "疑似", universe, problems)
 
     # 候选对账(软提示,不改退出码):专逮"有成立事实的候选通篇没下落"的漏裁决
     if len(sys.argv) >= 3:

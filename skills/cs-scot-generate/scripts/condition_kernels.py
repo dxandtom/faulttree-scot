@@ -35,6 +35,35 @@ _OPS = {"<": operator.lt, "<=": operator.le, ">": operator.gt, ">=": operator.ge
         "==": operator.eq, "=": operator.eq, "!=": operator.ne}
 _ID_COLS = ("CALLID", "CallID", "Call_Id", "CellId", "cellName", "CellName",
             "Object", "id", "ID", "Index")
+_FW_OPS = {"≥": ">=", "≤": "<=", "≠": "!=", "＞": ">", "＜": "<", "＝": "=="}   # 全角/数学符 → 归一
+_AGGS = {"mean", "min", "max", "sum", "last", "first"}
+_SCOPES = {"aggregate", "count_rows"}
+
+
+def _shape_err(b, need_op=False):
+    """数值类内核(A/B/E/I)共用的参数体检:全角运算符就地归一;非法枚举/非数值阈值/require<1
+    → 返回错误串(调用方响亮出"数据不足"),合法 → None。宗旨:绑定写错绝不静默降级——
+    实测 op 全角/agg 拼错/scope 拼错/require:0/字符串阈值,旧内核全部无声算出方向性错误结论。"""
+    if b.get("op") is not None:
+        op = _FW_OPS.get(str(b["op"]).strip(), str(b["op"]).strip())
+        if op not in _OPS:
+            return f"op「{b['op']}」不认识(只认 < <= > >= == != =)"
+        b["op"] = op
+    elif need_op:
+        return "缺 op"
+    if b.get("threshold") is not None and _num(b["threshold"]) is None:
+        return f"threshold「{b['threshold']}」不是数值(状态/字符串比较请改 C 类 equals/contains)"
+    if need_op and b.get("threshold") is None:
+        return "缺 threshold"
+    if b.get("agg") is not None and str(b["agg"]) not in _AGGS:
+        return f"agg「{b['agg']}」不认识(只认 {'/'.join(sorted(_AGGS))})"
+    if b.get("scope") is not None and str(b["scope"]) not in _SCOPES:
+        return f"scope「{b['scope']}」不认识(只认 aggregate/count_rows)"
+    if b.get("require") is not None:
+        rq = _num(b["require"])
+        if rq is None or rq < 1:
+            return f"require「{b['require']}」不合法(须为 ≥1 的数;0 会恒判成立)"
+    return None
 
 
 # ---------- 数据加载 ----------
@@ -108,9 +137,10 @@ def _num(v):
     if s.lower() in _NULLISH:
         return None
     try:
-        return float(s)
+        x = float(s)
     except (TypeError, ValueError):
         return None
+    return x if math.isfinite(x) else None   # "nan"/"inf" 字符串=缺测:进聚合会毒化 mean→恒判不成立(实测)
 
 
 def _apply_transforms(x, transforms):
@@ -201,6 +231,9 @@ def k_threshold(table, b, cls="A"):
     col, how = resolve_column(header, b.get("column", ""))
     if not col:
         return _insuf(cls, f"未找到列「{b.get('column')}」({how})", resolved_column=None)
+    err = _shape_err(b, need_op=True)
+    if err:
+        return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=col)
     vals, nulls, n = _numeric_series(rows, col, b.get("transforms"))
     op, thr = b.get("op"), b.get("threshold")
     fact = {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
@@ -225,6 +258,12 @@ def k_threshold(table, b, cls="A"):
 def k_difference(table, b, cls="B"):
     header, rows = table
     mens, subs = b.get("minuend") or [], b.get("subtrahend") or []
+    if not mens or not subs:
+        return _insuf(cls, "minuend/subtrahend 缺失或为空——差值两侧都必须给原始计数列"
+                           "(单侧为空会算成 0-0=0、恒判不成立)", resolved_column=None)
+    err = _shape_err(b)
+    if err:
+        return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=None)
     cols, missing = {}, []
     for name in mens + subs:
         c, _ = resolve_column(header, name)
@@ -270,6 +309,14 @@ def k_match(table, b, cls="C"):
         return _insuf(cls, "绑定缺 contains/equals 参数(op/target 等野字段无效)——若不拦,"
                            "空 targets 会静默 matched=0、整源变假排除;修绑定格式",
                       resolved_column=col)
+    if b.get("match") is not None and str(b.get("match")) not in ("exact", "contains"):
+        return _insuf(cls, f"match「{b.get('match')}」不认识(只认 exact/contains;正则请写 custom)——"
+                           "旧内核会静默按 exact 算", resolved_column=col)
+    if b.get("require") is not None:
+        _rq = _num(b.get("require"))
+        if _rq is None or _rq < 1:
+            return _insuf(cls, f"require「{b.get('require')}」不合法(须为 ≥1 的数;0 会恒判成立=假阳)",
+                          resolved_column=col)
     ci = b.get("case_insensitive", mode == "contains")
     norm = (lambda x: str(x).strip().lower()) if ci else (lambda x: str(x).strip())
     tnorm = [norm(t) for t in targets]
@@ -307,8 +354,11 @@ def k_match(table, b, cls="C"):
 
 # ---------- D:多条件组合 ----------
 def k_combo(b, sources, parent_source):
+    subs = b.get("sub") or []
+    if not subs:                                        # 空 AND 的 any(False…)全假 → 恒"成立"(实测假阳),响亮拒绝
+        return _insuf("D", "组合绑定缺 sub 子条件列表(字段名写错/被吃掉?)——空组合恒判成立,禁止")
     results = [evaluate_binding(s, sources, s.get("source", parent_source))
-               for s in (b.get("sub") or [])]
+               for s in subs]
     comb = str(b.get("combine", "AND")).upper()
     preds = [r.get("predicate_satisfied") for r in results]
     sts = [r.get("status") for r in results]
@@ -330,6 +380,9 @@ def k_proportion(table, b, cls="E"):
     gb, _ = resolve_column(header, b.get("group_by", ""))
     if not gb:
         return _insuf(cls, f"未找到分组列「{b.get('group_by')}」", resolved_column=None)
+    err = _shape_err(b)
+    if err:
+        return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=gb)
     filt = b.get("filter") or {}
     fcol = None
     if filt.get("column"):
@@ -375,6 +428,10 @@ def k_config(table, b, cls="F"):
     # 让 predicate_satisfied 始终表示「故障成立」,省得 RCA 再反推(树里"参数≠X才算故障"很常见,如 SsbPeriod≠20ms)。
     neg = bool(b.get("negate")) or ("not_equals" in b)
     raw = b.get("not_equals") if "not_equals" in b else b.get("equals")
+    if raw is None or not isinstance(raw, (str, int, float, bool)):
+        # 缺参会拿 "None" 去比恒不等、列表会拿 "['X']" 去比恒不等——正极性静默假阴/负极性静默假阳(实测)
+        return _insuf(cls, f"equals/not_equals 缺失或不是标量(拿到 {type(raw).__name__}: {raw!r})——"
+                           "F 类只认单个标量;多个候选值改 C 类 equals 列表", resolved_column=col)
     exp = str(raw)
     eq_matched = sum(1 for v in vals if v == exp)
     matched = (len(vals) - eq_matched) if neg else eq_matched      # neg:命中=不等于exp的故障行
@@ -395,6 +452,9 @@ def k_signaling(table, b, cls="H"):
     if not msgcol:
         return _insuf(cls, "无信令/消息数据源(需 trace 记录、含消息类型列 msg_column)", resolved_column=None)
     key, _ = resolve_column(header, b.get("key", "")) if b.get("key") else (None, "")
+    if b.get("key") and not key:                        # 显式给了 key 却解析不到 → 全表并成一个会话,has/lacks 语义畸变(实测)
+        return _insuf(cls, f"未找到会话键列「{b.get('key')}」——解析不到会把全表并成一个会话;"
+                           "确要全表当一个会话请显式 key:null", resolved_column=msgcol, msg_column=msgcol)
     has, lacks = set(b.get("has") or []), set(b.get("lacks") or [])
 
     # 解析 where:行级约束(同一行须满足全部),会话存在这样一行才算满足
@@ -406,6 +466,9 @@ def k_signaling(table, b, cls="H"):
             if not wc:
                 return _insuf(cls, f"where 未找到列「{cst.get('column')}」", resolved_column=None)
             vals = [str(v).strip() for v in (cst.get("contains") or cst.get("equals") or [])]
+            if not vals:                                # 空取值的 where 恒不满足 → 全会话假排除(实测),响亮拒绝
+                return _insuf(cls, f"where 子句缺 equals/contains 取值(列「{cst.get('column')}」)——"
+                                   "空约束恒不满足=假排除;修绑定格式", resolved_column=msgcol, msg_column=msgcol)
             constraints.append((wc, vals, "contains" if cst.get("contains") else "exact"))
 
     def _row_ok(r):
@@ -456,6 +519,11 @@ def k_feature(table, b, cls="I"):
         return _insuf(cls, f"未找到特征列「{b.get('feature') or b.get('column')}」({how})", resolved_column=None)
     metric = b.get("metric", "row_threshold")
     if metric == "row_threshold":
+        err = _shape_err(b)
+        if err:
+            return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=col)
+        if b.get("threshold") is None:
+            return _insuf(cls, "缺 threshold(row_threshold 必须给阈值,缺了会恒判不成立)", resolved_column=col)
         vals, nulls, n = _numeric_series(rows, col, b.get("transforms"))
         if not vals:
             return _insuf(cls, "特征列无有效数值", resolved_column=col)
