@@ -48,6 +48,10 @@ def _slim_fact(entry: dict) -> dict:
     if entry.get("mapping_reason"):
         out["mapping_reason"] = entry["mapping_reason"][:100]
     out.update({k: f[k] for k in _FACT_KEEP if k in f})
+    # 非 ok 事实带上机器理由(截断):内核的"为什么数据不足"(含 H 类词汇样例、列解析失败详情)是 RCA 写
+    # undetermined/复核错误绑定的弹药——绑定算错时,模型靠它才有翻案余地。只挂非 ok、封 160 字,压缩比无感。
+    if f.get("status") != "ok" and f.get("reason"):
+        out["reason"] = str(f["reason"])[:160]
     return out
 
 
