@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -67,6 +68,37 @@ def _holding_map(input_path):
         has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond   # 根/分组节点(无条件进入)不算"有真条件"
         out[nid] = (bool(n.get("pass_through")), hold, has_cond)
     return out
+
+
+def _unaddressed_holds(input_path, rca_path):
+    """候选对账(软提示):有成立事实、有真条件、非 pass_through 的候选节点,
+    在 rca.json **全文**里(node_id 按词边界认,防 n13 命中 n136;节点全名也认——契约允许只写名字)
+    一处都没出现 → 视为"漏裁决"点名。只提示不拦:契约的 excluded 档允许"一句话带过不进列表",
+    硬卡会误杀合法排除,还会重演"逼重写→编假节点"的旧病(docs/notes 有案底)。
+    实测背景:同产物同数据两跑,第二跑把 5 个有成立事实的分支通篇漏掉,原有校验(只核"写了的对不对")全数放行。"""
+    try:
+        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+        text = Path(rca_path).read_text(encoding="utf-8")
+    except Exception:
+        return []
+    if not pruned:
+        return []
+    ids_in_text = set(re.findall(r"\bn\d+\b", text))
+    missing = []
+    for nid, n in pruned.items():
+        hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True
+                   for f in (n.get("facts") or []))
+        cond = n.get("condition") or ""
+        has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond
+        if not hold or not has_cond or n.get("pass_through"):
+            continue
+        name = str(n.get("name") or "")
+        if nid in ids_in_text or (name and name in text):
+            continue
+        missing.append((nid, name))
+    missing.sort(key=lambda x: int(x[0][1:]) if x[0][1:].isdigit() else 10**9)
+    return missing
 
 
 def _check_fabrication(rc, tier, hold_map, problems):
@@ -184,6 +216,18 @@ def main() -> int:
             problems.append(f"[疑似缺证据] 疑似「{name}」既无 `support` 也无 `evidence_path`——疑似也得摆出支撑它的正向证据")
         _check_fabrication(rc, "疑似", hold_map, problems)
         _check_path_chain(rc, "疑似", parent_map, problems)
+
+    # 候选对账(软提示,不改退出码):专逮"有成立事实的候选通篇没下落"的漏裁决
+    if len(sys.argv) >= 3:
+        miss = _unaddressed_holds(sys.argv[2], sys.argv[1])
+        if miss:
+            print(f"⚠ 候选对账:以下 {len(miss)} 个节点有'成立'事实,rca.json 里却通篇没有下落(漏裁决嫌疑):")
+            for nid, name in miss[:15]:
+                print(f"  - {nid} 「{name}」")
+            if len(miss) > 15:
+                print(f"  …(还有 {len(miss) - 15} 个,用 rca_query --holding 看全量)")
+            print("  → 漏了就补报(确证/疑似,或至少在 undetermined.observed 给一行);"
+                  "确属排除的,在 excluded_note 一句话点名留痕,别静默略过。")
 
     if problems:
         print(f"不合格:发现 {len(problems)} 处问题:")
