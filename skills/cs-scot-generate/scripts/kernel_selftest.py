@@ -4,11 +4,11 @@
 为什么要它:condition_kernels.py 是整条流水线的地基(execute 只跑、不改统计),
 但此前它**没有任何回归测试**——谁改坏一行(改了谓词、漏了分量字段、动了解析)都不会有东西报警。
 这份用例覆盖每类的 成立/不成立/数据不足/边界(空表、缺列、%值、transform 链、require、三态组合),
-是确定性的(无 ground truth、不调模型、可反复跑出同一结果),被 cs-scot-benchmark 当第 6 项接入。
+是确定性的(无 ground truth、不调模型、可反复跑出同一结果)。
 
 用法:
     kernel_selftest.py            # 跑全量,打印逐条结果,全过 exit 0、有失败 exit 1
-    (也可被 benchmark import:from kernel_selftest import run_battery)
+    (也可被其它脚本 import:from kernel_selftest import run_battery)
 """
 from __future__ import annotations
 

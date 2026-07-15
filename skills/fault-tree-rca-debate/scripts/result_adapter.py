@@ -177,7 +177,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
                    + (",叶子判据经证据引擎实测成立,已托底 medium" if leaf_st == "held" and conf == "medium" else "")
                    + ")"]
                 + debate_caveats)
-                + ";得分机制孰优待 cs-scot-eval 评测确认"
+                + ";得分机制孰优待评测确认"
                 + (";⚠ 本次运行 LLM 曾连接失败、引擎降级为关键词匹配续跑,结果可信度受损,建议重跑"
                    if vendor_result.get("llm_degraded") else ""),
             "support": f"辩论引擎 Top-K 路径(k 内排名按 {mechanism});"

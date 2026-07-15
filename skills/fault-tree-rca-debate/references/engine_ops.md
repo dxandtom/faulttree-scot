@@ -90,17 +90,19 @@
 
 ## 四、三种得分机制 A/B/C——一键评测
 ```bash
-# mock 先验管线(已在仓库内跑通 30 场景),真引擎就绪后换 --engine real:
+# mock 先验管线,真引擎就绪后换 --engine real:
 python skills/fault-tree-rca-debate/scripts/ab_test_mechanisms.py --engine real --k 3 \
+    --suite <带答案场景目录> --trees <树索引目录> \
     [--only synth_中]   # 先小树标定成本,再放全量
 ```
-数据集 = `cs-scot-eval/suite_real` 的 30 个冻结场景(rca_input/树/答案全部已入库,开箱即测)。
+数据集:原配的 `cs-scot-eval/suite_real` 30 个冻结场景已随 cs-scot-eval 技能从本仓移除,
+现需自备带标准答案的场景,用 `--suite/--trees` 显式传入(目录结构见脚本 docstring)。
 **指标口径(重要)**:机制对比用**档位无关的排名指标**(hit@1 / hit@3 / MRR / FP进榜)——
-eval 的四档打分要求确证根因落在 `rca_result` 档,而本引擎是纯排序器、适配层诚实全放 probable 档,
-四档分数量的是"排序器 vs 事实闭环"的语义差,不是三种机制谁好。真值="不报根因"的场景(excluded/honest)
-排序器结构性做不到(无弃权),工具单列为「弃权能力缺口」——这是全盘替代要付的语义代价,与机制优劣分开看。
-注:eval 的"禁止脚本批量产 rca.json"红线是防**考模型**作弊;这里被测对象就是程序引擎,属正当用法,
-但成绩必须标注 `engine=debate`,与模型手工 RCA 的成绩分表呈现。
+四档打分(要求确证根因落在 `rca_result` 档)对本引擎不适用:它是纯排序器、适配层诚实全放
+probable 档,四档分数量的是"排序器 vs 事实闭环"的语义差,不是三种机制谁好。
+真值="不报根因"的场景(excluded/honest)排序器结构性做不到(无弃权),工具单列为
+「弃权能力缺口」——这是全盘替代要付的语义代价,与机制优劣分开看。
+成绩必须标注 `engine=debate`,与模型手工 RCA 的成绩分表呈现。
 
 ## 五、切换/回退
 - 用辩论引擎:runner 之后跑 `run_debate_rca.py`(见 SKILL.md)。
