@@ -317,6 +317,9 @@ def k_match(table, b, cls="C"):
         if _rq is None or _rq < 1:
             return _insuf(cls, f"require「{b.get('require')}」不合法(须为 ≥1 的数;0 会恒判成立=假阳)",
                           resolved_column=col)
+        if b.get("absent"):
+            return _insuf(cls, "absent 与 require 互斥(absent=命中0行才成立,require=至少命中N行)——"
+                               "语义矛盾,修绑定", resolved_column=col)
     ci = b.get("case_insensitive", mode == "contains")
     norm = (lambda x: str(x).strip().lower()) if ci else (lambda x: str(x).strip())
     tnorm = [norm(t) for t in targets]
@@ -341,11 +344,18 @@ def k_match(table, b, cls="C"):
             if len(samples) < 3:
                 samples.append(str(r.get(idc)) if idc else f"row#{i}")
     total = sum(dist.values())                          # 纳入统计的非空行数 = 占比分母
+    if b.get("absent") and total == 0:
+        # 负存在判据(故障=「没配置X」)靠"缺行即证据",但整列无值时缺的可能是导出段而非配置——不判成立
+        return _insuf(cls, "列全空/表为空,「不存在」无从证明(absent 需列里有实际取值兜底)",
+                      resolved_column=col)
     fact = {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
             "match": mode, "targets": targets, "matched": matched, "total": total,
             "ratio": round(matched / total, 4) if total else None, "nulls": nulls,
             "top": dist.most_common(5), "samples": samples,
-            "predicate_satisfied": matched >= b.get("require", 1)}
+            "predicate_satisfied": (matched == 0) if b.get("absent")
+                                   else matched >= b.get("require", 1)}
+    if b.get("absent"):
+        fact["absent"] = True                           # 极性标记:matched=0 且成立=「未配置」,让 RCA 读得懂
     if len(targets) > 1:                                # 单 target 时分解=matched,冗余不输出
         # 只进校验/审计层:不在 tree_prune._FACT_KEEP 白名单、不被 question 渲染——不会流进 RCA 上下文
         fact["matched_by_target"] = {str(t): by_target.get(str(t), 0) for t in targets}

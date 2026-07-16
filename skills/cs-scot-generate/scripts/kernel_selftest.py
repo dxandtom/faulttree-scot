@@ -74,6 +74,32 @@ CASES = [
      "binding": {"class": "C", "column": "DCErrType", "equals": ["RNL"]},
      "expect": {"status": "insufficient_data", "resolved_column": None}},
 
+    # ---- C/G 负存在(absent:故障=「没配置X」,缺行即证据)----
+    {"name": "G absent 值确实不存在→成立(带 absent 标记)",
+     "table": _t(["level2"], ["vrrp vrid 99 virtual-ip 10.1.1.111"],
+                 ["vrrp vrid 99 preempt-mode timer delay 120"], ["shutdown"]),
+     "binding": {"class": "G", "column": "level2", "contains": ["recover-delay"], "absent": True},
+     "expect": {"status": "ok", "matched": 0, "predicate_satisfied": True, "absent": True}},
+    {"name": "G absent 值存在→不成立(配了就不是故障)",
+     "table": _t(["level2"], ["vrrp vrid 99 preempt-mode timer delay 120"], ["vrrp recover-delay 10"]),
+     "binding": {"class": "G", "column": "level2", "contains": ["recover-delay"], "absent": True},
+     "expect": {"status": "ok", "matched": 1, "predicate_satisfied": False}},
+    {"name": "G absent 列全空→数据不足(没导出≠没配置,不判成立)",
+     "table": _t(["level2"], ["NIL"], ["-"]),
+     "binding": {"class": "G", "column": "level2", "contains": ["recover-delay"], "absent": True},
+     "expect": {"status": "insufficient_data"}},
+    {"name": "C absent+require 互斥→数据不足(语义矛盾拒收)",
+     "table": _t(["c"], ["X"]),
+     "binding": {"class": "C", "column": "c", "equals": ["X"], "require": 2, "absent": True},
+     "expect": {"status": "insufficient_data"}},
+    {"name": "D 负存在组合:配了A但没配B→成立(n77 VRRP回切延时实测场景)",
+     "table": _t(["level2"], ["vrrp vrid 99 virtual-ip 10.1.1.111"],
+                 ["vrrp vrid 99 preempt-mode timer delay 120"], ["shutdown"]),
+     "binding": {"class": "D", "combine": "AND", "sub": [
+         {"class": "G", "column": "level2", "contains": ["preempt-mode timer delay"]},
+         {"class": "G", "column": "level2", "contains": ["recover-delay"], "absent": True}]},
+     "expect": {"status": "ok", "predicate_satisfied": True}},
+
     # ---- D 组合(三态)----
     {"name": "D AND 两真→真", "table": _t(["err", "rsrp"], ["RNL", "-130"]),
      "binding": {"class": "D", "combine": "AND", "sub": [
