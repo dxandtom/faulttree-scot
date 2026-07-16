@@ -67,7 +67,7 @@ python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
 它把 A–J 模板库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览引擎 `analyzer.py`、绑定契约拷进 `<OUT>/scripts/`(**这几个库每次重跑都刷新**),为每个指标写一份**待填骨架** `<ind>_analyzer.py`,并产出 `plan.json`(`各<ind>_analyzer(script)→rca(agent_skill)`)。`--out` 用步骤 1 打印的 `<OUT>`。格式见 `references/plan_schema.md`。
-> **assemble 有两道硬闸门(退出码 1)**:①找不到 `tree/<场景>.tree_index.json`(步骤 1 没跑/场景名不一致/目录错位);②树 0 判据。报错里带排查指引——拦的是"步骤 1 没跑好就往下绑"的病根,别绕。
+> **assemble 有两道硬闸门(退出码 1)**:①`tree/` 下找不到步骤 1 产物 `*.tree_index.json`,或 index 里的场景名/短名与 `--scenario` 对不上(步骤 1 没跑/名字不一致/目录错位;新旧两代产物并存时报歧义、退出码 2);②树 0 判据。报错里带排查指引——拦的是"步骤 1 没跑好就往下绑"的病根,别绕。
 > **重跑 = 重新编译**:已存在的 `<ind>_analyzer.py` 默认**会被当前版本的空骨架覆盖**(旧的先备份成 `.py.bak`),所以**更新 skill 后直接重跑就能生效,不用手删旧脚本**;模型随后在步骤 2.5 重新填。确需保留上次填好的脚本 → 加 `--keep`。
 
 ### 步骤 2.5(关键的一步):为每个 `<ind>_analyzer.py` 填 `CONDITIONS`
@@ -92,7 +92,7 @@ python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o "<OUT>/overview
 python "<OUT>/scripts/<ind>_analyzer.py" "<该指标数据>" -o /tmp/<ind>.json
 python "<本目录>/scripts/validate_conditions.py" /tmp/<ind>.json
 # 叶子覆盖度闸门(树驱动,与数据取值无关):列出"没被任何绑定认领的叶子";漏绑(条件提到已喂列却没绑)→ 退出码 1
-python "<本目录>/scripts/check_tree_coverage.py" "<OUT>/tree/<场景>.tree_index.json" \
+python "<本目录>/scripts/check_tree_coverage.py" "<OUT>/tree/<短名>.tree_index.json" \
   --facts /tmp/<ind>.json [--facts /tmp/<其他源>.json ...] --columns "<本源列名,逗号分隔(从概览取)>"
 ```
 脚本要正常跑出逐条件事实(`indicator/source/summary/conditions`);校验器揪"没解析到列却给判断、数据不足缺理由",并机械逮代理三类:**`[流程不匹配]`(如 UEContext 条件绑了 RRC 率)/ `[建立配掉线]` / `[子因配总率]`(`.FailEst.` 子因绑了总成功率)**。**校验器报"不合格"= 那条多半是代理 → 按提示改成 `decision:insufficient_data` 或换列/换源、重跑,别带病往下走。** custom 写崩了/形状不对,在这步也暴露。**`validate_conditions` 的『覆盖度告警』是数据值级**(绑了的列里哪些取值没被认领)。
@@ -109,7 +109,7 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 
 ## 输出目录(就是 `<OUT>`)
 ```
-<OUT>/                                       # = <故障树目录>/scot产物/<场景名>/
+<OUT>/                                       # = <故障树目录>/scot产物/<短名>/(短名=英文 slug,取不到英文时=中文场景名)
 ├── plan.json                              # SCoT 计划(产物①)
 ├── manifest.json                          # 产物铭牌:格式契约版本+生成时间(execute/benchmark 启动比对,旧产物只告警)
 ├── scripts/<ind>_analyzer.py              # 逐条件分析脚本(模型填 CONDITIONS,产物②)
@@ -128,7 +128,7 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 ### 步骤 5(可选):打包成"一句话可用"的云端场景技能
 要把该场景发布成独立技能(每场景一个,技能名=英文短名)时,一条命令出货:
 ```bash
-python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <OUT> 旁的 <slug>/ 技能目录
+python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根目录>/scot技能/<slug>/ 技能目录(与 scot产物 平级;--dest 可改)
 ```
 产出 = execute 执行骨架(SKILL.md 自动改名+按场景写 description)+ `assets/`(本产物 + fault-tree-rca 规则副本),自动排除 overview/dispatch/runs/result/__pycache__ 等临时物。上传后用户一句 `/<slug> 数据在 <zip>,帮我诊断` 即可跑全程(默认约定见 execute SKILL.md「场景打包形态」)。产物没有英文短名时用 `--name` 指定。
 

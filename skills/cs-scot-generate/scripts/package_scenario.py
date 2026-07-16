@@ -46,7 +46,7 @@ def _ignore(_dirpath, names):
 def rewrite_skill_md(path: Path, name: str, scenario: str) -> None:
     """只重写 frontmatter 的 name/description(技能身份),正文(执行逻辑)一字不动。"""
     txt = path.read_text(encoding="utf-8")
-    m = re.match(r"^---\n(.*?)\n---\n", txt, re.S)
+    m = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", txt, re.S)   # 容忍 CRLF(Windows autocrlf 检出)
     if not m:
         print(f"[package] SKILL.md 缺 frontmatter,无法改名: {path}", file=sys.stderr)
         sys.exit(1)
@@ -110,14 +110,6 @@ def main() -> None:
               f"或回步骤1加 --slug 重跑。场景:「{scenario}」", file=sys.stderr)
         sys.exit(2)
 
-    dest_root = Path(args.dest).expanduser().resolve() if args.dest else out.parent
-    dest = dest_root / name
-    if dest.exists():
-        if not args.force:
-            print(f"目标已存在:{dest}(确认要覆盖就加 --force)", file=sys.stderr)
-            sys.exit(2)
-        shutil.rmtree(dest)
-
     exe = Path(args.execute_skill).expanduser().resolve()
     rca = Path(args.rca_skill).expanduser().resolve()
     for p, what in ((exe, "execute 技能"), (rca, "fault-tree-rca 技能")):
@@ -125,6 +117,26 @@ def main() -> None:
             print(f"找不到{what}({p} 下无 SKILL.md)——用 --execute-skill/--rca-skill 指路。",
                   file=sys.stderr)
             sys.exit(2)
+
+    # 默认放到与「scot产物」平级的「scot技能」容器下——绝不能默认到 out.parent:
+    # 产物目录名=slug=技能名,dest 会与产物目录本身同路径,--force 一开就是先删产物再打空包(实测过)。
+    if args.dest:
+        dest_root = Path(args.dest).expanduser().resolve()
+    elif out.parent.name == "scot产物":
+        dest_root = out.parent.parent / "scot技能"
+    else:
+        dest_root = out.parent / "scot技能"
+    dest = (dest_root / name).resolve()
+    for src, what in ((out, "场景产物目录"), (exe, "execute 技能源"), (rca, "fault-tree-rca 技能源")):
+        if dest == src or dest in src.parents or src in dest.parents:
+            print(f"目标目录与{what}重叠:{dest} ↔ {src}——继续会把源删掉/套娃,换个 --dest。",
+                  file=sys.stderr)
+            sys.exit(2)
+    if dest.exists():
+        if not args.force:
+            print(f"目标已存在:{dest}(确认要覆盖就加 --force)", file=sys.stderr)
+            sys.exit(2)
+        shutil.rmtree(dest)
 
     shutil.copytree(exe, dest, ignore=_ignore)                       # 执行骨架
     rewrite_skill_md(dest / "SKILL.md", name, scenario)              # 技能身份:名字+场景描述

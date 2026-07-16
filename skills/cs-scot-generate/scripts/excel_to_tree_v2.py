@@ -137,6 +137,8 @@ def slugify(name: str):
     if not s or _CJK_RE.search(s):
         return None
     s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    if len(s) > 60:                                      # 文件/目录名要跨平台安全,超长英文名截到词边界
+        s = s[:60].rstrip("-")
     return s or None
 
 
@@ -367,6 +369,10 @@ def main() -> None:
     if solutions:
         sol_path = outp.parent / "solutions.json"
         sol_path.write_text(json.dumps(solutions, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        # 重跑没产出方案(改了表头/换了页签/清了格)→ 必须清掉旧表:node_id(nN)按遭遇序分配,
+        # 树一变旧表的 nN 就错位,陈旧 solutions 会把别的节点的方案错挂给根因(全链无人再校验它)。
+        (outp.parent / "solutions.json").unlink(missing_ok=True)
     print(f"已输出子树: {output_path}")
     print(f"已输出权威 index: {outp.with_suffix('.tree_index.json')}")
     if slug:

@@ -226,23 +226,26 @@ def main() -> None:
             print("需要 --out,或用 --xlsx/--out-base 让我推导默认产物目录", file=sys.stderr)
             sys.exit(2)
         out = scenario_out_dir(anchor, scenario)
-        if not (out / "tree").is_dir():
-            # 步骤1可能用英文短名(slug)建的目录(--scenario 输的是中文名):扫产物容器,
-            # 按 tree_index 里的 scenario/slug 认领——名字两种都认,以内容为准。
-            hits = []
-            for ti in sorted((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json")):
-                try:
-                    d = json.loads(ti.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                if scenario in (d.get("scenario"), d.get("slug")):
-                    hits.append(ti.parent.parent)
-            if len(hits) == 1:
-                out = hits[0]
-            elif len(hits) > 1:
-                print(f"歧义:多个产物目录都声称场景「{scenario}」:{[str(h) for h in hits]}"
-                      "——用 --out 明确指定一个。", file=sys.stderr)
-                sys.exit(2)
+        # 扫容器对账(**无条件**,不能只在推导目录缺失时扫):步骤1目录名可能是英文短名(slug)
+        # 而 --scenario 输的是中文名;更危险的是**新旧两代产物并存**(升级后旧中文名目录没删)——
+        # 若只在"推导目录不存在"时才扫,旧中文名目录恰好存在就会被静默选中、归集出过期的树。
+        # 按 tree_index 内容认领:恰一个 → 用它;多个 → 硬拦;零个 → 沿用推导目录(下游闸门给指引)。
+        hits = []
+        for ti in sorted((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json")):
+            try:
+                d = json.loads(ti.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if scenario in (d.get("scenario"), d.get("slug")):
+                hits.append(ti.parent.parent)
+        if len(hits) == 1:
+            out = hits[0]
+        elif len(hits) > 1:
+            print(f"歧义:多个产物目录都声称场景「{scenario}」:{[str(h) for h in hits]}\n"
+                  "  多半是新旧两代产物并存(如旧中文名目录没删)——删掉过期目录再归集,"
+                  "或用 --out 明确指定。静默选错的代价是归集出过期的树,所以这里必须停。",
+                  file=sys.stderr)
+            sys.exit(2)
     work = Path(args.work) if args.work else out  # 默认 work==out,产物只此一处
 
     # 硬闸门:0 判据的树不许归集——判据是整条流水线的原料,0 判据多半是步骤1格式识别问题
@@ -287,6 +290,8 @@ def main() -> None:
     copy_into(work / "tree" / f"{stem}.md", out / "tree" / f"{stem}.md")
     if (work / "tree" / "solutions.json").exists():      # 推荐解决方案表(可选):RCA 报根因时点查
         copy_into(work / "tree" / "solutions.json", out / "tree" / "solutions.json")
+    elif (out / "tree" / "solutions.json").exists():     # work 侧没有 → out 侧的是陈旧副本,清掉防错挂
+        (out / "tree" / "solutions.json").unlink()
     # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
     here = Path(__file__).parent
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # A–J 模板库
