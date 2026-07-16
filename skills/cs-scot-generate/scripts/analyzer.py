@@ -176,9 +176,15 @@ def _stat_values(values, samples_for=None):
                 # 十分位:树里 "RSRP < -120"、"成功率 < 85%" 这类阈值条件,RCA 可据此估"多少在阈值一侧"。
                 "deciles": {f"p{q}": round(_pct(s, q), 4) for q in range(0, 101, 10)}}
     cnt = Counter(str(v).strip() for v in ne)
-    top = dict(cnt.most_common(20))
+    # 低基数列(≤200 个不同值)全枚举:这种列(命令关键字/枚举/类别)是绑定"挑列"的唯一真话来源,
+    # top-N 截断会把低频值(如 vrrp)藏成"看不见",绑定代理据此误判"数据里没有"——实测漏诊过根因。
+    full = len(cnt) <= 200
+    top = dict(cnt.most_common(None if full else 20))
     out = {"kind": "categorical", "count": len(ne), "nulls": nulls,
            "distinct": len(cnt), "top": top}
+    if not full:  # 高基数列没法全给,但截断必须自己招供,堵死"概览没看到=数据里没有"的错误推理
+        out["vocab_note"] = (f"共 {len(cnt)} 个不同值,此处仅展示最高频 20 个——"
+                             "词汇不完整,禁止据此判断某值在数据中不存在")
     if samples_for is not None:  # 给每个 top 值附几个样例标识
         out["samples"] = {val: samples_for(val)[:3] for val in list(top)[:8]}
     return out
