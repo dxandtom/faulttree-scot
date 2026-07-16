@@ -52,7 +52,7 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<�
 >   python "<本目录>/scripts/excel_to_tree_v2.py" "<故障树xlsx>" --list                              # 先探:列出可输入场景名(L2)+ 各自出处页签(非树页/旧页 -old 自动跳过;要保留旧页加 --include-old)
 >   python "<本目录>/scripts/excel_to_tree_v2.py" "<故障树xlsx>" --start-node "<场景名>" [--sheet "<页签名>"]   # 跨页签合并出该场景子树;--sheet 限定只用某一页
 >   ```
->   输出契约与老脚本一致(`<场景>.md` + `<场景>.tree_index.json`),判断按 `CHR/X2/RB/配置/DBG/信令/话统` **源标签**落进节点 `data_source`、给步骤 2.5 绑定**预路由**;判据没按源分列的(混血表的 `Judgment Condition` 单列)归 `通用` 标签——**通用无预路由**,路由靠绑定时模型读判据原文。后续步骤照旧。
+>   输出契约与老脚本同形,但 **v2 的文件/目录名用英文短名(slug)**:自动取场景所在层的英文列转小写连字符(如「三层业务问题」→ `layer-3-service-issues.md`,平台显示友好),英文列缺失/未翻译则沿用中文名并提示(可 `--slug <english-name>` 手工指定);中文场景名保留在 index 的 `scenario`,后续步骤 `--scenario` 仍输中文名。判断按 `CHR/X2/RB/配置/DBG/信令/话统` **源标签**落进节点 `data_source`、给步骤 2.5 绑定**预路由**;判据没按源分列的(混血表的 `Judgment Condition` 单列)归 `通用` 标签——**通用无预路由**,路由靠绑定时模型读判据原文。表里有 `Recommend Solution(Chinese/English)` 列时另产 **`tree/solutions.json`**(节点→推荐解决方案;不进树不进判据,RCA 报根因时点查输出)。后续步骤照旧。
 > - **怎么判断用哪个**:**先跑 v2 的 `--list`**——能列出场景=新格式、继续用 v2;若老脚本报 `未找到 Ln(Chinese) 层级列`,就是把新格式喂给了老脚本,换 v2。`--sheet`/`--list` 是 v2 独有,老脚本没有(传了会报 `unrecognized arguments`)。
 > - **起始层级(默认 L2,可选 L3/L4…)**:`--start-node` 默认把场景名当 **L2** 找。**用户提示词里明确要以 L3/L4 等更深层级为起点时**,加 `--start-level N`——`--list` 会改列**那一层**的场景名,`--start-node` 也从那层锚定,截出更小的子树(v2 老脚本同参)。用法:
 >   ```bash
@@ -119,10 +119,18 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 ├── overview/                              # 各源概览/枚举——仅绑定期用,含真实数据样本,步骤 4 交付前删
 ├── dispatch/                              # 派发简报(make_dispatch.py 生成)——仅绑定期用,步骤 4 交付前删
 ├── scripts/condition_binding_schema.md    # 绑定契约副本
-├── tree/<场景>.md                          # 故障树 md(产物③)
-└── tree/<场景>.tree_index.json            # 权威拓扑:node_id/父子/判据/数据源(绑定与 RCA 压缩都靠它)
+├── tree/<短名>.md                          # 故障树 md(产物③;短名=英文 slug,取不到英文时=中文场景名)
+├── tree/<短名>.tree_index.json            # 权威拓扑:node_id/父子/判据/数据源(绑定与 RCA 压缩都靠它)
+└── tree/solutions.json                    # (可选)节点→推荐解决方案:RCA 报根因时点查,不进裁决上下文
 ```
 跑它:`python "<cs-scot-execute 目录>/scripts/runner.py" --plan "<OUT>/plan.json" --data <ind>=<数据文件> ...`
+
+### 步骤 5(可选):打包成"一句话可用"的云端场景技能
+要把该场景发布成独立技能(每场景一个,技能名=英文短名)时,一条命令出货:
+```bash
+python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <OUT> 旁的 <slug>/ 技能目录
+```
+产出 = execute 执行骨架(SKILL.md 自动改名+按场景写 description)+ `assets/`(本产物 + fault-tree-rca 规则副本),自动排除 overview/dispatch/runs/result/__pycache__ 等临时物。上传后用户一句 `/<slug> 数据在 <zip>,帮我诊断` 即可跑全程(默认约定见 execute SKILL.md「场景打包形态」)。产物没有英文短名时用 `--name` 指定。
 
 ## 注意
 - 产物用**中文**;通用引擎 Python 3.11、自包含、精简忠实。

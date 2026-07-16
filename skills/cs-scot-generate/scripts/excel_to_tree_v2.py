@@ -15,8 +15,11 @@
   `--sheet "<页签名>"` 可限定只用某一页(等价"按页签名选")。
 - **元数据**:`和基础诊断对接KPI索引 / 解决方案 / 备注` 存为节点元数据(**不进判断条件**);
   `数据链接` 丢弃;`产品 / 制式` 不参与建树分支。
-- 输出契约与老脚本一致(`<场景>.md` + `<场景>.tree_index.json`);节点多了可选 `meta`/`sheets` 字段
-  (additive,老消费方忽略即可)。
+- 输出契约与老脚本同形(`<短名>.md` + `<短名>.tree_index.json`);**文件/目录名用英文短名(slug)**:
+  自动取场景所在层的英文列转小写连字符(如 layer-3-service-issues),取不到沿用中文名、可 --slug 指定;
+  中文场景名保留在 index.scenario。节点多了可选 `meta`/`sheets` 字段(additive,老消费方忽略即可)。
+- **推荐解决方案**:`Recommend Solution(Chinese/English)` 列按节点收进 `tree/solutions.json`
+  (不进树、不进判据、不进裁决上下文;RCA 报根因时按 node_id 点查,给结论附解决方案)。
 
 用法:
     excel_to_tree_v2.py <xlsx> --list                          # 列出所有可输入的场景名(L2)+ 各自出处页签
@@ -124,6 +127,37 @@ def _lvl_value(row, col: str, fb_cols) -> str:
     return ""
 
 
+_CJK_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")   # 中日韩统一表意文字(含扩展A/兼容区)
+
+
+def slugify(name: str):
+    """英文名 → 文件/目录用短名(slug):小写、非字母数字一律转 '-'、合并去首尾。
+    含中文字符(英文格没翻译、填的还是中文)或转换后为空 → 返回 None(不可用,交上层兜底)。"""
+    s = str(name or "").strip()
+    if not s or _CJK_RE.search(s):
+        return None
+    s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    return s or None
+
+
+def find_english_slug(tree_sheets, scenario: str):
+    """任意层级:找「场景名」所在格的同层英文备选列取值,第一个能转成合法 slug 的当英文短名。
+    (混血表同层是 Lx(Chinese)/Lx 双列,主列=中文、备选列=英文——场景名住哪层就取哪层的英文格。)"""
+    for _name, header, rows in tree_sheets:
+        levels, _, _, fb = sheet_schema(header)
+        for col, lvl in levels:
+            fbc = fb.get(lvl)
+            if not fbc:
+                continue
+            for row in rows:
+                if (row.get(col) or "").strip() == scenario:
+                    for c in fbc:
+                        s = slugify((row.get(c) or "").strip())
+                        if s:
+                            return s
+    return None
+
+
 def is_tree_sheet(header: List[str]) -> bool:
     return any(classify(h)[0] == "level" for h in header)
 
@@ -172,10 +206,16 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
             short[chain] = "n" + str(len(short) + 1)
         return short[chain]
 
+    solutions: Dict[str, Dict[str, str]] = {}
+
     for name, header, rows in tree_sheets:
         levels, methods, metas, fb = sheet_schema(header)
         if not levels:
             continue
+        # 推荐解决方案列(混血表英文表头,classify 不收):不进树/不进判据,单独按节点收集,
+        # 供 RCA 报根因时点查输出——诊断结论"太干巴巴"的补丁,但绝不掺进裁决上下文。
+        sol_cols = [(h, "zh" if "chinese" in h.lower() else "en")
+                    for h in header if "recommend solution" in h.lower()]
         for row in rows:
             full = [(lvl, _lvl_value(row, c, fb.get(lvl))) for c, lvl in levels]
             full = [(lvl, v) for lvl, v in full if v]
@@ -224,8 +264,12 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
                         nd["pass_through"] = False
                     for tag, v in meta.items():
                         nd["meta"].setdefault(tag, v)
+                    for c, lang in sol_cols:
+                        sv = _clean_text(row.get(c))
+                        if sv:
+                            solutions.setdefault(nid, {}).setdefault(lang, sv)
                 parent_id = nid
-    return {"scenario": scenario, "root": root_id, "nodes": nodes}
+    return {"scenario": scenario, "root": root_id, "nodes": nodes, "solutions": solutions}
 
 
 def index_to_markdown(index: Dict[str, Any]) -> str:
@@ -260,6 +304,8 @@ def main() -> None:
     ap.add_argument("--sheet", help="只用指定页签(等价按页签名选);不给=所有树页签")
     ap.add_argument("--list", action="store_true", help="列出所有可输入场景名(L2)+ 出处页签")
     ap.add_argument("--include-old", action="store_true", help="保留名字带 old/旧 的页签(默认跳过)")
+    ap.add_argument("--slug", help="英文短名(输出文件/目录名用,如 layer-3-service-issues);"
+                                   "默认自动取场景所在层的英文列转小写连字符,取不到则沿用中文名")
     ap.add_argument("-o", "--output")
     ap.add_argument("--out-base")
     args = ap.parse_args()
@@ -292,20 +338,45 @@ def main() -> None:
     if not index.get("root"):
         print(f"未在任何树页签找到场景「{args.start_node}」(L{args.start_level})。用 --list 核对名字。", file=sys.stderr)
         sys.exit(1)
+    solutions = index.pop("solutions", {})              # 单独落盘,不进 tree_index(别膨胀树契约)
     md = index_to_markdown(index)
+
+    # 英文短名:--slug 手工指定 > 场景所在层英文列自动转 > 场景名本身(本就是英文时)> 沿用中文名(现状)
+    if args.slug:
+        slug = slugify(args.slug)
+        if not slug:
+            print(f"--slug「{args.slug}」不可用:须为英文(会转成小写连字符,如 layer-3-service-issues)",
+                  file=sys.stderr)
+            sys.exit(2)
+    else:
+        slug = find_english_slug(tree, args.start_node) or slugify(args.start_node)
+    stem = slug or args.start_node
+    if slug:
+        index["slug"] = slug
 
     output_path = args.output
     out_dir = None
     if not output_path:
         anchor = Path(args.out_base).expanduser() if args.out_base else Path(args.excel_path).expanduser().resolve().parent
-        out_dir = scenario_out_dir(anchor, args.start_node)
-        output_path = str(out_dir / "tree" / f"{args.start_node}.md")
+        out_dir = scenario_out_dir(anchor, stem)
+        output_path = str(out_dir / "tree" / f"{stem}.md")
     outp = Path(output_path)
     outp.parent.mkdir(parents=True, exist_ok=True)
     outp.write_text(md, encoding="utf-8")
     outp.with_suffix(".tree_index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    if solutions:
+        sol_path = outp.parent / "solutions.json"
+        sol_path.write_text(json.dumps(solutions, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已输出子树: {output_path}")
     print(f"已输出权威 index: {outp.with_suffix('.tree_index.json')}")
+    if slug:
+        print(f"英文短名(slug): {slug}(文件/目录名用;中文场景名保留在 index.scenario)")
+    else:
+        print("⚠ 未取到可用英文短名(场景所在层英文列缺失/未翻译):文件与目录沿用中文名。"
+              "需要英文名请加 --slug <english-name> 重跑。", file=sys.stderr)
+    if solutions:
+        print(f"已输出解决方案表: {outp.parent / 'solutions.json'}(节点 {len(solutions)} 个;"
+              "RCA 报根因时点查,不进裁决上下文)")
     src_sheets = sorted({s for nd in index["nodes"].values() for s in nd.get("sheets", [])})
     n_cond = sum(1 for nd in index["nodes"].values() if nd.get("condition"))
     print(f"场景「{args.start_node}」合并自页签: {src_sheets};节点数 {len(index['nodes'])},带判据节点 {n_cond}")

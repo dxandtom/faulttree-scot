@@ -139,7 +139,7 @@ def scenario_out_dir(anchor_dir: Path, scenario: str) -> Path:
     return Path(anchor_dir) / DEFAULT_OUT_CONTAINER / scenario
 
 
-def build_plan(scenario: str, indicators: List[str], tree_rel: str) -> dict:
+def build_plan(scenario: str, indicators: List[str], tree_rel: str, stem: str = "") -> dict:
     """生成一份符合 SCoT plan schema 的直线计划。
 
     - 每个指标 → 一个 kind=script 节点(跑**生成的**逐条件分析脚本 <ind>_analyzer.py,
@@ -172,7 +172,7 @@ def build_plan(scenario: str, indicators: List[str], tree_rel: str) -> dict:
     })
     return {
         "version": "4.0",
-        "plan_id": f"plan_{scenario}",
+        "plan_id": f"plan_{stem or scenario}",
         "meta": {
             "goal": f"诊断「{scenario}」的根因",
             "success_criteria": ["输出所有成立的根因路径与逐条判断依据"],
@@ -226,24 +226,52 @@ def main() -> None:
             print("需要 --out,或用 --xlsx/--out-base 让我推导默认产物目录", file=sys.stderr)
             sys.exit(2)
         out = scenario_out_dir(anchor, scenario)
+        if not (out / "tree").is_dir():
+            # 步骤1可能用英文短名(slug)建的目录(--scenario 输的是中文名):扫产物容器,
+            # 按 tree_index 里的 scenario/slug 认领——名字两种都认,以内容为准。
+            hits = []
+            for ti in sorted((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json")):
+                try:
+                    d = json.loads(ti.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if scenario in (d.get("scenario"), d.get("slug")):
+                    hits.append(ti.parent.parent)
+            if len(hits) == 1:
+                out = hits[0]
+            elif len(hits) > 1:
+                print(f"歧义:多个产物目录都声称场景「{scenario}」:{[str(h) for h in hits]}"
+                      "——用 --out 明确指定一个。", file=sys.stderr)
+                sys.exit(2)
     work = Path(args.work) if args.work else out  # 默认 work==out,产物只此一处
-    tree_rel = f"tree/{scenario}.md"
 
     # 硬闸门:0 判据的树不许归集——判据是整条流水线的原料,0 判据多半是步骤1格式识别问题
     # (判据列没被认出被静默丢弃)。此时继续会诱发"模型自由发挥硬绑/写脚本量产绑定"的事故,
     # 必须在这里停下、回去查 Excel 表头,而不是往下走。
-    ti_path = work / "tree" / f"{scenario}.tree_index.json"
-    if not ti_path.exists():                             # 步骤1产物缺失/错位:比 0 判据更糟,同样硬拦
-        print(f"不合格:找不到步骤1产物 {ti_path}。\n"
+    # 定位步骤1产物:目录内唯一的 *.tree_index.json(文件名=英文短名或中文场景名,以内容为准)。
+    tis = sorted((work / "tree").glob("*.tree_index.json")) if (work / "tree").is_dir() else []
+    if not tis:                                          # 步骤1产物缺失/错位:比 0 判据更糟,同样硬拦
+        print(f"不合格:{work / 'tree'} 下找不到步骤1产物 *.tree_index.json。\n"
               "  排查:① 步骤1(excel_to_tree*)跑过了吗;② --scenario 与步骤1的 --start-node 名字\n"
               "  完全一致吗(含空格/括号全半角);③ --out/--work 是否指向步骤1的产物目录。\n"
               "  先把步骤1产物放对,再归集——没有树的产物只会诱发下游自由发挥。", file=sys.stderr)
         sys.exit(1)
+    if len(tis) > 1:
+        print(f"歧义:{work / 'tree'} 下有多份 tree_index:{[t.name for t in tis]}"
+              "——一个场景目录只放一棵树,清掉多余的再归集。", file=sys.stderr)
+        sys.exit(2)
+    ti_path = tis[0]
+    stem = ti_path.name[: -len(".tree_index.json")]      # 文件短名(slug 或中文场景名),树文件同名
+    tree_rel = f"tree/{stem}.md"
     try:
         _ti = json.loads(ti_path.read_text(encoding="utf-8"))
         _n_cond = sum(1 for nd in (_ti.get("nodes") or {}).values() if nd.get("condition"))
     except Exception as e:  # noqa: BLE001
         print(f"tree_index 读取失败({e}),无法核验判据数——先修复步骤1产物再归集。", file=sys.stderr)
+        sys.exit(1)
+    if scenario not in (_ti.get("scenario"), _ti.get("slug")):
+        print(f"不合格:--scenario「{scenario}」与产物不符(index.scenario=「{_ti.get('scenario')}」,"
+              f" slug={_ti.get('slug')!r})——名字打错或目录指错,核对后再归集。", file=sys.stderr)
         sys.exit(1)
     if _n_cond == 0:
         print(f"不合格:tree_index 里 {len(_ti.get('nodes') or {})} 个节点**一条判据都没有**。\n"
@@ -256,7 +284,9 @@ def main() -> None:
     for sub in ("scripts", "tree"):
         (out / sub).mkdir(parents=True, exist_ok=True)
 
-    copy_into(work / "tree" / f"{scenario}.md", out / "tree" / f"{scenario}.md")
+    copy_into(work / "tree" / f"{stem}.md", out / "tree" / f"{stem}.md")
+    if (work / "tree" / "solutions.json").exists():      # 推荐解决方案表(可选):RCA 报根因时点查
+        copy_into(work / "tree" / "solutions.json", out / "tree" / "solutions.json")
     # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
     here = Path(__file__).parent
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # A–J 模板库
@@ -294,19 +324,20 @@ def main() -> None:
         regenerated.append(ind)
         print(f"  [regen] 重铺空骨架: {target}{note}")
 
-    plan = build_plan(scenario, indicators, tree_rel)
+    plan = build_plan(scenario, indicators, tree_rel, stem)
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 出厂铭牌:这批产物由哪版格式契约、何时编译。execute/benchmark 启动时比对,旧产物只告警不阻断。
     manifest = {"product_format_version": PRODUCT_FORMAT_VERSION,
                 "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                "scenario": scenario, "indicators": indicators, "tree": tree_rel}
+                "scenario": scenario, "slug": _ti.get("slug"),
+                "indicators": indicators, "tree": tree_rel}
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"已归集场景产物: {out}")
     print(f"  plan.json(SCoT v4.0)+ manifest.json(产物铭牌,格式契约 v{PRODUCT_FORMAT_VERSION})"
           f"+ scripts/condition_kernels.py(A–J 模板库)"
-          f"+ scripts/<指标>_analyzer.py(待填骨架)+ tree/{scenario}.md")
+          f"+ scripts/<指标>_analyzer.py(待填骨架)+ tree/{stem}.md")
     to_fill = scaffolded + regenerated
     if to_fill:
         if regenerated:
