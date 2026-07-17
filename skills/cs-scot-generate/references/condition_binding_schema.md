@@ -49,6 +49,15 @@
 > 绑 C/G + `absent:true`(命中0行=故障成立;列全空时内核改判数据不足,不会把"没导出"误判成"没配置");
 > "配了A但没配B"= D 组合(AND)+ 存在子条件 + `absent` 子条件。**禁止以"无法确认不存在"为由投
 > `insufficient_data`**——配置源在场时那不是数据不足,是把确定证据白扔了(实测因此漏诊过根因)。
+> **字面模板(照抄字段名——子条件列表叫 `sub`、目标叫 `contains` 列表;`sub_conditions`/`target`
+> 等野字段内核不认,实测有整条因此变数据不足的)**:
+> ```python
+> {"class": "D", "combine": "AND", "sub": [
+>     {"class": "G", "column": "level2", "contains": ["preempt-mode timer delay"]},
+>     {"class": "G", "column": "level2", "contains": ["vrrp recover-delay"], "absent": True}]}
+> ```
+> 两个子条件长得像、极性相反:第一条**不带** absent=命中≥1行才成立(要求"配了");
+> 第二条**带** `absent`=命中0行才成立(要求"没配")。
 > ③ **趋势语义(增长/震荡/刷新)看有没有现成检测码**:判据给出了对应检测告警/日志码(如
 > `hwIfMonitorCrcErrorRising`,设备自己已判过"增长")→ 绑告警名合法;要人比较两次数值的 → 单快照数据
 > 判不了,`decision:insufficient_data`(注明"需两次采样对比")。
