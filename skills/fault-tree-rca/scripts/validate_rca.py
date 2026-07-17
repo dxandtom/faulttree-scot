@@ -281,6 +281,17 @@ def main() -> int:
             problems.append(f"[疑似缺理由] 疑似「{name}」没说清为什么只是疑似——必须写 `blocked_at`(卡在哪个节点)或 `caveats`(为何不确定)")
         if not (rc.get("support") or _evidence(rc)):
             problems.append(f"[疑似缺证据] 疑似「{name}」既无 `support` 也无 `evidence_path`——疑似也得摆出支撑它的正向证据")
+        # 口径不符(硬):证据链与档位打架——evidence 里没有任何节点写'数据不足/不成立'类疑虑,
+        # blocked_at 又空 = "全成立却居疑似"。模型有权凭主观怀疑降档,但怀疑必须落字、落在具体节点
+        # ('单源/保险起见'不是档位理由)。实测:确证被误杀几轮后,弱模型防御性把全成立候选整批降进
+        # 疑似(0 确证/13 疑似),软提示点名 10 条它照样交卷——不硬拦,往下躲永远零代价。
+        _ev = _evidence(rc)
+        if _ev and not str(rc.get("blocked_at") or "").strip():
+            if not any(_tag(str(n.get("judgment", "")), NOT_PROVEN) for n in _ev if isinstance(n, dict)):
+                problems.append(
+                    f"[口径不符] 疑似「{name}」evidence_path 无任何'数据不足/不成立'节点、blocked_at 又空"
+                    f"——全成立该进 rca_result;确有怀疑就写实:把存疑节点的 judgment 改'数据不足/语义近似'"
+                    f"并填 blocked_at。'单源/保险起见'不是降档理由")
         _check_fabrication(rc, "疑似", hold_map, problems)
         _check_path_chain(rc, "疑似", parent_map, problems)
         _check_unknown_nodes(rc, "疑似", universe, problems)
@@ -289,8 +300,10 @@ def main() -> int:
     # 疑似必须真有伤:evidence_path 里至少一个「有真判据、非 pass_through、且没有任何 ok 事实」的
     # 实际阻塞点。路径全干净的疑似 = 要么该升确证、要么阻塞点没写进路径(实测:校验误杀确证 →
     # 弱模型批量降档避审,疑似从个位数膨胀到 20+ ——疑似档不能当泄压阀)。
+    soft_hints = 0
     if len(sys.argv) >= 3:
         nb = _probables_without_block(probables, sys.argv[2])
+        soft_hints += len(nb)
         if nb:
             print(f"⚠ 疑似档体检:以下 {len(nb)} 条疑似的 evidence_path 里没有任何「有真判据且缺数据」的实际阻塞点:")
             for nm, ba in nb[:10]:
@@ -303,6 +316,7 @@ def main() -> int:
     # 候选对账(软提示,不改退出码):专逮"有成立事实的候选通篇没下落"的漏裁决
     if len(sys.argv) >= 3:
         miss = _unaddressed_holds(sys.argv[2], sys.argv[1])
+        soft_hints += len(miss)
         if miss:
             print(f"⚠ 候选对账:以下 {len(miss)} 个节点有'成立'事实,rca.json 里却通篇没有下落(漏裁决嫌疑):")
             for nid, name in miss[:15]:
@@ -323,6 +337,12 @@ def main() -> int:
         return 1
 
     note = "(已用 rca_input 核对'成立'有事实)" if hold_map is not None else "(未带 rca_input,跳过伪造核对)"
+    if soft_hints:
+        # "通过"两个字曾让弱模型把上方 ⚠ 全当装饰直接交卷(实测)——有软提示就别给干净的台阶
+        print(f"硬检查通过,但上方还有 {soft_hints} 条 ⚠ 软提示**未处置**:逐条处置"
+              f"(升档/补报/excluded_note 留痕/阻塞写实)并重跑本校验,再产出最终报告——"
+              f"确证根因 {len(confirmed)} 条、疑似 {len(probables)} 条{note}。")
+        return 0
     print(f"通过:确证根因 {len(confirmed)} 条(路径全成立)、疑似 {len(probables)} 条(理由齐备){note}。")
     return 0
 

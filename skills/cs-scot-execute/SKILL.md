@@ -36,10 +36,25 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
    跳过**、plan 需要但没给的源自动 `[skip]`(runner 内建)——两类都必须写进汇报,不许静默。
 3. **执行**:`python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" --data <指标>=<文件> ...`
    (`result/` 落在 `assets/` 下);rca 步骤按 `assets/fault-tree-rca/` 的规则做。
-4. **【输出汇报】固定契约(默认执行,无须用户每次要求)**:每步贴输出:校验结果、rca_input
-   摘要;**每一个**根因的诊断结论 + 故障树节点路径 + 理由(确证给成立理由 / 疑似给 confidence
-   与 blocked_at / 无法判断给缺什么);有 `assets/tree/solutions.json` 时根因附推荐解决方案;
-   结尾必带数据缺口与被跳过文件清单——结论只代表已提供数据能看到的部分。
+4. **【输出汇报】固定模板(默认执行,无须用户要求;各节内容与 rca.json 严格口径一致,别自创表格样式/emoji)**:
+   ```
+   ## 执行过程
+   每步一行:脚本/校验的输出要点(含 validate_rca 结果)
+   ## 诊断结论
+   ### 确证根因(N 条)
+   | 根因 | 故障树路径 | 关键证据 | 推荐解决方案 |
+   ### 疑似根因(N 条)
+   high/medium 逐条详述:根因/卡在哪(blocked_at)/证据/方案(有 solutions.json 时);
+   low 合并成一行一条的简表
+   ### 待确认(N 条)
+   各缺什么数据、补什么能定
+   ## 数据缺口与被跳过的文件
+   plan 缺的源、没匹配上的文件——结论只代表已提供数据能看到的部分
+   ## 树/绑定问题
+   tree_issues 非空时才有此节
+   ```
+   **validate_rca 的 ⚠ 软提示必须先逐条处置(升档/补报/excluded_note 留痕/阻塞写实)并重跑校验,
+   再产出本报告——"硬检查通过"不等于"没事了"。**
 - `--run-id <id>`(可选):本次运行号(**默认自动**「时间戳+随机」)。**版本管理是默认行为**:`result/` 永远=当前这一轮;重跑前 runner 把**上一轮整体归档到 `runs/<上轮run-id>/`**(`rca_input.json`/`rca.json`/`run.json`/`_compression.txt`),历史不丢、不覆盖、无歧义。每轮写 `result/run.json`(本轮 run_id + 输入数据指纹:路径/大小/sha1)并追加 `runs/index.jsonl`,可溯源、可检索。eval/benchmark 仍读 `result/`(=当前轮),不受影响。(`--new-run` 已是默认,保留仅为兼容。)
 
 ## 执行模型(真 SCoT)
