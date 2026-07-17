@@ -221,6 +221,14 @@ def main() -> int:
                 problems.append(f"[自相矛盾] 确证根因「{name}」/节点「{nname}」判'成立'却承认拿不到数据 → {judg!r}")
             tag = _tag(judg, NOT_PROVEN)
             if tag:
+                # 结构节点豁免:该节点在 rca_input 里是 pass_through / 无真条件(根·分组·汇总节点),
+                # 本就没有独立判据,谈不上"数据不足"破坏确证——弱模型常把它标成'数据不足'而不是契约
+                # 要求的'无独立条件',那是标签瑕疵、不是路径断了。以 rca_input 的机械事实为准,
+                # 不按层级/位置豁免(靠前的节点也可能真有判据,位置豁免会放走真的假确证)。
+                if hold_map:
+                    pt, _h, hc = hold_map.get(str(node.get("node_id", "")), (False, False, True))
+                    if pt or not hc:
+                        continue
                 problems.append(
                     f"[假根因] 确证根因「{name}」路径含'{tag}'节点「{nname}」"
                     f"→ 挪进 probable_causes 或 excluded,别凑路径、别造节点")
