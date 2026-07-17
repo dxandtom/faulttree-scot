@@ -108,6 +108,14 @@ def prune(index: dict, results: dict) -> dict:
     for nid in keep:
         n = nodes[nid]
         ent = facts.get(nid, [])
+        # 多源合成剔噪:节点已被真凭实据确立(存在 ok+成立 事实)时,剔掉同节点的 insufficient_data
+        # 事实——"某源答不了/没查到"是**没来作证**,不是反证,留着会诱导 RCA 把已确立节点降档
+        # (实测:dblg 声明"本源无法提供"+ config 实测确立,模型写 blocked_at="dblg insufficient"
+        # 赖在疑似档不肯升确证)。ok+不成立(真冲突)与 manual 照留;未确立节点的 insufficient
+        # 原样保留(那是 undetermined/疑似 的依据)。要件覆盖是否齐全仍由 RCA 按判据原文语义判。
+        if any((e.get("fact") or {}).get("status") == "ok"
+               and (e.get("fact") or {}).get("predicate_satisfied") is True for e in ent):
+            ent = [e for e in ent if (e.get("fact") or {}).get("status") != "insufficient_data"]
         rec = {"name": n.get("name"), "parent": n.get("parent"), "level": n.get("level")}
         ch = n.get("children") or []
         if ch:                                                      # 非叶子:RCA 据此知道"这不是根因、下面还有更深的因"
