@@ -3,7 +3,7 @@ name: cs-scot-execute
 description: 执行一份 SCoT 计划 plan.json(cs-scot-generate 产出的场景诊断产物里那份):从 entry 出发按 transition 遍历 nodes,用工作记忆与引用表达式在节点间传数据,跑各指标解析脚本,再做综合根因分析,输出根因路径与判断依据。当用户要执行 SCoT、运行某故障诊断场景、或对一个 plan.json 跑出根因。
 ---
 
-# cs-scot-execute —— 轻量 SCoT 计划执行器
+# 轻量 SCoT 计划执行器
 
 **本文件已加载,不要再次加载或调用本技能;"加载"≠"完成",真正跑完计划、产出结果才算完成。** 现在立刻用 Bash 跑 `python "<本目录>/scripts/runner.py" --plan "<plan.json>" --data <指标>=<文件> ...` 执行计划,把输出汇报出来。
 
@@ -21,6 +21,25 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
   结论只代表已提供数据能看到的部分。注意:一个数据源都没给仍是硬报错(用法错误);`--data` 的 key 打错
   会触发「plan 用不到的数据源」告警——看到它先核对 key 名,别让 typo 静默变成跳过。
 - `--base <dir>`:相对路径基准目录,默认是 `plan.json` 所在目录。
+
+## 场景打包形态(assets/)——一句话执行
+
+本技能常以**场景技能**形态发布(`package_scenario.py` 打包:技能目录名=场景英文短名,如
+`layer-3-service-issues`;名字变了,本文件的执行逻辑不变):诊断资源内置在本技能目录的
+`assets/` 下——`assets/plan.json`、`assets/scripts/`(各指标解析脚本)、`assets/tree/`
+(故障树 + 可选 solutions.json)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤按它执行)。
+
+此形态下用户只需一句话(如「数据在这里,帮我诊断」),按以下默认约定跑完全程,**不需要用户指路**:
+1. **数据入口**:数据以用户提供的形式为准——目录/散文件直接用;给的是压缩包(zip 等)就先解开再用。**不预设形式**,用户给什么接什么。
+2. **数据↔指标匹配**:指标名 = `assets/scripts/` 下的 `<指标>_analyzer.py` 前缀;数据文件按
+   文件名与指标名匹配(相等或包含,如 `config_20250701.csv` → `config`)。**匹配不上的文件
+   跳过**、plan 需要但没给的源自动 `[skip]`(runner 内建)——两类都必须写进汇报,不许静默。
+3. **执行**:`python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" --data <指标>=<文件> ...`
+   (`result/` 落在 `assets/` 下);rca 步骤按 `assets/fault-tree-rca/` 的规则做。
+4. **【输出汇报】固定契约(默认执行,无须用户每次要求)**:每步贴输出:校验结果、rca_input
+   摘要;**每一个**根因的诊断结论 + 故障树节点路径 + 理由(确证给成立理由 / 疑似给 confidence
+   与 blocked_at / 无法判断给缺什么);有 `assets/tree/solutions.json` 时根因附推荐解决方案;
+   结尾必带数据缺口与被跳过文件清单——结论只代表已提供数据能看到的部分。
 - `--run-id <id>`(可选):本次运行号(**默认自动**「时间戳+随机」)。**版本管理是默认行为**:`result/` 永远=当前这一轮;重跑前 runner 把**上一轮整体归档到 `runs/<上轮run-id>/`**(`rca_input.json`/`rca.json`/`run.json`/`_compression.txt`),历史不丢、不覆盖、无歧义。每轮写 `result/run.json`(本轮 run_id + 输入数据指纹:路径/大小/sha1)并追加 `runs/index.jsonl`,可溯源、可检索。eval/benchmark 仍读 `result/`(=当前轮),不受影响。(`--new-run` 已是默认,保留仅为兼容。)
 
 ## 执行模型(真 SCoT)

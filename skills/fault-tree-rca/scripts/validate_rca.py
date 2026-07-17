@@ -250,8 +250,10 @@ def main() -> int:
                 print(f"  - {nid} 「{name}」")
             if len(miss) > 15:
                 print(f"  …(还有 {len(miss) - 15} 个,用 rca_query --holding 看全量)")
-            print("  → 漏了就补报(确证/疑似,或至少在 undetermined.observed 给一行);"
-                  "确属排除的,在 excluded_note 一句话点名留痕,别静默略过。")
+            print("  → 逐个裁决(rca_query --node nX 走查),**别为消除本提示把候选整批塞进 probable_causes**"
+                  "——成立事实里常混着背景噪声(如子串命中),照单全收=放弃裁决、报告变噪音墙。"
+                  "真候选就补报(确证/疑似,或至少在 undetermined.observed 给一行);"
+                  "背景噪声/确属排除的,在 excluded_note 一句话点名留痕,别静默略过。")
 
     if problems:
         print(f"不合格:发现 {len(problems)} 处问题:")
