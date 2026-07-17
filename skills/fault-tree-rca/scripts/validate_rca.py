@@ -122,6 +122,42 @@ def _unaddressed_holds(input_path, rca_path):
     return missing
 
 
+def _probables_without_block(probables, input_path):
+    """疑似档体检(软):按契约,疑似 = 路径无不成立、但**有数据不足节点**且叶子有强证据——
+    所以每条疑似的 evidence_path 里该有至少一个真实阻塞点(有真判据、非 pass_through、
+    局部子树里没有任何 status=ok 的事实 = 真缺数)。路径全干净的点名(该升确证/该写实阻塞)。
+    没给 node_id 的条目核不了,跳过(理由齐不齐另有硬检查);pruned 缺失(md 形态)整体跳过。"""
+    try:
+        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+    except Exception:
+        return []
+    if not pruned:
+        return []
+
+    def _blocked(nid):
+        n = pruned.get(nid)
+        if not n:
+            return False
+        cond = n.get("condition") or ""
+        if not cond or "无条件" in cond or "无判断" in cond or n.get("pass_through"):
+            return False
+        return not any(f.get("status") == "ok" for f in (n.get("facts") or []))
+
+    out = []
+    for rc in probables or []:
+        if not isinstance(rc, dict):
+            continue
+        ids = [str(e.get("node_id", "")) for e in _evidence(rc) if isinstance(e, dict)]
+        ids = [i for i in ids if i]
+        if not ids:
+            continue
+        if not any(_blocked(i) for i in ids):
+            out.append((rc.get("Root_cause") or rc.get("root_cause") or "(未命名)",
+                        str(rc.get("blocked_at", ""))[:40]))
+    return out
+
+
 def _check_fabrication(rc, tier, hold_map, problems):
     """任何档:判'成立'的节点,若它**有真条件**却在局部子树里没有成立事实 = 伪造
     (pass_through / 无条件的根·分组节点判成立是结构性的,放行)。"""
@@ -248,6 +284,21 @@ def main() -> int:
         _check_fabrication(rc, "疑似", hold_map, problems)
         _check_path_chain(rc, "疑似", parent_map, problems)
         _check_unknown_nodes(rc, "疑似", universe, problems)
+
+    # 疑似档体检(软提示,不改退出码):确证与疑似的镜像检查——确证不许路径带伤(上面的硬检查),
+    # 疑似必须真有伤:evidence_path 里至少一个「有真判据、非 pass_through、且没有任何 ok 事实」的
+    # 实际阻塞点。路径全干净的疑似 = 要么该升确证、要么阻塞点没写进路径(实测:校验误杀确证 →
+    # 弱模型批量降档避审,疑似从个位数膨胀到 20+ ——疑似档不能当泄压阀)。
+    if len(sys.argv) >= 3:
+        nb = _probables_without_block(probables, sys.argv[2])
+        if nb:
+            print(f"⚠ 疑似档体检:以下 {len(nb)} 条疑似的 evidence_path 里没有任何「有真判据且缺数据」的实际阻塞点:")
+            for nm, ba in nb[:10]:
+                print(f"  - 「{nm}」(blocked_at: {ba or '未写'})")
+            if len(nb) > 10:
+                print(f"  …(还有 {len(nb) - 10} 条)")
+            print("  → 路径真干净就升确证;确有阻塞就把阻塞节点补进 evidence_path、blocked_at 写实——"
+                  "疑似档不是确证的避风港,也不是候选对账的泄压阀。")
 
     # 候选对账(软提示,不改退出码):专逮"有成立事实的候选通篇没下落"的漏裁决
     if len(sys.argv) >= 3:

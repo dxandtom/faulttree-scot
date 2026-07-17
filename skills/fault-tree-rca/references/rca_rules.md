@@ -83,6 +83,7 @@
 - **给人看的字段用名字、别用 id**:`Root_cause`/`support`/`caveats`/`blocked_at`/`reason`/`observed` 一律写节点**名字**(必要时"名字(nN)"),**绝不只写裸 `nXX`**——人读报告不该还得去翻 tree 文件查 id 对应哪个节点。只有 `evidence_path` 里 `node_id` 填 nN(同条目 `node` 填名字),各司其职。
 - **口径一致**:文字总结必须和 JSON 一致——`rca_result` 是 `[]` 就别说"发现了 N 条根因";疑似就叫疑似。
 - `rca_result` 为 `[]` **很正常**(上游话统/信令缺数据时);**强证据放 `probable_causes`,别硬塞 `rca_result`、更别造节点凑路径**。
+- **疑似档纪律**:每条疑似的 `evidence_path` 应包含**实际阻塞点**(有真判据且缺数据的节点)——路径全干净的该升确证;别把确证藏进疑似避审,也别拿疑似档当候选对账的泄压阀(validate 会逐条点名)。条目按 confidence 从高到低排;**文字汇报**详述 high/medium 的前几条,low 的合并成一行一条的简表——JSON 一条不少,治的只是噪音墙。
 - **推荐解决方案(可选,别光报病不给药)**:产物 `tree/solutions.json` 存在时(`{node_id: {"zh": …, "en": …}}`),给 `rca_result`/`probable_causes` 的每个条目按其**根因节点的 node_id** 点查,查到就在条目里加 `"recommend_solution"`(优先 zh,没有用 en),文字汇报也带上。**只在定完根因后点查报出的那几个节点**(别整个文件灌上下文);查不到就不加这个字段,**绝不自己编方案**;`undetermined` 不加(没定根因谈不上方案)。
 
 ## 一句话
