@@ -23,7 +23,7 @@ from pathlib import Path
 MISSING = ("无实测", "未找到", "找不到", "不存在", "事实中无", "无此值", "查不到",
            "未提供", "无法验证", "无法判定", "缺数据", "缺少", "数据不足")
 # 确证根因路径里不允许出现的"未完整成立"标记
-NOT_PROVEN = ("数据不足", "不成立", "部分成立", "未判定", "无法验证", "无法判定")
+NOT_PROVEN = ("数据不足", "不成立", "部分成立", "未判定", "无法验证", "无法判定", "语义近似", "存疑")
 
 
 def _is_clean_hold(judgment: str) -> bool:
@@ -148,13 +148,38 @@ def _probables_without_block(probables, input_path):
     for rc in probables or []:
         if not isinstance(rc, dict):
             continue
-        ids = [str(e.get("node_id", "")) for e in _evidence(rc) if isinstance(e, dict)]
+        ev = _evidence(rc)
+        if any(_tag(str(e.get("judgment", "")), NOT_PROVEN) for e in ev if isinstance(e, dict)):
+            continue                        # 疑虑已落字(数据不足/语义近似/存疑)——算"有伤",不点名
+        ids = [str(e.get("node_id", "")) for e in ev if isinstance(e, dict)]
         ids = [i for i in ids if i]
         if not ids:
             continue
         if not any(_blocked(i) for i in ids):
             out.append((rc.get("Root_cause") or rc.get("root_cause") or "(未命名)",
                         str(rc.get("blocked_at", ""))[:40]))
+    return out
+
+
+def _real_blocks(input_path):
+    """{node_id: 节点名} —— rca_input 里的「真实阻塞节点」:有真判据、非 pass_through、
+    且局部子树里没有任何 status=ok 的事实(=真查不了)。疑似的 blocked_at 必须指向其中之一,
+    才算"确有阻塞";读不到/无 pruned(md 形态)→ None(无从核实,调用方从宽)。"""
+    try:
+        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+    except Exception:
+        return None
+    if not pruned:
+        return None
+    out = {}
+    for nid, n in pruned.items():
+        cond = n.get("condition") or ""
+        if not cond or "无条件" in cond or "无判断" in cond or n.get("pass_through"):
+            continue
+        if any(f.get("status") == "ok" for f in (n.get("facts") or [])):
+            continue
+        out[nid] = str(n.get("name") or "")
     return out
 
 
@@ -269,6 +294,7 @@ def main() -> int:
     hold_map = _holding_map(sys.argv[2]) if len(sys.argv) >= 3 else None
     parent_map = _parent_map(sys.argv[2]) if len(sys.argv) >= 3 else None
     universe = _node_universe(sys.argv[2]) if (len(sys.argv) >= 3 and hold_map is not None) else None
+    blocks = _real_blocks(sys.argv[2]) if len(sys.argv) >= 3 else None
 
     confirmed = _confirmed(doc)
     probables = doc.get("probable_causes", []) if isinstance(doc, dict) else []
@@ -325,12 +351,25 @@ def main() -> int:
         # ('单源/保险起见'不是档位理由)。实测:确证被误杀几轮后,弱模型防御性把全成立候选整批降进
         # 疑似(0 确证/13 疑似),软提示点名 10 条它照样交卷——不硬拦,往下躲永远零代价。
         _ev = _evidence(rc)
-        if _ev and not str(rc.get("blocked_at") or "").strip():
-            if not any(_tag(str(n.get("judgment", "")), NOT_PROVEN) for n in _ev if isinstance(n, dict)):
+        if _ev and not any(_tag(str(n.get("judgment", "")), NOT_PROVEN) for n in _ev if isinstance(n, dict)):
+            # 证据链全"成立"→ blocked_at 必须**解析到一个真实阻塞节点**(_real_blocks)。实测:堵住
+            # "blocked_at 为空"后,弱模型改往里塞散文("无阻塞,匹配率极低(0.8%)")继续赖在疑似档——
+            # 散文不指向任何节点,解析不到=硬拦。真有语义怀疑(如"log 是代理证据")的正道:把存疑
+            # 节点的 judgment 写'数据不足/语义近似/存疑'(NOT_PROVEN 认这些词),不受本检查影响。
+            ba = str(rc.get("blocked_at") or "").strip()
+            resolved = False
+            if ba and blocks is None:
+                resolved = True                          # 没给 rca_input 无从核实,维持从宽
+            elif ba and blocks:
+                _ids = set(re.findall(r"\bn\d+\b", ba))
+                resolved = any(i in blocks for i in _ids) or any(nm and nm in ba for nm in blocks.values())
+            if not resolved:
+                why = ("blocked_at 为空" if not ba
+                       else f"blocked_at「{ba[:40]}」未指向任何真实阻塞节点(散文式理由不算阻塞)")
                 problems.append(
-                    f"[口径不符] 疑似「{name}」evidence_path 无任何'数据不足/不成立'节点、blocked_at 又空"
-                    f"——全成立该进 rca_result;确有怀疑就写实:把存疑节点的 judgment 改'数据不足/语义近似'"
-                    f"并填 blocked_at。'单源/保险起见'不是降档理由")
+                    f"[口径不符] 疑似「{name}」evidence_path 全'成立'且 {why}"
+                    f"——全成立该进 rca_result;确有怀疑就写实:存疑节点 judgment 改'数据不足/语义近似',"
+                    f"blocked_at 指向具体阻塞节点。'单源/保险起见/匹配率低'都不是降档理由")
         _check_fabrication(rc, "疑似", hold_map, problems)
         _check_path_chain(rc, "疑似", parent_map, problems)
         _check_unknown_nodes(rc, "疑似", universe, problems)
@@ -352,10 +391,12 @@ def main() -> int:
             print("  → 路径真干净就升确证;确有阻塞就把阻塞节点补进 evidence_path、blocked_at 写实——"
                   "疑似档不是确证的避风港,也不是候选对账的泄压阀。")
 
-    # 排除核对(软提示,不改退出码):被排除/仅观察的"成立且无反证"候选逐条晾出来
+    # 排除核对(软提示,不改退出码):被排除/仅观察的"成立且无反证"候选逐条晾出来。
+    # 注意:排除是合法出口,这张清单不计入"必须清零"的软提示数(不然有一条合法排除就永远清不了)
+    # ——它的处置方式是:报告「已排除的候选」一节逐条晾出站得住的理由(反证/绑定质量)。
+    exh = []
     if len(sys.argv) >= 3:
         exh = _excluded_holds_check(doc, sys.argv[1], sys.argv[2])
-        soft_hints += len(exh)
         if exh:
             print(f"⚠ 排除核对:以下 {len(exh)} 个节点有'成立'事实、**无任何反证**,却没进确证/疑似(下落=排除/仅观察):")
             for nid, name in exh[:10]:
@@ -391,12 +432,15 @@ def main() -> int:
 
     note = "(已用 rca_input 核对'成立'有事实)" if hold_map is not None else "(未带 rca_input,跳过伪造核对)"
     if soft_hints:
-        # "通过"两个字曾让弱模型把上方 ⚠ 全当装饰直接交卷(实测)——有软提示就别给干净的台阶
-        print(f"硬检查通过,但上方还有 {soft_hints} 条 ⚠ 软提示**未处置**:逐条处置"
-              f"(升档/补报/excluded_note 留痕/阻塞写实)并重跑本校验,再产出最终报告——"
-              f"确证根因 {len(confirmed)} 条、疑似 {len(probables)} 条{note}。")
+        # "通过"两个字曾让弱模型把上方 ⚠ 全当装饰直接交卷(实测两轮)——有软提示就别给干净的台阶
+        print(f"硬检查通过,但上方还有 {soft_hints} 条 ⚠ 软提示**未处置**——"
+              f"**带着未处置软提示产出的报告 = 不合格交付**:逐条处置(升档/补报/excluded_note 留痕/"
+              f"阻塞写实)并重跑本校验,**直到此行消失才可以写最终报告**"
+              f"(当前:确证 {len(confirmed)} 条、疑似 {len(probables)} 条{note})。")
         return 0
-    print(f"通过:确证根因 {len(confirmed)} 条(路径全成立)、疑似 {len(probables)} 条(理由齐备){note}。")
+    extra = (f";另:排除核对列出 {len(exh)} 个节点——排除是合法出口,但报告「已排除的候选」一节"
+             f"必须逐条晾出理由(反证/绑定质量),无声排除=不合格交付" if exh else "")
+    print(f"通过:确证根因 {len(confirmed)} 条(路径全成立)、疑似 {len(probables)} 条(理由齐备){note}{extra}。")
     return 0
 
 
