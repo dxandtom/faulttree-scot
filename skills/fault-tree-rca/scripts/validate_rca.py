@@ -158,6 +158,45 @@ def _probables_without_block(probables, input_path):
     return out
 
 
+def _excluded_holds_check(doc, rca_path, input_path):
+    """排除核对(软):有'成立'事实、**无任何反证**(无 ok+不成立 事实)、却没进确证/疑似的候选
+    (下落只能是 excluded/observed)。排除不一定错(松绑定假命中就该排),但每次排除都要晾出来:
+    理由必须落在反证或绑定质量上。实测:确证/疑似都设硬检查后,excluded 成了新泄压阀——弱模型
+    以"属正常配置模式,非故障"排除了业务确认的真根因(推翻树判据),还发明"证据量比别人少/
+    与已确认根因同源"等排除标准。通篇没提的节点归候选对账管,这里只核"有下落但下落是排除"的。"""
+    try:
+        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+        text = Path(rca_path).read_text(encoding="utf-8")
+    except Exception:
+        return []
+    if not pruned:
+        return []
+    reported = set()
+    for tier in ("rca_result", "probable_causes"):
+        for rc in (doc.get(tier) or []) if isinstance(doc, dict) else []:
+            if isinstance(rc, dict):
+                for e in _evidence(rc):
+                    if isinstance(e, dict) and e.get("node_id"):
+                        reported.add(str(e.get("node_id")))
+    ids_in_text = set(re.findall(r"\bn\d+\b", text))
+    out = []
+    for nid, n in pruned.items():
+        facts = n.get("facts") or []
+        hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
+        refuted = any(f.get("status") == "ok" and f.get("predicate_satisfied") is False for f in facts)
+        cond = n.get("condition") or ""
+        has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond
+        if not hold or refuted or not has_cond or n.get("pass_through") or nid in reported:
+            continue
+        name = str(n.get("name") or "")
+        if nid not in ids_in_text and not (name and name in text):
+            continue
+        out.append((nid, name))
+    out.sort(key=lambda x: int(x[0][1:]) if x[0][1:].isdigit() else 10**9)
+    return out
+
+
 def _check_fabrication(rc, tier, hold_map, problems):
     """任何档:判'成立'的节点,若它**有真条件**却在局部子树里没有成立事实 = 伪造
     (pass_through / 无条件的根·分组节点判成立是结构性的,放行)。"""
@@ -312,6 +351,20 @@ def main() -> int:
                 print(f"  …(还有 {len(nb) - 10} 条)")
             print("  → 路径真干净就升确证;确有阻塞就把阻塞节点补进 evidence_path、blocked_at 写实——"
                   "疑似档不是确证的避风港,也不是候选对账的泄压阀。")
+
+    # 排除核对(软提示,不改退出码):被排除/仅观察的"成立且无反证"候选逐条晾出来
+    if len(sys.argv) >= 3:
+        exh = _excluded_holds_check(doc, sys.argv[1], sys.argv[2])
+        soft_hints += len(exh)
+        if exh:
+            print(f"⚠ 排除核对:以下 {len(exh)} 个节点有'成立'事实、**无任何反证**,却没进确证/疑似(下落=排除/仅观察):")
+            for nid, name in exh[:10]:
+                print(f"  - {nid} 「{name}」")
+            if len(exh) > 10:
+                print(f"  …(还有 {len(exh) - 10} 个)")
+            print("  → 排除的合法理由只有两种:①反证(该节点有 ok+不成立 的事实);②绑定质量问题"
+                  "(点名哪条绑定、为何假命中)。**'配置常见/看着正常/证据量比别人少/与已确认根因同源'"
+                  "都不是排除理由——树的判据就是故障标准,你无权推翻树。**理由站不住的,挪回疑似或 undetermined。")
 
     # 候选对账(软提示,不改退出码):专逮"有成立事实的候选通篇没下落"的漏裁决
     if len(sys.argv) >= 3:
