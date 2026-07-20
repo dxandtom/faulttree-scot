@@ -2,14 +2,19 @@
 """调优表(<短名>.tuning.xlsx)→ 机械编译回场景产物:tree_index / tree md / solutions.json /
 各 <指标>_analyzer.py 的 CONDITIONS / plan.json,全程零模型参与、确定性、可重复。
 
-设计要点(每条都是防"人改坏"的):
-- **node_id 只认不改**:已有 id 原样保留;新增行留空,按 max+1 自动分配(历史 id 不复用——
-  连已删节点的 id 也不复用,防外部引用错位);改已有 id / id 重复 = 硬拦。
-- **先全量校验、后写盘**:任何一处错(JSON 坏/id 重复/上级对不上/类别不认识)都收集全、
-  按 Excel 行号用人话报出来,一个文件都不写——绝不留半成品产物。
-- **新增数据源列**(绑定:<新源>)自动落地:克隆现有 analyzer 换 INDICATOR、写 CONDITIONS、
-  plan.json 增加该指标步骤;某源绑定清空则从 plan 摘除(脚本保留)。
-- **变更摘要**:导入成功后打印 节点增/删/改名、判据改动、各源绑定增删改——每次导入可评审。
+设计要点(每条都是防"人改坏"的,多条来自隔离评审的实测发现):
+- **node_id 只认不改**:已有 id 原样保留;新增行留空,按 max+1 自动分配(历史 id 不复用);
+  改已有 id、复制 id、**手编一个树里从没有过的 id** = 硬拦。
+- **先全量校验、全量备料,最后统一写盘**:任何错(JSON 坏/id 问题/上级不符/该有的列被删)都
+  收集全、按 Excel 行号用人话报出来,一个文件都不写;写盘阶段不再有任何可失败的计算。
+- **页签按表头找**(含 node_id 的那页),不吃"活动页"的亏(业务同事复制页签留底是常态);
+  表头的全角冒号/空格自动归一,重复表头、非法源名硬拦。
+- **判据以「判据:<标签>」列或「判据:原文」列为准**(原文列=老格式 v1 树的逐字判据,优先);
+- 绑定 JSON 里保留的 id/source/condition_text 覆盖默认值(自定义 id/页签路由/逐字子句不丢);
+  code 从旧 tree_index 按 node_id 继承(老产物 code 兼容不丢)。
+- **新增数据源列**(绑定:<新源>)自动克隆现有 analyzer 换 INDICATOR 并接进 plan;
+  绑定全清空时 plan 同步退化为只剩 rca(与 assemble 空指标行为一致)。
+- **变更摘要**:节点增/删/改名/移动、判据/解决方案改动、各源绑定条数——每次导入可评审。
 
 用法:import_tree_excel.py --out <场景产物目录(或打包技能的 assets/)>
 本脚本自包含(不依赖 generate 技能的其它模块),会随产物一起分发。
@@ -25,12 +30,13 @@ from pathlib import Path
 
 _LVL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
 _NID_RE = re.compile(r"^n\d+$")
+_SRC_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _CLASSES = set("ABCDEFGHIJ")
 _DECISIONS = {"insufficient_data", "manual", "not_applicable"}
 _CURLY = {"“": '"', "”": '"', "‘": "'", "’": "'"}
+RAW_TAG = "原文"
 
 
-# ---------- 与生成侧同一套的机械件(内嵌副本,保持自包含) ----------
 def _infer_combine(method):
     if not method:
         return None
@@ -59,10 +65,12 @@ def _index_to_markdown(index):
     return "\n".join(lines) + "\n"
 
 
-def _write_conditions(analyzer: Path, entries):
-    """ast 定位 CONDITIONS 赋值块整体替换 + 写后语法自检(与 merge_conditions 同款)。"""
-    src = analyzer.read_text(encoding="utf-8")
-    tree = ast.parse(src)
+def _replace_conditions(src: str, entries, fname: str):
+    """在 analyzer 源码文本里定位 CONDITIONS 赋值块整体替换,返回 (新文本, 错误串)。只备料不写盘。"""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as e:
+        return None, f"{fname}: analyzer 解析失败:{e}"
     span = None
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
@@ -70,25 +78,28 @@ def _write_conditions(analyzer: Path, entries):
             span = (node.lineno, node.end_lineno)
             break
     if span is None:
-        return f"{analyzer.name}: 找不到 CONDITIONS 赋值块"
+        return None, f"{fname}: 找不到 CONDITIONS 赋值块"
     block = "CONDITIONS = [\n" + "".join(f"    {e!r},\n" for e in entries) + "]"
     lines = src.splitlines(keepends=True)
     new_src = "".join(lines[:span[0] - 1]) + block + "\n" + "".join(lines[span[1]:])
     try:
         ast.parse(new_src)
     except SyntaxError as e:
-        return f"{analyzer.name}: 写入后语法自检失败:{e}"
-    analyzer.write_text(new_src, encoding="utf-8")
-    return None
+        return None, f"{fname}: 替换后语法自检失败:{e}"
+    return new_src, None
 
 
-def _read_conditions(path: Path):
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _read_conditions_text(src: str):
+    tree = ast.parse(src)
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "CONDITIONS" for t in node.targets):
             return ast.literal_eval(node.value)
     return []
+
+
+def _no_const(name):
+    raise ValueError(f"数字「{name}」不合法(NaN/Infinity 不能用,写具体数字)")
 
 
 def _parse_cell_json(raw, where, errors, warns):
@@ -97,19 +108,38 @@ def _parse_cell_json(raw, where, errors, warns):
     if not txt:
         return None
     try:
-        return json.loads(txt)
-    except json.JSONDecodeError:
+        return json.loads(txt, parse_constant=_no_const)
+    except ValueError as e:
         fixed = txt
         for k, v in _CURLY.items():
             fixed = fixed.replace(k, v)
-        try:
-            val = json.loads(fixed)
-            warns.append(f"{where}: 用了中文引号(“ ” ‘ ’),本次已自动纠正——下次请用英文引号 \" '")
-            return val
-        except json.JSONDecodeError as e:
-            errors.append(f"{where}: 绑定格式不对(JSON 解析失败:{e.msg},第{e.lineno}行第{e.colno}列)。"
-                          "常见原因:引号用了中文引号、少了逗号或括号。照着 tuning-guide.md 的模板改。")
-            return None
+        if fixed != txt:
+            try:
+                val = json.loads(fixed, parse_constant=_no_const)
+                warns.append(f"{where}: 用了中文引号(“ ” ‘ ’),本次已自动纠正——下次请用英文引号 \" '")
+                return val
+            except ValueError:
+                pass
+        msg = getattr(e, "msg", str(e))
+        errors.append(f"{where}: 绑定格式不对({msg})。常见原因:引号用了中文引号、少了逗号或括号。"
+                      "照着 tuning-guide.md 的模板改。")
+        return None
+
+
+def _pick_sheet(wb):
+    """按表头找「node_id + 层级列」的那一页——绝不吃'活动页'的亏(复制页签留底是常态)。"""
+    hits = []
+    for ws in wb.worksheets:
+        head = [("" if c is None else str(c)).strip() for c in next(ws.iter_rows(values_only=True), [])]
+        if "node_id" in head and any(_LVL_RE.match(h) for h in head):
+            hits.append(ws)
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise SystemExit("没有任何页签的表头含 node_id + 层级列(L2(Chinese) 这种)——"
+                         "别删表头行;若把表复制到了新页签,保留一页正式的即可")
+    raise SystemExit(f"有 {len(hits)} 个页签都像正式调优表({[w.title for w in hits]})——"
+                     "只保留一页,备份页请删掉或去掉它的表头行")
 
 
 def main() -> None:
@@ -128,53 +158,88 @@ def main() -> None:
     if len(xls) != 1 or len(tis) != 1:
         raise SystemExit(f"tree/ 下应各有一份调优表与 tree_index(现有 {len(xls)} / {len(tis)} 份)")
     old_index = json.loads(tis[0].read_text(encoding="utf-8"))
+    old_nodes = old_index.get("nodes") or {}
     stem = tis[0].name[: -len(".tree_index.json")]
+    old_sol_p = out / "tree" / "solutions.json"
+    old_solutions = json.loads(old_sol_p.read_text(encoding="utf-8")) if old_sol_p.exists() else {}
+    existing_aps = sorted((out / "scripts").glob("*_analyzer.py"))
+    if not existing_aps:
+        raise SystemExit("产物 scripts/ 下没有任何 analyzer,无法落绑定(产物不完整)")
 
     from openpyxl import load_workbook
-    ws = load_workbook(xls[0], data_only=True).active
+    ws = _pick_sheet(load_workbook(xls[0], data_only=True))
     rows = [[("" if c is None else str(c)).strip() for c in r] for r in ws.iter_rows(values_only=True)]
-    if not rows:
-        raise SystemExit("调优表是空的")
     header, body = rows[0], rows[1:]
 
-    # ---- 解析表头 ----
+    # ---- 表头解析(全角冒号/空格归一;重复列、非法源名硬拦)----
+    errors, warns = [], []
     lvl_col, tag_col, src_col = {}, {}, {}
-    id_col = sol_zh = sol_en = meta_col = None
+    id_col = sol_zh = sol_en = meta_col = raw_col = None
     for i, h in enumerate(header):
-        m = _LVL_RE.match(h)
-        if h == "node_id":
+        hn = h.replace("：", ":").strip()
+        m = _LVL_RE.match(hn)
+        if hn == "node_id":
             id_col = i
         elif m:
-            lvl_col[int(m.group(1))] = i
-        elif h.startswith("判据:") or h.startswith("判据:"):
-            tag_col[h.split(":", 1)[-1].split(":", 1)[-1]] = i
-        elif h.startswith("绑定:") or h.startswith("绑定:"):
-            src_col[h.split(":", 1)[-1].split(":", 1)[-1]] = i
-        elif h == "Recommend Solution(Chinese)":
+            l = int(m.group(1))
+            if l in lvl_col:
+                errors.append(f"表头有两个 L{l} 层级列——删掉多余的一列")
+            lvl_col[l] = i
+        elif hn.startswith("判据:"):
+            t = hn.split(":", 1)[1].strip()
+            if t == RAW_TAG:
+                raw_col = i
+            elif t in tag_col:
+                errors.append(f"表头有两个「判据:{t}」列——删掉多余的一列")
+            else:
+                tag_col[t] = i
+        elif hn.startswith("绑定:"):
+            s = hn.split(":", 1)[1].strip()
+            if not _SRC_RE.match(s):
+                errors.append(f"表头「{h}」的源名「{s}」不合法(只能用英文字母/数字/下划线,别带空格)")
+            elif s in src_col:
+                errors.append(f"表头有两个「绑定:{s}」列——删掉多余的一列")
+            else:
+                src_col[s] = i
+        elif hn == "Recommend Solution(Chinese)":
             sol_zh = i
-        elif h == "Recommend Solution(English)":
+        elif hn == "Recommend Solution(English)":
             sol_en = i
-        elif h == "meta(勿改)":
+        elif hn == "meta(勿改)":
             meta_col = i
+        elif hn and ("判据" in hn or "绑定" in hn):
+            errors.append(f"表头「{h}」看着像判据/绑定列但格式不对——应写成「判据:<标签>」或「绑定:<源名>」(半角冒号)")
     if id_col is None or not lvl_col:
         raise SystemExit("表头不合格:缺 node_id 列或层级列(L2(Chinese) 这种)——别删表头行/表头列")
 
-    levels = sorted(lvl_col)
-    errors, warns = [], []
-    nodes, order, solutions = {}, [], {}
-    binds = {s: [] for s in src_col}                      # 源 → [(row_idx, nid占位, cell对象列表)]
-    stack = {}                                            # 层级 → (nid, name)
-    seen_ids, blank_rows = set(), []
+    # ---- 防"删列即清数据"(评审 M2):旧产物有的东西,表里必须还有对应列 ----
+    old_tags = []
+    for n in old_nodes.values():
+        for t in (n.get("data_source") or {}):
+            if t not in old_tags:
+                old_tags.append(t)
+    miss_tags = [t for t in old_tags if t not in tag_col]
+    if miss_tags and raw_col is None:
+        errors.append(f"旧产物的判据标签 {miss_tags} 在表头找不到对应「判据:<标签>」列——删了会把这些判据整列清空;"
+                      "误删就把列加回来")
+    if old_solutions and sol_zh is None and sol_en is None:
+        errors.append("旧产物有 solutions.json,但表头没有 Recommend Solution 列——删了会清空全部解决方案;误删就加回来")
+    if any((n.get("meta") or {}) for n in old_nodes.values()) and meta_col is None:
+        errors.append("旧产物节点带 meta,但表头没有 meta(勿改) 列——误删就加回来")
 
+    # ---- 逐行解析 ----
+    nodes, order, solutions = {}, [], {}
+    binds = {s: [] for s in src_col}
+    stack, seen_ids, blank_rows = {}, set(), []
     for ri, row in enumerate(body):
-        rowno = ri + 2                                    # Excel 行号(1-based + 表头)
-        def cell(i):
-            return row[i] if (i is not None and i < len(row)) else ""
+        rowno = ri + 2
+
+        def cell(i, _row=row):
+            return _row[i] if (i is not None and i < len(_row)) else ""
         filled = [(l, cell(ci)) for l, ci in sorted(lvl_col.items()) if cell(ci)]
         if not filled:
             continue
         lvl, name = filled[-1]
-        # 上级各层必须照抄且与上文一致(防插错位置/上级改名漏改)
         parent = None
         if filled[:-1]:
             anc_ok = True
@@ -190,22 +255,36 @@ def main() -> None:
         nid = cell(id_col)
         if nid:
             if not _NID_RE.match(nid):
-                errors.append(f"第{rowno}行「{name}」: node_id「{nid}」格式不对(应为 n+数字,新增行请留空)")
+                errors.append(f"第{rowno}行「{name}」: node_id「{nid}」格式不对(应为 n+数字;新增行请留空)")
             elif nid in seen_ids:
                 errors.append(f"第{rowno}行「{name}」: node_id「{nid}」重复了——新增行 node_id 要留空,别复制别的行的")
+            elif nid not in old_nodes:                    # 评审 M1:手编新 id = 静默断外部引用,拦
+                errors.append(f"第{rowno}行「{name}」: node_id「{nid}」是新造的(树里从来没有过)——"
+                              "新增节点请把这格留空,系统会自动编号")
             seen_ids.add(nid)
         else:
             blank_rows.append(ri)
         key = nid or f"__new__{ri}"
+        raw_cond = cell(raw_col)
         cond_parts = [(t, cell(ci)) for t, ci in tag_col.items() if cell(ci)]
-        condition = "\n".join(f"[{t}] {v}" for t, v in cond_parts) or None
+        if raw_cond and cond_parts:
+            errors.append(f"第{rowno}行「{name}」:「判据:原文」和「判据:<标签>」列都填了——只能用一种"
+                          "(原文列是老格式树专用的逐字判据)")
+        if raw_cond:                                      # v1 老树:逐字保真,不加任何标签前缀
+            condition, data_source = raw_cond, {}
+        else:
+            if nid in old_nodes:                          # 评审 M6:同节点多标签按旧序,防往返抖动
+                old_order = list((old_nodes[nid].get("data_source") or {}).keys())
+                cond_parts.sort(key=lambda tv: (old_order.index(tv[0]) if tv[0] in old_order else 10**6))
+            condition = "\n".join(f"[{t}] {v}" for t, v in cond_parts) or None
+            data_source = {t: v for t, v in cond_parts}
         meta = {}
         if cell(meta_col):
             meta = _parse_cell_json(cell(meta_col), f"第{rowno}行「{name}」meta 列", errors, warns) or {}
-        nodes[key] = {"name": name, "parent": parent, "level": lvl, "code": None,
+        nodes[key] = {"name": name, "parent": parent, "level": lvl,
+                      "code": (old_nodes.get(nid) or {}).get("code") if nid else None,
                       "children": [], "condition": condition,
-                      "combine": _infer_combine(condition),
-                      "data_source": {t: v for t, v in cond_parts},
+                      "combine": _infer_combine(condition), "data_source": data_source,
                       "pass_through": not condition, "sheets": ["tuning"], "meta": meta}
         order.append(key)
         if parent:
@@ -244,13 +323,13 @@ def main() -> None:
 
     # ---- 分配新 id(历史 id 不复用:取 表内∪旧index 的最大号+1)----
     used = {int(k[1:]) for k in seen_ids if _NID_RE.match(k)}
-    used |= {int(k[1:]) for k in (old_index.get("nodes") or {}) if _NID_RE.match(k)}
+    used |= {int(k[1:]) for k in old_nodes if _NID_RE.match(k)}
     nxt = max(used, default=0) + 1
     rename = {}
     for ri in blank_rows:
-        key = f"__new__{ri}"
-        rename[key] = f"n{nxt}"
+        rename[f"__new__{ri}"] = f"n{nxt}"
         nxt += 1
+
     def rid(k):
         return rename.get(k, k)
     new_nodes = {}
@@ -264,49 +343,36 @@ def main() -> None:
         index["slug"] = old_index["slug"]
     solutions = {rid(k): v for k, v in solutions.items()}
 
-    # ---- 变更摘要(对旧产物)----
-    old_nodes = old_index.get("nodes") or {}
-    added = [rid(k) for k in order if rid(k) not in old_nodes]
-    removed = [k for k in old_nodes if k not in new_nodes]
-    renamed = [k for k in new_nodes if k in old_nodes and old_nodes[k].get("name") != new_nodes[k]["name"]]
-    cond_chg = [k for k in new_nodes if k in old_nodes and (old_nodes[k].get("condition") or None) != new_nodes[k]["condition"]]
-
-    # ---- 写盘(校验全过才走到这)----
-    tis[0].write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
-    (out / "tree" / f"{stem}.md").write_text(_index_to_markdown(index), encoding="utf-8")
-    if solutions:
-        (out / "tree" / "solutions.json").write_text(
-            json.dumps(solutions, ensure_ascii=False, indent=2), encoding="utf-8")
-    else:
-        (out / "tree" / "solutions.json").unlink(missing_ok=True)
-
-    existing = sorted((out / "scripts").glob("*_analyzer.py"))
-    if not existing:
-        raise SystemExit("产物 scripts/ 下没有任何 analyzer,无法落绑定(产物不完整)")
-    summary_src = []
-    for s, entries in binds.items():
+    # ---- 备料:各源 CONDITIONS 与 analyzer 文本(全部成功才进入写盘)----
+    indicators = [s for s in src_col if any(it for _r, _k, it in binds[s])]
+    writes, summary_src = [], []
+    for s in src_col:
         full = []
-        for _ri, key, items in entries:
+        for _ri, key, items in binds[s]:
             nid = rid(key)
             nd = new_nodes[nid]
             for b in items:
-                full.append({"id": f"{s}-{nid}", "node": nd["name"], "node_id": nid,
-                             "condition_text": nd["condition"] or nd["name"], "source": s, **b})
+                entry = {"id": f"{s}-{nid}", "node": nd["name"], "node_id": nid,
+                         "condition_text": nd["condition"] or nd["name"], "source": s, **b}
+                full.append(entry)
         ap_path = out / "scripts" / f"{s}_analyzer.py"
-        if not ap_path.exists():                          # 新增数据源:克隆现有 analyzer,换 INDICATOR
-            tpl = existing[0].read_text(encoding="utf-8")
-            tpl = re.sub(r'(?m)^INDICATOR = .*$', f'INDICATOR = "{s}"', tpl, count=1)
-            ap_path.write_text(tpl, encoding="utf-8")
-        before = len(_read_conditions(ap_path))
-        err = _write_conditions(ap_path, full)
+        if ap_path.exists():
+            src_text = ap_path.read_text(encoding="utf-8")
+            before = len(_read_conditions_text(src_text))
+        else:                                             # 新增数据源:克隆现有 analyzer 换 INDICATOR
+            src_text = existing_aps[0].read_text(encoding="utf-8")
+            src_text = re.sub(r'(?m)^INDICATOR = .*$', f'INDICATOR = "{s}"', src_text, count=1)
+            before = 0
+        new_text, err = _replace_conditions(src_text, full, ap_path.name)
         if err:
-            raise SystemExit(f"写绑定失败:{err}")
+            raise SystemExit(f"不合格(未改动任何文件):{err}")
+        writes.append((ap_path, new_text))
         summary_src.append(f"{s}: {before}→{len(full)} 条")
 
-    # ---- plan / manifest:指标 = 有绑定的源(表列顺序);清空的源摘除 ----
-    indicators = [s for s in src_col if any(it for _r, _k, it in binds[s])]
-    plan_p = out / "plan.json"
-    if plan_p.exists() and indicators:
+    # plan / manifest:指标 = 有绑定的源(表列顺序);全部清空也要重写(评审 M3,防 plan 与 manifest 撕裂)
+    plan_p, mf_p = out / "plan.json", out / "manifest.json"
+    plan_text = mf_text = None
+    if plan_p.exists():
         plan = json.loads(plan_p.read_text(encoding="utf-8"))
         pnodes = []
         for i, ind in enumerate(indicators):
@@ -323,16 +389,40 @@ def main() -> None:
         rca["inputs"] = {"fault_tree_md": "$memory.fault_tree_md",
                          **{ind: f"$memory.{ind}_result" for ind in indicators}}
         plan["nodes"] = pnodes + [rca]
-        plan["entry"] = indicators[0]
-        plan_p.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
-    mf_p = out / "manifest.json"
+        plan["entry"] = indicators[0] if indicators else "rca"
+        plan_text = json.dumps(plan, ensure_ascii=False, indent=2)
     if mf_p.exists():
         mf = json.loads(mf_p.read_text(encoding="utf-8"))
         mf["indicators"] = indicators
-        mf_p.write_text(json.dumps(mf, ensure_ascii=False, indent=2), encoding="utf-8")
+        mf_text = json.dumps(mf, ensure_ascii=False, indent=2)
+
+    # ---- 变更摘要(含移动/解决方案,评审 H6/M2)----
+    added = [k for k in new_nodes if k not in old_nodes]
+    removed = [k for k in old_nodes if k not in new_nodes]
+    renamed = [k for k in new_nodes if k in old_nodes and old_nodes[k].get("name") != new_nodes[k]["name"]]
+    moved = [k for k in new_nodes if k in old_nodes and old_nodes[k].get("parent") != new_nodes[k]["parent"]]
+    cond_chg = [k for k in new_nodes if k in old_nodes
+                and (old_nodes[k].get("condition") or None) != new_nodes[k]["condition"]]
+    sol_chg = [k for k in set(solutions) | set(old_solutions)
+               if (solutions.get(k) or {}) != (old_solutions.get(k) or {})]
+
+    # ---- 统一写盘(此后无任何可失败的计算)----
+    tis[0].write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out / "tree" / f"{stem}.md").write_text(_index_to_markdown(index), encoding="utf-8")
+    if solutions:
+        old_sol_p.write_text(json.dumps(solutions, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        old_sol_p.unlink(missing_ok=True)
+    for p, text in writes:
+        p.write_text(text, encoding="utf-8")
+    if plan_text:
+        plan_p.write_text(plan_text, encoding="utf-8")
+    if mf_text:
+        mf_p.write_text(mf_text, encoding="utf-8")
 
     for w in warns:
         print(f"⚠ {w}")
+
     def _nm(k, pool):
         return f"{k}「{(pool.get(k) or {}).get('name', '')}」"
 
@@ -341,7 +431,11 @@ def main() -> None:
     print(f"  删除节点 {len(removed)}: {', '.join(_nm(k, old_nodes) for k in removed) or '无'}")
     print(f"  改名 {len(renamed)}: "
           + (", ".join(f"{k}: {old_nodes[k].get('name')}→{new_nodes[k]['name']}" for k in renamed) or "无"))
+    print(f"  移动(换了上级){len(moved)}: "
+          + (", ".join(f"{_nm(k, new_nodes)}: {old_nodes[k].get('parent')}→{new_nodes[k]['parent']}"
+                       for k in moved) or "无"))
     print(f"  判据改动 {len(cond_chg)}: {', '.join(_nm(k, new_nodes) for k in cond_chg) or '无'}")
+    print(f"  解决方案改动 {len(sol_chg)}: {', '.join(sorted(sol_chg)) or '无'}")
     print(f"  绑定: {'; '.join(summary_src) or '无'}")
     print("下一步:重新打包/上传前,建议用真实数据跑一遍 runner 验证。")
 
