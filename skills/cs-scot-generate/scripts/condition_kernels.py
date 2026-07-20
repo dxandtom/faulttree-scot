@@ -363,23 +363,82 @@ def k_match(table, b, cls="C"):
 
 
 # ---------- D:多条件组合 ----------
+def _combine_tri(comb, results):
+    """AND/OR 的三态合成(子结果 → (predicate, status))。"""
+    preds = [r.get("predicate_satisfied") for r in results]
+    sts = [r.get("status") for r in results]
+    if comb == "AND":
+        return ((False, "ok") if any(p is False for p in preds)
+                else (None, "insufficient_data") if any(s != "ok" for s in sts)
+                else (True, "ok"))
+    return ((True, "ok") if any(p is True for p in preds)
+            else (None, "insufficient_data") if any(s != "ok" for s in sts)
+            else (False, "ok"))
+
+
 def k_combo(b, sources, parent_source):
     subs = b.get("sub") or []
     if not subs:                                        # 空 AND 的 any(False…)全假 → 恒"成立"(实测假阳),响亮拒绝
         return _insuf("D", "组合绑定缺 sub 子条件列表(字段名写错/被吃掉?)——空组合恒判成立,禁止")
+    comb = str(b.get("combine", "AND")).upper()
+
+    if b.get("group_by"):
+        # 分组组合:按 group_by 列切组,**每组单独跑全部子条件**,存在一个组满足 → 节点成立。
+        # 治的是"整列有A也有B、但A和B不在同一接口/对象上"的假确证(业务脚本的 groupby 语义直译)。
+        # 组间三态:有组全真→成立;无全真但有组数据不足→数据不足;否则不成立。
+        if any(s.get("source", parent_source) != parent_source for s in subs):
+            return _insuf("D", "group_by 组合的 sub 不得跨源(各源行没有对齐关系,跨源分组无定义)"
+                               "——跨源判据拆成外层 D(不带 group_by)+ 各源内层 D(带 group_by)")
+        table = sources.get(parent_source)
+        if table is None:
+            return _insuf("D", f"无数据源「{parent_source}」(group_by 需要本源数据切组)")
+        header, rows = table
+        gcol, how = resolve_column(header, b["group_by"])
+        if not gcol:
+            return _insuf("D", f"未找到分组列「{b['group_by']}」({how})", resolved_column=None)
+        groups = {}
+        for r in rows:
+            gv = str(r.get(gcol, "")).strip()
+            if not _is_null(gv):
+                groups.setdefault(gv, []).append(r)
+        if not groups:
+            return _insuf("D", f"分组列「{gcol}」全空,无组可判", resolved_column=gcol)
+        matched, insuf_g, first_detail = [], [], None
+        for gv, grows in groups.items():
+            gsources = dict(sources)
+            gsources[parent_source] = (header, grows)
+            results = [evaluate_binding(s, gsources, parent_source) for s in subs]
+            pred, st = _combine_tri(comb, results)
+            if pred is True:
+                matched.append(gv)
+                if first_detail is None or first_detail[0] != "matched":
+                    first_detail = ("matched", gv, results)
+            elif st != "ok":
+                insuf_g.append(gv)
+                if first_detail is None:
+                    first_detail = ("insufficient", gv, results)
+            elif first_detail is None:
+                first_detail = ("unmatched", gv, results)
+        if matched:
+            pred, st = True, "ok"
+        elif insuf_g:
+            pred, st = None, "insufficient_data"
+        else:
+            pred, st = False, "ok"
+        fact = {"class": "D", "status": st, "combine": comb, "group_by": gcol,
+                "groups": len(groups), "matched_groups": sorted(matched)[:5],
+                "predicate_satisfied": pred,
+                "reason": None if st == "ok" else
+                f"无任何组全部满足,且 {len(insuf_g)} 个组存在数据不足子条件,无法确证整体"}
+        if len(matched) > 5:
+            fact["matched_groups_total"] = len(matched)
+        if first_detail:                                 # 只带一个代表组的子结果当审计样本,防事实爆炸
+            fact["sample_group"], fact["sub_facts"] = first_detail[1], first_detail[2]
+        return fact
+
     results = [evaluate_binding(s, sources, s.get("source", parent_source))
                for s in subs]
-    comb = str(b.get("combine", "AND")).upper()
-    preds = [r.get("predicate_satisfied") for r in results]
-    sts = [r.get("status") for r in results]
-    if comb == "AND":
-        pred, st = ((False, "ok") if any(p is False for p in preds)
-                    else (None, "insufficient_data") if any(s != "ok" for s in sts)
-                    else (True, "ok"))
-    else:  # OR
-        pred, st = ((True, "ok") if any(p is True for p in preds)
-                    else (None, "insufficient_data") if any(s != "ok" for s in sts)
-                    else (False, "ok"))
+    pred, st = _combine_tri(comb, results)
     return {"class": "D", "status": st, "combine": comb, "predicate_satisfied": pred,
             "reason": None if st == "ok" else "组合含数据不足子条件,无法确证整体", "sub_facts": results}
 

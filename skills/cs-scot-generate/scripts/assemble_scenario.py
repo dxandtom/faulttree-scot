@@ -299,6 +299,10 @@ def main() -> None:
     copy_into(here / "analyzer.py", out / "scripts" / "analyzer.py")                    # 概览辅助:模型先看列再填条件
     copy_into(here.parent / "references" / "condition_binding_schema.md",
               out / "scripts" / "condition_binding_schema.md")                          # 绑定契约
+    copy_into(here / "export_tree_excel.py", out / "scripts" / "export_tree_excel.py")  # 调优表:产物→Excel
+    copy_into(here / "import_tree_excel.py", out / "scripts" / "import_tree_excel.py")  # 调优表:Excel→产物(自包含)
+    copy_into(here.parent / "references" / "tuning_excel_guide.md",
+              out / "tree" / "tuning-guide.md")                                         # 调优表动手说明(业务读者)
     # 重跑 = 重新编译:默认用当前版本的空骨架覆盖旧脚本(这样才能用上刚拷进来的新 condition_kernels/mo_config);
     # 覆盖前若旧脚本不是"全新空骨架"(填过/手改过/上一版骨架)→ 先备份成 .py.bak,绝不静默丢失。
     # 想原样保留已填脚本:加 --keep(老的 skip-if-exists 行为)。

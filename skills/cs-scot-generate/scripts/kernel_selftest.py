@@ -117,6 +117,43 @@ CASES = [
          {"class": "A", "column": "rsrp", "op": "<", "threshold": -120, "scope": "count_rows", "require": 1}]},
      "expect": {"status": "ok", "predicate_satisfied": True}},
 
+    # ---- D 分组组合(group_by:组内 AND,任一组全真才成立)----
+    {"name": "D group_by 同组同现→成立且报命中组",
+     "table": _t(["level1", "level2"], ["Eth-Trunk0", "cmd A x"], ["Eth-Trunk0", "cmd B y"],
+                 ["GE1/0/1", "cmd C z"]),
+     "binding": {"class": "D", "combine": "AND", "group_by": "level1", "sub": [
+         {"class": "G", "column": "level2", "contains": ["cmd A"]},
+         {"class": "G", "column": "level2", "contains": ["cmd B"]}]},
+     "expect": {"status": "ok", "predicate_satisfied": True, "matched_groups": ["Eth-Trunk0"]}},
+    {"name": "D group_by 跨组各现→不成立(整列绑定的假确证被治住)",
+     "table": _t(["level1", "level2"], ["Eth-Trunk0", "cmd A x"], ["GE1/0/1", "cmd B y"]),
+     "binding": {"class": "D", "combine": "AND", "group_by": "level1", "sub": [
+         {"class": "G", "column": "level2", "contains": ["cmd A"]},
+         {"class": "G", "column": "level2", "contains": ["cmd B"]}]},
+     "expect": {"status": "ok", "predicate_satisfied": False}},
+    {"name": "D group_by 组内负存在:本接口配A没配B→成立(他接口有B不掩盖)",
+     "table": _t(["level1", "level2"], ["Eth-Trunk0", "vrrp preempt-mode timer delay 20"],
+                 ["GE1/0/1", "vrrp recover-delay 10"]),
+     "binding": {"class": "D", "combine": "AND", "group_by": "level1", "sub": [
+         {"class": "G", "column": "level2", "contains": ["preempt-mode timer delay"]},
+         {"class": "G", "column": "level2", "contains": ["recover-delay"], "absent": True}]},
+     "expect": {"status": "ok", "predicate_satisfied": True, "matched_groups": ["Eth-Trunk0"]}},
+    {"name": "D group_by 组数据不足传播(sub 缺列)",
+     "table": _t(["level1", "level2"], ["Eth-Trunk0", "x"]),
+     "binding": {"class": "D", "combine": "AND", "group_by": "level1", "sub": [
+         {"class": "G", "column": "没有的列", "contains": ["A"]}]},
+     "expect": {"status": "insufficient_data"}},
+    {"name": "D group_by 分组列全空→数据不足",
+     "table": _t(["level1", "level2"], ["NIL", "x"], ["-", "y"]),
+     "binding": {"class": "D", "combine": "AND", "group_by": "level1", "sub": [
+         {"class": "G", "column": "level2", "contains": ["x"]}]},
+     "expect": {"status": "insufficient_data"}},
+    {"name": "D group_by 跨源 sub→拒(跨源分组无定义)",
+     "table": _t(["level1", "level2"], ["a", "x"]),
+     "binding": {"class": "D", "combine": "AND", "group_by": "level1", "sub": [
+         {"class": "G", "column": "level2", "contains": ["x"], "source": "别的源"}]},
+     "expect": {"status": "insufficient_data"}},
+
     # ---- E 占比/TopN(报分量 valid/top1_count)----
     {"name": "E top1 占比>0.7 成立 + 报分量", "table": _t(["term"], ["A"], ["A"], ["A"], ["A"], ["B"]),
      "binding": {"class": "E", "group_by": "term", "op": ">", "threshold": 0.7},

@@ -132,6 +132,18 @@ python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根�
 ```
 产出 = execute 执行骨架(SKILL.md 自动改名+按场景写 description)+ `assets/`(本产物 + fault-tree-rca 规则副本),自动排除 overview/dispatch/runs/result/__pycache__ 等临时物。上传后用户一句 `/<slug> 数据在 <zip>,帮我诊断` 即可跑全程(默认约定见 execute SKILL.md「场景打包形态」)。产物没有英文短名时用 `--name` 指定。
 
+### 步骤 6(人工调优循环):调优表——树+绑定的人可编辑事实源
+打包时自动产出 `tree/<短名>.tuning.xlsx`(单页签,一行一节点:层级/判据/各源绑定 JSON/解决方案;
+业务同事的动手说明在 `tree/tuning-guide.md`)。人改完表后一条命令**机械编译回产物**(零模型参与):
+```bash
+python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或打包技能的 assets/>"
+```
+自动:tree_index(**node_id 只认不改**,新行留空自动分配、历史 id 不复用)/ tree md / solutions.json /
+各 `<指标>_analyzer.py` 的 CONDITIONS / plan.json(新增 `绑定:<新源>` 列会克隆 analyzer 并接进计划)。
+先全量校验后写盘(JSON 坏/id 重复/上级不符 → 按 Excel 行号人话报错、一个文件不动),成功打印变更摘要。
+**导出调优表之后,树与绑定的一切修改只在调优表上做**(别再手改脚本/tree_index,会被下次导入覆盖);
+改完重打包分发。重新导出:`python "<产物>/scripts/export_tree_excel.py" --out "<产物>"`。
+
 ## 注意
 - 产物用**中文**;通用引擎 Python 3.11、自包含、精简忠实。
 - 数据 xlsx/csv 都支持(xlsx 需 `pip install openpyxl`)。
