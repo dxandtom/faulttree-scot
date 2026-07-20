@@ -138,6 +138,13 @@ def main() -> None:
             sys.exit(2)
         shutil.rmtree(dest)
 
+    # 打包前刷新调优表(产物→Excel,业务同事的工作台;失败不阻断打包,响亮提示即可)
+    try:
+        from export_tree_excel import export as _export_tuning
+        _export_tuning(out)
+    except Exception as e:  # noqa: BLE001
+        print(f"[package] ⚠ 调优表导出失败(不阻断打包): {e}", file=sys.stderr)
+
     shutil.copytree(exe, dest, ignore=_ignore)                       # 执行骨架
     rewrite_skill_md(dest / "SKILL.md", name, scenario)              # 技能身份:名字+场景描述
     shutil.copytree(out, dest / "assets", ignore=_ignore)            # 诊断产物(排除临时物)
