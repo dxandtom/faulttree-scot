@@ -120,6 +120,7 @@ def main() -> int:
 
     pending, all_warns, wrote = [], [], []
     cross_cands = {}                                    # node_id -> {node_id, sources:[…], reasons:[…]}
+    pending_inds = set()                                # 有缺批/坏批的源(候选清理要避开不完整的轮次)
     for ind in sorted(plan):
         merged, seen = [], set()
         got = []
@@ -128,10 +129,12 @@ def main() -> int:
             tag = rp.stem
             if not rp.exists():
                 pending.append(f"{ind} 批{n}:结果文件未到({rp.name})——等子代理/同简报重派")
+                pending_inds.add(ind)
                 continue
             entries, err = parse_result(rp)
             if err:
                 pending.append(f"{ind} 批{n}:{err}——同简报重派该批")
+                pending_inds.add(ind)
                 continue
             if ind != "cross":                          # 子代理的「涉及多源」标记:抽出来汇入补绑候选,
                 marks = [e for e in entries            # 不进本源脚本(它不是可执行绑定)
@@ -163,19 +166,26 @@ def main() -> int:
         err = write_conditions(analyzer, merged)
         if err:
             pending.append(f"{ind}:{err}")
+            pending_inds.add(ind)
             continue
         wrote.append(ind)
         print(f"{ind}:{' / '.join(got)} → 合并 {len(merged)} 条,已写入 {analyzer.name}"
               + (f"(缺 {len(plan[ind]) - len(got)} 批,到货后重跑本脚本即可)" if len(got) < len(plan[ind]) else ""))
 
+    cp = ddir / "cross_candidates.json"
     if cross_cands:
         import json as _json
-        cp = ddir / "cross_candidates.json"
         cp.write_text(_json.dumps(sorted(cross_cands.values(), key=lambda c: c["node_id"]),
                                   ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\n跨源判据候选 {len(cross_cands)} 条(子代理标记 cross_source)→ {cp}")
         print("  下一步:python make_dispatch.py --out \"<OUT>\" --cross 生成跨源补绑简报,"
               "派一个子代理填 param_from 绑定,再跑本脚本合并进 cross_analyzer.py。")
+    else:
+        noncross = [i for i in plan if i != "cross"]
+        # 本轮完整扫过全部单源批次且一个标记都没有 → 陈旧候选必须清掉,防按旧候选补绑早已改判的节点
+        if noncross and not (pending_inds - {"cross"}) and cp.exists():
+            cp.unlink()
+            print("\n单源批次里已无 cross_source 标记 → 陈旧的 cross_candidates.json 已清除。")
 
     if all_warns:
         print(f"\n格式漂移点名({len(all_warns)} 处,条目已保留,修绑定后重写该批结果并重跑):")

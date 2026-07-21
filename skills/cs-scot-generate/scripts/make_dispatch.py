@@ -102,6 +102,23 @@ CROSS_RULES = """【跨源绑定规约——逐条遵守】
 8. 诚实:参数抽不到/歧义、对端查不到、源没提供 → 内核自动报数据不足,**别**为了"绑上"硬凑;
    mapping_reason 写实(链条每一跳从哪来、到哪去)。"""
 
+CROSS_OUTPUT_FORMAT = """【输出格式】
+把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
+写完后最终回复只报一行「共 N 条,已写 <路径>」。每条字段:
+{"id":"cross-<node_id>","node":"<节点名>","node_id":"<nN>","condition_text":"<逐字抄候选清单的判据原文>",
+ "class":"…","source":"<最终查询落点的真实源名,如 config——绝不是 cross>",...类参数/param_from...,
+ "mapping_reason":"<链条每一跳写实:参数从哪个源怎么抽、代到哪查什么>"}
+示例(传参链):
+{"id":"cross-n2","node":"peer-link配置缺失","node_id":"n2","condition_text":"...","class":"G","source":"config",
+ "column":"level2","contains":["mode lacp-static"],"absent":True,
+ "filter":{"column":"level1","equals":"@plink"},
+ "param_from":{"plink":{"source":"cmd","column":"CmdResult",
+               "filter":{"column":"CmdName","contains":"peer-link"},"extract":{"kv":"Port Name"}}},
+ "mapping_reason":"回显抽 Port Name → 查该接口配置块,缺 mode lacp-static 即故障"}
+示例(绑不了):
+{"id":"cross-n9","node":"…","node_id":"n9","condition_text":"...","decision":"insufficient_data",
+ "mapping_reason":"链条第2跳要的数据本场景未采集"}"""
+
 OUTPUT_FORMAT = """【输出格式】
 把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行,
 合并脚本两种都认);写完后最终回复只报一行「共 N 条,已写 <路径>」。每条字段:
@@ -294,7 +311,7 @@ def main() -> int:
             reasons = ";".join(c.get("reasons") or [])
             lines.append(f"\n[{nid}] {name}(由 {srcs} 源标记" + (f":{reasons}" if reasons else "") + f")\n{cond}")
         sec.append("\n".join(lines))
-        sec.append(OUTPUT_FORMAT.format(ind="cross"))
+        sec.append(CROSS_OUTPUT_FORMAT)
         ddir.mkdir(parents=True, exist_ok=True)
         bp = ddir / "cross_batch1.txt"
         bp.write_text("\n\n".join(sec) + "\n", encoding="utf-8")

@@ -16,6 +16,7 @@ provenance(命中了哪列、怎么命中、nulls)+ `predicate_satisfied`(**仅�
 """
 from __future__ import annotations
 
+import copy
 import csv
 import io
 import math
@@ -408,7 +409,7 @@ def _combine_tri(comb, results):
             else (False, "ok"))
 
 
-def k_combo(b, sources, parent_source):
+def k_combo(b, sources, parent_source, _resolved=False):
     subs = b.get("sub") or []
     if not subs:                                        # 空 AND 的 any(False…)全假 → 恒"成立"(实测假阳),响亮拒绝
         return _insuf("D", "组合绑定缺 sub 子条件列表(字段名写错/被吃掉?)——空组合恒判成立,禁止")
@@ -439,7 +440,7 @@ def k_combo(b, sources, parent_source):
         for gv, grows in groups.items():
             gsources = dict(sources)
             gsources[parent_source] = (header, grows)
-            results = [evaluate_binding(s, gsources, parent_source) for s in subs]
+            results = [evaluate_binding(s, gsources, parent_source, _resolved) for s in subs]
             pred, st = _combine_tri(comb, results)
             if pred is True:
                 matched.append(gv)
@@ -468,7 +469,7 @@ def k_combo(b, sources, parent_source):
             fact["sample_group"], fact["sub_facts"] = first_detail[1], first_detail[2]
         return fact
 
-    results = [evaluate_binding(s, sources, s.get("source", parent_source))
+    results = [evaluate_binding(s, sources, s.get("source", parent_source), _resolved)
                for s in subs]
     pred, st = _combine_tri(comb, results)
     return {"class": "D", "status": st, "combine": comb, "predicate_satisfied": pred,
@@ -562,7 +563,10 @@ def _apply_filter(table, flt):
     keep = []
     for r in rows:
         for col, mode, tgts in resolved:
-            v = str(r.get(col, "")).strip().lower()
+            raw = r.get(col, "")
+            if mode == "excludes" and _is_null(raw):     # 过滤列为空的行"不含X"是空洞真:留下会污染取值
+                break                                    # (对端行选择被脏续行/汇总行混入,实测能比出错值)
+            v = str(raw).strip().lower()
             hit = (v in tgts) if mode == "equals" else any(t and t in v for t in tgts)
             if (mode == "excludes") == hit:              # equals/contains 要命中才留;excludes 要不命中才留
                 break
@@ -582,7 +586,9 @@ _NO_SUBST_KEYS = ("mapping_reason", "condition_text", "node", "id", "note", "rea
 
 def _subst(obj, params):
     """深代入:任何**整串**形如 "@name" 的字符串换成 params[name],其余原样(深拷贝)。
-    引用了 params 里没有的名字 → 抛 KeyError(调用方响亮出数据不足,绝不拿字面 @xxx 去查=假排除)。"""
+    引用了 params 里没有的名字 → 抛 KeyError(调用方响亮出数据不足,绝不拿字面 @xxx 去查=假排除)。
+    **作用域**:自带 `param_from` 的子 dict(如 D 的 sub 子绑定)整体跳过——它自成作用域,
+    参数在它自己被评估时解析,不继承外层。tuple/set 同 list 处理(子代理写圆/花括号也别漏)。"""
     if isinstance(obj, str):
         m = _PARAM_RE.match(obj)
         if m:
@@ -592,32 +598,51 @@ def _subst(obj, params):
         return obj
     if isinstance(obj, list):
         return [_subst(x, params) for x in obj]
+    if isinstance(obj, tuple):
+        return [_subst(x, params) for x in obj]          # 顺手归一成 list(内核按 list 消费)
+    if isinstance(obj, set):
+        return [_subst(x, params) for x in sorted(obj, key=str)]
     if isinstance(obj, dict):
+        if "param_from" in obj:                          # 子绑定自成作用域:原样深拷、自己解析
+            return copy.deepcopy(obj)
         return {k: (v if k in _NO_SUBST_KEYS else _subst(v, params)) for k, v in obj.items()}
     return obj
 
 
 def _find_stray_params(obj, in_doc=False):
-    """找出绑定里所有 @整串引用(跳过文案字段)——没 param_from 却写了 @xxx 是要拦的脚枪。"""
+    """找出绑定里所有 @整串引用(跳过文案字段)——没 param_from 却写了 @xxx 是要拦的脚枪。
+    自带 param_from 的子 dict 跳过(自成作用域,由它自己的评估检查);tuple/set 同 list。"""
     if isinstance(obj, str):
         m = _PARAM_RE.match(obj)
         return [] if (in_doc or not m) else [m.group(1)]
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple, set)):
         return [n for x in obj for n in _find_stray_params(x, in_doc)]
     if isinstance(obj, dict):
+        if "param_from" in obj:
+            return []
         return [n for k, v in obj.items() for n in _find_stray_params(v, in_doc or k in _NO_SUBST_KEYS)]
     return []
 
 
+_SPEC_KEYS = {"source", "column", "filter", "extract"}
+
+
 def _resolve_values(spec, sources, parent_source):
     """按 spec{source?, column, filter?, extract?} 从某源抽出值列表(非空、去重、保序)。
-    返回 (values, None) 或 (None, 错误串)。供 param_from 与 P 的 pair_from 共用。"""
+    返回 (values, None) 或 (None, 错误串)。供 param_from 与 P 的 pair_from 共用。
+    未知键响亮拒收(extract 拼成 extrct 被静默忽略=参数变整格杂糅文本,实测能把 absent 判成假阳)。"""
     if not isinstance(spec, dict):
         return None, f"取值规格应为对象 {{source, column, filter?, extract?}},收到 {type(spec).__name__}"
+    unknown = set(spec) - _SPEC_KEYS
+    if unknown:
+        return None, (f"取值规格有不认识的键 {sorted(unknown)}(只认 source/column/filter/extract"
+                      ";expand 写在参数规格顶层)——拼错会被静默忽略、抽出错误的值,拒收")
     src = spec.get("source", parent_source)
     table = sources.get(src)
     if table is None:
-        return None, f"无数据源「{src}」(用 --data {src}=<文件> 提供)"
+        hint = ("「cross」不是数据源名——source 应写最终查询落点/取值来源的**真实源名**"
+                if src == "cross" else f"用 --data {src}=<文件> 提供")
+        return None, f"无数据源「{src}」({hint})"
     if not table[1]:
         return None, f"数据源「{src}」为空表(仅表头、0 行),无从抽值"
     flt = spec.get("filter")
@@ -704,7 +729,9 @@ def _eval_with_params(b, sources, source_name):
             q = _subst(qb, {**resolved, **extra})
         except KeyError as e:
             return _insuf(cls, f"绑定里用了 @{e.args[0]},但 param_from 没有声明它")
-        return evaluate_binding(q, sources, source_name)
+        # _resolved=True:代入完成的查询体不再做 @ 检查——抽出的参数值本身恰好长成 "@xxx" 时
+        # 必须按字面参与匹配,不许被当成未声明参数误杀(评审实测过这条假不足)
+        return evaluate_binding(q, sources, source_name, _resolved=True)
 
     if expand is None:
         fact = _run({})
@@ -747,6 +774,8 @@ def k_pair_from(b, sources, parent_source):
     pf = b.get("pair_from")
     if not isinstance(pf, dict) or "local" not in pf or "peer" not in pf:
         return _insuf("P", 'pair_from 应为 {"local": {source, column, …}, "peer": {…}} 两侧规格')
+    if b.get("filter"):                                  # 静默忽略会让两侧取全表值(歧义/错值),响亮拒绝
+        return _insuf("P", "filter 不作用于 pair_from 顶层——把 filter 分别写进 local/peer 两侧规格")
     fw = b.get("fault_when", "not_equal")
     if fw not in ("not_equal", "equal"):
         return _insuf("P", f"fault_when「{fw}」不认识(只认 not_equal/equal)")
@@ -767,10 +796,11 @@ def k_pair_from(b, sources, parent_source):
             "predicate_satisfied": (not same) if fw == "not_equal" else same}
 
 
-def evaluate_binding(b, sources, source_name):
+def evaluate_binding(b, sources, source_name, _resolved=False):
     """按 b['class'] 分派到对应内核;D 递归,J 人工,无源/未知类别 → 数据不足。
     若绑定带 `decision`(模型生成时已判本条无法机械评估)→ 直接按该判定出 status,**不跑内核、不给判断**。
-    带 `filter`(A/C/G/P)→ 先行级预过滤再算(EAV 窄表:先选中"哪个量"的行,再对值做统计)。"""
+    带 `filter`(A/C/G/P)→ 先行级预过滤再算(EAV 窄表:先选中"哪个量"的行,再对值做统计)。
+    _resolved(内部):True=本绑定已由 param_from 代入完成,跳过 @ 残留检查(字面 @ 值合法)。"""
     cls = str(b.get("class", "")).upper()
     decided = b.get("decision")
     if decided == "cross_source":                        # 绑定期的跨源标记:应被 merge 收进补绑候选,
@@ -786,20 +816,22 @@ def evaluate_binding(b, sources, source_name):
         return k_manual(b)
     if b.get("param_from"):                              # 参数化查询:先抽参数、再代入(D/P/A/C/G 通吃)
         return _eval_with_params(b, sources, source_name)
-    stray = _find_stray_params(b)
-    if stray:                                            # 写了 @xxx 却没 param_from:拿字面 @ 去查=假排除,拦
-        return _insuf(cls or "?", f"绑定里用了 @{stray[0]} 却没有 param_from——参数没人解析,"
-                                  "查询会拿字面 @ 去匹配(恒不命中=假排除);补 param_from 或去掉 @")
+    if not _resolved:
+        stray = _find_stray_params(b)
+        if stray:                                        # 写了 @xxx 却没 param_from:拿字面 @ 去查=假排除,拦
+            return _insuf(cls or "?", f"绑定里用了 @{stray[0]} 却没有 param_from——参数没人解析,"
+                                      "查询会拿字面 @ 去匹配(恒不命中=假排除);补 param_from 或去掉 @")
     if cls == "P" and b.get("pair_from"):                # 跨源成对比较:两侧各自选行取值再比
         return k_pair_from(b, sources, source_name)
     if cls == "D":
         if b.get("filter"):                              # 静默忽略会让 sub 在全表上算出假阳,响亮拒绝
             return _insuf("D", "filter 不作用于 D 类顶层——把 filter 写进各 sub 子绑定(各自选行再合成)")
-        return k_combo(b, sources, source_name)
+        return k_combo(b, sources, source_name, _resolved)
     table = sources.get(source_name)
     if table is None:
-        return _insuf(cls or "?", f"无数据源「{source_name}」(用 --data {source_name}=<文件> 提供)",
-                      resolved_column=None)
+        hint = ("「cross」不是数据源名——cross 绑定的 source 应写最终查询落点的**真实源名**(如 config)"
+                if source_name == "cross" else f"用 --data {source_name}=<文件> 提供")
+        return _insuf(cls or "?", f"无数据源「{source_name}」({hint})", resolved_column=None)
     if not table[1]:                                     # 空表(仅表头、0 行):没数据 ≠ 排除——
         return _insuf(cls or "?",                        # 别让 matched=0/0 冒充"确定不成立"
                       "数据源为空表(仅表头、0 行数据),无从判定——不当'不成立'处理")

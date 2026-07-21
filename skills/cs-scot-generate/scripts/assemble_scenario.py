@@ -315,7 +315,7 @@ def build_plan(scenario: str, indicators: List[str], tree_rel: str, stem: str = 
             "goal": f"诊断「{scenario}」的根因",
             "success_criteria": ["输出所有成立的根因路径与逐条判断依据"],
         },
-        "entry": indicators[0] if indicators else "rca",
+        "entry": indicators[0] if indicators else "cross",
         "memory_init": {"fault_tree_md": tree_rel},
         "nodes": nodes,
     }

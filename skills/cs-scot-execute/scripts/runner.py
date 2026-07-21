@@ -140,8 +140,11 @@ def run_script_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
                 continue
             p = Path(v)
             p = p if p.is_absolute() else base / p
-            if p.exists():                               # 路径坏的源不递入:该源绑定自然报"无数据源"
+            if p.exists():
                 pairs.append((k, p))
+            else:                                        # 路径打错别静默丢:事实层只会说"无数据源",指不到病根
+                print(f"  [warn] --data {k} 的路径不存在: {p} —— cross 步骤将收不到该源"
+                      "(其相关绑定会报「无数据源」;核对路径)")
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "out.json"
             cmd = [sys.executable, str(script), "-o", str(out)]
