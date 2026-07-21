@@ -42,6 +42,60 @@ _FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "valu
               "group_by", "groups", "matched_groups", "sample_group")
 
 
+_AGG_ZH = {"mean": "平均", "min": "最小", "max": "最大", "sum": "合计", "last": "最新", "first": "最早"}
+
+
+def _explain(f: dict) -> str:
+    """把一条事实拼成"怎么判的"人话(给不懂判据分类的人看,也给 RCA 报告直接引用)。
+    机械生成、数字取自事实原字段——弱模型引用它就不会把数值/规则改写编错。拼不出的类返回空串。"""
+    st, pred = f.get("status"), f.get("predicate_satisfied")
+    verdict = "成立" if pred is True else ("不成立" if pred is False else "无法判定")
+    if st == "insufficient_data":
+        return f"查不了:{str(f.get('reason', ''))[:120]}"
+    if st == "manual":
+        return "需人工现场确认,自动数据判不了"
+    cls, col = f.get("class"), f.get("resolved_column")
+    try:
+        if cls in ("C", "G"):
+            tgt = "、".join(f"「{t}」" for t in (f.get("targets") or [])[:3])
+            if f.get("absent"):
+                hit = f.get("matched", 0)
+                return (f"在「{col}」列的 {f.get('total')} 行里找 {tgt} → 命中 {hit} 行"
+                        + ("(没有这项内容,即「未配置」)→ 成立" if hit == 0 else "(该内容存在)→ 不成立"))
+            return (f"在「{col}」列的 {f.get('total')} 行里找 {tgt} → 命中 {f.get('matched')} 行 → {verdict}")
+        if cls in ("A", "B"):
+            op, thr = f.get("op"), f.get("threshold")
+            if f.get("scope") == "count_rows":
+                return (f"「{col or '差值'}」逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足 → {verdict}")
+            agg = _AGG_ZH.get(f.get("agg"), f.get("agg") or "")
+            return (f"「{col or '差值'}」{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}")
+        if cls == "D":
+            if f.get("group_by"):
+                mg = "、".join(f.get("matched_groups") or [])
+                return (f"按「{f.get('group_by')}」分成 {f.get('groups')} 组,每组单独查全部子条件:"
+                        + (f"「{mg}」组全部满足 → 成立" if pred is True else "没有任何一组全部满足 → 不成立"))
+            n = len(f.get("sub_facts") or [])
+            need = "全部" if f.get("combine") == "AND" else "任一"
+            return f"{n} 个子条件须{need}满足(各子条件详见 sub_facts)→ {verdict}"
+        if cls == "F":
+            dv = "、".join(str(v) for v in (f.get("distinct_values") or [])[:3])
+            return f"配置「{col}」实际取值:{dv},判「{f.get('compare')} {f.get('expected')}」→ {verdict}"
+        if cls == "E":
+            return (f"按「{f.get('group_by')}」分组,占比最高的是「{f.get('top1')}」占 {f.get('top1_ratio')},"
+                    f"判「{f.get('op')} {f.get('threshold')}」→ {verdict}")
+        if cls == "H":
+            return (f"按「{f.get('key')}」分成 {f.get('groups')} 个会话,满足消息模式的会话 "
+                    f"{f.get('matched_sessions')} 个 → {verdict}")
+        if cls == "I":
+            if f.get("count_satisfied") is not None:
+                return (f"「{col}」逐行判「{f.get('op')} {f.get('threshold')}」:"
+                        f"{f.get('count_satisfied')}/{f.get('valid')} 行满足 → {verdict}")
+            return f"「{col}」列形态检查({f.get('metric')})→ {verdict}"
+    except Exception:  # noqa: BLE001
+        return ""                                        # 解释拼不出绝不能影响剪枝主流程
+    return ""
+
+
 def _slim_fact(entry: dict) -> dict:
     """精简一条事实:去掉与节点重复的 condition_text、截断 mapping_reason,只留关键结果字段。"""
     f = entry.get("fact") or {}
@@ -53,6 +107,10 @@ def _slim_fact(entry: dict) -> dict:
     # undetermined/复核错误绑定的弹药——绑定算错时,模型靠它才有翻案余地。只挂非 ok、封 160 字,压缩比无感。
     if f.get("status") != "ok" and f.get("reason"):
         out["reason"] = str(f["reason"])[:160]
+    ex = _explain(f)
+    if ex:
+        # "怎么判的"人话:机械拼自事实原字段,RCA 的 evidence.how 直接引用——数字与规则不过模型的手
+        out["explain"] = ex
     return out
 
 

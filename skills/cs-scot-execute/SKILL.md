@@ -43,6 +43,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
    ## 诊断结论
    ### 确证根因(N 条)
    | 根因 | 故障树路径 | 关键证据 | 推荐解决方案 |
+   (关键证据 = evidence 里 how 的原文——"在哪找什么→实际多少→按什么规则→结论",数字不许改写)
    ### 疑似根因(N 条)
    high/medium 逐条详述:根因/卡在哪(blocked_at)/证据/方案(有 solutions.json 时);
    low 合并成一行一条的简表
@@ -78,7 +79,8 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 ```json
 {
   "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
-     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实>","judgment":"成立/不成立/数据不足"}]} ],
+     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实>",
+        "how":"<怎么判的人话(抄事实的 explain)>","judgment":"成立/不成立/数据不足"}]} ],
   "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low","blocked_at":"…","caveats":"…","support":"…","evidence_path":[…]} ],
   "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…"]} ],
   "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }

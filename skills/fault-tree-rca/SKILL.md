@@ -49,7 +49,8 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 ```json
 {
   "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
-     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实;没有写'事实中无此值'>","judgment":"成立/不成立/数据不足"}]} ],
+     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实;没有写'事实中无此值'>",
+        "how":"<怎么判的人话:事实带 explain 就逐字抄,数字不许改写>","judgment":"成立/不成立/数据不足"}]} ],
   "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low",
      "blocked_at":"<数据不足的节点>","caveats":"<有效样本量/空值比例/语义近似>","support":"<叶子证据>","evidence_path":[…]} ],
   "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…(仅观察,非根因)"]} ],
