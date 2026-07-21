@@ -79,7 +79,7 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
 3. 沿 `transition.next_on_success` 前进,`end=true` 结束;
 4. 节点间数据全靠 `$input`/`$memory`/`$step`/`$output` 引用传递。
 
-未定义的 kind 会直接报错(避免静默跳过)。典型链:`各 <指标>_analyzer(script,快)`→`rca(agent_skill,唯一模型步骤,慢)`。**统计已在生成脚本里算好,execute 不再加工数据。**
+未定义的 kind 会直接报错(避免静默跳过)。典型链:`各 <指标>_analyzer(script,快)`→`cross(script,跨源判据:传参链/两侧比较,runner 把全部源递给它;没有跨源绑定时秒过)`→`rca(agent_skill,唯一模型步骤,慢)`。**统计已在生成脚本里算好,execute 不再加工数据。**
 
 ## 输出
 - `script` 节点产出存入 `$memory`(不单独落盘);

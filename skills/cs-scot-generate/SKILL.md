@@ -95,6 +95,11 @@ python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o "<OUT>/overview
 > **先认数据词汇再绑值**:枚举/消息名类的目标值(C/G 的 `equals`、EAV 的 `filter.equals`)只能绑
 > **数据里真出现过**或**概览/枚举清单里在册**的写法,**别照故障树正文猜拼写**;概览可能截断,拿不准就
 > 抽全量枚举核对(见 `references/datacom_log_adapter.md`)。(v1 H 类的 has/lacks 词汇规矩随内核封存。)
+> **跨源判据(收齐后的补绑小步)**:单源子代理遇到"先查别处才知道查什么/要与别的源比对"的判据,
+> 会按简报规约写 `decision:"cross_source"` 标记;merge 后若打印出「跨源判据候选 N 条」→ 跑
+> `python "<本目录>/scripts/make_dispatch.py" --out "<OUT>" --cross` 生成**跨源补绑简报**(自带全部源
+> 概览+枚举+知识),派一个子代理按 `param_from`/`pair_from` 模板补绑(见 binding schema「参数化查询」),
+> 结果照旧跑 merge 合并进 `cross_analyzer.py`;没有候选就跳过这一小步。
 
 ### 步骤 3:用真实数据验证每个生成脚本
 ```bash

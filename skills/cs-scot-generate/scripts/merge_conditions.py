@@ -119,6 +119,7 @@ def main() -> int:
         return 2
 
     pending, all_warns, wrote = [], [], []
+    cross_cands = {}                                    # node_id -> {node_id, sources:[…], reasons:[…]}
     for ind in sorted(plan):
         merged, seen = [], set()
         got = []
@@ -132,6 +133,19 @@ def main() -> int:
             if err:
                 pending.append(f"{ind} 批{n}:{err}——同简报重派该批")
                 continue
+            if ind != "cross":                          # 子代理的「涉及多源」标记:抽出来汇入补绑候选,
+                marks = [e for e in entries            # 不进本源脚本(它不是可执行绑定)
+                         if e.get("decision") == "cross_source"]
+                entries = [e for e in entries if e.get("decision") != "cross_source"]
+                for m in marks:
+                    nid = m.get("node_id") or "?"
+                    c = cross_cands.setdefault(nid, {"node_id": nid, "node": m.get("node"),
+                                                     "sources": [], "reasons": []})
+                    if ind not in c["sources"]:
+                        c["sources"].append(ind)
+                    r = str(m.get("mapping_reason") or "").strip()
+                    if r and r not in c["reasons"]:
+                        c["reasons"].append(r)
             dup = 0
             for e in entries:
                 key = repr(sorted(e.items(), key=lambda kv: kv[0]))
@@ -153,6 +167,15 @@ def main() -> int:
         wrote.append(ind)
         print(f"{ind}:{' / '.join(got)} → 合并 {len(merged)} 条,已写入 {analyzer.name}"
               + (f"(缺 {len(plan[ind]) - len(got)} 批,到货后重跑本脚本即可)" if len(got) < len(plan[ind]) else ""))
+
+    if cross_cands:
+        import json as _json
+        cp = ddir / "cross_candidates.json"
+        cp.write_text(_json.dumps(sorted(cross_cands.values(), key=lambda c: c["node_id"]),
+                                  ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n跨源判据候选 {len(cross_cands)} 条(子代理标记 cross_source)→ {cp}")
+        print("  下一步:python make_dispatch.py --out \"<OUT>\" --cross 生成跨源补绑简报,"
+              "派一个子代理填 param_from 绑定,再跑本脚本合并进 cross_analyzer.py。")
 
     if all_warns:
         print(f"\n格式漂移点名({len(all_warns)} 处,条目已保留,修绑定后重写该批结果并重跑):")

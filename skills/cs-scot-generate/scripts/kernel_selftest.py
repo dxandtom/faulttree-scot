@@ -24,8 +24,8 @@ def _t(header, *rows):
     return (list(header), [dict(zip(header, r)) for r in rows])
 
 
-# 每条用例:name / table(None=无源) / binding / expect(字段=值,需相等)
-#          / present(必须出现的字段) / reason_has(reason 里必须含的子串)
+# 每条用例:name / table(None=无源;多源用例改给 sources={源名: table})/ binding
+#          / expect(字段=值,需相等) / present(必须出现的字段) / reason_has(reason 里必须含的子串)
 CASES = [
     # ---- A 阈值 ----
     {"name": "A aggregate 成立(率<100)", "table": _t(["rate"], ["95"], ["97"]),
@@ -266,6 +266,115 @@ CASES = [
      "expect": {"status": "ok", "local": "1.1.1.1", "peer": "2.2.2.2", "filter_rows": 2,
                 "predicate_satisfied": True}},
 
+    # ---- filter excludes(不含才保留:挑「Object 不带 *」的对端行)----
+    {"name": "filter excludes 选出不含标记的行",
+     "table": _t(["Object", "val"], ["MLAG*", "1"], ["MLAG", "2"]),
+     "binding": {"class": "C", "filter": {"column": "Object", "excludes": "*"},
+                 "column": "val", "equals": ["2"], "match": "exact"},
+     "expect": {"status": "ok", "matched": 1, "total": 1, "predicate_satisfied": True}},
+    {"name": "filter 子句 equals+excludes 同给→数据不足(歧义拒收)",
+     "table": _t(["Object", "val"], ["A", "1"]),
+     "binding": {"class": "C", "filter": {"column": "Object", "equals": "A", "excludes": "*"},
+                 "column": "val", "contains": ["1"]},
+     "expect": {"status": "insufficient_data"}},
+
+    # ---- param_from 参数化查询(X:先抽参数、再代入)----
+    {"name": "param_from 单跳:回显抽接口名→查该接口配置(peer-link 链)",
+     "table": None, "sources": {
+        "cmd": _t(["CmdName", "CmdResult"], ["display dfs-group 1 peer-link", "Port Name: Eth-Trunk0"]),
+        "config": _t(["level1", "level2"], ["Eth-Trunk0", "mode lacp-static"], ["GE1/0/1", "x"])},
+     "binding": {"class": "G", "source": "config", "column": "level2", "contains": ["mode lacp-static"],
+                 "filter": {"column": "level1", "equals": "@plink"},
+                 "param_from": {"plink": {"source": "cmd", "column": "CmdResult",
+                                          "filter": {"column": "CmdName", "contains": "peer-link"},
+                                          "extract": {"kv": "Port Name"}}}},
+     "expect": {"status": "ok", "matched": 1, "predicate_satisfied": True,
+                "params": {"plink": "Eth-Trunk0"}}},
+    {"name": "param_from 多跳:Vbdif→bridge-domain 号→查 BD 配置",
+     "table": _t(["level1", "level2"],
+                 ["Vbdif100", "bridge-domain: 20"], ["bd 20", "vxlan vni 5000"]),
+     "binding": {"class": "G", "column": "level2", "contains": ["vxlan vni"],
+                 "filter": {"column": "level1", "equals": "@bdblk"},
+                 "param_from": {
+                     "vbdif": {"column": "level1", "extract": {"regex": "(Vbdif\\d+)"}},
+                     "bdnum": {"column": "level2", "filter": {"column": "level1", "equals": "@vbdif"},
+                               "extract": {"kv": "bridge-domain"}},
+                     "bdblk": {"column": "level1", "extract": {"regex": "(bd \\d+)"},
+                               "filter": {"column": "level1", "contains": "@bdnum"}}}},
+     "expect": {"status": "ok", "matched": 1, "predicate_satisfied": True}},
+    {"name": "param_from 参数抽不到→数据不足(不是不成立)",
+     "table": _t(["a", "b"], ["x", "y"]),
+     "binding": {"class": "G", "column": "b", "contains": ["y"],
+                 "filter": {"column": "a", "equals": "@p"},
+                 "param_from": {"p": {"column": "a", "extract": {"kv": "没有的键"}}}},
+     "expect": {"status": "insufficient_data", "predicate_satisfied": None}, "reason_has": "抽取失败"},
+    {"name": "param_from 参数多值无 expand→数据不足(歧义)",
+     "table": _t(["a", "b"], ["v1", "x"], ["v2", "x"]),
+     "binding": {"class": "G", "column": "b", "contains": ["@p"],
+                 "param_from": {"p": {"column": "a"}}},
+     "expect": {"status": "insufficient_data"}, "reason_has": "歧义"},
+    {"name": "@引用未声明参数→数据不足(防拿字面 @ 查出假排除)",
+     "table": _t(["a"], ["x"]),
+     "binding": {"class": "G", "column": "a", "contains": ["@nobody"],
+                 "param_from": {"p": {"column": "a"}}},
+     "expect": {"status": "insufficient_data"}, "reason_has": "没有声明"},
+    {"name": "写了 @xxx 却没 param_from→数据不足(响亮拦)",
+     "table": _t(["a"], ["x"]),
+     "binding": {"class": "G", "column": "a", "contains": ["@p"]},
+     "expect": {"status": "insufficient_data"}, "reason_has": "没有 param_from"},
+    {"name": "参数引用排在后面的参数→数据不足(只能向前引用)",
+     "table": _t(["a"], ["x"]),
+     "binding": {"class": "G", "column": "a", "contains": ["x"],
+                 "param_from": {"p1": {"column": "a", "filter": {"column": "a", "equals": "@p2"}},
+                                "p2": {"column": "a"}}},
+     "expect": {"status": "insufficient_data"}, "reason_has": "排在前面"},
+    {"name": "expand all:每个接口都要有配置,一个缺→不成立并点名",
+     "table": _t(["level1", "level2"], ["Vbdif100", "bridge-domain 10"], ["Vbdif200", "shutdown"]),
+     "binding": {"class": "G", "column": "level2", "contains": ["bridge-domain"],
+                 "filter": {"column": "level1", "equals": "@ifc"},
+                 "param_from": {"ifc": {"column": "level1", "extract": {"regex": "(Vbdif\\d+)"},
+                                        "expand": "all"}}},
+     "expect": {"status": "ok", "predicate_satisfied": False, "fail_values": ["Vbdif200"]}},
+    {"name": "expand any:任一值命中即成立",
+     "table": _t(["level1", "level2"], ["Vbdif100", "x"], ["Vbdif200", "vxlan anycast-gateway enable"]),
+     "binding": {"class": "G", "column": "level2", "contains": ["anycast-gateway"],
+                 "filter": {"column": "level1", "equals": "@ifc"},
+                 "param_from": {"ifc": {"column": "level1", "expand": "any"}}},
+     "expect": {"status": "ok", "predicate_satisfied": True, "hit_values": ["Vbdif200"]}},
+    {"name": "expand 乱写→数据不足", "table": _t(["a"], ["x"]),
+     "binding": {"class": "G", "column": "a", "contains": ["x"],
+                 "param_from": {"p": {"column": "a", "expand": "each"}}},
+     "expect": {"status": "insufficient_data"}},
+    {"name": "两个参数都带 expand→数据不足(组合爆炸拒收)",
+     "table": _t(["a", "b"], ["x", "y"]),
+     "binding": {"class": "G", "column": "b", "contains": ["@q"],
+                 "param_from": {"p": {"column": "a", "expand": "all"},
+                                "q": {"column": "b", "expand": "any"}}},
+     "expect": {"status": "insufficient_data"}},
+
+    # ---- P pair_from(跨源成对比较:两侧各自选行取值)----
+    {"name": "P pair_from 两文件比 Nve source 不一致→成立",
+     "table": None, "sources": {
+        "cfg_a": _t(["level1", "level2"], ["Nve1", "source: 1.1.1.1"]),
+        "cfg_b": _t(["level1", "level2"], ["Nve1", "source: 2.2.2.2"])},
+     "binding": {"class": "P", "source": "cfg_a", "fault_when": "not_equal", "pair_from": {
+         "local": {"source": "cfg_a", "column": "level2",
+                   "filter": {"column": "level1", "equals": "Nve1"}, "extract": {"kv": "source"}},
+         "peer": {"source": "cfg_b", "column": "level2",
+                  "filter": {"column": "level1", "equals": "Nve1"}, "extract": {"kv": "source"}}}},
+     "expect": {"status": "ok", "local": "1.1.1.1", "peer": "2.2.2.2", "equal": False,
+                "predicate_satisfied": True}},
+    {"name": "P pair_from 对端源缺→数据不足",
+     "table": None, "sources": {"cfg_a": _t(["level1", "level2"], ["Nve1", "source: 1.1.1.1"])},
+     "binding": {"class": "P", "source": "cfg_a", "pair_from": {
+         "local": {"source": "cfg_a", "column": "level2", "extract": {"kv": "source"}},
+         "peer": {"source": "cfg_b", "column": "level2", "extract": {"kv": "source"}}}},
+     "expect": {"status": "insufficient_data"}, "reason_has": "对端"},
+    {"name": "cross_source 标记漏到运行时→数据不足并指路",
+     "table": _t(["a"], ["x"]),
+     "binding": {"class": "G", "decision": "cross_source", "column": "a", "contains": ["x"]},
+     "expect": {"status": "insufficient_data"}, "reason_has": "补绑"},
+
     # ---- J 人工 / decision 逃逸 ----
     {"name": "J 人工→manual,不给判断", "table": None,
      "binding": {"class": "J", "note": "需现场确认"},
@@ -354,7 +463,7 @@ CASES = [
 def _check(case):
     b = case["binding"]
     table = case.get("table")
-    sources = {"_t": table} if table else {}
+    sources = case.get("sources") or ({"_t": table} if table else {})
     try:
         fact = evaluate_binding(b, sources, b.get("source", "_t"))
     except Exception as e:  # 内核抛异常 = 直接失败(本不该崩)

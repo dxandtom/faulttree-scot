@@ -8,6 +8,8 @@
 2. 按 `kind` 分派当前节点:
    - **`script`**:`name`→`scripts/<name>.py`;解析 `inputs`(`data` 解析成数据文件),
      跑 `python scripts/<name>.py <数据> -o <临时>`,产出 JSON 按 `outputs` 写入 `$memory`。
+     特例 `inputs.data = "$input.*"`(跨源判据脚本 cross_analyzer,格式契约 v3 起):runner 把本轮
+     **全部**已提供数据源以 `--data 源=路径`(可多次)递入;该节点不进"缺源即跳过"清单,给多少吃多少。
    - **`agent_skill`**:解析 `inputs`(`fault_tree_md` 路径读成正文,其余归到
      `indicator_results`;上游被跳过/未产出的输入**不进** `indicator_results`,改记到顶层
      `missing_indicators`(键→原因),RCA 按「数据不足」对待),备到 `result/rca_input.json`,

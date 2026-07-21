@@ -33,6 +33,9 @@ COMMON_RULES = """【公共规约——逐条遵守】
 1. 本文件就是你的全部任务与材料,不要用 Bash;除了把结果写到文首【结果文件】路径外,**不要读写任何其他文件**。
 2. 只绑你这个源({ind})能答的判据;明显不归本源答的**整条不写**;「确属本源该答、这次却答不了」才写
    decision:"insufficient_data" 并在 mapping_reason 里说明原因。
+   **跨源联查的判据是第三种情况**:判据要"先查别处拿到值,才知道在本源查什么"(传参链)、或要与别的源
+   的数据比对(两侧一致性)→ 本源别硬绑、也别当"不归我答"沉默,写一行标记(它会汇入跨源补绑环节,
+   不进本源脚本):{{"node_id":"nN","decision":"cross_source","mapping_reason":"<一句话:缺哪一环>"}}
 3. 树驱动:下面清单里的**每条判据都要过一遍**再决定绑/不绑;按判据要的列+值绑,**不管这次数据里出没出现**
    (值没出现 → 照绑,运行时 matched=0 = 确定排除,不是数据不足)。
 4. 一条判据常含**多个子条件**(换行/且/①② 分隔):本源能答的每个子条件都要绑到(单源多子条件用 D 类组合),
@@ -75,6 +78,29 @@ EAV_RULES = """【EAV 窄表铁规(本源适用)】
   {"class":"C","filter":{"column":"DataItem","equals":"<指标名>"},"column":"DataValue","contains":["<取值>"],...}
 **filter.equals 的值必须逐字来自下文的枚举清单**;清单里没有的指标名,禁止绑、禁止自己编——
 写 decision:"insufficient_data" 并注明「已查枚举无对应项」。filter 命中 0 行=该指标本次未采集=数据不足,不是"不成立"。"""
+
+CROSS_RULES = """【跨源绑定规约——逐条遵守】
+1. 本文件就是你的全部任务与材料;结果(Python 列表字面量)用 Write 写到文首【结果文件】路径(UTF-8),
+   最终回复只报一行「共 N 条,已写 <路径>」。
+2. 下面每条候选判据都要表态:能绑的按本规约绑;确实绑不了的写
+   {{"node_id":"nN","decision":"insufficient_data","mapping_reason":"<为什么绑不了>"}}——不许漏、不许编。
+3. 每条绑定必带 "source"=最终查询落点的源名;param_from/pair_from/sub 里的 source 各写各的。
+   列名/枚举值只能用下方各源概览/枚举里出现过的;**外挂知识讲了"去哪查"的,照知识写**。
+4. 传参链(先查A、拿结果再查B)→ param_from:参数按声明顺序解析,**后面的可用前面的**(@前参数)=多跳;
+   查询体里 "@参数名" 整串占位会被代入(filter 值 / contains·equals·regex 目标里可用)。字面模板:
+   {{"class":"G","source":"config","column":"<列>","contains":["<要找的内容>"],
+     "filter":{{"column":"<列>","equals":"@p"}},
+     "param_from":{{"p":{{"source":"cmd","column":"<列>","filter":{{...选行}},"extract":{{"kv":"<键>"}}}}}}}}
+5. 参数默认须收敛到**唯一值**(多值=歧义→数据不足);判据要"**每个**X都查"才加 "expand":"all"
+   (全部满足才成立)或 "any"(任一满足即成立),一条绑定只许一个参数带 expand。
+6. 两侧一致性(本端/对端在**不同文件**)→ P 类 pair_from,两侧各自「选行→取值」:
+   {{"class":"P","source":"<任一侧源>","fault_when":"not_equal","pair_from":{{
+      "local":{{"source":"<本端源>","column":"<列>","filter":{{...}},"extract":{{...}}}},
+      "peer":{{"source":"<对端源>","column":"<列>","filter":{{...}},"extract":{{...}}}}}}}}
+   (同一张表里靠标记分侧的,用普通 P:side_column+peer_marker,不用 pair_from。)
+7. filter 子句除 equals/contains 还认 **excludes**(不含才保留,如挑「Object 不带 * 」的对端行)。
+8. 诚实:参数抽不到/歧义、对端查不到、源没提供 → 内核自动报数据不足,**别**为了"绑上"硬凑;
+   mapping_reason 写实(链条每一跳从哪来、到哪去)。"""
 
 OUTPUT_FORMAT = """【输出格式】
 把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行,
@@ -193,6 +219,8 @@ def main() -> int:
     ap.add_argument("--indicators", default="", help="逗号分隔;缺省=按 <OUT>/scripts/*_analyzer.py 自动发现")
     ap.add_argument("--batch-size", type=int, default=50)
     ap.add_argument("--tree-index", default="", help="缺省=<OUT>/tree/*.tree_index.json(须唯一)")
+    ap.add_argument("--cross", action="store_true",
+                    help="生成跨源补绑简报(读 dispatch/cross_candidates.json,由 merge_conditions 汇集)")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -213,7 +241,8 @@ def main() -> int:
     if args.indicators:
         inds = [x.strip() for x in args.indicators.split(",") if x.strip()]
     else:
-        inds = sorted(p.stem[:-len("_analyzer")] for p in out.glob("scripts/*_analyzer.py"))
+        inds = sorted(p.stem[:-len("_analyzer")] for p in out.glob("scripts/*_analyzer.py")
+                      if p.name != "cross_analyzer.py")  # cross 走 --cross 补绑简报,不按单源派
     if not inds:
         _fail("没找到任何指标(--indicators 或 <OUT>/scripts/*_analyzer.py)")
         return 2
@@ -225,6 +254,54 @@ def main() -> int:
     if knowledge_text:
         n_kn = knowledge_text.count("◆ ")
         print(f"外挂知识:tree/knowledge.md 命中 {n_kn} 条,已嵌入全部简报")
+
+    if args.cross:                                       # 跨源补绑简报:一份装下全部候选 + 所有源的词汇
+        ddir = out / "dispatch"
+        cand_p = ddir / "cross_candidates.json"
+        if not cand_p.exists():
+            _fail(f"没有 {cand_p} —— 先完成单源绑定并跑 merge_conditions.py"
+                  "(子代理的 cross_source 标记会汇成候选);没有候选文件=没有跨源判据,无需补绑")
+            return 2
+        cands = json.loads(cand_p.read_text(encoding="utf-8"))
+        if not cands:
+            print("cross_candidates.json 为空——没有跨源判据,无需补绑。")
+            return 0
+        cond_by_id = {nid: (name, cond) for nid, name, cond in conditions}
+        rp = ddir / "cross_batch1_result.py"
+        sec = [f"# 跨源补绑简报:cross · 共 {len(cands)} 条候选判据\n【结果文件】{rp}",
+               f"你是诊断绑定专家,任务:为下面的跨源判据写 param_from/pair_from 绑定(或明确绑不了),"
+               f"产出 cross_analyzer.py 的 CONDITIONS 片段。场景:{scenario}。",
+               CROSS_RULES.format()]
+        if knowledge_text:
+            sec.append("【外挂知识(业务同事手写:指路可信——去哪查/怎么查照它;但不是事实,查证靠数据)】\n"
+                       + knowledge_text)
+        for ind in inds:
+            ov = ov_dir / f"{ind}_overview.json"
+            if ov.exists():
+                sec.append(f"【{ind} 源数据词汇——概览原文】\n" + ov.read_text(encoding="utf-8").strip())
+            else:
+                sec.append(f"【{ind} 源概览缺失】overview/{ind}_overview.json 不存在——该源列名未知,"
+                           "涉及它的绑定老实写 decision:insufficient_data 并注明缺概览")
+            for f in find_enums(ov_dir, ind):
+                sec.append(f"【{ind} 源数据词汇——枚举清单原文:{f.name}】\n"
+                           + f.read_text(encoding="utf-8").strip())
+        lines = [f"【候选判据清单(共 {len(cands)} 条;condition_text 必须逐字取自这里)】"]
+        for c in cands:
+            nid = c.get("node_id")
+            name, cond = cond_by_id.get(nid, (c.get("node") or "?",
+                                              "(tree_index 里查不到判据原文——node_id 可能填错,核实后表态)"))
+            srcs = "、".join(c.get("sources") or [])
+            reasons = ";".join(c.get("reasons") or [])
+            lines.append(f"\n[{nid}] {name}(由 {srcs} 源标记" + (f":{reasons}" if reasons else "") + f")\n{cond}")
+        sec.append("\n".join(lines))
+        sec.append(OUTPUT_FORMAT.format(ind="cross"))
+        ddir.mkdir(parents=True, exist_ok=True)
+        bp = ddir / "cross_batch1.txt"
+        bp.write_text("\n\n".join(sec) + "\n", encoding="utf-8")
+        print(f"跨源补绑简报 → {bp}(候选 {len(cands)} 条)。派一个子代理处理,结果收 {rp.name},"
+              "然后重跑 merge_conditions.py 合并进 cross_analyzer.py。")
+        return 0
+
     n_batches = max(1, math.ceil(len(conditions) / args.batch_size))
     batches = [conditions[i * args.batch_size:(i + 1) * args.batch_size] for i in range(n_batches)]
     ddir = out / "dispatch"

@@ -535,22 +535,25 @@ _ARCHIVED = set("BEFHI")                                # v1 内核已封存 arc
 
 
 def _apply_filter(table, flt):
-    """行级预过滤——为「EAV 窄表」(一行一个量,如 DataItem/DataValue/Unit 形状)服务:
-    先把行缩到 filter 命中的子集,再让内核对子集算。子句 {column, equals:值|[值…] 或 contains:值|[值…]};
-    多子句(list)= AND,同一行须全满足;大小写不敏感。
+    """行级预过滤——为「EAV 窄表」(一行一个量,如 DataItem/DataValue/Unit 形状)或"先选中某命令/
+    某检查项的行"服务:先把行缩到 filter 命中的子集,再让内核对子集算。
+    子句 {column, equals:值|[值…] 或 contains:值|[值…] 或 excludes:值|[值…](**不含**才保留,
+    如挑「Object 不带 *」的对端行)};多子句(list)= AND,同一行须全满足;大小写不敏感。
     返回 (过滤后table, None) 或 (None, 错误串)(列解析不到 → 上层判数据不足)。"""
     header, rows = table
     clauses = flt if isinstance(flt, list) else [flt]
     resolved = []
     for c in clauses:
         if not isinstance(c, dict):                      # 畸形子句(如写成字符串)→ 数据不足,绝不乱配、绝不崩
-            return None, f"filter 子句应为对象 {{column, equals|contains}},收到 {type(c).__name__}: {str(c)[:40]!r}"
+            return None, f"filter 子句应为对象 {{column, equals|contains|excludes}},收到 {type(c).__name__}: {str(c)[:40]!r}"
         col, how = resolve_column(header, c.get("column", ""))
         if not col:
             return None, f"filter 未找到列「{c.get('column')}」({how})"
-        if c.get("equals") is None and c.get("contains") is None:   # 缺目标值 → 数据不足(不许退化成 contains:"none")
-            return None, f"filter 子句缺 equals/contains(列「{c.get('column')}」)"
-        mode = "equals" if c.get("equals") is not None else "contains"
+        given = [m for m in ("equals", "contains", "excludes") if c.get(m) is not None]
+        if len(given) != 1:                              # 缺/多给 → 数据不足(不许退化、不许歧义)
+            return None, (f"filter 子句须给 equals/contains/excludes 之一(列「{c.get('column')}」,"
+                          f"收到 {given or '空'})")
+        mode = given[0]
         tgt = c.get(mode)
         tgts = [str(t).strip().lower() for t in (tgt if isinstance(tgt, list) else [tgt])]
         if not any(tgts):
@@ -560,7 +563,8 @@ def _apply_filter(table, flt):
     for r in rows:
         for col, mode, tgts in resolved:
             v = str(r.get(col, "")).strip().lower()
-            if not ((v in tgts) if mode == "equals" else any(t and t in v for t in tgts)):
+            hit = (v in tgts) if mode == "equals" else any(t and t in v for t in tgts)
+            if (mode == "excludes") == hit:              # equals/contains 要命中才留;excludes 要不命中才留
                 break
         else:
             keep.append(r)
@@ -571,12 +575,208 @@ def _apply_filter(table, flt):
 _FILTERABLE = ("A", "C", "G", "P")
 
 
+# ---------- 参数化查询(param_from):先抽参数、再代入——跨源/同源传参链的家 ----------
+_PARAM_RE = re.compile(r"^@([A-Za-z_]\w*)$")            # @整串引用才算参数;句子里夹 @ 不误伤
+_NO_SUBST_KEYS = ("mapping_reason", "condition_text", "node", "id", "note", "reason")
+
+
+def _subst(obj, params):
+    """深代入:任何**整串**形如 "@name" 的字符串换成 params[name],其余原样(深拷贝)。
+    引用了 params 里没有的名字 → 抛 KeyError(调用方响亮出数据不足,绝不拿字面 @xxx 去查=假排除)。"""
+    if isinstance(obj, str):
+        m = _PARAM_RE.match(obj)
+        if m:
+            if m.group(1) not in params:
+                raise KeyError(m.group(1))
+            return params[m.group(1)]
+        return obj
+    if isinstance(obj, list):
+        return [_subst(x, params) for x in obj]
+    if isinstance(obj, dict):
+        return {k: (v if k in _NO_SUBST_KEYS else _subst(v, params)) for k, v in obj.items()}
+    return obj
+
+
+def _find_stray_params(obj, in_doc=False):
+    """找出绑定里所有 @整串引用(跳过文案字段)——没 param_from 却写了 @xxx 是要拦的脚枪。"""
+    if isinstance(obj, str):
+        m = _PARAM_RE.match(obj)
+        return [] if (in_doc or not m) else [m.group(1)]
+    if isinstance(obj, list):
+        return [n for x in obj for n in _find_stray_params(x, in_doc)]
+    if isinstance(obj, dict):
+        return [n for k, v in obj.items() for n in _find_stray_params(v, in_doc or k in _NO_SUBST_KEYS)]
+    return []
+
+
+def _resolve_values(spec, sources, parent_source):
+    """按 spec{source?, column, filter?, extract?} 从某源抽出值列表(非空、去重、保序)。
+    返回 (values, None) 或 (None, 错误串)。供 param_from 与 P 的 pair_from 共用。"""
+    if not isinstance(spec, dict):
+        return None, f"取值规格应为对象 {{source, column, filter?, extract?}},收到 {type(spec).__name__}"
+    src = spec.get("source", parent_source)
+    table = sources.get(src)
+    if table is None:
+        return None, f"无数据源「{src}」(用 --data {src}=<文件> 提供)"
+    if not table[1]:
+        return None, f"数据源「{src}」为空表(仅表头、0 行),无从抽值"
+    flt = spec.get("filter")
+    if flt:
+        table, err = _apply_filter(table, flt)
+        if err:
+            return None, f"(源「{src}」){err}"
+        if not table[1]:
+            return None, f"filter 命中 0 行(源「{src}」),无从抽值"
+    header, rows = table
+    col, how = resolve_column(header, spec.get("column", ""))
+    if not col:
+        return None, f"未找到列「{spec.get('column')}」({how},源「{src}」)"
+    ex = spec.get("extract")
+    if ex:
+        err = _extract_spec_err(ex)
+        if err:
+            return None, err
+    vals, seen = [], set()
+    for r in rows:
+        v = r.get(col, "")
+        if _is_null(v):
+            continue
+        if ex:
+            v = _extract_val(v, ex)
+            if v is None:
+                continue
+        v = str(v).strip()
+        if v and v not in seen:
+            seen.add(v)
+            vals.append(v)
+    if not vals:
+        sample = next((str(r.get(col, ""))[:80] for r in rows if not _is_null(r.get(col, ""))), "")
+        return None, (f"源「{src}」列「{col}」一条值也没抽到——核对 filter/extract 与数据格式。"
+                      f"该列样例:「{sample}」")
+    return vals, None
+
+
+_EXPAND_CAP = 32                                        # expand 逐值展开上限:防呆不防爆
+
+
+def _eval_with_params(b, sources, source_name):
+    """带 param_from 的绑定:按声明顺序解析各参数(后面的可引用前面的 @参数 → 多跳链),
+    再把参数代入查询体(filter 值 / contains·equals·regex 目标 / pair_from 等位置)正常评估。
+    至多一个参数可带 expand:"all"/"any"(多值逐个代入:all=全部成立才成立,any=任一成立即成立)。
+    参数抽不到/歧义/引用未声明 → 响亮数据不足,绝不带着坏参数查出假结论。"""
+    cls = str(b.get("class", "")).upper() or "?"
+    pf = b.get("param_from")
+    if not isinstance(pf, dict) or not pf:
+        return _insuf(cls, 'param_from 应为非空对象 {"参数名": {source, column, filter?, extract?}}')
+    resolved, expand = {}, None                          # expand = (参数名, mode, [值…])
+    for name, spec in pf.items():
+        if not re.match(r"^[A-Za-z_]\w*$", str(name)):
+            return _insuf(cls, f"参数名「{name}」不合法(限字母/数字/下划线;引用时写 @{name})")
+        try:
+            spec_r = _subst(spec, resolved)              # 后面的参数可用前面的 → 链;只能向前引用,天然无环
+        except KeyError as e:
+            return _insuf(cls, f"参数「{name}」引用了 @{e.args[0]},但它没有排在前面(参数按声明顺序解析,"
+                               "只能引用已解析的)")
+        mode = spec_r.pop("expand", None) if isinstance(spec_r, dict) else None
+        vals, err = _resolve_values(spec_r, sources, b.get("source", source_name))
+        if err:
+            return _insuf(cls, f"参数「{name}」抽取失败:{err}", param=name)
+        if mode is None:
+            if len(vals) > 1:
+                return _insuf(cls, f"参数「{name}」有 {len(vals)} 个不同值:{vals[:3]}…——歧义,"
+                                   "先用 filter/extract 收窄到唯一值;确要逐值遍历加 \"expand\":\"all\"/\"any\"",
+                              param=name)
+            resolved[name] = vals[0]
+            continue
+        if mode not in ("all", "any"):
+            return _insuf(cls, f"参数「{name}」的 expand「{mode}」不认识(只认 all/any)")
+        if expand is not None:
+            return _insuf(cls, f"只允许一个参数带 expand(「{expand[0]}」和「{name}」都带了)——"
+                               "两个一起展开会组合爆炸,拆成两条绑定")
+        if len(vals) > _EXPAND_CAP:
+            return _insuf(cls, f"参数「{name}」expand 值太多({len(vals)} > {_EXPAND_CAP})——"
+                               "先用 filter 收窄再展开", param=name)
+        expand = (name, mode, vals)
+    qb = {k: v for k, v in b.items() if k != "param_from"}
+
+    def _run(extra):
+        try:
+            q = _subst(qb, {**resolved, **extra})
+        except KeyError as e:
+            return _insuf(cls, f"绑定里用了 @{e.args[0]},但 param_from 没有声明它")
+        return evaluate_binding(q, sources, source_name)
+
+    if expand is None:
+        fact = _run({})
+        fact.setdefault("params", dict(resolved))        # 审计:这次查询代入了什么参数
+        return fact
+    name, mode, vals = expand
+    per = [(v, _run({name: v})) for v in vals]
+    preds = [f.get("predicate_satisfied") for _, f in per]
+    sts = [f.get("status") for _, f in per]
+    if mode == "all":
+        pred, st = ((False, "ok") if any(p is False for p in preds)
+                    else (None, "insufficient_data") if any(s != "ok" for s in sts)
+                    else (True, "ok"))
+    else:
+        pred, st = ((True, "ok") if any(p is True for p in preds)
+                    else (None, "insufficient_data") if any(s != "ok" for s in sts)
+                    else (False, "ok"))
+    n_true = sum(1 for p in preds if p is True)
+    n_false = sum(1 for p in preds if p is False)
+    n_insuf = sum(1 for _, f in per if f.get("status") != "ok")
+    fact = {"class": cls, "status": st, "predicate_satisfied": pred, "params": dict(resolved),
+            "expand": {"param": name, "mode": mode, "n": len(vals),
+                       "n_true": n_true, "n_false": n_false, "n_insuf": n_insuf},
+            "reason": None if st == "ok" else
+            f"expand 的 {len(vals)} 个值里 {n_insuf} 个查不了,无法确证整体"}
+    # 证据要点名到值:all 挂"谁违规",any 挂"谁命中";再带一个代表性子结果供审计
+    if mode == "all" and n_false:
+        fact["fail_values"] = [v for v, f in per if f.get("predicate_satisfied") is False][:5]
+    if mode == "any" and n_true:
+        fact["hit_values"] = [v for v, f in per if f.get("predicate_satisfied") is True][:5]
+    sample = next((x for x in per if x[1].get("predicate_satisfied") is (False if mode == "all" else True)),
+                  next((x for x in per if x[1].get("status") != "ok"), per[0]))
+    fact["sample_value"], fact["sub_facts"] = sample[0], [sample[1]]
+    return fact
+
+
+def k_pair_from(b, sources, parent_source):
+    """P 类的跨源形态:两侧各自「选行→取值」再比较(本端/对端在不同文件时用它;
+    同表带标记分侧的仍用 side_column 形态)。pair_from = {"local": 取值规格, "peer": 取值规格}。"""
+    pf = b.get("pair_from")
+    if not isinstance(pf, dict) or "local" not in pf or "peer" not in pf:
+        return _insuf("P", 'pair_from 应为 {"local": {source, column, …}, "peer": {…}} 两侧规格')
+    fw = b.get("fault_when", "not_equal")
+    if fw not in ("not_equal", "equal"):
+        return _insuf("P", f"fault_when「{fw}」不认识(只认 not_equal/equal)")
+    got = {}
+    for side, zh in (("local", "本端"), ("peer", "对端")):
+        vals, err = _resolve_values(pf[side], sources, parent_source)
+        if err:
+            return _insuf("P", f"查不到{zh}的数据:{err}——{zh}不可查是判不了,不是'不成立'")
+        if len(vals) > 1:
+            return _insuf("P", f"{zh}取值有歧义:{vals[:3]}…(多个不同值)——先用 filter/extract 收窄")
+        got[side] = vals[0]
+    same = got["local"] == got["peer"]
+    return {"class": "P", "status": "ok", "local": got["local"], "peer": got["peer"],
+            "equal": same, "fault_when": fw,
+            "local_source": pf["local"].get("source", parent_source),
+            "peer_source": pf["peer"].get("source", parent_source),
+            "resolved_column": str(pf["local"].get("column", "")),
+            "predicate_satisfied": (not same) if fw == "not_equal" else same}
+
+
 def evaluate_binding(b, sources, source_name):
     """按 b['class'] 分派到对应内核;D 递归,J 人工,无源/未知类别 → 数据不足。
     若绑定带 `decision`(模型生成时已判本条无法机械评估)→ 直接按该判定出 status,**不跑内核、不给判断**。
     带 `filter`(A/C/G/P)→ 先行级预过滤再算(EAV 窄表:先选中"哪个量"的行,再对值做统计)。"""
     cls = str(b.get("class", "")).upper()
     decided = b.get("decision")
+    if decided == "cross_source":                        # 绑定期的跨源标记:应被 merge 收进补绑候选,
+        return _insuf(cls or "?",                        # 漏到运行时=补绑没做完,响亮说明而不是装没事
+                      "标记为跨源判据(cross_source),应由跨源补绑环节产出 param_from 绑定——"
+                      "出现在运行时说明补绑未完成,回到步骤 2.5 跑 make_dispatch --cross")
     if decided in ("insufficient_data", "manual", "not_applicable"):
         return {"class": cls or "?",
                 "status": "manual" if decided == "manual" else "insufficient_data",
@@ -584,6 +784,14 @@ def evaluate_binding(b, sources, source_name):
                 "reason": b.get("mapping_reason") or b.get("reason") or f"模型判定:{decided}"}
     if cls == "J" or b.get("manual"):
         return k_manual(b)
+    if b.get("param_from"):                              # 参数化查询:先抽参数、再代入(D/P/A/C/G 通吃)
+        return _eval_with_params(b, sources, source_name)
+    stray = _find_stray_params(b)
+    if stray:                                            # 写了 @xxx 却没 param_from:拿字面 @ 去查=假排除,拦
+        return _insuf(cls or "?", f"绑定里用了 @{stray[0]} 却没有 param_from——参数没人解析,"
+                                  "查询会拿字面 @ 去匹配(恒不命中=假排除);补 param_from 或去掉 @")
+    if cls == "P" and b.get("pair_from"):                # 跨源成对比较:两侧各自选行取值再比
+        return k_pair_from(b, sources, source_name)
     if cls == "D":
         if b.get("filter"):                              # 静默忽略会让 sub 在全表上算出假阳,响亮拒绝
             return _insuf("D", "filter 不作用于 D 类顶层——把 filter 写进各 sub 子绑定(各自选行再合成)")

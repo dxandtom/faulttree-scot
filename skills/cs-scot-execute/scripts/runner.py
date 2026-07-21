@@ -32,7 +32,7 @@ _TOK = re.compile(r"[^.\[\]]+|\[\d+\]")
 # 产物格式契约:执行器"认识"的版本。与 cs-scot-generate/scripts/assemble_scenario.py 的
 # PRODUCT_FORMAT_VERSION 成对维护——产物结构有破坏性变化时两边一起 +1。比对只告警不阻断(知情,不是门禁)。
 # v2:绑定 filter 字段 + 空表守卫(旧产物的旧内核副本会静默忽略 filter → 假阳,提示重新 generate)。
-EXPECTED_PRODUCT_FORMAT = 2
+EXPECTED_PRODUCT_FORMAT = 3
 
 
 def check_product_format(base: Path) -> None:
@@ -102,9 +102,13 @@ def resolve_inputs(inputs: dict, ctx: Dict[str, Any]) -> dict:
 
 
 def _input_key(node: dict) -> Any:
-    """script 节点 inputs.data 若是 $input.<key> 引用,返回 key;否则 None。"""
+    """script 节点 inputs.data 若是 $input.<key> 引用,返回 key;否则 None。
+    "$input.*"(cross 跨源脚本:要全部源)不算具体 key → None(不进"必须提供"清单,给多少吃多少)。"""
     ref = (node.get("inputs") or {}).get("data")
-    return ref[len("$input."):] if isinstance(ref, str) and ref.startswith("$input.") else None
+    if not (isinstance(ref, str) and ref.startswith("$input.")):
+        return None
+    key = ref[len("$input."):]
+    return None if key == "*" else key
 
 
 def store_outputs(outputs: dict, value: Any, ctx: Dict[str, Any]) -> None:
@@ -122,11 +126,35 @@ def store_outputs(outputs: dict, value: Any, ctx: Dict[str, Any]) -> None:
 
 
 def run_script_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
-    """执行 kind=script 节点:跑 scripts/<name>.py <数据> -o <tmp>,返回其 JSON 产出。"""
+    """执行 kind=script 节点:跑 scripts/<name>.py <数据> -o <tmp>,返回其 JSON 产出。
+    inputs.data="$input.*"(cross 跨源脚本)→ 把本轮**全部**已提供数据源以 --data 源=路径 递入。"""
     name = node.get("name") or node["id"]
     script = base / "scripts" / f"{name}.py"
     if not script.exists():
         raise FileNotFoundError(f"节点 {node['id']} 的脚本不存在: {script}")
+    raw_ref = (node.get("inputs") or {}).get("data")
+    if raw_ref == "$input.*":
+        pairs = []
+        for k, v in (ctx.get("input") or {}).items():
+            if not v:
+                continue
+            p = Path(v)
+            p = p if p.is_absolute() else base / p
+            if p.exists():                               # 路径坏的源不递入:该源绑定自然报"无数据源"
+                pairs.append((k, p))
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out.json"
+            cmd = [sys.executable, str(script), "-o", str(out)]
+            for k, p in pairs:
+                cmd += ["--data", f"{k}={p}"]
+            print(f"[script] {node['id']}: {' '.join(cmd)}")
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+                                  encoding="utf-8", errors="replace")
+            if proc.returncode != 0:
+                raise RuntimeError(f"节点 {node['id']} 失败 (exit {proc.returncode}):\n{proc.stderr[-2000:]}")
+            result = json.loads(out.read_text(encoding="utf-8"))
+        store_outputs(node.get("outputs"), result, ctx)
+        return result
     ins = resolve_inputs(node.get("inputs"), ctx)
     if "data" not in ins or not ins["data"]:
         raise ValueError(f"节点 {node['id']} 缺少已绑定的 inputs.data(用 --data <指标>=<文件> 提供)")
@@ -420,7 +448,12 @@ def main() -> None:
     provided = {k for k, v in data_map.items() if v}
     missing = {k: ids for k, ids in required.items() if k not in provided}
     unused = sorted(provided - set(required))
-    if unused:                                          # typo 防线:key 打错会变成"静默跳过",这里点破
+    has_star = any((n.get("inputs") or {}).get("data") == "$input.*"
+                   for n in plan.get("nodes", []) if n.get("kind") == "script")
+    if unused and has_star:                             # 有跨源节点:多给的源会递给它(pair_from 的对端文件等)
+        print(f"[info] 数据源 {', '.join(unused)} 不属任何单源解析步骤,将只递给跨源步骤(cross)使用;"
+              "若它本该有自己的解析步骤,核对 key 名。")
+    elif unused:                                        # typo 防线:key 打错会变成"静默跳过",这里点破
         print(f"[warn] --data 里有 plan 用不到的数据源: {', '.join(unused)}"
               f"(plan 需要: {', '.join(required)})——key 是不是打错了?这些文件本轮不会被使用。")
     if required and not set(required) & provided:       # 一个都没给:大概率用法错误,仍硬报错并给指引

@@ -45,7 +45,50 @@
 **P 类什么时候用**:判据要"查对端,比较本端/对端的某信息是否一致"(如 MLAG 两侧 IP/版本/配置一致性)。
 数据形态:同一表里本端行与对端行靠**分侧列**区分(如 `Object` 列本端带 `*` 标记);要比的值在
 `value_column`(整格)或其格内某段(加 `extract`);一次只比**一项**信息——多项各写一条 P 绑定,
-并用 `filter` 先把行缩到该检查项。
+并用 `filter` 先把行缩到该检查项。**两侧在不同文件**时改用 `pair_from`(见下节)。
+
+## 参数化查询(`param_from`)与跨源判据——传参链的家
+
+有的判据**一步查不完**:要先查出一个值,拿它当参数再查下一处(常见:「从回显抽出接口名/网元名,
+再去配置/日志里查它」)。这类判据写进**跨源脚本 `cross_analyzer.py`**(assemble 自动生成;由步骤 2.5
+的「跨源补绑」环节填,见 SKILL.md;执行时 runner 把全部数据源都递给它)。三样机制:
+
+**1. `param_from` 传参链(单跳/多跳)**:声明"参数先去哪抽",查询体里 `"@参数名"` 整串占位被代入
+(可用在 filter 值、`contains`/`equals`/`regex` 目标里):
+```python
+{"class": "G", "source": "config", "column": "level2", "contains": ["mode lacp-static"], "absent": True,
+ "filter": {"column": "level1", "equals": "@plink"},
+ "param_from": {"plink": {"source": "cmd", "column": "CmdResult",
+                          "filter": {"column": "CmdName", "contains": "peer-link"},
+                          "extract": {"kv": "Port Name"}}}}
+```
+- 参数规格 = `{source?(缺省=本绑定的 source), column, filter?, extract?}`——**抽参数用的就是现成的
+  选行/取值两层**,没有新语法;
+- **多跳**:参数按声明顺序解析,**后面的可引用前面的**(`@前参数` 用在自己的 filter 里)——
+  「Vbdif → 它的 bridge-domain 号 → 该 BD 的配置」三连查就是三个参数排着写;只能向前引用,天然无环;
+- **诚实守则(内核自动执行)**:参数抽不到 → 整条数据不足(附该列样例);抽出**多个不同值** → 数据不足
+  (歧义,先收窄 filter);查询体用了 `@xxx` 却没声明、或声明了引用顺序不对 → 响亮拒收;
+  **没写 `param_from` 却在查询里用 `@xxx`** → 拒收(否则拿字面 @ 去匹配=恒不命中=假排除)。
+
+**2. `expand` 多值展开**:判据要"**每个** X 都查"(如「每个 Vbdif 接口都必须配 bridge-domain」)时,
+给**一个**参数加 `"expand": "all"`(逐值代入,**全部**满足才成立;违规值点名进 `fail_values`)或
+`"any"`(任一满足即成立;命中值进 `hit_values`)。一条绑定只许一个参数带 expand(防组合爆炸),
+展开值上限 32(超了报数据不足,先收窄)。
+
+**3. P 类 `pair_from`(两侧在不同文件)**:两侧各自「选行 → 取值」再比,替代同表的 side_column 形态:
+```python
+{"class": "P", "source": "config_a", "fault_when": "not_equal", "pair_from": {
+   "local": {"source": "config_a", "column": "level2",
+             "filter": {"column": "level1", "equals": "Nve1"}, "extract": {"kv": "source"}},
+   "peer":  {"source": "config_b", "column": "level2",
+             "filter": {"column": "level1", "equals": "Nve1"}, "extract": {"kv": "source"}}}}
+```
+任一侧抽不到值/源没提供 → 数据不足("查不到对端"不是"不成立");一侧多值 → 数据不足(歧义)。
+
+**绑定期分工**:单源子代理遇到跨源判据**不硬绑也不沉默**,写一行标记
+`{"node_id":"nN","decision":"cross_source","mapping_reason":"<缺哪一环>"}`;merge_conditions 把标记
+汇成 `dispatch/cross_candidates.json`;`make_dispatch --cross` 产一份带**全部源概览+知识**的补绑简报,
+由一个子代理(或主代理)按上面模板填进 cross_analyzer.py。**跨源绑定不走调优表**(工程侧维护)。
 
 > **C/G 的 `contains` 三条铁规**(违者=假阳/假阴,validate 只能软告警,规矩在这就得守):
 > ① **每个 target 都必须独立是"判据成立的充分信号"**(任一命中→判据确实成立):多个等价错误码/告警名

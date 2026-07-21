@@ -40,7 +40,9 @@ _FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "valu
               "top1_count", "valid", "n", "n_rows", "filtered_n", "filter_rows", "distinct",
               "matched_sessions", "lacks_never_seen", "nulls", "op", "threshold", "absent",
               "group_by", "groups", "matched_groups", "sample_group",
-              "match", "extract", "local", "peer", "equal", "fault_when", "n_local", "n_peer")
+              "match", "extract", "local", "peer", "equal", "fault_when", "n_local", "n_peer",
+              "params", "expand", "fail_values", "hit_values", "sample_value",
+              "local_source", "peer_source")
 
 
 _AGG_ZH = {"mean": "平均", "min": "最小", "max": "最大", "sum": "合计", "last": "最新", "first": "最早"}
@@ -93,11 +95,26 @@ def _explain(f: dict) -> str:
         return "需人工现场确认,自动数据判不了"
     cls, col = f.get("class"), f.get("resolved_column")
     pre = ""
+    if f.get("params"):                                  # 参数化查询(X):先说清代入了什么参数
+        pv = "、".join(f"{k}=「{v}」" for k, v in list(f.get("params").items())[:3])
+        pre += f"先从数据里抽出参数({pv})代入,"
     if f.get("filter") and f.get("filter_rows") is not None:
         fd = _filter_zh(f.get("filter"))
         if fd:
-            pre = f"先按「{fd}」筛出 {f.get('filter_rows')} 行,"
+            pre += f"先按「{fd}」筛出 {f.get('filter_rows')} 行,"
     try:
+        ex_info = f.get("expand")
+        if ex_info:                                      # expand 逐值展开:按值说结果,点名违规/命中的值
+            need = "每个值都要满足" if ex_info.get("mode") == "all" else "任一值满足即可"
+            head = (pre + f"参数「{ex_info.get('param')}」共 {ex_info.get('n')} 个值逐个代入查({need}):"
+                    f"{ex_info.get('n_true')} 个成立、{ex_info.get('n_false')} 个不成立")
+            if ex_info.get("n_insuf"):
+                head += f"、{ex_info.get('n_insuf')} 个查不了"
+            if f.get("fail_values"):
+                head += f";不满足的值:「{'」「'.join(f['fail_values'])}」"
+            if f.get("hit_values"):
+                head += f";命中的值:「{'」「'.join(f['hit_values'])}」"
+            return head + f" → {verdict}"
         if cls in ("C", "G"):
             ex = f" 每格抽{_extract_zh(f['extract'])}后" if f.get("extract") else ""
             verb = "按正则匹配" if f.get("match") == "regex" else "找"
@@ -118,7 +135,9 @@ def _explain(f: dict) -> str:
             ex = f"(每格抽{_extract_zh(f['extract'])})" if f.get("extract") else ""
             rule = "不一致即故障" if f.get("fault_when") == "not_equal" else "一致即故障"
             side = "不一致" if not f.get("equal") else "一致"
-            return (pre + f"对比两侧的「{col}」{ex}:本端=「{f.get('local')}」、对端=「{f.get('peer')}」"
+            src = (f"(本端取自「{f.get('local_source')}」、对端取自「{f.get('peer_source')}」)"
+                   if f.get("local_source") or f.get("peer_source") else "")
+            return (pre + f"对比两侧的「{col}」{ex}{src}:本端=「{f.get('local')}」、对端=「{f.get('peer')}」"
                     f"→ 两侧{side},按「{rule}」→ {verdict}")
         if cls == "D":
             need = "全部" if f.get("combine", "AND") == "AND" else "任一"
