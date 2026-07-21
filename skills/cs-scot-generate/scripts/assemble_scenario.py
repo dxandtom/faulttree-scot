@@ -24,16 +24,16 @@ DEFAULT_OUT_CONTAINER = "scot产物"
 #     **静默忽略 filter、在全表上算出假阳**,必须重新 assemble 刷新内核副本。
 PRODUCT_FORMAT_VERSION = 2
 
-# 每个指标一份"逐条件分析脚本"的骨架:模型在 generate 时按 A–J 模板填 CONDITIONS。
+# 每个指标一份"逐条件分析脚本"的骨架:模型在 generate 时按类别模板(A/C/G/D/J/P)填 CONDITIONS。
 # 默认直接套预制内核(evaluate_binding);模板不够用时,模型才为个别条件写 custom。
 # execute 把它当普通脚本跑:python <ind>_analyzer.py <数据> -o out.json,直接吐该源逐条件事实。
 ANALYZER_SCAFFOLD = '''#!/usr/bin/env python3
 """生成的「__IND__」逐条件分析脚本——读表 → 逐条件统计 → 输出事实。
 
-generate 时由模型按 A–J 模板填 CONDITIONS;execute 当普通脚本跑(快):
+generate 时由模型按类别模板(A/C/G/D/J/P)填 CONDITIONS;execute 当普通脚本跑(快):
     python __IND___analyzer.py <数据文件> -o out.json
 默认直接套预制内核;仅当数据格式特殊、模板不够用时,模型才为个别条件写 custom 函数
-(会在 generate 校验时拿真实数据真跑、出错即暴露)。绑定字段与 A–J 参数见同目录 condition_binding_schema.md。
+(会在 generate 校验时拿真实数据真跑、出错即暴露)。绑定字段与各类参数见同目录 condition_binding_schema.md。
 """
 import argparse
 import json
@@ -41,7 +41,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from condition_kernels import load_table, evaluate_binding  # 预制模板库(A–J 内核)
+from condition_kernels import load_table, evaluate_binding  # 预制模板库(A/C/G/D/J/P 内核)
 
 INDICATOR = "__IND__"
 
@@ -155,7 +155,7 @@ def build_plan(scenario: str, indicators: List[str], tree_rel: str, stem: str = 
             "id": ind,
             "kind": "script",
             "name": f"{ind}_analyzer",
-            "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按 A–J 模板算好)",
+            "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按类别模板算好)",
             "inputs": {"data": f"$input.{ind}"},
             "outputs": {"result": f"$memory.{ind}_result"},
             "transition": {"next_on_success": nxt},
@@ -294,7 +294,7 @@ def main() -> None:
         (out / "tree" / "solutions.json").unlink()
     # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
     here = Path(__file__).parent
-    copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # A–J 模板库
+    copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # 类别模板库
     copy_into(here / "mo_config.py", out / "scripts" / "mo_config.py")                  # 配置拓扑适配器:MO文本→表 + IP/追溯原语(.txt 配置 + custom 用)
     copy_into(here / "analyzer.py", out / "scripts" / "analyzer.py")                    # 概览辅助:模型先看列再填条件
     copy_into(here.parent / "references" / "condition_binding_schema.md",
@@ -345,7 +345,7 @@ def main() -> None:
 
     print(f"已归集场景产物: {out}")
     print(f"  plan.json(SCoT v4.0)+ manifest.json(产物铭牌,格式契约 v{PRODUCT_FORMAT_VERSION})"
-          f"+ scripts/condition_kernels.py(A–J 模板库)"
+          f"+ scripts/condition_kernels.py(类别模板库)"
           f"+ scripts/<指标>_analyzer.py(待填骨架)+ tree/{stem}.md")
     to_fill = scaffolded + regenerated
     if to_fill:
@@ -353,7 +353,7 @@ def main() -> None:
             print(f"  (重跑重铺了 {regenerated},旧脚本各留了 .py.bak;它们现在是空骨架,需重新填 CONDITIONS)")
         print(f"\n下一步(generate 的关键一步):为 {to_fill} 各自的 <指标>_analyzer.py 填 CONDITIONS——")
         print("  先用 analyzer.py 看各源真实列;再按 condition_binding_schema.md,把故障树每条判据")
-        print("  路由到对应源、选 A–J 内核、对哪列(裸名即可,组前缀自动剥)、给阈值/变换;对不上就标数据不足。")
+        print("  路由到对应源、选 A/C/G/D/J/P 内核、对哪列(裸名即可,组前缀自动剥)、给阈值/变换;对不上就标数据不足。")
         print("  默认直接套模板;模板不够用才为个别条件写 custom。填好后用真实数据各跑一遍校验:")
         for ind in to_fill:
             print(f"    python {out}/scripts/{ind}_analyzer.py <{ind}数据> -o /tmp/{ind}.json && "

@@ -168,7 +168,7 @@ def _target_warnings(conditions):
         if any(w in ct for w in _NEG_TREND) and not any(_ALARM_SHAPE.search(t) for t in targets):
             warns.append(f"⚠ 语义错配嫌疑:「{cid}」判据含否定/趋势词(为空/未建立/增长/震荡…),"
                          f"但绑定是文本捞子串且无告警码形 target——子串命中表达不了这类语义。"
-                         f"数据有携带极性的状态枚举列(值如 Down/FAILED)→ 改绑 equals/F 类 not_equals 最轻;"
+                         f"数据有携带极性的状态枚举列(值如 Down/FAILED)→ 改绑 equals(杂糅格加 extract 抽值)最轻;"
                          f"否则改绑检测告警名、写 custom 抽值,或 decision:insufficient_data{detail}")
     return warns
 
@@ -196,15 +196,15 @@ def main() -> int:
         cls = c.get("class") or f.get("class")
 
         if not cls:
-            problems.append(f"[类别缺失]「{cid}」没有 class(应为 A–J)")
+            problems.append(f"[类别缺失]「{cid}」没有 class(应为 A/C/D/G/J/P)")
         if str(cls).upper() == "J" and st != "manual":
             problems.append(f"[J类越权]「{cid}」J 类应 status=manual,实际 {st!r}")
 
         # 数据不足 / 列没解析到,却给了判断 → 编造
         if st == "insufficient_data" and pred is not None:
             problems.append(f"[无中生有]「{cid}」数据不足却给了 predicate_satisfied={pred!r}")
-        # 各内核"解析到了什么"的痕迹字段(A/F/I:resolved_column;B:resolved_columns;D:sub_facts;
-        # H:msg_column;E:group_by)。一个都没有却给了判断,才算无中生有。
+        # 各内核"解析到了什么"的痕迹字段(A/C/G/P:resolved_column;D:sub_facts 或 group_by;
+        # resolved_columns/msg_column 是 v1 封存类的痕迹,旧产物兼容保留)。一个都没有却给了判断,才算无中生有。
         _prov = ("resolved_column", "resolved_columns", "sub_facts", "msg_column", "group_by")
         if st == "ok" and pred is not None and not any(f.get(k) is not None for k in _prov):
             problems.append(f"[无中生有]「{cid}」没解析到任何列/痕迹却给了 predicate_satisfied={pred!r}")

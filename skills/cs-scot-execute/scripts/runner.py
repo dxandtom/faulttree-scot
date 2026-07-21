@@ -180,8 +180,9 @@ def _file_fingerprint(path: str) -> dict:
 
 
 def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[str, str], base: Path,
-                        missing_inputs=None) -> None:
-    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs/index.jsonl 追加一行,供生产侧管理。"""
+                        missing_inputs=None, runs_base: Path = None) -> None:
+    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs/index.jsonl 追加一行,供生产侧管理。
+    runs/index.jsonl 落在 runs_base(默认=base;--result-base 生效时=结果根目录)下。"""
     import datetime
     created = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     inputs = {k: _file_fingerprint(v) for k, v in data_map.items() if v}  # 空值=没提供:归 missing_inputs,不指纹(Path('') 会指到 CWD)
@@ -190,7 +191,7 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
     if missing_inputs:                                   # 部分数据运行:铭牌上写明缺口,事后一看便知这轮少了啥
         manifest["missing_inputs"] = sorted(missing_inputs)
     (run_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    idx = base / "runs" / "index.jsonl"
+    idx = (runs_base or base) / "runs" / "index.jsonl"
     idx.parent.mkdir(parents=True, exist_ok=True)
     with idx.open("a", encoding="utf-8") as f:           # 一行一运行:run_id + 时间 + 各输入指纹,便于事后检索/去重
         f.write(json.dumps({"run_id": run_id, "created_at": created,
@@ -228,7 +229,8 @@ def _archive_previous_run(result_dir: Path, runs_dir: Path):
     return dst
 
 
-def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_subdir: str = "result") -> Any:
+def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_subdir: str = "result",
+                         result_base: Path = None) -> Any:
     """执行 kind=agent_skill 节点:备好输入,交给该 prompt-only 技能(模型)执行。
 
     runner 自身不调模型;它把解析好的 inputs 写到 result/<id>_input.json 并打印待办,
@@ -286,7 +288,7 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
     if missing_ind:      # 两种形态都带上缺数标记(顶层键,下游 RCA/辩论桥都能看到)
         payload["missing_indicators"] = missing_ind
 
-    in_path = base / result_subdir / f"{node['id']}_input.json"
+    in_path = (result_base or base) / result_subdir / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     # 注:上一轮的最终结果已在 main() 启动时整体归档到 runs/<上轮run_id>/,result/ 此刻只剩本轮的新输入,
@@ -329,6 +331,9 @@ def main() -> None:
     ap.add_argument("--data", action="append", default=[],
                     help="$input 绑定,如 --data kpi=path.csv(可多次)")
     ap.add_argument("--base", help="路径解析基准目录(默认取 plan.json 所在目录)")
+    ap.add_argument("--result-base", help="结果输出根目录:result/ 与 runs/ 落在它下面(默认=--base,"
+                                          "即产物目录,老行为不变)。平台不允许技能写自身目录时用它把结果"
+                                          "外移,如 --result-base <技能目录>/../<技能名>-result")
     ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」)。result/ 始终=当前一轮;"
                                      "重跑前自动把上一轮整体归档到 runs/<上轮run_id>/,history 不丢、不覆盖、无歧义")
     ap.add_argument("--new-run", action="store_true",
@@ -388,11 +393,15 @@ def main() -> None:
     # 每轮自动带 run_id(--run-id 可自定义),写 result/run.json 标明本轮身份 + 追加 runs/index.jsonl。
     # eval/benchmark 仍读 result/(= 当前轮),不受影响。
     run_id = args.run_id or _gen_run_id()
-    result_dir = base / "result"
-    archived = _archive_previous_run(result_dir, base / "runs")
+    result_base = Path(args.result_base).resolve() if args.result_base else base
+    result_dir = result_base / "result"
+    archived = _archive_previous_run(result_dir, result_base / "runs")
     result_dir.mkdir(parents=True, exist_ok=True)
-    _write_run_manifest(result_dir, run_id, plan, data_map, base, missing_inputs=missing)
+    _write_run_manifest(result_dir, run_id, plan, data_map, base, missing_inputs=missing,
+                        runs_base=result_base)
     result_subdir = "result"
+    if result_base != base:
+        print(f"  结果目录:{result_dir}(--result-base 生效,不往产物/技能目录写)")
     if archived:
         print(f"  run_id={run_id};上一轮已归档 → {archived}（result/ 即当前轮，历史在 runs/）")
     else:
@@ -416,7 +425,7 @@ def main() -> None:
             else:
                 result = run_script_node(node, ctx, base)
         elif kind == "agent_skill":
-            result = run_agent_skill_node(node, ctx, base, result_subdir)
+            result = run_agent_skill_node(node, ctx, base, result_subdir, result_base)
         else:
             raise ValueError(f"节点 {cur} 的 kind={kind} 暂不支持(当前实现 script / agent_skill)")
         ctx["step"][cur] = result

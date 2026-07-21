@@ -39,15 +39,52 @@ _FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "valu
               "matched", "total", "ratio", "top", "count_satisfied", "top1", "top1_ratio",
               "top1_count", "valid", "n", "n_rows", "filtered_n", "filter_rows", "distinct",
               "matched_sessions", "lacks_never_seen", "nulls", "op", "threshold", "absent",
-              "group_by", "groups", "matched_groups", "sample_group")
+              "group_by", "groups", "matched_groups", "sample_group",
+              "match", "extract", "local", "peer", "equal", "fault_when", "n_local", "n_peer")
 
 
 _AGG_ZH = {"mean": "平均", "min": "最小", "max": "最大", "sum": "合计", "last": "最新", "first": "最早"}
+_CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
+
+
+def _filter_zh(flt) -> str:
+    """filter 子句 →「列=值」短语(让 explain 说清"先选中了哪些行再算")。拼不出返回空串。"""
+    try:
+        parts = []
+        for c in (flt if isinstance(flt, list) else [flt]):
+            tgt = c.get("equals") if c.get("equals") is not None else c.get("contains")
+            if isinstance(tgt, list):
+                tgt = "/".join(str(t) for t in tgt)
+            parts.append(f"{c.get('column')}={tgt}")
+        return "、".join(parts)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _extract_zh(spec) -> str:
+    """extract 规格 → "抽哪段值"短语。"""
+    if not isinstance(spec, dict):
+        return ""
+    return (f"「{spec['kv']}」后面的值" if spec.get("kv")
+            else f"正则「{spec.get('regex')}」抽出的值")
+
+
+def _sub_explains(subs) -> str:
+    """把 D 组合的各子条件事实递归拼成 ①…;②… 一段(数字全部来自事实原字段)。"""
+    parts = []
+    for i, sf in enumerate((subs or [])[:4]):
+        mark = _CIRCLED[i] if i < len(_CIRCLED) else f"{i + 1}."
+        parts.append(mark + (_explain(sf) or f"子条件{i + 1}({sf.get('class')} 类,详见 sub_facts)"))
+    if len(subs or []) > 4:
+        parts.append(f"…等共 {len(subs)} 个子条件")
+    return ";".join(parts)
 
 
 def _explain(f: dict) -> str:
     """把一条事实拼成"怎么判的"人话(给不懂判据分类的人看,也给 RCA 报告直接引用)。
-    机械生成、数字取自事实原字段——弱模型引用它就不会把数值/规则改写编错。拼不出的类返回空串。"""
+    机械生成、数字取自事实原字段——弱模型引用它就不会把数值/规则改写编错。拼不出的类返回空串。
+    D 组合(含 group_by 分组)会**递归**拼装各子条件的解释:报告读者能看到"在哪个组里、
+    每个子条件各命中多少"而非一句笼统的"组合成立"。"""
     st, pred = f.get("status"), f.get("predicate_satisfied")
     verdict = "成立" if pred is True else ("不成立" if pred is False else "无法判定")
     if st == "insufficient_data":
@@ -55,28 +92,56 @@ def _explain(f: dict) -> str:
     if st == "manual":
         return "需人工现场确认,自动数据判不了"
     cls, col = f.get("class"), f.get("resolved_column")
+    pre = ""
+    if f.get("filter") and f.get("filter_rows") is not None:
+        fd = _filter_zh(f.get("filter"))
+        if fd:
+            pre = f"先按「{fd}」筛出 {f.get('filter_rows')} 行,"
     try:
         if cls in ("C", "G"):
+            ex = f" 每格抽{_extract_zh(f['extract'])}后" if f.get("extract") else ""
+            verb = "按正则匹配" if f.get("match") == "regex" else "找"
             tgt = "、".join(f"「{t}」" for t in (f.get("targets") or [])[:3])
             if f.get("absent"):
                 hit = f.get("matched", 0)
-                return (f"在「{col}」列的 {f.get('total')} 行里找 {tgt} → 命中 {hit} 行"
+                return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {hit} 行"
                         + ("(没有这项内容,即「未配置」)→ 成立" if hit == 0 else "(该内容存在)→ 不成立"))
-            return (f"在「{col}」列的 {f.get('total')} 行里找 {tgt} → 命中 {f.get('matched')} 行 → {verdict}")
+            return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {f.get('matched')} 行 → {verdict}")
         if cls in ("A", "B"):
+            ex = f"每格抽{_extract_zh(f['extract'])},再" if f.get("extract") else ""
             op, thr = f.get("op"), f.get("threshold")
             if f.get("scope") == "count_rows":
-                return (f"「{col or '差值'}」逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足 → {verdict}")
+                return (pre + f"「{col or '差值'}」{ex}逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足 → {verdict}")
             agg = _AGG_ZH.get(f.get("agg"), f.get("agg") or "")
-            return (f"「{col or '差值'}」{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}")
+            return (pre + f"「{col or '差值'}」{ex}{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}")
+        if cls == "P":
+            ex = f"(每格抽{_extract_zh(f['extract'])})" if f.get("extract") else ""
+            rule = "不一致即故障" if f.get("fault_when") == "not_equal" else "一致即故障"
+            side = "不一致" if not f.get("equal") else "一致"
+            return (pre + f"对比两侧的「{col}」{ex}:本端=「{f.get('local')}」、对端=「{f.get('peer')}」"
+                    f"→ 两侧{side},按「{rule}」→ {verdict}")
         if cls == "D":
+            need = "全部" if f.get("combine", "AND") == "AND" else "任一"
             if f.get("group_by"):
-                mg = "、".join(f.get("matched_groups") or [])
-                return (f"按「{f.get('group_by')}」分成 {f.get('groups')} 组,每组单独查全部子条件:"
-                        + (f"「{mg}」组全部满足 → 成立" if pred is True else "没有任何一组全部满足 → 不成立"))
-            n = len(f.get("sub_facts") or [])
-            need = "全部" if f.get("combine") == "AND" else "任一"
-            return f"{n} 个子条件须{need}满足(各子条件详见 sub_facts)→ {verdict}"
+                mg = f.get("matched_groups") or []
+                detail = _sub_explains(f.get("sub_facts"))
+                sample = f.get("sample_group")
+                if pred is True:
+                    head = (f"按「{f.get('group_by')}」分成 {f.get('groups')} 组,每组单独查全部子条件:"
+                            f"「{'」「'.join(mg)}」{'等 ' + str(f.get('matched_groups_total')) + ' 个' if f.get('matched_groups_total') else ''}组满足")
+                    if detail and sample:
+                        head += f"——以「{sample}」组为例:{detail} → 组内{need}满足"
+                    return head + " → 成立"
+                head = (f"按「{f.get('group_by')}」分成 {f.get('groups')} 组,每组单独查全部子条件:"
+                        f"没有任何一组{need}满足")
+                if detail and sample:
+                    head += f"(以「{sample}」组为例:{detail})"
+                return head + " → 不成立"
+            subs = f.get("sub_facts") or []
+            detail = _sub_explains(subs)
+            return (f"{len(subs)} 个子条件须{need}满足:{detail} → {verdict}" if detail
+                    else f"{len(subs)} 个子条件须{need}满足(各子条件详见 sub_facts)→ {verdict}")
+        # ---- 以下为 v1 封存内核类(B/E/F/H/I)的解释,留作旧产物兼容:旧场景包自带旧内核照常出事实 ----
         if cls == "F":
             dv = "、".join(str(v) for v in (f.get("distinct_values") or [])[:3])
             return f"配置「{col}」实际取值:{dv},判「{f.get('compare')} {f.get('expected')}」→ {verdict}"
@@ -103,7 +168,7 @@ def _slim_fact(entry: dict) -> dict:
     if entry.get("mapping_reason"):
         out["mapping_reason"] = entry["mapping_reason"][:100]
     out.update({k: f[k] for k in _FACT_KEEP if k in f})
-    # 非 ok 事实带上机器理由(截断):内核的"为什么数据不足"(含 H 类词汇样例、列解析失败详情)是 RCA 写
+    # 非 ok 事实带上机器理由(截断):内核的"为什么数据不足"(含 extract 抽不到的样例、列解析失败详情)是 RCA 写
     # undetermined/复核错误绑定的弹药——绑定算错时,模型靠它才有翻案余地。只挂非 ok、封 160 字,压缩比无感。
     if f.get("status") != "ok" and f.get("reason"):
         out["reason"] = str(f["reason"])[:160]

@@ -21,6 +21,8 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
   结论只代表已提供数据能看到的部分。注意:一个数据源都没给仍是硬报错(用法错误);`--data` 的 key 打错
   会触发「plan 用不到的数据源」告警——看到它先核对 key 名,别让 typo 静默变成跳过。
 - `--base <dir>`:相对路径基准目录,默认是 `plan.json` 所在目录。
+- `--result-base <dir>`:结果输出根目录(`result/` 与 `runs/` 落在它下面),默认=`--base` 即产物目录、
+  老行为不变。**运行平台不允许往技能/产物目录写文件时用它把结果外移**(场景打包形态必用,见下)。
 
 ## 场景打包形态(assets/)——一句话执行
 
@@ -34,8 +36,15 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 2. **数据↔指标匹配**:指标名 = `assets/scripts/` 下的 `<指标>_analyzer.py` 前缀;数据文件按
    文件名与指标名匹配(相等或包含,如 `config_20250701.csv` → `config`)。**匹配不上的文件
    跳过**、plan 需要但没给的源自动 `[skip]`(runner 内建)——两类都必须写进汇报,不许静默。
-3. **执行**:`python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" --data <指标>=<文件> ...`
-   (`result/` 落在 `assets/` 下);rca 步骤按 `assets/fault-tree-rca/` 的规则做。
+3. **执行**:
+   ```
+   python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" \
+     --result-base "<本目录>/../<本技能目录名>-result" --data <指标>=<文件> ...
+   ```
+   **`--result-base` 必带**:平台不允许技能写自身目录下的文件,结果(`result/`、`runs/`)写到
+   **与本技能平齐**的 `<本技能目录名>-result/` 目录(如技能叫 `layer-3-service-issues`,结果就在
+   它旁边的 `layer-3-service-issues-result/`);rca 步骤按 `assets/fault-tree-rca/` 的规则做,
+   rca.json 也写在该结果目录(以 runner 打印的路径为准)。
 4. **【输出汇报】固定模板(默认执行,无须用户要求;各节内容与 rca.json 严格口径一致,别自创表格样式/emoji)**:
    ```
    ## 执行过程

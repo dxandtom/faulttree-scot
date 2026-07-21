@@ -308,7 +308,7 @@ def main() -> None:
                                   f"(只认 {'/'.join(sorted(_DECISIONS))})")
                 elif dec is None and cls not in _CLASSES:
                     errors.append(f"第{rowno}行「{name}」绑定:{s}: class「{b.get('class')}」不认识"
-                                  "(A–J 之一;查不了就写 decision,模板见 tuning-guide.md)")
+                                  "(A/C/D/G/J/P 之一;查不了就写 decision,模板见 tuning-guide.md)")
             binds[s].append((ri, key, items))
 
     roots = [k for k in order if nodes[k]["parent"] is None]
@@ -378,7 +378,7 @@ def main() -> None:
         for i, ind in enumerate(indicators):
             nxt_id = indicators[i + 1] if i + 1 < len(indicators) else "rca"
             pnodes.append({"id": ind, "kind": "script", "name": f"{ind}_analyzer",
-                           "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按 A–J 模板算好)",
+                           "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按类别模板算好)",
                            "inputs": {"data": f"$input.{ind}"},
                            "outputs": {"result": f"$memory.{ind}_result"},
                            "transition": {"next_on_success": nxt_id}})

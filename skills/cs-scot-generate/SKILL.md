@@ -15,12 +15,16 @@ description: 把故障树(Excel)+ 若干指标数据编译成场景诊断产物:
 > - 输入路径可能带空格、括号、中文(如 `EnhancedExcelDataExport (7).xlsx`),命令里**整条路径务必加引号**。
 > - 产物是数据/资产(交给执行器 cs-scot-execute 去跑),不是可执行程序。
 
-## 核心:按 A–J 模板生成"逐条件分析脚本"(generate 编译、execute 只跑)
-故障树条件分 **A–J 十类**(阈值/差值/字段匹配/组合/占比TopN/配置/日志/信令/特征/人工)。统计逻辑已**预制成测过的内核库** `scripts/condition_kernels.py`;generate 时**你按真实数据,为每个指标填一份"逐条件分析脚本" `<ind>_analyzer.py`**——读表 → 逐条件统计 → 输出事实。
+## 核心:按类别模板生成"逐条件分析脚本"(generate 编译、execute 只跑)
+故障树条件分 **A/C/G/D/J/P 六类**(阈值比较/字段匹配/日志匹配/多条件组合/人工确认/成对比较),
+配三个横切能力:**`filter` 选行、`extract` 格内取值、`regex` 正则匹配**。统计逻辑已**预制成测过的
+内核库** `scripts/condition_kernels.py`;generate 时**你按真实数据,为每个指标填一份"逐条件分析脚本"
+`<ind>_analyzer.py`**——读表 → 逐条件统计 → 输出事实。
 - 默认**直接套模板**(`evaluate_binding`:选类别、对哪列、阈值/变换;组前缀 `Common:` 自动剥);
 - 仅当数据格式特殊、模板不够用时,才为个别条件写 `custom` 函数(会在步骤3拿真实数据真跑、出错即暴露)。
+- v1 的 B/E/F/H/I 内核已封存 `archive/kernels-v1/`(数通判据普查零命中;老产物自包含旧副本不受影响)。
 
-这样**generate 产出"读表+统计"的代码;execute 只按序跑脚本(快)+ 末尾一次 RCA(慢)**。是否成立/路径回溯/跨源组合,交给 `fault-tree-rca`。绑定字段与 A–J 参数见 `references/condition_binding_schema.md`;先用 `analyzer.py` 看各源真实列(概览:列清单+数值摘要/十分位+nulls)。
+这样**generate 产出"读表+统计"的代码;execute 只按序跑脚本(快)+ 末尾一次 RCA(慢)**。是否成立/路径回溯/跨源组合,交给 `fault-tree-rca`。绑定字段与各类参数见 `references/condition_binding_schema.md`;先用 `analyzer.py` 看各源真实列(概览:列清单+数值摘要/十分位+nulls)。
 
 ## 输入
 - 故障树 `.xlsx`(绝对路径)。
@@ -66,7 +70,7 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<�
 python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
-它把 A–J 模板库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览引擎 `analyzer.py`、绑定契约拷进 `<OUT>/scripts/`(**这几个库每次重跑都刷新**),为每个指标写一份**待填骨架** `<ind>_analyzer.py`,并产出 `plan.json`(`各<ind>_analyzer(script)→rca(agent_skill)`)。`--out` 用步骤 1 打印的 `<OUT>`。格式见 `references/plan_schema.md`。
+它把类别模板库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览引擎 `analyzer.py`、绑定契约拷进 `<OUT>/scripts/`(**这几个库每次重跑都刷新**),为每个指标写一份**待填骨架** `<ind>_analyzer.py`,并产出 `plan.json`(`各<ind>_analyzer(script)→rca(agent_skill)`)。`--out` 用步骤 1 打印的 `<OUT>`。格式见 `references/plan_schema.md`。
 > **assemble 有两道硬闸门(退出码 1)**:①`tree/` 下找不到步骤 1 产物 `*.tree_index.json`,或 index 里的场景名/短名与 `--scenario` 对不上(步骤 1 没跑/名字不一致/目录错位;新旧两代产物并存时报歧义、退出码 2);②树 0 判据。报错里带排查指引——拦的是"步骤 1 没跑好就往下绑"的病根,别绕。
 > **重跑 = 重新编译**:已存在的 `<ind>_analyzer.py` 默认**会被当前版本的空骨架覆盖**(旧的先备份成 `.py.bak`),所以**更新 skill 后直接重跑就能生效,不用手删旧脚本**;模型随后在步骤 2.5 重新填。确需保留上次填好的脚本 → 加 `--keep`。
 
@@ -76,7 +80,7 @@ python "<本目录>/scripts/assemble_scenario.py" \
 python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o "<OUT>/overview/<ind>_overview.json"   # 精简概览:列名/量纲/类别取值(目录会自动建)
 ```
 `--lean` 砍掉十分位+样例(填 CONDITIONS 用不到),只留**列名 / min·max·mean(定阈值/量纲)/ 类别取值(C 类匹配)**——读得快、上下文小、不影响正确性。多页签 xlsx:先不带 `--sheet` 看页签清单,再 `--sheet <名> --lean` 看某页详情。
-按 `references/condition_binding_schema.md`,把判据**路由到对应源**、填进该源脚本的 `CONDITIONS`(选 A–J 类、对哪列〔裸名即可〕、阈值/变换;对不上标 `decision:insufficient_data`)。**每条都填 `node_id`**(取自 `tree_index.json` 里的短 id `nN`)——RCA 靠它把事实挂回树、并把上下文压成局部子树。**默认套模板,非改不可才写 `custom`**。跨源的组合各源分别出子事实,AND/OR 留给 RCA 合。
+按 `references/condition_binding_schema.md`,把判据**路由到对应源**、填进该源脚本的 `CONDITIONS`(选 A/C/G/D/J/P 类、对哪列〔裸名即可〕、阈值/变换/extract;对不上标 `decision:insufficient_data`)。**每条都填 `node_id`**(取自 `tree_index.json` 里的短 id `nN`)——RCA 靠它把事实挂回树、并把上下文压成局部子树。**默认套模板,非改不可才写 `custom`**。跨源的组合各源分别出子事实,AND/OR 留给 RCA 合。
 > **⚡ 提速:并行绑定,派发准备交给脚本,模型只管"派"和"收"**。先跑
 > `python "<本目录>/scripts/make_dispatch.py" --out "<OUT>"` ——机械生成每个子代理的**自包含简报** `<OUT>/dispatch/<ind>_batch<N>.txt`:判据自动切批(≤50 条/批,防单次生成过长——回复截断和 600s 流挂是同一病的两副面孔)、该源概览/枚举**原文**自动嵌入(零转述零删减)、公共规约与 C/G·EAV 铁规固定文本;**EAV 源缺枚举会响亮拒产**并给出抽枚举命令,先补再跑。派发提示词一句话:「你的全部任务和材料在 <简报路径>,用 Read 读完它(可分段),照其中规约执行——结果写到简报指定的结果文件,最终回复只报『共 N 条,已写 <路径>』」(子代理**各写各的** `<本批>_result.py`,零竞态;绑定内容从此不过任何模型的上下文——实测走"回复→主代理转录→Edit 重打"三过上下文,撑爆主会话、写入代理流挂)——**一份简报派一个子代理**;简报多就**分波派**(一波 4~8 个,收完一波再下一波),**不许**为省事把多份简报合并给一个子代理(合并=拆批白做,截断/流挂回归),也别转述简报内容;子代理读不了文件的环境(权限没配)→ 主代理把简报全文读入后**原样**贴进派发词(简报已拼装好,纯复制)。简报/概览都住 `<OUT>` 圈内,严禁 `/tmp`(Windows 上=用户 Temp=圈外,后台子代理读写被拒)。
 > **收货=跑合并脚本(幂等、先到先合,不必等全齐)**:`python "<本目录>/scripts/merge_conditions.py" --out "<OUT>"` ——机械完成验收(逐批 ast 可解析、无 U+FFFD 乱码,点名「C/G 缺 contains/equals」的野格式与缺 `node_id` 的条目)、按源合并去重(实测子代理会把同段重复两遍)、用 ast 定位骨架块把 CONDITIONS **直接写进** `<ind>_analyzer.py` 并做落盘后语法自检——模型不再手工 Edit,也不许自写替换脚本(实测孤儿 `]` 五连炸)。收到几批就能跑几批,**"谁先回来先写谁"天然成立**;脚本输出里的**缺批/坏批照单同简报重派一次**(流挂/截断多为偶发)→ 再失败,主会话自己按简报绑、把结果写成该批 `_result.py` 再跑合并。**明令禁止"取不到就编造占位"**(循环生成 `insufficient_data` 占位=踩量产红线+每个节点都被"认领"、覆盖度闸门对真漏绑集体失明,实测过);禁止转包单代理吞全量;子代理只写自己批次的结果文件,**不许**直改 `<ind>_analyzer.py`(多代理同改一个文件必竞态,合并必须走脚本串行)。
@@ -85,7 +89,9 @@ python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o "<OUT>/overview
 > **⚠ 多源都能答就都绑、不许谦让;多子条件要绑全**:各源子代理**互相看不见**——"这个大概日志侧会绑"的谦让=两边都没绑;本源能答就绑,多源同绑同一节点是**期望行为**(各出各的事实,主次让 RCA 合)。一个节点的判据常是**多个子条件都要满足**(换行/且/①② 分隔):把本源能答的**每个子条件**都绑上(单源多子条件用 D 组合;答不了的子条件显式 `decision:insufficient_data`),**不是碰到一条就算认领了这个节点**。步骤 3 的闸门会输出跨源认领对账,专逮这两种。**反过来也别灌水:明显不归本源答的判据整条不用写**(不写=不认领,让覆盖度闸门/对账把真漏绑显出来),`decision` 占位只给「确属本源该答、这次却答不了」的——对全树 158 条逐条表态两次实测都是灾难:撑爆回复被截断丢数据、每个节点都被"认领"把闸门糊瞎、"数据不足"口径失真。
 > **⚠ 写进去后核对覆盖度(别只数条数)**:主代理写完,跑步骤3的 **`check_tree_coverage.py`** 机械核对——**`❌ 漏绑`>0(本源能答的叶子没绑)= 没写全,回去补,别往下跑**;**0 条或异常少**几乎一定是数据驱动/没收齐造成的欠绑定。
 > **泛化第一(重要)**:绑定按**格式+语义**,别被这次数据带偏。**节点级"整体有没有失败"若本源有该流程同事件的成功率列 → 直接用(A 类,阈值=100/按量纲),这是重述不是代理**;但**特定失败子因的计数器不在本源列里 → `decision:insufficient_data` 或换源,绝不拿通用率代理、绝不把多条判据塞给同一列**(语义错+恒成立+丢泛化)。判别看列**度量什么(建立 vs 掉线)**、别看名字。**绑率前机械自检:① 流程词逐字对上(UECntx/RRC/NGSig/QosFlow 不互代);② 计数器不含 `.FailEst.`(含=子因,禁率)。** 一次生成要能反复执行不同数据。
-> **信令 / H 类先认消息词汇**:多页签信令源,先 `analyzer.py "<数据>" --sheet <带 MessageType 的页签(如 detailInfoRight)> --lean -o "<OUT>/overview/<页签>_overview.json"` 看 `MessageType`/`InterfaceType`/cause 的**真实取值**;`has`/`lacks`/`where` 只能绑**数据里真出现过**的消息名,**别照故障树正文猜**(`has` 猜错内核守卫会改判数据不足并附真实词汇样例;`lacks`/`where` 猜错则**静默**退化——恒真/恒 0,该路径假阴性、整源白填)。
+> **先认数据词汇再绑值**:枚举/消息名类的目标值(C/G 的 `equals`、EAV 的 `filter.equals`)只能绑
+> **数据里真出现过**或**概览/枚举清单里在册**的写法,**别照故障树正文猜拼写**;概览可能截断,拿不准就
+> 抽全量枚举核对(见 `references/datacom_log_adapter.md`)。(v1 H 类的 has/lacks 词汇规矩随内核封存。)
 
 ### 步骤 3:用真实数据验证每个生成脚本
 ```bash
@@ -113,7 +119,7 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 ├── plan.json                              # SCoT 计划(产物①)
 ├── manifest.json                          # 产物铭牌:格式契约版本+生成时间(execute/benchmark 启动比对,旧产物只告警)
 ├── scripts/<ind>_analyzer.py              # 逐条件分析脚本(模型填 CONDITIONS,产物②)
-├── scripts/condition_kernels.py           # A–J 模板库(脚本 import 它)
+├── scripts/condition_kernels.py           # 类别模板库(脚本 import 它)
 ├── scripts/mo_config.py                   # 配置拓扑适配器(MO 文本→表 + custom 原语)
 ├── scripts/analyzer.py                    # 概览引擎(步骤 2.5 模型看列用)
 ├── overview/                              # 各源概览/枚举——仅绑定期用,含真实数据样本,步骤 4 交付前删
