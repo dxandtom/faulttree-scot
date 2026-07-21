@@ -7,8 +7,8 @@
 (默认 ≤50 条/批)、该源概览/枚举原文自动嵌入、公共规约与 C/G·EAV 铁规是固定文本,
 模型只剩「每份简报派一个子代理」一个动作。
 
-产物:<OUT>/dispatch/<ind>_batch<N>.txt(自包含:公共规约 + 本源要点 + 数据词汇原文
-+ 该批判据原文 + 输出格式)。派发句式(主代理用):
+产物:<OUT>/dispatch/<ind>_batch<N>.txt(自包含:公共规约 + 外挂知识(tree/knowledge.md
+按「适用」标签匹配的条目)+ 本源要点 + 数据词汇原文 + 该批判据原文 + 输出格式)。派发句式(主代理用):
   「你的全部任务和材料在 <简报路径>,用 Read 读完它(可分段),照其中规约执行,结果放最终回复」
 子代理读不了文件的环境(权限没配)→ 主代理把简报全文读入后原样贴进派发词(纯复制,零转述)。
 简报只在绑定期有用,交付前清场(SKILL 步骤 4)会删掉 dispatch/。
@@ -25,6 +25,7 @@ import argparse
 import glob
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -112,7 +113,49 @@ def find_enums(ov_dir: Path, ind: str) -> list:
     return files
 
 
-def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_text, is_eav, enum_texts, result_path):
+def parse_knowledge(text: str):
+    """knowledge.md 正文 → [{title, tags(或None), body}]。条目=「### 标题」起头,紧跟可选
+    「适用:标签1、标签2」行,其余为正文;首个 ### 之前的说明文字忽略。"""
+    entries, cur = [], None
+    for line in text.splitlines():
+        if line.startswith("### "):
+            cur = {"title": line[4:].strip(), "tags": None, "body": []}
+            entries.append(cur)
+        elif cur is not None:
+            s = line.strip().replace(":", ":")
+            if cur["tags"] is None and not cur["body"] and s.startswith("适用:"):
+                cur["tags"] = [t for t in re.split(r"[、,,/\s]+", s.split(":", 1)[1]) if t]
+            elif line.strip() or cur["body"]:
+                cur["body"].append(line)
+    return [e for e in entries if "\n".join(e["body"]).strip()]
+
+
+def match_knowledge(entries, name_pool: str):
+    """按「适用」标签挑与当前树相关的条目:无标签/含「通用」恒选;有标签则任一标签
+    出现在 name_pool(节点名+判据文本拼串)才选——按分支载入,不全量灌。"""
+    picked = []
+    for e in entries:
+        if e["tags"] and "通用" not in e["tags"] and not any(t in name_pool for t in e["tags"]):
+            continue
+        tagline = f"(适用:{'、'.join(e['tags'])})" if e["tags"] else ""
+        picked.append(f"◆ {e['title']}{tagline}\n" + "\n".join(e["body"]).strip())
+    return picked
+
+
+def load_knowledge(out: Path, name_pool: str):
+    """<OUT>/tree/knowledge.md(业务同事手写的外挂知识)→ 匹配本树的条目文本块;无文件/无匹配 → None。"""
+    kf = out / "tree" / "knowledge.md"
+    if not kf.exists():
+        return None
+    try:
+        picked = match_knowledge(parse_knowledge(kf.read_text(encoding="utf-8")), name_pool)
+    except OSError:
+        return None
+    return "\n\n".join(picked) if picked else None
+
+
+def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_text, is_eav, enum_texts, result_path,
+                   knowledge_text=None):
     sec = []
     sec.append(f"# 绑定简报:{ind} 源 · 第 {batch_no}/{n_batches} 批(本批 {len(batch)} 条判据,全树共 {total} 条;"
                f"其余批由别的子代理处理,你只管本批)\n【结果文件】{result_path}")
@@ -121,6 +164,13 @@ def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_te
     sec.append(COMMON_RULES.format(ind=ind))
     if is_eav:
         sec.append(EAV_RULES)
+    if knowledge_text:
+        sec.append("【外挂知识(业务同事手写,绑定时优先参考)】\n"
+                   "下面的条目讲了本场景「去哪个源查、看哪列、怎么查、什么算正常」。用法:\n"
+                   "- **指路可信**:绑定选哪个源/哪列/filter 值,按知识说的写(它比你猜的准);\n"
+                   "  知识指明「该信息在别的源」而本源没有 → 本源老实不认领或写 decision 指路;\n"
+                   "- **不是事实**:不能因为知识说了什么就直接给判断,查证仍靠数据跑出来。\n\n"
+                   + knowledge_text)
     sec.append("【本源数据词汇——概览原文(列名/量纲/类别取值,绑定只能用这里出现的列)】\n" + overview_text.strip())
     for name, text in enum_texts:
         sec.append(f"【本源数据词汇——枚举清单原文:{name}】\n" + text.strip())
@@ -169,6 +219,12 @@ def main() -> int:
         return 2
 
     ov_dir = out / "overview"
+    # 外挂知识(tree/knowledge.md):按树的节点名+判据文本匹配「适用」标签,命中的条目进每份简报
+    name_pool = scenario + "\n" + "\n".join(f"{name} {cond}" for _, name, cond in conditions)
+    knowledge_text = load_knowledge(out, name_pool)
+    if knowledge_text:
+        n_kn = knowledge_text.count("◆ ")
+        print(f"外挂知识:tree/knowledge.md 命中 {n_kn} 条,已嵌入全部简报")
     n_batches = max(1, math.ceil(len(conditions) / args.batch_size))
     batches = [conditions[i * args.batch_size:(i + 1) * args.batch_size] for i in range(n_batches)]
     ddir = out / "dispatch"
@@ -202,7 +258,7 @@ def main() -> int:
             p = ddir / f"{ind}_batch{i}.txt"
             rp = ddir / f"{ind}_batch{i}_result.py"
             p.write_text(build_briefing(ind, scenario, i, n_batches, batch, len(conditions),
-                                        ov_text, is_eav, enum_texts, str(rp)), encoding="utf-8")
+                                        ov_text, is_eav, enum_texts, str(rp), knowledge_text), encoding="utf-8")
             written.append((ind, i, len(batch), p))
 
     print(f"判据共 {len(conditions)} 条 → 每源 {n_batches} 批(≤{args.batch_size} 条/批)。已生成简报 {len(written)} 份:")

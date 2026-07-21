@@ -15,6 +15,12 @@
   - `outline.status`(`hold/fail/insufficient/pass/uncovered`)只是**粗导航**——仍要按 `pruned_nodes` 的条件+事实**重判**。
   - node_id 是短 id(`nN`);`pass_through:true` 节点(汇总/"测试")**永不阻断路径**;`combine` 是 `AND/OR/unknown` 提示。
   - **node_id 权威**:`Fault_tree_path` 只用 `pruned_nodes` 里真实节点;`tree_issues.orphan_node_ids`/`unmapped_facts` 是绑定填错的信号,别据此硬判。
+- **`knowledge`(可选)**:业务同事手写的**外挂知识**条目(`[{title, 适用?, text}]`,已按当前分支筛过)。
+  它是**判读口径,不是事实**——两条用法红线:
+  ① **可信其"怎么查/怎么解读/什么算正常"**:知识说"某现象属正常"(如双活网关一台 ping 不通)→ 对应
+  候选按知识口径处理并在 caveats/排除理由里**引用知识标题**留痕;知识讲了查询方法/主次口径 → 照它解读事实;
+  ② **不许拿知识顶替实测**:知识描述的现象/数值不能当 `actual` 引用,"知识说会这样"≠"数据里查到了"——
+  成立仍要事实,缺数仍是数据不足。知识与事实**冲突**时以事实为准,并在 caveats 写明冲突。
 
 ## 核心:一个通用判定法则(不分指标)
 对故障树**每条判断条件**,照此走:

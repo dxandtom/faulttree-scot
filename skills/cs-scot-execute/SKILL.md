@@ -29,7 +29,8 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 本技能常以**场景技能**形态发布(`package_scenario.py` 打包:技能目录名=场景英文短名,如
 `layer-3-service-issues`;名字变了,本文件的执行逻辑不变):诊断资源内置在本技能目录的
 `assets/` 下——`assets/plan.json`、`assets/scripts/`(各指标解析脚本)、`assets/tree/`
-(故障树 + 可选 solutions.json)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤按它执行)。
+(故障树 + 可选 solutions.json + 可编辑的 **knowledge.md 外挂知识**,runner 会按分支匹配后随
+rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤按它执行)。
 
 此形态下用户只需一句话(如「数据在这里,帮我诊断」),按以下默认约定跑完全程,**不需要用户指路**:
 1. **数据入口**:数据以用户提供的形式为准——目录/散文件直接用;给的是压缩包(zip 等)就先解开再用。**不预设形式**,用户给什么接什么。

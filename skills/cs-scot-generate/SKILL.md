@@ -71,6 +71,9 @@ python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
 它把类别模板库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览引擎 `analyzer.py`、绑定契约拷进 `<OUT>/scripts/`(**这几个库每次重跑都刷新**),为每个指标写一份**待填骨架** `<ind>_analyzer.py`,并产出 `plan.json`(`各<ind>_analyzer(script)→rca(agent_skill)`)。`--out` 用步骤 1 打印的 `<OUT>`。格式见 `references/plan_schema.md`。
+首次归集还会建 **`<OUT>/tree/knowledge.md` 外挂知识模板**(业务同事手写"去哪查/怎么查/什么算正常",
+`### 标题`+`适用:标签` 一条一段;重跑**永不覆盖**)——绑定简报(make_dispatch)与执行时的 RCA 输入都会按
+「适用」标签自动载入匹配条目,**是判读口径不是事实**。
 > **assemble 有两道硬闸门(退出码 1)**:①`tree/` 下找不到步骤 1 产物 `*.tree_index.json`,或 index 里的场景名/短名与 `--scenario` 对不上(步骤 1 没跑/名字不一致/目录错位;新旧两代产物并存时报歧义、退出码 2);②树 0 判据。报错里带排查指引——拦的是"步骤 1 没跑好就往下绑"的病根,别绕。
 > **重跑 = 重新编译**:已存在的 `<ind>_analyzer.py` 默认**会被当前版本的空骨架覆盖**(旧的先备份成 `.py.bak`),所以**更新 skill 后直接重跑就能生效,不用手删旧脚本**;模型随后在步骤 2.5 重新填。确需保留上次填好的脚本 → 加 `--keep`。
 

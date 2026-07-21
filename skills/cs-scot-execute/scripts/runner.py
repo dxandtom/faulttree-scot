@@ -229,6 +229,43 @@ def _archive_previous_run(result_dir: Path, runs_dir: Path):
     return dst
 
 
+def _load_knowledge(tree_dir: Path, name_pool: str) -> list:
+    """tree/knowledge.md(业务同事手写的外挂知识)→ 与当前子树匹配的条目 [{title, tags?, text}]。
+    条目 = 「### 标题」+ 可选「适用:标签1、标签2」行 + 正文;无适用行或含「通用」= 恒载入,
+    有标签则任一标签出现在 name_pool(剪枝后节点名/判据/场景名拼串)才载入——按分支载入,不全量灌。
+    文件没有/解析失败 → 空列表(知识是增益,绝不因它坏了主流程)。"""
+    kf = tree_dir / "knowledge.md"
+    if not kf.exists():
+        return []
+    try:
+        text = kf.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    entries, cur = [], None
+    for line in text.splitlines():
+        if line.startswith("### "):
+            cur = {"title": line[4:].strip(), "tags": None, "body": []}
+            entries.append(cur)
+        elif cur is not None:
+            s = line.strip().replace(":", ":")
+            if cur["tags"] is None and not cur["body"] and s.startswith("适用:"):
+                cur["tags"] = [t for t in re.split(r"[、,,/\s]+", s.split(":", 1)[1]) if t]
+            elif line.strip() or cur["body"]:
+                cur["body"].append(line)
+    out = []
+    for e in entries:
+        body = "\n".join(e["body"]).strip()
+        if not body:
+            continue
+        if e["tags"] and "通用" not in e["tags"] and not any(t in name_pool for t in e["tags"]):
+            continue
+        item = {"title": e["title"], "text": body}
+        if e["tags"]:
+            item["适用"] = "、".join(e["tags"])
+        out.append(item)
+    return out
+
+
 def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_subdir: str = "result",
                          result_base: Path = None) -> Any:
     """执行 kind=agent_skill 节点:备好输入,交给该 prompt-only 技能(模型)执行。
@@ -287,6 +324,21 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
         payload = {"fault_tree_md": ft_text, "indicator_results": ins}
     if missing_ind:      # 两种形态都带上缺数标记(顶层键,下游 RCA/辩论桥都能看到)
         payload["missing_indicators"] = missing_ind
+    # 外挂知识(tree/knowledge.md,业务同事手写):按「适用」标签匹配当前子树,命中的条目随输入
+    # 交给 RCA——是判读**口径**(去哪查/怎么解读/什么算正常),不是事实,不能顶替实测值。
+    if md_path:
+        ftree = payload.get("fault_tree")
+        if isinstance(ftree, dict):                      # 剪枝形态:按保留分支的节点名+判据匹配 → 按分支载入
+            pool = str(ftree.get("scenario") or "") + " " + " ".join(
+                f"{(n or {}).get('name') or ''} {(n or {}).get('condition') or ''}"
+                for n in (ftree.get("pruned_nodes") or {}).values())
+        else:                                            # 完整 md 形态:对全文匹配
+            pool = str(payload.get("fault_tree_md") or "")
+        knowledge = _load_knowledge(md_path.parent, pool)
+        if knowledge:
+            payload["knowledge"] = knowledge
+            print(f"  外挂知识:tree/knowledge.md 命中 {len(knowledge)} 条(按分支匹配),已随 RCA 输入下发:"
+                  + "、".join(f"「{e['title']}」" for e in knowledge[:5]))
 
     in_path = (result_base or base) / result_subdir / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)

@@ -18,6 +18,33 @@ from typing import List
 # 与 excel_to_tree.py 保持一致的统一产物目录约定:<anchor>/scot产物/<场景名>
 DEFAULT_OUT_CONTAINER = "scot产物"
 
+# 外挂知识模板:首次归集时写入 tree/knowledge.md(已存在**永不覆盖**——它是业务同事手写的)。
+# 两条示例是真实场景(M-LAG)的可用知识,照这个样子一条一条往下加即可。
+KNOWLEDGE_TEMPLATE = """\
+# 外挂知识(knowledge.md)——业务同事直接编辑本文件
+
+一条知识 = 一段,固定结构,照下面的样子往后抄:
+
+    ### 知识标题(一句话,名词短语)
+    适用:分支/场景关键词(可多个,用、分隔;写「通用」或不写这行 = 全场景生效)
+    正文(人话,写清:去哪个数据、看哪一列、怎么查、什么算正常/不算故障)
+
+说明:
+- 「适用」的关键词按**故障树节点名**匹配——诊断和绑定只载入与当前分支相关的条目,不会全量灌;
+- 知识是**口径不是事实**:它教系统"去哪查、怎么解读",查证结论仍以数据为准;
+- 下面两条是真实示例(M-LAG 场景),可直接保留、修改或删除。
+
+### M-LAG场景对端查询方法
+适用:M-LAG
+在 diag 数据中,筛选「DataItem」列为「MLAG_NodeId」的数据,当结果为两条时即可查询到本端与对端的
+数据,少于两条即无法查询对端。其中「Object」列里的内容带*号的为本端,不带*的为对端。其余设备具体
+信息通常从「ObjContent」列里获取。
+
+### M-LAG场景本端对端信息使用方法
+适用:M-LAG
+通常使用本端对端信息的名字,即「NENAME」列,在其他数据源中查询有关该网元的相关信息。
+"""
+
 # 产物格式契约版本(写进出厂铭牌 manifest.json):**只在改动使旧产物与新执行器不兼容时才 +1**
 # (修 bug、改文案不动它)。bump 时同步 bump cs-scot-execute/scripts/runner.py 的 EXPECTED_PRODUCT_FORMAT。
 # v2:绑定新增 filter 字段(EAV 行级预过滤)+ 空表守卫——旧产物里的旧 condition_kernels 副本会
@@ -303,6 +330,10 @@ def main() -> None:
     copy_into(here / "import_tree_excel.py", out / "scripts" / "import_tree_excel.py")  # 调优表:Excel→产物(自包含)
     copy_into(here.parent / "references" / "tuning_excel_guide.md",
               out / "tree" / "tuning-guide.md")                                         # 调优表动手说明(业务读者)
+    kn = out / "tree" / "knowledge.md"                   # 外挂知识:业务同事手写的"去哪查/怎么查/什么算正常"
+    if not kn.exists():                                  # 用户手写文件——只建模板,重跑**永不覆盖**
+        kn.write_text(KNOWLEDGE_TEMPLATE, encoding="utf-8")
+        print(f"已建外挂知识模板 → {kn}(业务同事可编辑;绑定简报与 RCA 输入会按分支自动载入)")
     # 重跑 = 重新编译:默认用当前版本的空骨架覆盖旧脚本(这样才能用上刚拷进来的新 condition_kernels/mo_config);
     # 覆盖前若旧脚本不是"全新空骨架"(填过/手改过/上一版骨架)→ 先备份成 .py.bak,绝不静默丢失。
     # 想原样保留已填脚本:加 --keep(老的 skip-if-exists 行为)。
