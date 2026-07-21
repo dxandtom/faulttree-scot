@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""按条件类别(A–J)预制的"统计内核模板"+ 列解析 + 处理变换词汇。
+"""按条件类别(A/C/G/D/J/P)预制的"统计内核模板"+ 列解析 + 取值(extract)+ 处理变换词汇。
 
-设计:把**易错的统计逻辑**(占比/TopN、差值、阈值计数、字段匹配……)固化成测过的内核;
-运行时由 LLM 产出的**绑定**(选哪个类别内核、对哪列、剥前缀/缩放等变换、阈值、路由到哪个源)
-来参数化它们。内核只产**事实**:算出的量 + provenance(命中了哪列、怎么命中、nulls)+
-`predicate_satisfied`(**仅对解析到的数据做字面比较**的结果)。
+设计:把**易错的统计逻辑**(阈值计数、字段/正则匹配、格内取值、负存在、成对比较、多条件组合)
+固化成测过的内核;运行时由 LLM 产出的**绑定**(选哪个类别内核、对哪列、行过滤 filter、格内
+extract、剥前缀/缩放等变换、阈值、路由到哪个源)来参数化它们。内核只产**事实**:算出的量 +
+provenance(命中了哪列、怎么命中、nulls)+ `predicate_satisfied`(**仅对解析到的数据做字面
+比较**的结果)。v1 的 B/E/F/H/I 内核已封存于 archive/kernels-v1(数通场景普查零命中)。
 
 铁律(机械层就守住,别等到 RCA):
 - 列解析不到 → `status:"insufficient_data"`,**绝不**给 `predicate_satisfied`,**绝不**编造值。
@@ -15,10 +16,12 @@
 """
 from __future__ import annotations
 
+import copy
 import csv
 import io
 import math
 import operator
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -41,7 +44,7 @@ _SCOPES = {"aggregate", "count_rows"}
 
 
 def _shape_err(b, need_op=False):
-    """数值类内核(A/B/E/I)共用的参数体检:全角运算符就地归一;非法枚举/非数值阈值/require<1
+    """数值类参数体检(A 类及带 op/threshold 的绑定共用):全角运算符就地归一;非法枚举/非数值阈值/require<1
     → 返回错误串(调用方响亮出"数据不足"),合法 → None。宗旨:绑定写错绝不静默降级——
     实测 op 全角/agg 拼错/scope 拼错/require:0/字符串阈值,旧内核全部无声算出方向性错误结论。"""
     if b.get("op") is not None:
@@ -64,6 +67,40 @@ def _shape_err(b, need_op=False):
         if rq is None or rq < 1:
             return f"require「{b['require']}」不合法(须为 ≥1 的数;0 会恒判成立)"
     return None
+
+
+# ---------- 取值层(extract):从一格杂糅文本里抽出要的那段值,贯穿 A/C/G/P ----------
+def _extract_spec_err(spec):
+    """extract 参数体检:{"kv": "键名"} 或 {"regex": "正则"} 二选一;正则编译失败=响亮拒收
+    (判据里的"关键字"是原料不是成品——%u/%d 是 printf 占位不是正则,绑定层要先换成 \\d+ 等)。"""
+    if not isinstance(spec, dict) or (("kv" in spec) == ("regex" in spec)):
+        return 'extract 只认 {"kv": "键名"} 或 {"regex": "正则"} 之一'
+    if "regex" in spec:
+        try:
+            re.compile(str(spec["regex"]))
+        except re.error as e:
+            return f"extract.regex 编译失败:{e}(%u/%d 这类占位要先换成 \\d+;HTML 渣要剔掉)"
+    return None
+
+
+def _extract_val(text, spec):
+    """从一格文本抽值:kv=「键 [:=:] 值」(值到 空白/逗号/分号 止,但「,后跟恰好3位数字」当
+    千分位续上——设备回显计数「CRC: 1,234」要抽整数,不是截在逗号前的 1);regex=第一个捕获组
+    (无捕获组取整体命中)。抽不到返回 None(调用方按缺测/未命中处理,绝不编值)。"""
+    s = str(text)
+    if "kv" in spec:
+        m = re.search(re.escape(str(spec["kv"])) + r"\s*[::=]\s*([^\s,;,;]+(?:,\d{3})*)", s)
+        return m.group(1) if m else None
+    m = re.search(str(spec["regex"]), s)
+    if not m:
+        return None
+    return m.group(1) if m.groups() else m.group(0)
+
+
+def _decomma(s):
+    """千分位归一:仅当整体呈 1,234[.56] 形态才去逗号(别误伤枚举串),供 extract 抽出的值转数用。"""
+    t = str(s).strip()
+    return t.replace(",", "") if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", t) else s
 
 
 # ---------- 数据加载 ----------
@@ -234,12 +271,30 @@ def k_threshold(table, b, cls="A"):
     err = _shape_err(b, need_op=True)
     if err:
         return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=col)
-    vals, nulls, n = _numeric_series(rows, col, b.get("transforms"))
+    spec = b.get("extract")
+    if spec:
+        err = _extract_spec_err(spec)
+        if err:
+            return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=col)
+        # 取值层:格子是杂糅文本(如 "利用率:83%,速率:1G"),先抽出要的那段再转数;抽不到=缺测
+        raw = [r.get(col, "") for r in rows]
+        picked = [(_extract_val(v, spec) if not _is_null(v) else None) for v in raw]
+        vals = [x for x in (_apply_transforms(_num(_decomma(p)), b.get("transforms"))
+                            for p in picked if p is not None) if x is not None]
+        nulls, n = sum(1 for p in picked if p is None), len(raw)
+    else:
+        vals, nulls, n = _numeric_series(rows, col, b.get("transforms"))
     op, thr = b.get("op"), b.get("threshold")
     fact = {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
             "n_rows": n, "nulls": nulls, "valid": len(vals), "op": op, "threshold": thr,
             "transforms": b.get("transforms") or []}
+    if spec:
+        fact["extract"] = spec
     if not vals:
+        if spec:
+            sample = next((str(r.get(col, ""))[:80] for r in rows if not _is_null(r.get(col, ""))), "")
+            return _insuf(cls, f"extract 在该列一条也没抽到数值——核对 kv 键名/正则与数据格式。"
+                               f"该列样例:「{sample}」", resolved_column=col, nulls=nulls)
         return _insuf(cls, "该列无有效数值(全空/NIL)", resolved_column=col, nulls=nulls)
     if b.get("scope") == "count_rows":
         cnt = sum(1 for v in vals if _cmp(v, op, thr))
@@ -254,64 +309,33 @@ def k_threshold(table, b, cls="A"):
     return fact
 
 
-# ---------- B:差值计算 ----------
-def k_difference(table, b, cls="B"):
-    header, rows = table
-    mens, subs = b.get("minuend") or [], b.get("subtrahend") or []
-    if not mens or not subs:
-        return _insuf(cls, "minuend/subtrahend 缺失或为空——差值两侧都必须给原始计数列"
-                           "(单侧为空会算成 0-0=0、恒判不成立)", resolved_column=None)
-    err = _shape_err(b)
-    if err:
-        return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=None)
-    cols, missing = {}, []
-    for name in mens + subs:
-        c, _ = resolve_column(header, name)
-        (cols.__setitem__(name, c) if c else missing.append(name))
-    if missing:
-        return _insuf(cls, f"缺原始计数列:{missing}(只有成功率/无原始计数 → 无法算差值)",
-                      resolved_column=None, missing=missing)
-    tr = b.get("transforms")
-    per, nulls = [], 0
-    for r in rows:
-        mv = [_num(r.get(cols[n], "")) for n in mens]
-        sv = [_num(r.get(cols[n], "")) for n in subs]
-        if any(x is None for x in mv + sv):
-            nulls += 1
-            continue
-        per.append(sum(_apply_transforms(x, tr) for x in mv) - sum(_apply_transforms(x, tr) for x in sv))
-    if not per:
-        return _insuf(cls, "无有效行(计数列空/NIL)", nulls=nulls)
-    op, thr = b.get("op", ">"), b.get("threshold", 0)
-    fact = {"class": cls, "status": "ok", "resolved_columns": cols, "nulls": nulls,
-            "valid": len(per), "op": op, "threshold": thr}
-    if b.get("scope") == "count_rows":
-        cnt = sum(1 for v in per if _cmp(v, op, thr))
-        fact.update(scope="count_rows", count_satisfied=cnt, ratio=round(cnt / len(per), 4),
-                    predicate_satisfied=cnt >= b.get("require", 1))
-    else:
-        agg = b.get("agg", "sum")
-        value = _agg(per, agg)
-        fact.update(scope="aggregate", agg=agg, value=round(value, 4),
-                    predicate_satisfied=_cmp(value, op, thr))
-    return fact
-
-
 # ---------- C / G:字段 / 日志匹配 ----------
 def k_match(table, b, cls="C"):
     header, rows = table
     col, how = resolve_column(header, b.get("column", ""))
     if not col:
         return _insuf(cls, f"未找到列「{b.get('column')}」({how})", resolved_column=None)
-    mode = "contains" if b.get("contains") else b.get("match", "exact")
-    targets = b.get("contains") or b.get("equals") or []
-    if not targets:                                     # C/G 只认 contains/equals 列表;op/target 等野字段内核不读。
-        return _insuf(cls, "绑定缺 contains/equals 参数(op/target 等野字段无效)——若不拦,"
+    mode = ("regex" if b.get("regex") else "contains" if b.get("contains") else b.get("match", "exact"))
+    targets = b.get("contains") or b.get("equals") or b.get("regex") or []
+    if not targets:                                     # C/G 只认 contains/equals/regex 列表;op/target 等野字段内核不读。
+        return _insuf(cls, "绑定缺 contains/equals/regex 参数(op/target 等野字段无效)——若不拦,"
                            "空 targets 会静默 matched=0、整源变假排除;修绑定格式",
                       resolved_column=col)
-    if b.get("match") is not None and str(b.get("match")) not in ("exact", "contains"):
-        return _insuf(cls, f"match「{b.get('match')}」不认识(只认 exact/contains;正则请写 custom)——"
+    if b.get("match") is not None and str(b.get("match")) not in ("exact", "contains", "regex"):
+        return _insuf(cls, f"match「{b.get('match')}」不认识(只认 exact/contains/regex)——"
                            "旧内核会静默按 exact 算", resolved_column=col)
+    if mode == "regex":                                 # 判据自带的"关键字"是原料不是成品:编译不过响亮拒收
+        for t in targets:
+            try:
+                re.compile(str(t))
+            except re.error as e:
+                return _insuf(cls, f"regex「{t}」编译失败:{e}(%u/%d 这类 printf 占位要先换成 \\d+;"
+                                   "HTML 渣要剔掉)——坏正则不拦会整条恒不命中=假排除", resolved_column=col)
+    spec = b.get("extract")
+    if spec:
+        _e = _extract_spec_err(spec)
+        if _e:
+            return _insuf(cls, f"绑定参数不合法:{_e}", resolved_column=col)
     if b.get("require") is not None:
         _rq = _num(b.get("require"))
         if _rq is None or _rq < 1:
@@ -331,10 +355,17 @@ def k_match(table, b, cls="C"):
         if _is_null(v):
             nulls += 1
             continue
+        if spec:                                        # 取值层:先从杂糅格里抽出值,再对抽出的值做匹配
+            v = _extract_val(v, spec)
+            if v is None:
+                nulls += 1                              # 抽不到=该行没有这项信息,按缺测计,不当不命中
+                continue
         dist[str(v).strip()] += 1                       # 同列取值分布(给 RCA 判分量/主次)
         nv = norm(v)
         if mode == "contains":
             hits = [j for j, t in enumerate(tnorm) if t in nv]
+        elif mode == "regex":
+            hits = [j for j, t in enumerate(targets) if re.search(str(t), str(v).strip())]
         else:
             hits = [j for j, t in enumerate(tnorm) if nv == t]
         if hits:
@@ -356,6 +387,8 @@ def k_match(table, b, cls="C"):
                                    else matched >= b.get("require", 1)}
     if b.get("absent"):
         fact["absent"] = True                           # 极性标记:matched=0 且成立=「未配置」,让 RCA 读得懂
+    if spec:
+        fact["extract"] = spec                          # 审计:值是从格内抽出来的,不是整格
     if len(targets) > 1:                                # 单 target 时分解=matched,冗余不输出
         # 只进校验/审计层:不在 tree_prune._FACT_KEEP 白名单、不被 question 渲染——不会流进 RCA 上下文
         fact["matched_by_target"] = {str(t): by_target.get(str(t), 0) for t in targets}
@@ -376,7 +409,7 @@ def _combine_tri(comb, results):
             else (False, "ok"))
 
 
-def k_combo(b, sources, parent_source):
+def k_combo(b, sources, parent_source, _resolved=False):
     subs = b.get("sub") or []
     if not subs:                                        # 空 AND 的 any(False…)全假 → 恒"成立"(实测假阳),响亮拒绝
         return _insuf("D", "组合绑定缺 sub 子条件列表(字段名写错/被吃掉?)——空组合恒判成立,禁止")
@@ -407,7 +440,7 @@ def k_combo(b, sources, parent_source):
         for gv, grows in groups.items():
             gsources = dict(sources)
             gsources[parent_source] = (header, grows)
-            results = [evaluate_binding(s, gsources, parent_source) for s in subs]
+            results = [evaluate_binding(s, gsources, parent_source, _resolved) for s in subs]
             pred, st = _combine_tri(comb, results)
             if pred is True:
                 matched.append(gv)
@@ -436,181 +469,60 @@ def k_combo(b, sources, parent_source):
             fact["sample_group"], fact["sub_facts"] = first_detail[1], first_detail[2]
         return fact
 
-    results = [evaluate_binding(s, sources, s.get("source", parent_source))
+    results = [evaluate_binding(s, sources, s.get("source", parent_source), _resolved)
                for s in subs]
     pred, st = _combine_tri(comb, results)
     return {"class": "D", "status": st, "combine": comb, "predicate_satisfied": pred,
             "reason": None if st == "ok" else "组合含数据不足子条件,无法确证整体", "sub_facts": results}
 
 
-# ---------- E:占比 / TopN ----------
-def k_proportion(table, b, cls="E"):
+# ---------- P:成对比较(本端/对端同一信息是否一致)----------
+def k_pair(table, b, cls="P"):
+    """两侧同一信息的一致性判定(查对端类判据的家)。行选择用通用 filter(evaluate_binding 已前置),
+    参数:side_column(分侧列)+ peer_marker(含此标记=本端,默认 "*")、value_column(取值列)、
+    可选 extract(格内抽值)、fault_when:"not_equal"=两侧不等算故障成立(默认)/"equal" 反之。
+    守卫:任一侧无行/无值 → 数据不足(「查不到对端」不是不成立);一侧多个不同值 → 数据不足(歧义附样例)。"""
     header, rows = table
-    gb, _ = resolve_column(header, b.get("group_by", ""))
-    if not gb:
-        return _insuf(cls, f"未找到分组列「{b.get('group_by')}」", resolved_column=None)
-    err = _shape_err(b)
-    if err:
-        return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=gb)
-    filt = b.get("filter") or {}
-    fcol = None
-    if filt.get("column"):
-        fcol, _ = resolve_column(header, filt["column"])
-        if not fcol:
-            return _insuf(cls, f"未找到过滤列「{filt['column']}」")
-    tnorm = [str(t).strip() for t in (filt.get("contains") or filt.get("equals") or [])]
-    fmode = "contains" if filt.get("contains") else "exact"
-    sel = []
-    for r in rows:
-        if fcol:
-            v = str(r.get(fcol, "")).strip()
-            if not (any(t in v for t in tnorm) if fmode == "contains" else v in tnorm):
-                continue
-        sel.append(r)
-    if not sel:
-        return {"class": cls, "status": "ok", "group_by": gb, "filtered_n": 0,
-                "predicate_satisfied": False, "note": "过滤后无记录"}
-    c = Counter(str(r.get(gb, "")).strip() for r in sel if not _is_null(r.get(gb, "")))
-    if not c:
-        return _insuf(cls, "分组列全空")
-    top, topn = c.most_common(1)[0]
-    ratio = topn / sum(c.values())
-    op, thr = b.get("op", ">"), b.get("threshold", 0.7)
-    return {"class": cls, "status": "ok", "group_by": gb, "filter_col": fcol,
-            "filtered_n": len(sel), "valid": sum(c.values()), "top1": top, "top1_count": topn,
-            "top1_ratio": round(ratio, 4), "op": op, "threshold": thr,
-            "predicate_satisfied": _cmp(ratio, op, thr)}
-
-
-# ---------- F:配置检查 ----------
-def k_config(table, b, cls="F"):
-    header, rows = table
-    col, how = resolve_column(header, b.get("param", ""))
-    if not col:
-        return _insuf(cls, f"无配置数据源/未找到参数「{b.get('param')}」(配置核查通常需单独的配置导出)",
-                      resolved_column=None)
-    vals = [str(r.get(col, "")).strip() for r in rows if not _is_null(r.get(col, ""))]
-    if not vals:
-        return _insuf(cls, "参数列无值")
-    # 故障语义:默认 equals=X → 故障="配置(全部)等于X"(predicate=all 行==X);
-    # not_equals=X 或 negate:true → 故障="配置不等于X"(predicate=存在行!=X),
-    # 让 predicate_satisfied 始终表示「故障成立」,省得 RCA 再反推(树里"参数≠X才算故障"很常见,如 SsbPeriod≠20ms)。
-    neg = bool(b.get("negate")) or ("not_equals" in b)
-    raw = b.get("not_equals") if "not_equals" in b else b.get("equals")
-    if raw is None or not isinstance(raw, (str, int, float, bool)):
-        # 缺参会拿 "None" 去比恒不等、列表会拿 "['X']" 去比恒不等——正极性静默假阴/负极性静默假阳(实测)
-        return _insuf(cls, f"equals/not_equals 缺失或不是标量(拿到 {type(raw).__name__}: {raw!r})——"
-                           "F 类只认单个标量;多个候选值改 C 类 equals 列表", resolved_column=col)
-    exp = str(raw)
-    eq_matched = sum(1 for v in vals if v == exp)
-    matched = (len(vals) - eq_matched) if neg else eq_matched      # neg:命中=不等于exp的故障行
-    satisfied = any(v != exp for v in vals) if neg else all(v == exp for v in vals)
-    return {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
-            "expected": raw, "compare": ("!=" if neg else "=="),
-            "n": len(vals), "matched": matched, "ratio": round(matched / len(vals), 4),
-            "distinct_values": list(dict.fromkeys(vals))[:5], "predicate_satisfied": satisfied}
-
-
-# ---------- H:信令流程 ----------
-def k_signaling(table, b, cls="H"):
-    """会话级信令判定:按 key 分组,看每个会话的消息集合是否满足 has/lacks;
-    可选 where:要求会话里**存在一行**同时满足若干"列=值"约束(如"FAIL 且携带 cause=X")。
-    where 写法:单个 {column, equals|contains} 或其列表(列表内所有约束须落在同一行)。"""
-    header, rows = table
-    msgcol, _ = resolve_column(header, b.get("msg_column", "")) if b.get("msg_column") else (None, "")
-    if not msgcol:
-        return _insuf(cls, "无信令/消息数据源(需 trace 记录、含消息类型列 msg_column)", resolved_column=None)
-    key, _ = resolve_column(header, b.get("key", "")) if b.get("key") else (None, "")
-    if b.get("key") and not key:                        # 显式给了 key 却解析不到 → 全表并成一个会话,has/lacks 语义畸变(实测)
-        return _insuf(cls, f"未找到会话键列「{b.get('key')}」——解析不到会把全表并成一个会话;"
-                           "确要全表当一个会话请显式 key:null", resolved_column=msgcol, msg_column=msgcol)
-    has, lacks = set(b.get("has") or []), set(b.get("lacks") or [])
-
-    # 解析 where:行级约束(同一行须满足全部),会话存在这样一行才算满足
-    where = b.get("where")
-    constraints = []
-    if where:
-        for cst in (where if isinstance(where, list) else [where]):
-            wc, _ = resolve_column(header, cst.get("column", ""))
-            if not wc:
-                return _insuf(cls, f"where 未找到列「{cst.get('column')}」", resolved_column=None)
-            vals = [str(v).strip() for v in (cst.get("contains") or cst.get("equals") or [])]
-            if not vals:                                # 空取值的 where 恒不满足 → 全会话假排除(实测),响亮拒绝
-                return _insuf(cls, f"where 子句缺 equals/contains 取值(列「{cst.get('column')}」)——"
-                                   "空约束恒不满足=假排除;修绑定格式", resolved_column=msgcol, msg_column=msgcol)
-            constraints.append((wc, vals, "contains" if cst.get("contains") else "exact"))
-
-    def _row_ok(r):
-        for wc, vals, mode in constraints:
-            v = str(r.get(wc, "")).strip()
-            if not (any(t in v for t in vals) if mode == "contains" else v in vals):
-                return False
-        return True
-
-    groups = {}  # key -> {"msgs": set, "where_ok": bool}
-    for r in rows:
-        k = str(r.get(key, "")).strip() if key else "_all"
-        g = groups.setdefault(k, {"msgs": set(), "where_ok": not constraints})
-        g["msgs"].add(str(r.get(msgcol, "")).strip())
-        if constraints and not g["where_ok"] and _row_ok(r):
-            g["where_ok"] = True
-
-    # 兜底:has 里的消息名若在整列里从未出现过 → 多半是消息名写错(或本数据无此流程),
-    # 不是"真没失败"。别默默给 predicate=False,改判数据不足、把真实词汇样例摆出来。
-    all_msgs = set().union(*(g["msgs"] for g in groups.values())) if groups else set()
-    unknown_has = sorted(t for t in has if t not in all_msgs)
-    if unknown_has:
-        sample = sorted(v for v in all_msgs if v)[:15]
-        return _insuf(cls, f"has 里的消息名在 msg_column 从未出现:{unknown_has}——疑似消息名与数据词汇不符,"
-                           f"或本数据无此流程(非'真没失败')。msg_column 实际取值样例:{sample}",
-                      resolved_column=msgcol, msg_column=msgcol,
-                      unknown_messages=unknown_has, msg_vocab_sample=sample)
-
-    matched = sum(1 for g in groups.values()
-                  if has <= g["msgs"] and not (lacks & g["msgs"]) and g["where_ok"])
-    out = {"class": cls, "status": "ok", "key": key, "msg_column": msgcol, "groups": len(groups),
-           "matched_sessions": matched, "predicate_satisfied": matched > 0}
-    # lacks 里的消息名若整列从未出现 → lacks 约束恒成立、退化成"只要有 has 就命中" → 可能假阳性。
-    # 不改判定(免得压掉真信号),但标注出来,让 RCA 对这条"成立"降置信、写进 caveat。
-    unknown_lacks = sorted(t for t in lacks if t not in all_msgs)
-    if unknown_lacks:
-        out["lacks_never_seen"] = unknown_lacks
-    if constraints:
-        out["where"] = [{"column": wc, "values": vals, "match": mode} for wc, vals, mode in constraints]
-    return out
-
-
-# ---------- I:特征分析 ----------
-def k_feature(table, b, cls="I"):
-    header, rows = table
-    col, how = resolve_column(header, b.get("feature") or b.get("column") or "")
-    if not col:
-        return _insuf(cls, f"未找到特征列「{b.get('feature') or b.get('column')}」({how})", resolved_column=None)
-    metric = b.get("metric", "row_threshold")
-    if metric == "row_threshold":
-        err = _shape_err(b)
+    scol, how_s = resolve_column(header, b.get("side_column", ""))
+    if not scol:
+        return _insuf(cls, f"未找到分侧列「{b.get('side_column')}」({how_s})", resolved_column=None)
+    vcol, how_v = resolve_column(header, b.get("value_column", ""))
+    if not vcol:
+        return _insuf(cls, f"未找到取值列「{b.get('value_column')}」({how_v})", resolved_column=None)
+    fw = b.get("fault_when", "not_equal")
+    if fw not in ("not_equal", "equal"):
+        return _insuf(cls, f"fault_when「{fw}」不认识(只认 not_equal/equal)", resolved_column=vcol)
+    spec = b.get("extract")
+    if spec:
+        err = _extract_spec_err(spec)
         if err:
-            return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=col)
-        if b.get("threshold") is None:
-            return _insuf(cls, "缺 threshold(row_threshold 必须给阈值,缺了会恒判不成立)", resolved_column=col)
-        vals, nulls, n = _numeric_series(rows, col, b.get("transforms"))
-        if not vals:
-            return _insuf(cls, "特征列无有效数值", resolved_column=col)
-        op, thr = b.get("op", "<="), b.get("threshold")
-        cnt = sum(1 for v in vals if _cmp(v, op, thr))
-        return {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
-                "transforms": b.get("transforms") or [], "op": op, "threshold": thr,
-                "valid": len(vals), "nulls": nulls, "count_satisfied": cnt,
-                "ratio": round(cnt / len(vals), 4), "predicate_satisfied": cnt >= b.get("require", 1)}
-    raw = [r.get(col, "") for r in rows]
-    if metric == "all_null":
-        return {"class": cls, "status": "ok", "resolved_column": col, "metric": metric,
-                "predicate_satisfied": all(_is_null(v) for v in raw)}
-    if metric == "all_same":
-        nn = [str(v).strip() for v in raw if not _is_null(v)]
-        return {"class": cls, "status": "ok", "resolved_column": col, "metric": metric,
-                "distinct": len(set(nn)), "predicate_satisfied": len(nn) > 0 and len(set(nn)) == 1}
-    return _insuf(cls, f"未支持的 metric「{metric}」")
+            return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=vcol)
+    marker = str(b.get("peer_marker", "*"))
+    local_vals, peer_vals = [], []
+    for r in rows:
+        sv, vv = str(r.get(scol, "")), r.get(vcol, "")
+        if _is_null(sv) or _is_null(vv):
+            continue
+        val = _extract_val(vv, spec) if spec else str(vv).strip()
+        if val is None:
+            continue
+        (local_vals if marker in sv else peer_vals).append(str(val).strip())
+    if not local_vals or not peer_vals:
+        side = "本端" if not local_vals else "对端"
+        return _insuf(cls, f"查不到{side}的数据(「{scol}」按标记「{marker}」分侧后{side}无取值)"
+                           "——对端不可查是判不了,不是'不成立'", resolved_column=vcol)
+    lset, pset = sorted(set(local_vals)), sorted(set(peer_vals))
+    if len(lset) > 1 or len(pset) > 1:
+        return _insuf(cls, f"取值有歧义:本端 {lset[:3]} / 对端 {pset[:3]}(一侧多个不同值)"
+                           "——先用 filter 缩小行范围或改 extract 抽得更准", resolved_column=vcol)
+    same = lset[0] == pset[0]
+    fact = {"class": cls, "status": "ok", "resolved_column": vcol, "side_column": scol,
+            "local": lset[0], "peer": pset[0], "equal": same, "fault_when": fw,
+            "n_local": len(local_vals), "n_peer": len(peer_vals),
+            "predicate_satisfied": (not same) if fw == "not_equal" else same}
+    if spec:
+        fact["extract"] = spec
+    return fact
 
 
 # ---------- J:人工确认 ----------
@@ -619,27 +531,30 @@ def k_manual(b):
             "note": b.get("note", "需人工现场确认,自动指标不可判")}
 
 
-_KERNELS = {"A": k_threshold, "B": k_difference, "C": k_match, "E": k_proportion,
-            "F": k_config, "G": lambda t, b: k_match(t, b, "G"), "H": k_signaling, "I": k_feature}
+_KERNELS = {"A": k_threshold, "C": k_match, "G": lambda t, b: k_match(t, b, "G"), "P": k_pair}
+_ARCHIVED = set("BEFHI")                                # v1 内核已封存 archive/kernels-v1(数通普查零命中)
 
 
 def _apply_filter(table, flt):
-    """行级预过滤——为「EAV 窄表」(一行一个量,如 DataItem/DataValue/Unit 形状)服务:
-    先把行缩到 filter 命中的子集,再让内核对子集算。子句 {column, equals:值|[值…] 或 contains:值|[值…]};
-    多子句(list)= AND,同一行须全满足;大小写不敏感。语义与 E 类内建 filter、H 类 where 同族。
+    """行级预过滤——为「EAV 窄表」(一行一个量,如 DataItem/DataValue/Unit 形状)或"先选中某命令/
+    某检查项的行"服务:先把行缩到 filter 命中的子集,再让内核对子集算。
+    子句 {column, equals:值|[值…] 或 contains:值|[值…] 或 excludes:值|[值…](**不含**才保留,
+    如挑「Object 不带 *」的对端行)};多子句(list)= AND,同一行须全满足;大小写不敏感。
     返回 (过滤后table, None) 或 (None, 错误串)(列解析不到 → 上层判数据不足)。"""
     header, rows = table
     clauses = flt if isinstance(flt, list) else [flt]
     resolved = []
     for c in clauses:
         if not isinstance(c, dict):                      # 畸形子句(如写成字符串)→ 数据不足,绝不乱配、绝不崩
-            return None, f"filter 子句应为对象 {{column, equals|contains}},收到 {type(c).__name__}: {str(c)[:40]!r}"
+            return None, f"filter 子句应为对象 {{column, equals|contains|excludes}},收到 {type(c).__name__}: {str(c)[:40]!r}"
         col, how = resolve_column(header, c.get("column", ""))
         if not col:
             return None, f"filter 未找到列「{c.get('column')}」({how})"
-        if c.get("equals") is None and c.get("contains") is None:   # 缺目标值 → 数据不足(不许退化成 contains:"none")
-            return None, f"filter 子句缺 equals/contains(列「{c.get('column')}」)"
-        mode = "equals" if c.get("equals") is not None else "contains"
+        given = [m for m in ("equals", "contains", "excludes") if c.get(m) is not None]
+        if len(given) != 1:                              # 缺/多给 → 数据不足(不许退化、不许歧义)
+            return None, (f"filter 子句须给 equals/contains/excludes 之一(列「{c.get('column')}」,"
+                          f"收到 {given or '空'})")
+        mode = given[0]
         tgt = c.get(mode)
         tgts = [str(t).strip().lower() for t in (tgt if isinstance(tgt, list) else [tgt])]
         if not any(tgts):
@@ -648,24 +563,250 @@ def _apply_filter(table, flt):
     keep = []
     for r in rows:
         for col, mode, tgts in resolved:
-            v = str(r.get(col, "")).strip().lower()
-            if not ((v in tgts) if mode == "equals" else any(t and t in v for t in tgts)):
+            raw = r.get(col, "")
+            if mode == "excludes" and _is_null(raw):     # 过滤列为空的行"不含X"是空洞真:留下会污染取值
+                break                                    # (对端行选择被脏续行/汇总行混入,实测能比出错值)
+            v = str(raw).strip().lower()
+            hit = (v in tgts) if mode == "equals" else any(t and t in v for t in tgts)
+            if (mode == "excludes") == hit:              # equals/contains 要命中才留;excludes 要不命中才留
                 break
         else:
             keep.append(r)
     return (header, keep), None
 
 
-# filter 只作用于这些类:E 有内建 filter、H 有内建 where(会话内语义),各自保持不变;D/J 不碰数据。
-_FILTERABLE = ("A", "B", "C", "F", "G", "I")
+# filter 作用于所有吃表的内核类;D 顶层不碰数据(filter 写进各 sub 子绑定)、J 不碰数据。
+_FILTERABLE = ("A", "C", "G", "P")
 
 
-def evaluate_binding(b, sources, source_name):
+# ---------- 参数化查询(param_from):先抽参数、再代入——跨源/同源传参链的家 ----------
+_PARAM_RE = re.compile(r"^@([A-Za-z_]\w*)$")            # @整串引用才算参数;句子里夹 @ 不误伤
+_NO_SUBST_KEYS = ("mapping_reason", "condition_text", "node", "id", "note", "reason")
+
+
+def _subst(obj, params):
+    """深代入:任何**整串**形如 "@name" 的字符串换成 params[name],其余原样(深拷贝)。
+    引用了 params 里没有的名字 → 抛 KeyError(调用方响亮出数据不足,绝不拿字面 @xxx 去查=假排除)。
+    **作用域**:自带 `param_from` 的子 dict(如 D 的 sub 子绑定)整体跳过——它自成作用域,
+    参数在它自己被评估时解析,不继承外层。tuple/set 同 list 处理(子代理写圆/花括号也别漏)。"""
+    if isinstance(obj, str):
+        m = _PARAM_RE.match(obj)
+        if m:
+            if m.group(1) not in params:
+                raise KeyError(m.group(1))
+            return params[m.group(1)]
+        return obj
+    if isinstance(obj, list):
+        return [_subst(x, params) for x in obj]
+    if isinstance(obj, tuple):
+        return [_subst(x, params) for x in obj]          # 顺手归一成 list(内核按 list 消费)
+    if isinstance(obj, set):
+        return [_subst(x, params) for x in sorted(obj, key=str)]
+    if isinstance(obj, dict):
+        if "param_from" in obj:                          # 子绑定自成作用域:原样深拷、自己解析
+            return copy.deepcopy(obj)
+        return {k: (v if k in _NO_SUBST_KEYS else _subst(v, params)) for k, v in obj.items()}
+    return obj
+
+
+def _find_stray_params(obj, in_doc=False):
+    """找出绑定里所有 @整串引用(跳过文案字段)——没 param_from 却写了 @xxx 是要拦的脚枪。
+    自带 param_from 的子 dict 跳过(自成作用域,由它自己的评估检查);tuple/set 同 list。"""
+    if isinstance(obj, str):
+        m = _PARAM_RE.match(obj)
+        return [] if (in_doc or not m) else [m.group(1)]
+    if isinstance(obj, (list, tuple, set)):
+        return [n for x in obj for n in _find_stray_params(x, in_doc)]
+    if isinstance(obj, dict):
+        if "param_from" in obj:
+            return []
+        return [n for k, v in obj.items() for n in _find_stray_params(v, in_doc or k in _NO_SUBST_KEYS)]
+    return []
+
+
+_SPEC_KEYS = {"source", "column", "filter", "extract"}
+
+
+def _resolve_values(spec, sources, parent_source):
+    """按 spec{source?, column, filter?, extract?} 从某源抽出值列表(非空、去重、保序)。
+    返回 (values, None) 或 (None, 错误串)。供 param_from 与 P 的 pair_from 共用。
+    未知键响亮拒收(extract 拼成 extrct 被静默忽略=参数变整格杂糅文本,实测能把 absent 判成假阳)。"""
+    if not isinstance(spec, dict):
+        return None, f"取值规格应为对象 {{source, column, filter?, extract?}},收到 {type(spec).__name__}"
+    unknown = set(spec) - _SPEC_KEYS
+    if unknown:
+        return None, (f"取值规格有不认识的键 {sorted(unknown)}(只认 source/column/filter/extract"
+                      ";expand 写在参数规格顶层)——拼错会被静默忽略、抽出错误的值,拒收")
+    src = spec.get("source", parent_source)
+    table = sources.get(src)
+    if table is None:
+        hint = ("「cross」不是数据源名——source 应写最终查询落点/取值来源的**真实源名**"
+                if src == "cross" else f"用 --data {src}=<文件> 提供")
+        return None, f"无数据源「{src}」({hint})"
+    if not table[1]:
+        return None, f"数据源「{src}」为空表(仅表头、0 行),无从抽值"
+    flt = spec.get("filter")
+    if flt:
+        table, err = _apply_filter(table, flt)
+        if err:
+            return None, f"(源「{src}」){err}"
+        if not table[1]:
+            return None, f"filter 命中 0 行(源「{src}」),无从抽值"
+    header, rows = table
+    col, how = resolve_column(header, spec.get("column", ""))
+    if not col:
+        return None, f"未找到列「{spec.get('column')}」({how},源「{src}」)"
+    ex = spec.get("extract")
+    if ex:
+        err = _extract_spec_err(ex)
+        if err:
+            return None, err
+    vals, seen = [], set()
+    for r in rows:
+        v = r.get(col, "")
+        if _is_null(v):
+            continue
+        if ex:
+            v = _extract_val(v, ex)
+            if v is None:
+                continue
+        v = str(v).strip()
+        if v and v not in seen:
+            seen.add(v)
+            vals.append(v)
+    if not vals:
+        sample = next((str(r.get(col, ""))[:80] for r in rows if not _is_null(r.get(col, ""))), "")
+        return None, (f"源「{src}」列「{col}」一条值也没抽到——核对 filter/extract 与数据格式。"
+                      f"该列样例:「{sample}」")
+    return vals, None
+
+
+_EXPAND_CAP = 32                                        # expand 逐值展开上限:防呆不防爆
+
+
+def _eval_with_params(b, sources, source_name):
+    """带 param_from 的绑定:按声明顺序解析各参数(后面的可引用前面的 @参数 → 多跳链),
+    再把参数代入查询体(filter 值 / contains·equals·regex 目标 / pair_from 等位置)正常评估。
+    至多一个参数可带 expand:"all"/"any"(多值逐个代入:all=全部成立才成立,any=任一成立即成立)。
+    参数抽不到/歧义/引用未声明 → 响亮数据不足,绝不带着坏参数查出假结论。"""
+    cls = str(b.get("class", "")).upper() or "?"
+    pf = b.get("param_from")
+    if not isinstance(pf, dict) or not pf:
+        return _insuf(cls, 'param_from 应为非空对象 {"参数名": {source, column, filter?, extract?}}')
+    resolved, expand = {}, None                          # expand = (参数名, mode, [值…])
+    for name, spec in pf.items():
+        if not re.match(r"^[A-Za-z_]\w*$", str(name)):
+            return _insuf(cls, f"参数名「{name}」不合法(限字母/数字/下划线;引用时写 @{name})")
+        try:
+            spec_r = _subst(spec, resolved)              # 后面的参数可用前面的 → 链;只能向前引用,天然无环
+        except KeyError as e:
+            return _insuf(cls, f"参数「{name}」引用了 @{e.args[0]},但它没有排在前面(参数按声明顺序解析,"
+                               "只能引用已解析的)")
+        mode = spec_r.pop("expand", None) if isinstance(spec_r, dict) else None
+        vals, err = _resolve_values(spec_r, sources, b.get("source", source_name))
+        if err:
+            return _insuf(cls, f"参数「{name}」抽取失败:{err}", param=name)
+        if mode is None:
+            if len(vals) > 1:
+                return _insuf(cls, f"参数「{name}」有 {len(vals)} 个不同值:{vals[:3]}…——歧义,"
+                                   "先用 filter/extract 收窄到唯一值;确要逐值遍历加 \"expand\":\"all\"/\"any\"",
+                              param=name)
+            resolved[name] = vals[0]
+            continue
+        if mode not in ("all", "any"):
+            return _insuf(cls, f"参数「{name}」的 expand「{mode}」不认识(只认 all/any)")
+        if expand is not None:
+            return _insuf(cls, f"只允许一个参数带 expand(「{expand[0]}」和「{name}」都带了)——"
+                               "两个一起展开会组合爆炸,拆成两条绑定")
+        if len(vals) > _EXPAND_CAP:
+            return _insuf(cls, f"参数「{name}」expand 值太多({len(vals)} > {_EXPAND_CAP})——"
+                               "先用 filter 收窄再展开", param=name)
+        expand = (name, mode, vals)
+    qb = {k: v for k, v in b.items() if k != "param_from"}
+
+    def _run(extra):
+        try:
+            q = _subst(qb, {**resolved, **extra})
+        except KeyError as e:
+            return _insuf(cls, f"绑定里用了 @{e.args[0]},但 param_from 没有声明它")
+        # _resolved=True:代入完成的查询体不再做 @ 检查——抽出的参数值本身恰好长成 "@xxx" 时
+        # 必须按字面参与匹配,不许被当成未声明参数误杀(评审实测过这条假不足)
+        return evaluate_binding(q, sources, source_name, _resolved=True)
+
+    if expand is None:
+        fact = _run({})
+        fact.setdefault("params", dict(resolved))        # 审计:这次查询代入了什么参数
+        return fact
+    name, mode, vals = expand
+    per = [(v, _run({name: v})) for v in vals]
+    preds = [f.get("predicate_satisfied") for _, f in per]
+    sts = [f.get("status") for _, f in per]
+    if mode == "all":
+        pred, st = ((False, "ok") if any(p is False for p in preds)
+                    else (None, "insufficient_data") if any(s != "ok" for s in sts)
+                    else (True, "ok"))
+    else:
+        pred, st = ((True, "ok") if any(p is True for p in preds)
+                    else (None, "insufficient_data") if any(s != "ok" for s in sts)
+                    else (False, "ok"))
+    n_true = sum(1 for p in preds if p is True)
+    n_false = sum(1 for p in preds if p is False)
+    n_insuf = sum(1 for _, f in per if f.get("status") != "ok")
+    fact = {"class": cls, "status": st, "predicate_satisfied": pred, "params": dict(resolved),
+            "expand": {"param": name, "mode": mode, "n": len(vals),
+                       "n_true": n_true, "n_false": n_false, "n_insuf": n_insuf},
+            "reason": None if st == "ok" else
+            f"expand 的 {len(vals)} 个值里 {n_insuf} 个查不了,无法确证整体"}
+    # 证据要点名到值:all 挂"谁违规",any 挂"谁命中";再带一个代表性子结果供审计
+    if mode == "all" and n_false:
+        fact["fail_values"] = [v for v, f in per if f.get("predicate_satisfied") is False][:5]
+    if mode == "any" and n_true:
+        fact["hit_values"] = [v for v, f in per if f.get("predicate_satisfied") is True][:5]
+    sample = next((x for x in per if x[1].get("predicate_satisfied") is (False if mode == "all" else True)),
+                  next((x for x in per if x[1].get("status") != "ok"), per[0]))
+    fact["sample_value"], fact["sub_facts"] = sample[0], [sample[1]]
+    return fact
+
+
+def k_pair_from(b, sources, parent_source):
+    """P 类的跨源形态:两侧各自「选行→取值」再比较(本端/对端在不同文件时用它;
+    同表带标记分侧的仍用 side_column 形态)。pair_from = {"local": 取值规格, "peer": 取值规格}。"""
+    pf = b.get("pair_from")
+    if not isinstance(pf, dict) or "local" not in pf or "peer" not in pf:
+        return _insuf("P", 'pair_from 应为 {"local": {source, column, …}, "peer": {…}} 两侧规格')
+    if b.get("filter"):                                  # 静默忽略会让两侧取全表值(歧义/错值),响亮拒绝
+        return _insuf("P", "filter 不作用于 pair_from 顶层——把 filter 分别写进 local/peer 两侧规格")
+    fw = b.get("fault_when", "not_equal")
+    if fw not in ("not_equal", "equal"):
+        return _insuf("P", f"fault_when「{fw}」不认识(只认 not_equal/equal)")
+    got = {}
+    for side, zh in (("local", "本端"), ("peer", "对端")):
+        vals, err = _resolve_values(pf[side], sources, parent_source)
+        if err:
+            return _insuf("P", f"查不到{zh}的数据:{err}——{zh}不可查是判不了,不是'不成立'")
+        if len(vals) > 1:
+            return _insuf("P", f"{zh}取值有歧义:{vals[:3]}…(多个不同值)——先用 filter/extract 收窄")
+        got[side] = vals[0]
+    same = got["local"] == got["peer"]
+    return {"class": "P", "status": "ok", "local": got["local"], "peer": got["peer"],
+            "equal": same, "fault_when": fw,
+            "local_source": pf["local"].get("source", parent_source),
+            "peer_source": pf["peer"].get("source", parent_source),
+            "resolved_column": str(pf["local"].get("column", "")),
+            "predicate_satisfied": (not same) if fw == "not_equal" else same}
+
+
+def evaluate_binding(b, sources, source_name, _resolved=False):
     """按 b['class'] 分派到对应内核;D 递归,J 人工,无源/未知类别 → 数据不足。
     若绑定带 `decision`(模型生成时已判本条无法机械评估)→ 直接按该判定出 status,**不跑内核、不给判断**。
-    带 `filter`(A/B/C/F/G/I)→ 先行级预过滤再算(EAV 窄表:先选中"哪个量"的行,再对值做统计)。"""
+    带 `filter`(A/C/G/P)→ 先行级预过滤再算(EAV 窄表:先选中"哪个量"的行,再对值做统计)。
+    _resolved(内部):True=本绑定已由 param_from 代入完成,跳过 @ 残留检查(字面 @ 值合法)。"""
     cls = str(b.get("class", "")).upper()
     decided = b.get("decision")
+    if decided == "cross_source":                        # 绑定期的跨源标记:应被 merge 收进补绑候选,
+        return _insuf(cls or "?",                        # 漏到运行时=补绑没做完,响亮说明而不是装没事
+                      "标记为跨源判据(cross_source),应由跨源补绑环节产出 param_from 绑定——"
+                      "出现在运行时说明补绑未完成,回到步骤 2.5 跑 make_dispatch --cross")
     if decided in ("insufficient_data", "manual", "not_applicable"):
         return {"class": cls or "?",
                 "status": "manual" if decided == "manual" else "insufficient_data",
@@ -673,37 +814,43 @@ def evaluate_binding(b, sources, source_name):
                 "reason": b.get("mapping_reason") or b.get("reason") or f"模型判定:{decided}"}
     if cls == "J" or b.get("manual"):
         return k_manual(b)
+    if b.get("param_from"):                              # 参数化查询:先抽参数、再代入(D/P/A/C/G 通吃)
+        return _eval_with_params(b, sources, source_name)
+    if not _resolved:
+        stray = _find_stray_params(b)
+        if stray:                                        # 写了 @xxx 却没 param_from:拿字面 @ 去查=假排除,拦
+            return _insuf(cls or "?", f"绑定里用了 @{stray[0]} 却没有 param_from——参数没人解析,"
+                                      "查询会拿字面 @ 去匹配(恒不命中=假排除);补 param_from 或去掉 @")
+    if cls == "P" and b.get("pair_from"):                # 跨源成对比较:两侧各自选行取值再比
+        return k_pair_from(b, sources, source_name)
     if cls == "D":
         if b.get("filter"):                              # 静默忽略会让 sub 在全表上算出假阳,响亮拒绝
             return _insuf("D", "filter 不作用于 D 类顶层——把 filter 写进各 sub 子绑定(各自选行再合成)")
-        return k_combo(b, sources, source_name)
+        return k_combo(b, sources, source_name, _resolved)
     table = sources.get(source_name)
     if table is None:
-        return _insuf(cls or "?", f"无数据源「{source_name}」(用 --data {source_name}=<文件> 提供)",
-                      resolved_column=None)
+        hint = ("「cross」不是数据源名——cross 绑定的 source 应写最终查询落点的**真实源名**(如 config)"
+                if source_name == "cross" else f"用 --data {source_name}=<文件> 提供")
+        return _insuf(cls or "?", f"无数据源「{source_name}」({hint})", resolved_column=None)
     if not table[1]:                                     # 空表(仅表头、0 行):没数据 ≠ 排除——
         return _insuf(cls or "?",                        # 别让 matched=0/0 冒充"确定不成立"
                       "数据源为空表(仅表头、0 行数据),无从判定——不当'不成立'处理")
     fn = _KERNELS.get(cls)
     if not fn:
-        return _insuf(cls or "?", f"未知条件类别「{cls}」(应为 A–J 之一)")
+        if cls in _ARCHIVED:
+            return _insuf(cls, f"类别「{cls}」属 v1 内核,已封存于 archive/kernels-v1(数通场景不用)——"
+                               "改用 A/C/G/D/P 组合表达,或复活 v1 内核集")
+        return _insuf(cls or "?", f"未知条件类别「{cls}」(本内核集只认 A/C/D/G/J/P)")
     flt = b.get("filter")
     if flt:
-        if cls in _FILTERABLE:
-            table, err = _apply_filter(table, flt)
-            if err:
-                return _insuf(cls, err, resolved_column=None)
-            if not table[1]:                             # 过滤后 0 行 = 该指标项/取值本次没采集到
-                fact = _insuf(cls, "filter 命中 0 行(该指标项/取值本次未采集),无从判定——不当'不成立'处理")
-                fact["filter"] = flt
-                return fact
-            fact = fn(table, b)
-            fact["filter"], fact["filter_rows"] = flt, len(table[1])
+        table, err = _apply_filter(table, flt)
+        if err:
+            return _insuf(cls, err, resolved_column=None)
+        if not table[1]:                                 # 过滤后 0 行 = 该指标项/取值本次没采集到
+            fact = _insuf(cls, "filter 命中 0 行(该指标项/取值本次未采集),无从判定——不当'不成立'处理")
+            fact["filter"] = flt
             return fact
-        if cls == "E":
-            if isinstance(flt, list):                    # E 的内建 filter 只吃单 dict,list 会崩内核 → 拦成数据不足
-                return _insuf("E", "E 类内建 filter 只接受单个子句(dict);多子句请拆分或改 A/C + filter")
-            # 单 dict → 交给 k_proportion 内建处理(注意其语义独立:大小写敏感、命中 0 行按'排除'算)
-        else:                                            # H/未知类:静默忽略会在全表上算出假阳,响亮拒绝
-            return _insuf(cls, f"filter 不作用于 {cls} 类(H 用内建 where;适用 filter 的是 A/B/C/F/G/I)")
+        fact = fn(table, b)
+        fact["filter"], fact["filter_rows"] = flt, len(table[1])
+        return fact
     return fn(table, b)

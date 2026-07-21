@@ -15,6 +15,12 @@
   - `outline.status`(`hold/fail/insufficient/pass/uncovered`)只是**粗导航**——仍要按 `pruned_nodes` 的条件+事实**重判**。
   - node_id 是短 id(`nN`);`pass_through:true` 节点(汇总/"测试")**永不阻断路径**;`combine` 是 `AND/OR/unknown` 提示。
   - **node_id 权威**:`Fault_tree_path` 只用 `pruned_nodes` 里真实节点;`tree_issues.orphan_node_ids`/`unmapped_facts` 是绑定填错的信号,别据此硬判。
+- **`knowledge`(可选)**:业务同事手写的**外挂知识**条目(`[{title, 适用?, text}]`,已按当前分支筛过)。
+  它是**判读口径,不是事实**——两条用法红线:
+  ① **可信其"怎么查/怎么解读/什么算正常"**:知识说"某现象属正常"(如双活网关一台 ping 不通)→ 对应
+  候选按知识口径处理并在 caveats/排除理由里**引用知识标题**留痕;知识讲了查询方法/主次口径 → 照它解读事实;
+  ② **不许拿知识顶替实测**:知识描述的现象/数值不能当 `actual` 引用,"知识说会这样"≠"数据里查到了"——
+  成立仍要事实,缺数仍是数据不足。知识与事实**冲突**时以事实为准,并在 caveats 写明冲突。
 
 ## 核心:一个通用判定法则(不分指标)
 对故障树**每条判断条件**,照此走:
@@ -79,7 +85,9 @@
   "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
      "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字取自故障树>",
         "mapping":"<树的量 X → 命中的数据列;没有写'无对应列'>","mapping_reason":"<为何这么对/差异/为何数据不足>",
-        "actual":"<逐字引用事实(可引 deciles/nulls);没有写'事实中无此值'>","judgment":"成立/不成立/数据不足"}]} ],
+        "actual":"<逐字引用事实(可引 deciles/nulls);没有写'事实中无此值'>",
+        "how":"<怎么判的,一句人话——事实里带 explain 就逐字抄它(数字与规则不许改写),没有才按事实字段自己拼:在哪个数据的哪列找什么/算什么、实际得到多少、按什么规则判的>",
+        "judgment":"成立/不成立/数据不足"}]} ],
   "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low",
      "blocked_at":"<路径上数据不足的节点>","caveats":"<有效样本量/空值比例/语义近似等>",
      "support":"<叶子证据>","evidence_path":[ …同上结构… ]} ],
@@ -87,7 +95,8 @@
   "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }
 }
 ```
-- 每条 evidence 把 **条件 + 实际值 + 判断** 写全;`pass_through` 中间节点注明"无独立条件"。
+- 每条 evidence 把 **条件 + 实际值 + 怎么判的(how)+ 判断** 写全;`pass_through` 中间节点注明"无独立条件"。
+- **`how` 是给不懂技术、不懂判据分类的人看的**(报告和 HTML 直接展示它):事实里的 `explain` 字段就是机械拼好的这句话,**逐字抄、别改写数字**;它说清"在哪找什么→实际多少→按什么规则→结论",人对着它就能自行核验判断对不对。
 - **给人看的字段用名字、别用 id**:`Root_cause`/`support`/`caveats`/`blocked_at`/`reason`/`observed` 一律写节点**名字**(必要时"名字(nN)"),**绝不只写裸 `nXX`**——人读报告不该还得去翻 tree 文件查 id 对应哪个节点。只有 `evidence_path` 里 `node_id` 填 nN(同条目 `node` 填名字),各司其职。
 - **口径一致**:文字总结必须和 JSON 一致——`rca_result` 是 `[]` 就别说"发现了 N 条根因";疑似就叫疑似。
 - `rca_result` 为 `[]` **很正常**(上游话统/信令缺数据时);**强证据放 `probable_causes`,别硬塞 `rca_result`、更别造节点凑路径**。

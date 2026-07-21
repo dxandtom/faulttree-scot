@@ -21,21 +21,31 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
   结论只代表已提供数据能看到的部分。注意:一个数据源都没给仍是硬报错(用法错误);`--data` 的 key 打错
   会触发「plan 用不到的数据源」告警——看到它先核对 key 名,别让 typo 静默变成跳过。
 - `--base <dir>`:相对路径基准目录,默认是 `plan.json` 所在目录。
+- `--result-base <dir>`:结果输出根目录(`result/` 与 `runs/` 落在它下面),默认=`--base` 即产物目录、
+  老行为不变。**运行平台不允许往技能/产物目录写文件时用它把结果外移**(场景打包形态必用,见下)。
 
 ## 场景打包形态(assets/)——一句话执行
 
 本技能常以**场景技能**形态发布(`package_scenario.py` 打包:技能目录名=场景英文短名,如
 `layer-3-service-issues`;名字变了,本文件的执行逻辑不变):诊断资源内置在本技能目录的
 `assets/` 下——`assets/plan.json`、`assets/scripts/`(各指标解析脚本)、`assets/tree/`
-(故障树 + 可选 solutions.json)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤按它执行)。
+(故障树 + 可选 solutions.json + 可编辑的 **knowledge.md 外挂知识**,runner 会按分支匹配后随
+rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤按它执行)。
 
 此形态下用户只需一句话(如「数据在这里,帮我诊断」),按以下默认约定跑完全程,**不需要用户指路**:
 1. **数据入口**:数据以用户提供的形式为准——目录/散文件直接用;给的是压缩包(zip 等)就先解开再用。**不预设形式**,用户给什么接什么。
 2. **数据↔指标匹配**:指标名 = `assets/scripts/` 下的 `<指标>_analyzer.py` 前缀;数据文件按
    文件名与指标名匹配(相等或包含,如 `config_20250701.csv` → `config`)。**匹配不上的文件
    跳过**、plan 需要但没给的源自动 `[skip]`(runner 内建)——两类都必须写进汇报,不许静默。
-3. **执行**:`python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" --data <指标>=<文件> ...`
-   (`result/` 落在 `assets/` 下);rca 步骤按 `assets/fault-tree-rca/` 的规则做。
+3. **执行**:
+   ```
+   python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" \
+     --result-base "<本目录>/../<本技能目录名>-result" --data <指标>=<文件> ...
+   ```
+   **`--result-base` 必带**:平台不允许技能写自身目录下的文件,结果(`result/`、`runs/`)写到
+   **与本技能平齐**的 `<本技能目录名>-result/` 目录(如技能叫 `layer-3-service-issues`,结果就在
+   它旁边的 `layer-3-service-issues-result/`);rca 步骤按 `assets/fault-tree-rca/` 的规则做,
+   rca.json 也写在该结果目录(以 runner 打印的路径为准)。
 4. **【输出汇报】固定模板(默认执行,无须用户要求;各节内容与 rca.json 严格口径一致,别自创表格样式/emoji)**:
    ```
    ## 执行过程
@@ -43,6 +53,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
    ## 诊断结论
    ### 确证根因(N 条)
    | 根因 | 故障树路径 | 关键证据 | 推荐解决方案 |
+   (关键证据 = evidence 里 how 的原文——"在哪找什么→实际多少→按什么规则→结论",数字不许改写)
    ### 疑似根因(N 条)
    high/medium 逐条详述:根因/卡在哪(blocked_at)/证据/方案(有 solutions.json 时);
    low 合并成一行一条的简表
@@ -68,7 +79,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 3. 沿 `transition.next_on_success` 前进,`end=true` 结束;
 4. 节点间数据全靠 `$input`/`$memory`/`$step`/`$output` 引用传递。
 
-未定义的 kind 会直接报错(避免静默跳过)。典型链:`各 <指标>_analyzer(script,快)`→`rca(agent_skill,唯一模型步骤,慢)`。**统计已在生成脚本里算好,execute 不再加工数据。**
+未定义的 kind 会直接报错(避免静默跳过)。典型链:`各 <指标>_analyzer(script,快)`→`cross(script,跨源判据:传参链/两侧比较,runner 把全部源递给它;没有跨源绑定时秒过)`→`rca(agent_skill,唯一模型步骤,慢)`。**统计已在生成脚本里算好,execute 不再加工数据。**
 
 ## 输出
 - `script` 节点产出存入 `$memory`(不单独落盘);
@@ -78,7 +89,8 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 ```json
 {
   "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
-     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实>","judgment":"成立/不成立/数据不足"}]} ],
+     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实>",
+        "how":"<怎么判的人话(抄事实的 explain)>","judgment":"成立/不成立/数据不足"}]} ],
   "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low","blocked_at":"…","caveats":"…","support":"…","evidence_path":[…]} ],
   "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…"]} ],
   "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }

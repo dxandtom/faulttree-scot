@@ -32,7 +32,7 @@ _TOK = re.compile(r"[^.\[\]]+|\[\d+\]")
 # 产物格式契约:执行器"认识"的版本。与 cs-scot-generate/scripts/assemble_scenario.py 的
 # PRODUCT_FORMAT_VERSION 成对维护——产物结构有破坏性变化时两边一起 +1。比对只告警不阻断(知情,不是门禁)。
 # v2:绑定 filter 字段 + 空表守卫(旧产物的旧内核副本会静默忽略 filter → 假阳,提示重新 generate)。
-EXPECTED_PRODUCT_FORMAT = 2
+EXPECTED_PRODUCT_FORMAT = 3
 
 
 def check_product_format(base: Path) -> None:
@@ -102,9 +102,13 @@ def resolve_inputs(inputs: dict, ctx: Dict[str, Any]) -> dict:
 
 
 def _input_key(node: dict) -> Any:
-    """script 节点 inputs.data 若是 $input.<key> 引用,返回 key;否则 None。"""
+    """script 节点 inputs.data 若是 $input.<key> 引用,返回 key;否则 None。
+    "$input.*"(cross 跨源脚本:要全部源)不算具体 key → None(不进"必须提供"清单,给多少吃多少)。"""
     ref = (node.get("inputs") or {}).get("data")
-    return ref[len("$input."):] if isinstance(ref, str) and ref.startswith("$input.") else None
+    if not (isinstance(ref, str) and ref.startswith("$input.")):
+        return None
+    key = ref[len("$input."):]
+    return None if key == "*" else key
 
 
 def store_outputs(outputs: dict, value: Any, ctx: Dict[str, Any]) -> None:
@@ -122,11 +126,38 @@ def store_outputs(outputs: dict, value: Any, ctx: Dict[str, Any]) -> None:
 
 
 def run_script_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
-    """执行 kind=script 节点:跑 scripts/<name>.py <数据> -o <tmp>,返回其 JSON 产出。"""
+    """执行 kind=script 节点:跑 scripts/<name>.py <数据> -o <tmp>,返回其 JSON 产出。
+    inputs.data="$input.*"(cross 跨源脚本)→ 把本轮**全部**已提供数据源以 --data 源=路径 递入。"""
     name = node.get("name") or node["id"]
     script = base / "scripts" / f"{name}.py"
     if not script.exists():
         raise FileNotFoundError(f"节点 {node['id']} 的脚本不存在: {script}")
+    raw_ref = (node.get("inputs") or {}).get("data")
+    if raw_ref == "$input.*":
+        pairs = []
+        for k, v in (ctx.get("input") or {}).items():
+            if not v:
+                continue
+            p = Path(v)
+            p = p if p.is_absolute() else base / p
+            if p.exists():
+                pairs.append((k, p))
+            else:                                        # 路径打错别静默丢:事实层只会说"无数据源",指不到病根
+                print(f"  [warn] --data {k} 的路径不存在: {p} —— cross 步骤将收不到该源"
+                      "(其相关绑定会报「无数据源」;核对路径)")
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "out.json"
+            cmd = [sys.executable, str(script), "-o", str(out)]
+            for k, p in pairs:
+                cmd += ["--data", f"{k}={p}"]
+            print(f"[script] {node['id']}: {' '.join(cmd)}")
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+                                  encoding="utf-8", errors="replace")
+            if proc.returncode != 0:
+                raise RuntimeError(f"节点 {node['id']} 失败 (exit {proc.returncode}):\n{proc.stderr[-2000:]}")
+            result = json.loads(out.read_text(encoding="utf-8"))
+        store_outputs(node.get("outputs"), result, ctx)
+        return result
     ins = resolve_inputs(node.get("inputs"), ctx)
     if "data" not in ins or not ins["data"]:
         raise ValueError(f"节点 {node['id']} 缺少已绑定的 inputs.data(用 --data <指标>=<文件> 提供)")
@@ -180,8 +211,9 @@ def _file_fingerprint(path: str) -> dict:
 
 
 def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[str, str], base: Path,
-                        missing_inputs=None) -> None:
-    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs/index.jsonl 追加一行,供生产侧管理。"""
+                        missing_inputs=None, runs_base: Path = None) -> None:
+    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs/index.jsonl 追加一行,供生产侧管理。
+    runs/index.jsonl 落在 runs_base(默认=base;--result-base 生效时=结果根目录)下。"""
     import datetime
     created = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     inputs = {k: _file_fingerprint(v) for k, v in data_map.items() if v}  # 空值=没提供:归 missing_inputs,不指纹(Path('') 会指到 CWD)
@@ -190,7 +222,7 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
     if missing_inputs:                                   # 部分数据运行:铭牌上写明缺口,事后一看便知这轮少了啥
         manifest["missing_inputs"] = sorted(missing_inputs)
     (run_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    idx = base / "runs" / "index.jsonl"
+    idx = (runs_base or base) / "runs" / "index.jsonl"
     idx.parent.mkdir(parents=True, exist_ok=True)
     with idx.open("a", encoding="utf-8") as f:           # 一行一运行:run_id + 时间 + 各输入指纹,便于事后检索/去重
         f.write(json.dumps({"run_id": run_id, "created_at": created,
@@ -228,7 +260,45 @@ def _archive_previous_run(result_dir: Path, runs_dir: Path):
     return dst
 
 
-def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_subdir: str = "result") -> Any:
+def _load_knowledge(tree_dir: Path, name_pool: str) -> list:
+    """tree/knowledge.md(业务同事手写的外挂知识)→ 与当前子树匹配的条目 [{title, tags?, text}]。
+    条目 = 「### 标题」+ 可选「适用:标签1、标签2」行 + 正文;无适用行或含「通用」= 恒载入,
+    有标签则任一标签出现在 name_pool(剪枝后节点名/判据/场景名拼串)才载入——按分支载入,不全量灌。
+    文件没有/解析失败 → 空列表(知识是增益,绝不因它坏了主流程)。"""
+    kf = tree_dir / "knowledge.md"
+    if not kf.exists():
+        return []
+    try:
+        text = kf.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    entries, cur = [], None
+    for line in text.splitlines():
+        if line.startswith("### "):
+            cur = {"title": line[4:].strip(), "tags": None, "body": []}
+            entries.append(cur)
+        elif cur is not None:
+            s = line.strip().replace(":", ":")
+            if cur["tags"] is None and not cur["body"] and s.startswith("适用:"):
+                cur["tags"] = [t for t in re.split(r"[、,,/\s]+", s.split(":", 1)[1]) if t]
+            elif line.strip() or cur["body"]:
+                cur["body"].append(line)
+    out = []
+    for e in entries:
+        body = "\n".join(e["body"]).strip()
+        if not body:
+            continue
+        if e["tags"] and "通用" not in e["tags"] and not any(t in name_pool for t in e["tags"]):
+            continue
+        item = {"title": e["title"], "text": body}
+        if e["tags"]:
+            item["适用"] = "、".join(e["tags"])
+        out.append(item)
+    return out
+
+
+def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_subdir: str = "result",
+                         result_base: Path = None) -> Any:
     """执行 kind=agent_skill 节点:备好输入,交给该 prompt-only 技能(模型)执行。
 
     runner 自身不调模型;它把解析好的 inputs 写到 result/<id>_input.json 并打印待办,
@@ -285,8 +355,23 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
         payload = {"fault_tree_md": ft_text, "indicator_results": ins}
     if missing_ind:      # 两种形态都带上缺数标记(顶层键,下游 RCA/辩论桥都能看到)
         payload["missing_indicators"] = missing_ind
+    # 外挂知识(tree/knowledge.md,业务同事手写):按「适用」标签匹配当前子树,命中的条目随输入
+    # 交给 RCA——是判读**口径**(去哪查/怎么解读/什么算正常),不是事实,不能顶替实测值。
+    if md_path:
+        ftree = payload.get("fault_tree")
+        if isinstance(ftree, dict):                      # 剪枝形态:按保留分支的节点名+判据匹配 → 按分支载入
+            pool = str(ftree.get("scenario") or "") + " " + " ".join(
+                f"{(n or {}).get('name') or ''} {(n or {}).get('condition') or ''}"
+                for n in (ftree.get("pruned_nodes") or {}).values())
+        else:                                            # 完整 md 形态:对全文匹配
+            pool = str(payload.get("fault_tree_md") or "")
+        knowledge = _load_knowledge(md_path.parent, pool)
+        if knowledge:
+            payload["knowledge"] = knowledge
+            print(f"  外挂知识:tree/knowledge.md 命中 {len(knowledge)} 条(按分支匹配),已随 RCA 输入下发:"
+                  + "、".join(f"「{e['title']}」" for e in knowledge[:5]))
 
-    in_path = base / result_subdir / f"{node['id']}_input.json"
+    in_path = (result_base or base) / result_subdir / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     # 注:上一轮的最终结果已在 main() 启动时整体归档到 runs/<上轮run_id>/,result/ 此刻只剩本轮的新输入,
@@ -329,6 +414,9 @@ def main() -> None:
     ap.add_argument("--data", action="append", default=[],
                     help="$input 绑定,如 --data kpi=path.csv(可多次)")
     ap.add_argument("--base", help="路径解析基准目录(默认取 plan.json 所在目录)")
+    ap.add_argument("--result-base", help="结果输出根目录:result/ 与 runs/ 落在它下面(默认=--base,"
+                                          "即产物目录,老行为不变)。平台不允许技能写自身目录时用它把结果"
+                                          "外移,如 --result-base <技能目录>/../<技能名>-result")
     ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」)。result/ 始终=当前一轮;"
                                      "重跑前自动把上一轮整体归档到 runs/<上轮run_id>/,history 不丢、不覆盖、无歧义")
     ap.add_argument("--new-run", action="store_true",
@@ -363,7 +451,12 @@ def main() -> None:
     provided = {k for k, v in data_map.items() if v}
     missing = {k: ids for k, ids in required.items() if k not in provided}
     unused = sorted(provided - set(required))
-    if unused:                                          # typo 防线:key 打错会变成"静默跳过",这里点破
+    has_star = any((n.get("inputs") or {}).get("data") == "$input.*"
+                   for n in plan.get("nodes", []) if n.get("kind") == "script")
+    if unused and has_star:                             # 有跨源节点:多给的源会递给它(pair_from 的对端文件等)
+        print(f"[info] 数据源 {', '.join(unused)} 不属任何单源解析步骤,将只递给跨源步骤(cross)使用;"
+              "若它本该有自己的解析步骤,核对 key 名。")
+    elif unused:                                        # typo 防线:key 打错会变成"静默跳过",这里点破
         print(f"[warn] --data 里有 plan 用不到的数据源: {', '.join(unused)}"
               f"(plan 需要: {', '.join(required)})——key 是不是打错了?这些文件本轮不会被使用。")
     if required and not set(required) & provided:       # 一个都没给:大概率用法错误,仍硬报错并给指引
@@ -388,11 +481,15 @@ def main() -> None:
     # 每轮自动带 run_id(--run-id 可自定义),写 result/run.json 标明本轮身份 + 追加 runs/index.jsonl。
     # eval/benchmark 仍读 result/(= 当前轮),不受影响。
     run_id = args.run_id or _gen_run_id()
-    result_dir = base / "result"
-    archived = _archive_previous_run(result_dir, base / "runs")
+    result_base = Path(args.result_base).resolve() if args.result_base else base
+    result_dir = result_base / "result"
+    archived = _archive_previous_run(result_dir, result_base / "runs")
     result_dir.mkdir(parents=True, exist_ok=True)
-    _write_run_manifest(result_dir, run_id, plan, data_map, base, missing_inputs=missing)
+    _write_run_manifest(result_dir, run_id, plan, data_map, base, missing_inputs=missing,
+                        runs_base=result_base)
     result_subdir = "result"
+    if result_base != base:
+        print(f"  结果目录:{result_dir}(--result-base 生效,不往产物/技能目录写)")
     if archived:
         print(f"  run_id={run_id};上一轮已归档 → {archived}（result/ 即当前轮，历史在 runs/）")
     else:
@@ -416,7 +513,7 @@ def main() -> None:
             else:
                 result = run_script_node(node, ctx, base)
         elif kind == "agent_skill":
-            result = run_agent_skill_node(node, ctx, base, result_subdir)
+            result = run_agent_skill_node(node, ctx, base, result_subdir, result_base)
         else:
             raise ValueError(f"节点 {cur} 的 kind={kind} 暂不支持(当前实现 script / agent_skill)")
         ctx["step"][cur] = result

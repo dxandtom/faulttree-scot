@@ -1,8 +1,11 @@
 # 逐条件绑定契约——generate 时填进 `<ind>_analyzer.py` 的 `CONDITIONS`
 
 诊断的"会变"部分**只在这里**:generate 时模型看**故障树条件 + 各源真实表头/样本**(先用 `analyzer.py` 出概览),
-为每条判据写一个**绑定**:选哪个**类别内核**(A–J,统计逻辑已在 `condition_kernels.py` 固化测过)、对哪列、
+为每条判据写一个**绑定**:选哪个**类别内核**(A/C/G/D/J/P,统计逻辑已在 `condition_kernels.py` 固化测过)、对哪列、
 做什么处理变换、路由到哪个源、阈值多少;**对不上就老实标数据不足**。绑定平铺进对应源脚本的 `CONDITIONS` 列表。
+> v1 的 **B/E/F/H/I** 内核(差值/占比TopN/配置检查/信令流程/特征分析)已**封存**于
+> `archive/kernels-v1/`(数通场景判据普查零命中):新绑定**别再用**这些类(内核会响亮报"已封存"
+> 的数据不足);老产物自包含旧内核副本,照常执行不受影响;蜂窝等老场景要复活见 archive 的 README。
 
 脚本跑起来对每条 `evaluate_binding(绑定, {源:表}, 源)` → 事实(算出的量 + provenance + `predicate_satisfied` 的**字面**比较);
 `成立/不成立/数据不足` 的**最终裁决 + 路径回溯 + 语义是否真等(RSRP≠RSSI 要降置信)** 仍由 `fault-tree-rca` 做。
@@ -16,26 +19,81 @@
 | `node` | 故障树节点名 |
 | `node_id` | 该节点在 `tree/<场景>.tree_index.json` 里的 **key(形如 `nN`,短、推荐)或 `code`**(两者都认)。**必填**——RCA 靠它把事实挂回树;**别填节点名**;填错/不存在会被当"孤儿"报出来 |
 | `condition_text` | **逐字**取自故障树的判断条件(给 RCA 复核) |
-| `class` | `A`–`J`,决定用哪个内核 |
+| `class` | `A`/`C`/`G`/`D`/`J`/`P` 之一,决定用哪个内核(B/E/F/H/I 已封存,见上) |
 | `source` | 数据源逻辑名(对应 `--data <name>=<file>`);J 类可为 null |
 | `mapping_reason` | **为何这么对/语义或单位差异/为何判数据不足**(必写,可审) |
 | `decision`(可选) | 模型**已判本条无法机械评估**时填 `"insufficient_data"`(或 `"manual"`;也认 `"not_applicable"`,按数据不足出):直接出该状态、**不跑内核、不给判断**。**比写一堆 has/lacks/column 再在 reason 里说"数据不足"既更诚实、又更快、又更短。** |
-| `filter`(可选) | **行级预过滤**,给「EAV 窄表」(一行一个量,如 `DataItem/DataValue/Unit` 形状)用:先把行缩到命中子集、内核再对子集算。子句 `{column, equals:值\|[值…]}` 或 `{column, contains:…}`,list=AND。**只作用于 A/B/C/F/G/I**(E 有内建 `filter`、H 有内建 `where`,语义不变);过滤后 0 行=该指标项本次未采集 → 数据不足(不是"不成立")。 |
+| `filter`(可选) | **行级预过滤**,给「EAV 窄表」(一行一个量,如 `DataItem/DataValue/Unit` 形状)或"先选中某命令/某检查项的行"用:先把行缩到命中子集、内核再对子集算。子句 `{column, equals:值\|[值…]}` 或 `{column, contains:…}`,list=AND。**作用于 A/C/G/P**(D 顶层不吃——把 filter 写进各 `sub` 子绑定;J 不碰数据);过滤后 0 行=该指标项本次未采集 → 数据不足(不是"不成立")。 |
+| `extract`(可选) | **格内取值层**,给"一格是杂糅文本、要先抽出其中一段值再判"用,作用于 **A/C/G/P**。二选一:`{"kv": "<键名>"}`(抓「键: 值」「键=值」「键:值」,值到空白/逗号/分号止;`,后跟3位数字` 当千分位续上)或 `{"regex": "<带捕获组的正则>"}`(取第 1 捕获组;无捕获组取整体命中)。**A+extract**=抽出数值比阈值(`1,234` 千分位自动归一);**C/G+extract**=抽出值后再做 equals/contains/regex 匹配;**抽不到=该行缺测**(计 `nulls`,不当不命中);整列一条都抽不到 → 数据不足并附样例。正则编译不过 → 响亮拒收(判据里的"关键字"是**原料不是成品**:`%u`/`%d` 是 printf 占位,先换成 `\d+`;HTML 渣剔掉)。 |
 | …类参数… | 见下表,直接平铺在本对象上 |
 
 ## 类别 → 内核参数
 | 类 | 名称 | 关键参数 | 产出事实 |
 |---|---|---|---|
-| **A** | 阈值比较 | `column`,`op`(`< <= > >= == !=`,`=`同`==`),`threshold`,`scope`(`aggregate`/`count_rows`),`agg`(mean/min/max/first/last/sum),`transforms` | aggregate 给 `value`;count_rows 给 `count_satisfied`/`ratio` |
-| **B** | 差值计算 | `minuend`:[列…],`subtrahend`:[列…],`op`,`threshold`,`scope`,`transforms` | `value`=Σ被减−Σ减;**缺任一原始计数列→数据不足** |
-| **C** | 字段匹配 | `column`,`equals`:[值…] 或 `contains`:[子串…],`match`,`case_insensitive`,`require`(默认1);`absent:true`=负存在(命中**0行**才算故障成立,与 `require` 互斥;列全空→数据不足) | `matched` 命中行数 + 样例 |
-| **D** | 多条件组合 | `combine`(`AND`/`OR`),`sub`:[子绑定…](每个子绑定自带 `class`,可自带 `source`) | AND:有子False→False、有数据不足→数据不足、否则True;OR 对称 |
-| **E** | 占比/TopN | `group_by`,`filter`:{column,equals/contains},`op`,`threshold` | `top1`/`top1_ratio` |
-| **F** | 配置检查 | `param`,`equals`;或 `not_equals`/`negate:true`(故障=参数**≠**期望值) | 需配置数据源;无→数据不足 |
-| **G** | 日志匹配 | `column`(日志文本列),`contains`:[码/串…] | 同 C(子串) |
-| **H** | 信令流程 | `msg_column`,`key`(会话/callid),`has`:[消息…],`lacks`:[消息…],`where`:{column,equals/contains}(或其列表;同一行须满足全部,表达"某消息**且携带** cause=X") | `matched_sessions`;需 trace;无→数据不足 |
-| **I** | 特征分析 | `feature`/`column`,`metric`(`row_threshold`/`all_same`/`all_null`),`op`,`threshold`,`require`(默认1),`transforms` | TA 距离 `156*TA/2`=`scale:78`;`/100`=`scale:0.01` |
+| **A** | 阈值比较 | `column`,`op`(`< <= > >= == !=`,`=`同`==`),`threshold`,`scope`(`aggregate`/`count_rows`),`agg`(mean/min/max/first/last/sum),`transforms`;可加 `extract`(先从格内抽出数值,见公共字段) | aggregate 给 `value`;count_rows 给 `count_satisfied`/`ratio` |
+| **C** | 字段匹配 | `column`,`equals`:[值…] 或 `contains`:[子串…] 或 **`regex`:[正则…]**(任一命中即命中;regex 用 `re.search`、**大小写敏感**、逐条编译校验坏正则响亮拒收),`match`(`exact`/`contains`/`regex`),`case_insensitive`,`require`(默认1);`absent:true`=负存在(命中**0行**才算故障成立,与 `require` 互斥;列全空→数据不足);可加 `extract`(先抽值再匹配) | `matched` 命中行数 + `total`/`ratio`/`top` + 样例 |
+| **D** | 多条件组合 | `combine`(`AND`/`OR`),`sub`:[子绑定…](每个子绑定自带 `class`,可自带 `source`);`group_by`:"<对象列>"=同对象关联(按列切组、每组单独跑全部 sub,任一组全真才成立;sub 不得跨源) | AND:有子False→False、有数据不足→数据不足、否则True;OR 对称;group_by 给 `matched_groups` |
+| **G** | 日志匹配 | `column`(日志文本列),`contains`:[码/串…] / `regex`:[正则…];其余同 C | 同 C(实现即 C) |
 | **J** | 人工确认 | `note` | `status:"manual"`,不给判断 |
+| **P** | 成对比较 | `side_column`(分侧列)+`peer_marker`(默认 `"*"`,含标记=本端),`value_column`(取值列),可加 `extract`/`filter`,`fault_when`(`not_equal` 默认=两侧**不等**算故障 / `equal` 反之) | `local`/`peer`/`equal`;**任一侧无值→数据不足**("查不到对端"是判不了,不是不成立);一侧多个不同值→数据不足(歧义,先用 filter 缩行) |
+
+> ~~B 差值 · E 占比/TopN · F 配置检查 · H 信令流程 · I 特征分析~~:v1 内核,已封存
+> `archive/kernels-v1/`(新绑定用到会得到"已封存"的数据不足)。原用途的替代:F 的"参数=期望值"
+> → C `equals`(整格)或 C+`extract`(格内字段);I 的 `row_threshold` → A `count_rows`;
+> B/E/H 数通判据无命中,真需要时按 archive README 复活。
+
+**P 类什么时候用**:判据要"查对端,比较本端/对端的某信息是否一致"(如 MLAG 两侧 IP/版本/配置一致性)。
+数据形态:同一表里本端行与对端行靠**分侧列**区分(如 `Object` 列本端带 `*` 标记);要比的值在
+`value_column`(整格)或其格内某段(加 `extract`);一次只比**一项**信息——多项各写一条 P 绑定,
+并用 `filter` 先把行缩到该检查项。**两侧在不同文件**时改用 `pair_from`(见下节)。
+
+## 参数化查询(`param_from`)与跨源判据——传参链的家
+
+有的判据**一步查不完**:要先查出一个值,拿它当参数再查下一处(常见:「从回显抽出接口名/网元名,
+再去配置/日志里查它」)。这类判据写进**跨源脚本 `cross_analyzer.py`**(assemble 自动生成;由步骤 2.5
+的「跨源补绑」环节填,见 SKILL.md;执行时 runner 把全部数据源都递给它)。三样机制:
+
+**1. `param_from` 传参链(单跳/多跳)**:声明"参数先去哪抽",查询体里 `"@参数名"` 整串占位被代入
+(可用在 filter 值、`contains`/`equals`/`regex` 目标里):
+```python
+{"class": "G", "source": "config", "column": "level2", "contains": ["mode lacp-static"], "absent": True,
+ "filter": {"column": "level1", "equals": "@plink"},
+ "param_from": {"plink": {"source": "cmd", "column": "CmdResult",
+                          "filter": {"column": "CmdName", "contains": "peer-link"},
+                          "extract": {"kv": "Port Name"}}}}
+```
+- 参数规格 = `{source?(缺省=本绑定的 source), column, filter?, extract?}`——**抽参数用的就是现成的
+  选行/取值两层**,没有新语法;
+- **多跳**:参数按声明顺序解析,**后面的可引用前面的**(`@前参数` 用在自己的 filter 里)——
+  「Vbdif → 它的 bridge-domain 号 → 该 BD 的配置」三连查就是三个参数排着写;只能向前引用,天然无环;
+- **作用域**:参数只在**本条绑定**内可见;D 的 sub 子绑定**自带 `param_from` 时自成作用域**
+  (自己解析自己的参数,不继承外层)——外层参数要给 sub 用,就把参数提到 D 顶层、sub 里只写 `@名`;
+- **诚实守则(内核自动执行)**:参数抽不到 → 整条数据不足(附该列样例);抽出**多个不同值** → 数据不足
+  (歧义,先收窄 filter);查询体用了 `@xxx` 却没声明、或声明了引用顺序不对 → 响亮拒收;
+  **没写 `param_from` 却在查询里用 `@xxx`** → 拒收(否则拿字面 @ 去匹配=恒不命中=假排除)。
+
+**2. `expand` 多值展开**:判据要"**每个** X 都查"(如「每个 Vbdif 接口都必须配 bridge-domain」)时,
+给**一个**参数加 `"expand": "all"`(逐值代入,**全部**满足才成立;违规值点名进 `fail_values`)或
+`"any"`(任一满足即成立;命中值进 `hit_values`)。一条绑定只许一个参数带 expand(防组合爆炸),
+展开值上限 32(超了报数据不足,先收窄)。
+
+**3. P 类 `pair_from`(两侧在不同文件)**:两侧各自「选行 → 取值」再比,替代同表的 side_column 形态:
+```python
+{"class": "P", "source": "config_a", "fault_when": "not_equal", "pair_from": {
+   "local": {"source": "config_a", "column": "level2",
+             "filter": {"column": "level1", "equals": "Nve1"}, "extract": {"kv": "source"}},
+   "peer":  {"source": "config_b", "column": "level2",
+             "filter": {"column": "level1", "equals": "Nve1"}, "extract": {"kv": "source"}}}}
+```
+任一侧抽不到值/源没提供 → 数据不足("查不到对端"不是"不成立");一侧多值 → 数据不足(歧义)。
+`filter` 写进 local/peer **两侧规格里**(pair_from 顶层 filter 会被响亮拒收,不静默忽略)。
+另注:filter 的 `excludes` 模式下,**过滤列为空的行不保留**("不含X"对空格子是空洞真,留下会把
+脏续行/汇总行混进对端选择、比出错值)。
+
+**绑定期分工**:单源子代理遇到跨源判据**不硬绑也不沉默**,写一行标记
+`{"node_id":"nN","decision":"cross_source","mapping_reason":"<缺哪一环>"}`;merge_conditions 把标记
+汇成 `dispatch/cross_candidates.json`;`make_dispatch --cross` 产一份带**全部源概览+知识**的补绑简报,
+由一个子代理(或主代理)按上面模板填进 cross_analyzer.py。**跨源绑定不走调优表**(工程侧维护)。
 
 > **C/G 的 `contains` 三条铁规**(违者=假阳/假阴,validate 只能软告警,规矩在这就得守):
 > ① **每个 target 都必须独立是"判据成立的充分信号"**(任一命中→判据确实成立):多个等价错误码/告警名
@@ -43,8 +101,8 @@
 > 命中了也不代表成立,而 contains 是任一命中即命中,一个泛词毒整条。超短 ASCII 串(≤3字符)几乎必踩
 > (`"NP"` 是 `"snmp"` 的子串)。
 > ② **值否定/为空语义禁 G 捞子串**("字段为空/查不到/未建立/状态非UP"):标签存在≠字段为空,文本捞子串
-> 表达不了否定——**数据有携带极性的状态枚举列(值如 `Down`/`FAILED`)→ 直绑 `equals` 或 F 类 `not_equals`
-> 最轻**;没有才写 custom(抽值判空)或 `decision:insufficient_data`。
+> 表达不了否定——**数据有携带极性的状态枚举列(值如 `Down`/`FAILED`)→ 直绑 `equals` 最轻**(状态藏在
+> 杂糅格里就加 `extract` 抽出字段值再 `equals`);没有才写 custom(抽值判空)或 `decision:insufficient_data`。
 > **但"负存在"是另一回事**("**没有配置X/未启用X**"=判某行内容整个不存在):这可判,**缺行就是证据**——
 > 绑 C/G + `absent:true`(命中0行=故障成立;列全空时内核改判数据不足,不会把"没导出"误判成"没配置");
 > "配了A但没配B"= D 组合(AND)+ 存在子条件 + `absent` 子条件。**禁止以"无法确认不存在"为由投
@@ -67,9 +125,12 @@
 > `hwIfMonitorCrcErrorRising`,设备自己已判过"增长")→ 绑告警名合法;要人比较两次数值的 → 单快照数据
 > 判不了,`decision:insufficient_data`(注明"需两次采样对比")。
 
-> **F 类极性**:让 `predicate_satisfied` 永远表示"**故障成立**"。树写"参数=坏值才算故障"→ `equals:坏值`;树写"参数**≠**好值才算故障"(如 `SsbPeriod≠20ms`、`TxRxMode≠64T64R`)→ 用 `not_equals:好值`(或 `negate:true`+`equals`),**别绑好值再靠 `mapping_reason` 反推**(那样 `predicate_satisfied` 含义反了,RCA 一不留神就判错)。
+> **极性铁律**:让 `predicate_satisfied` 永远表示"**故障成立**"。树写"某值=坏值才算故障"→ `equals:坏值`;
+> 树写"参数**≠**好值才算故障"→ 本内核集没有 not_equals(v1 F 类已封存),**别绑好值再靠 `mapping_reason`
+> 反推**(那样 `predicate_satisfied` 含义反了,RCA 一不留神就判错)——写 custom(抽值比较)或
+> `decision:insufficient_data` 注明"≠语义无模板"。
 >
-> **标签 = 路由分类,不是 N 个互斥实现**:A–J 对齐的是**故障树的说话方式**(树写"日志"→G、"配置"→F、"特征"→I),方便选型;底层原语共享——**G 就是 C**(同一匹配内核)、F≈C 的"全等"版、I 的 `row_threshold`≈A 的 `count_rows`。所以遇到"日志/配置/特征"别硬塞进 C/A,**按树的措辞选标签**;也别去"合并去重"它们,标签稳定才好绑。`require`:A/B/I 的 `count_rows`/`row_threshold` 统一为"满足行数 ≥ require 才算成立"(默认1)。
+> **标签 = 路由分类,不是 N 个互斥实现**:类别对齐的是**故障树的说话方式**(树写"日志"→G、写"字段取值"→C),方便选型;底层原语共享——**G 就是 C**(同一匹配内核)。选行(`filter`)× 取值(整格/`extract`)× 判定(匹配/absent/阈值/P 两侧比较)× 组合(D)是**四层正交**的,按需拼装。`require`:A 的 `count_rows` 与 C/G 统一为"满足行数 ≥ require 才算成立"(默认1)。
 
 ## 处理变换词汇(`transforms`,固定可审,别写任意代码)
 `scale:<f>`(乘,如 `/100`→`scale:0.01`)、`abs`、`neg`、`round:<n>`、`log10`(量级/对数标度条件用;x≤0 无对数 → 该值当缺测/null,不编值)。
@@ -132,14 +193,13 @@
   例:「CPU 占用率>80%」→ `{"class":"A","filter":{"column":"DataItem","equals":"SYS_CpuUsage"},
   "column":"DataValue","op":">","threshold":80,"scope":"count_rows"}`。
 - **空表(仅表头、0 行)→ 一律「数据不足」**(所有读表类),**filter 命中 0 行 → 「数据不足」**
-  (A/B/C/F/G/I),内核自动兜住——没数据≠排除,别让 `matched=0/0` 冒充"确定不成立"。
+  (A/C/G/P),内核自动兜住——没数据≠排除,别让 `matched=0/0` 冒充"确定不成立"。
   (非空表上 `matched=0` 仍是**确定排除**,语义不变。)
-- **E 类例外**:E 的内建 `filter` 语义独立——只接受**单个子句**(list 会被拦成数据不足)、
-  **大小写敏感**、命中 0 行按"排除"算。EAV 场景要占比/TopN 时,优先把行选窄的活交给 A/C+filter。
-- **D/H 顶层不吃 filter**(响亮报数据不足,不静默忽略):D 把 filter 写进各 `sub` 子绑定;H 用内建 `where`。
+- **D 顶层不吃 filter**(响亮报数据不足,不静默忽略):把 filter 写进各 `sub` 子绑定(各自选行再合成)。
 - **回显计数器红线**:「回显里出现某告警名」可用 G(告警名只在发生时出现);「回显里某计数器>阈值」
-  **禁用 G**——`CRC:` 这类标签恒在、值为 0 也会子串命中(假阳),必须 custom 用 `mo_config.extract_metric`
-  抽出数值再比较。详见 `references/datacom_log_adapter.md`。
+  **禁用 G**——`CRC:` 这类标签恒在、值为 0 也会子串命中(假阳)。首选 **A + `filter`(选中该命令的行)
+  + `extract`**(`{"kv":"CRC"}` 或正则捕获组)抽出数值再比阈(千分位自动归一);正则/多值语义复杂到
+  extract 表达不了再 custom 用 `mo_config.extract_metric`。详见 `references/datacom_log_adapter.md`。
 
 ## 一个节点多条判据怎么绑
 - **同源多条(尤其 AND)**:**优先 D 类**组合成一条绑定(AND/OR 语义由内核合成:有假即假、有缺即缺)。
@@ -150,6 +210,6 @@
   判据漏没漏"没有机械闸门——多判据节点用 D 类,就把"绑没绑全"收敛回了节点级,闸门看得住。
 
 > 真实例子见 `examples/kpi-tabular/scripts/kpi_analyzer.py`(填好的 `CONDITIONS` + 一条 `custom`)。
-> **接入类「配置拓扑」场景**(NSA 的 S1/X2 链路、路由、EPGroup、多运营商等):配置常是 `MOName:key=val,...;` **文本**(非表格)→ 用 `.txt` 直接喂、每个 MO 类型当**页签**、`source=<MO类型>` 套 F/A/C;模板搞不定的(IP 网段匹配、跨 MO 追溯、分号多值、动态表头)写 custom + 用 `mo_config` 原语。**详见 `references/nsa_config_adapter.md`(4 个可照抄的 custom 例子)。**
+> **接入类「配置拓扑」场景**(NSA 的 S1/X2 链路、路由、EPGroup、多运营商等):配置常是 `MOName:key=val,...;` **文本**(非表格)→ 用 `.txt` 直接喂、每个 MO 类型当**页签**、`source=<MO类型>` 套 A/C;模板搞不定的(IP 网段匹配、跨 MO 追溯、分号多值、动态表头)写 custom + 用 `mo_config` 原语。**详见 `references/nsa_config_adapter.md`(4 个可照抄的 custom 例子;注意其 F 类示例属 v1 内核,现改用 C `equals`)。**
 > **数通「诊断文件包」场景**(路由器/交换机的 cmd/diag/config/dblg/log/opr/bas 一包 CSV,混血格式故障树·统一走 v2):
 > 7 类文件的内核对号表、EAV 窄表 `filter` 绑法、回显计数器红线、空表语义——**详见 `references/datacom_log_adapter.md`。**

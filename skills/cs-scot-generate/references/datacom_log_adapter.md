@@ -15,16 +15,15 @@
    从 L1 起根用 `--start-level 1`(换起始层级后 node_id 整体重排,tree_index 必须重生成、绑定 node_id 跟着重填)。
    **建完必须核对输出里的「带判据节点 N」:N=0 → 停**(格式没被识别,assemble 也会硬拦),别往下绑定。
 3. **空表 ≠ 排除**:有的模板可能只有表头、0 行数据(如 BasInfo 空壳)。内核对空表(所有读表类)、
-   `filter` 命中 0 行(A/B/C/F/G/I)自动出「数据不足」——别手工绕过这个语义。
-   (例外:E 类内建 filter 语义独立——单子句、大小写敏感、命中 0 行按"排除"算,见 binding schema。)
+   `filter` 命中 0 行(A/C/G/P)自动出「数据不足」——别手工绕过这个语义。
 
 ## 二、7 类文件 → 内核对号表
 
 | 文件(示例名) | 形态 | 主要判据落点 | 用什么 |
 |---|---|---|---|
-| `*.txt.csv`(cmd,命令+完整回显) | 引号多行 CSV,一条记录=一条命令,`CmdResult`=整段回显 | 回显里的告警/事件/状态 | 存在类→G;计数器类→custom+`extract_metric`(见三) |
+| `*.txt.csv`(cmd,命令+完整回显) | 引号多行 CSV,一条记录=一条命令,`CmdResult`=整段回显 | 回显里的告警/事件/状态 | 存在类→G;计数器类→**A+`filter`+`extract`**(正则/kv 抽值,见三);复杂语义才 custom |
 | `*_CmdResult.csv`(diag,命令明细) | 引号多行 CSV,**EAV 窄表**:`DataItem`(≈282 种指标名)/`DataValue`/`Unit` | 各类指标值判断 | **A/C + `filter`**(见四) |
-| `*_diagfile.csv`(config,运行配置) | 规整表,层次列 `Module→level1→L2Module→level2…` | 配置项存在/取值 | C/F 绑 level 列;深层路径 custom(可借 `mo_config` 原语) |
+| `*_diagfile.csv`(config,运行配置) | 规整表,层次列 `Module→level1→L2Module→level2…` | 配置项存在/取值/负存在 | C 绑 level 列(存在/`absent`;同接口关联用 D+`group_by`);格内取值加 `extract`;深层路径 custom(可借 `mo_config` 原语) |
 | `diaglog_*.log.csv`(dblg,诊断日志) | 规整表,`Module/Level/Summary` 码值列 + `Content/Log` 文本 | 日志码/告警名 | **C/G 绑 `Summary`**(首选,枚举干净);正文细节才用 G 绑 `Content` |
 | `log.log.csv`(log,运行日志) | 同 dblg 结构 | 同上 | 同上 |
 | `log.log.opr.csv`(opr,操作记录) | 规整小表 | 操作审计 | C(诊断价值有限) |
@@ -39,7 +38,19 @@
   **但也照绑**(告警可能只落在其中一处;两边各出事实,主次让 RCA 合)。各源子代理互相看不见,
   "这个让日志侧去绑"的谦让=两边都没绑。
 - **「某计数器异常」**(如 CRC 错包>0):**禁用 G**——`CRC:` 标签在回显里**恒在**,值为 0 的健康
-  回显也会子串命中(假阳)。必须 custom 抽值再比:
+  回显也会子串命中(假阳)。**首选模板:A + `filter`(选中该命令的行)+ `extract`(抽出计数)**,
+  千分位逗号自动归一、抽不到=数据不足并附样例:
+```python
+# 判据:display interface 回显有 CRC 错包(>0)
+{"id":"L4-crc","node":"接口CRC错包","node_id":"nX","condition_text":"…","class":"A","source":"cmd",
+ "filter":{"column":"CmdName","contains":"display interface"},
+ "column":"CmdResult","extract":{"regex":"CRC:\\s*([\\d,]+)"},
+ "op":">","threshold":0,"scope":"count_rows",
+ "mapping_reason":"标签恒在禁 G 子串;filter 选中该命令的回显行,extract 抽 CRC 计数逐行比阈"}
+```
+  **边界(选错会假阴)**:`extract` 每格只抽**第一个**命中——适用于"一行=一条命令=一个对象"的回显
+  (如逐接口的 `display interface Eth-Trunk0`)。**一格回显里同一计数器出现多次**(如不带参数的全接口
+  dump,`CRC:` 出现 N 次)→ 第一个健康不代表都健康,必须 custom 用 `extract_metric`(抽**全部**命中):
 ```python
 from mo_config import extract_metric, fact_ok, fact_insufficient
 
@@ -93,8 +104,8 @@ CUSTOM = {"L4-crc": _crc_error}
   C 类 `equals`/`contains`,树驱动逐叶子绑,值这次没出现也照绑(`matched=0`=确定排除)。
 - 树条件常给 `FEI/2/hwLinkHeartbeatChangeAlarm_active` 这种全称:取**告警名段**绑 `Summary`
   (`contains:["hwLinkHeartbeatChangeAlarm"]` 连 active/clear 一起认),要区分 active/clear 再加档。
-- `Level`(级别)、`Module`(模块)可做 A/C 绑定的 `filter` 维度(E 类另有内建单子句 filter,
-  语义独立,别混用);正文细节才落 `Content/Log` 的 G 类。
+- `Level`(级别)、`Module`(模块)可做 A/C 绑定的 `filter` 维度;正文细节才落 `Content/Log` 的 G 类
+  (正文自带正则形态的判据用 `regex`,占位符先修:`%u`→`\d+`)。
 
 ## 六、典型坑速查
 | 症状 | 根因 | 处置 |
@@ -102,7 +113,7 @@ CUSTOM = {"L4-crc": _crc_error}
 | 读 cmd/diag 当场抛 csv 错 | 老版内核没调字段上限 | 升级本仓 `condition_kernels.py`(已内置) |
 | 空壳模板全树"排除" | 空表被当 `matched=0` | 已内置空表→数据不足;老版需升级 |
 | **filter 绑定跑出诡异"成立"** | **旧产物里的旧内核副本静默忽略 filter,在全表上算**(最危险:不报错、直接假阳) | 重跑步骤2 assemble 刷新产物内核副本;runner 铭牌告警"产物较旧"就别带病跑(格式契约 v2 起含 filter) |
-| CRC/计数器类判据全成立 | 用了 G 子串(标签恒在) | 换 custom+`extract_metric`(见三) |
+| CRC/计数器类判据全成立 | 用了 G 子串(标签恒在) | 换 A+`filter`+`extract` 抽值比阈(见三) |
 | diag 绑不上任何判据 | 拿宽表思路绑 EAV | 用 `filter` 选量(见四) |
 | node_id 全对不上 | 换了 `--start-level` 没重生成 | 重跑步骤1,绑定 node_id 重填 |
 | **建树输出「带判据节点 0」/ 节点数≈真实行数×2、中英文名混层** | 旧版 v2 不认混血表:判据列被静默丢弃、同层中英双列被串成两层 | 升级 `excel_to_tree_v2.py` 重跑步骤1;0 判据时 assemble 会硬拦,**别**自己读 Excel 写脚本量产绑定 |

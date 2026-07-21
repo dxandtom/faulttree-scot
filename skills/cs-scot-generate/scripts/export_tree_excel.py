@@ -64,6 +64,8 @@ def export(out_dir: Path) -> Path:
     sources, bind, dropped = [], {}, []
     for ap in sorted((out_dir / "scripts").glob("*_analyzer.py")):
         src = ap.name[: -len("_analyzer.py")]
+        if src == "cross":                               # 跨源判据(param_from 链)是工程师维护的,
+            continue                                     # 不进调优表——防业务同事误改传参链 JSON
         sources.append(src)
         for c in read_conditions(ap):
             if not isinstance(c, dict):

@@ -18,22 +18,51 @@ from typing import List
 # 与 excel_to_tree.py 保持一致的统一产物目录约定:<anchor>/scot产物/<场景名>
 DEFAULT_OUT_CONTAINER = "scot产物"
 
+# 外挂知识模板:首次归集时写入 tree/knowledge.md(已存在**永不覆盖**——它是业务同事手写的)。
+# 两条示例是真实场景(M-LAG)的可用知识,照这个样子一条一条往下加即可。
+KNOWLEDGE_TEMPLATE = """\
+# 外挂知识(knowledge.md)——业务同事直接编辑本文件
+
+一条知识 = 一段,固定结构,照下面的样子往后抄:
+
+    ### 知识标题(一句话,名词短语)
+    适用:分支/场景关键词(可多个,用、分隔;写「通用」或不写这行 = 全场景生效)
+    正文(人话,写清:去哪个数据、看哪一列、怎么查、什么算正常/不算故障)
+
+说明:
+- 「适用」的关键词按**故障树节点名**匹配——诊断和绑定只载入与当前分支相关的条目,不会全量灌;
+- 知识是**口径不是事实**:它教系统"去哪查、怎么解读",查证结论仍以数据为准;
+- 下面两条是真实示例(M-LAG 场景),可直接保留、修改或删除。
+
+### M-LAG场景对端查询方法
+适用:M-LAG
+在 diag 数据中,筛选「DataItem」列为「MLAG_NodeId」的数据,当结果为两条时即可查询到本端与对端的
+数据,少于两条即无法查询对端。其中「Object」列里的内容带*号的为本端,不带*的为对端。其余设备具体
+信息通常从「ObjContent」列里获取。
+
+### M-LAG场景本端对端信息使用方法
+适用:M-LAG
+通常使用本端对端信息的名字,即「NENAME」列,在其他数据源中查询有关该网元的相关信息。
+"""
+
 # 产物格式契约版本(写进出厂铭牌 manifest.json):**只在改动使旧产物与新执行器不兼容时才 +1**
 # (修 bug、改文案不动它)。bump 时同步 bump cs-scot-execute/scripts/runner.py 的 EXPECTED_PRODUCT_FORMAT。
 # v2:绑定新增 filter 字段(EAV 行级预过滤)+ 空表守卫——旧产物里的旧 condition_kernels 副本会
 #     **静默忽略 filter、在全表上算出假阳**,必须重新 assemble 刷新内核副本。
-PRODUCT_FORMAT_VERSION = 2
+# v3:plan 新增 cross 节点(inputs.data="$input.*",跨源判据脚本要**全部**数据源)——
+#     旧执行器解析不了 "$input.*" 会当场报错,须升级 cs-scot-execute。
+PRODUCT_FORMAT_VERSION = 3
 
-# 每个指标一份"逐条件分析脚本"的骨架:模型在 generate 时按 A–J 模板填 CONDITIONS。
+# 每个指标一份"逐条件分析脚本"的骨架:模型在 generate 时按类别模板(A/C/G/D/J/P)填 CONDITIONS。
 # 默认直接套预制内核(evaluate_binding);模板不够用时,模型才为个别条件写 custom。
 # execute 把它当普通脚本跑:python <ind>_analyzer.py <数据> -o out.json,直接吐该源逐条件事实。
 ANALYZER_SCAFFOLD = '''#!/usr/bin/env python3
 """生成的「__IND__」逐条件分析脚本——读表 → 逐条件统计 → 输出事实。
 
-generate 时由模型按 A–J 模板填 CONDITIONS;execute 当普通脚本跑(快):
+generate 时由模型按类别模板(A/C/G/D/J/P)填 CONDITIONS;execute 当普通脚本跑(快):
     python __IND___analyzer.py <数据文件> -o out.json
 默认直接套预制内核;仅当数据格式特殊、模板不够用时,模型才为个别条件写 custom 函数
-(会在 generate 校验时拿真实数据真跑、出错即暴露)。绑定字段与 A–J 参数见同目录 condition_binding_schema.md。
+(会在 generate 校验时拿真实数据真跑、出错即暴露)。绑定字段与各类参数见同目录 condition_binding_schema.md。
 """
 import argparse
 import json
@@ -41,7 +70,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from condition_kernels import load_table, evaluate_binding  # 预制模板库(A–J 内核)
+from condition_kernels import load_table, evaluate_binding  # 预制模板库(A/C/G/D/J/P 内核)
 
 INDICATOR = "__IND__"
 
@@ -134,6 +163,105 @@ if __name__ == "__main__":
 '''
 
 
+# 跨源判据分析脚本骨架:需要**多个源**才能判的条件(param_from 传参链 / P pair_from 跨源比较 /
+# 跨源 D 组合)都放这里,由步骤 2.5 的「跨源补绑」环节填(make_dispatch --cross 产简报)。
+# 执行时 runner 把本轮全部 --data 源都递进来;没有跨源判据时 CONDITIONS 为空、秒过。
+CROSS_SCAFFOLD = '''#!/usr/bin/env python3
+"""生成的「cross」跨源判据分析脚本——一条判据要动用多个数据源时的家。
+
+execute 当普通脚本跑(runner 自动把全部数据源递进来):
+    python cross_analyzer.py --data cmd=<文件> --data config=<文件> ... -o out.json
+绑定写法见同目录 condition_binding_schema.md 的「参数化查询(param_from)」与 P 类 pair_from。
+"""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from condition_kernels import load_table, evaluate_binding
+
+INDICATOR = "cross"
+
+# ===== 跨源补绑环节填这里:每条必带 "source"=最终查询落点的源名 =====
+# param_from/pair_from/sub 里的 source 各写各的源名;本轮没提供的源,内核自动报数据不足。
+CONDITIONS = [
+]
+
+CUSTOM = {}  # 最后手段:param_from 多跳都表达不了的,按 id 写返回 fact 的函数
+
+
+def _referenced_sources(c):
+    """收集一条绑定引用到的所有源名(自身 source + 嵌套 param_from/pair_from/sub 里的 source)。"""
+    out = set()
+
+    def walk(o):
+        if isinstance(o, dict):
+            if isinstance(o.get("source"), str):
+                out.add(o["source"])
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(c)
+    return out
+
+
+def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    ap = argparse.ArgumentParser(description="cross 跨源判据分析(多源→逐条件统计)")
+    ap.add_argument("--data", action="append", default=[], help="源名=文件,可多次")
+    ap.add_argument("-o", "--output", required=True)
+    ap.add_argument("--indicator", default=INDICATOR)
+    args = ap.parse_args()
+    paths = {}
+    for item in args.data:
+        if "=" not in item:
+            print(f"--data 格式应为 源名=文件: {item}", file=sys.stderr)
+            sys.exit(2)
+        k, v = item.split("=", 1)
+        paths[k.strip()] = v.strip()
+    # 懒加载:只读 CONDITIONS 真正引用到的源(cmd 这类大 CSV 不白读);没提供的源不造空表,
+    # 让内核报「无数据源」而不是把"没喂"错当"空表"。
+    sources = {}
+    for c in CONDITIONS:
+        if c.get("decision") in ("insufficient_data", "manual", "not_applicable"):
+            continue
+        for s in _referenced_sources(c):
+            if s in paths and s not in sources:
+                try:
+                    sources[s] = load_table(paths[s])
+                except Exception:                        # 读坏了当空表:该条自然数据不足,不崩整脚本
+                    sources[s] = ([], [])
+    conds = []
+    for c in CONDITIONS:
+        if c.get("mode") == "custom" and c.get("id") in CUSTOM:
+            fact = CUSTOM[c["id"]](sources)
+        else:
+            fact = evaluate_binding(c, sources, c.get("source", INDICATOR))
+        meta = {k: c[k] for k in ("id", "node", "node_id", "condition_text", "class", "mapping_reason") if k in c}
+        conds.append({**meta, "fact": fact})
+    ok = sum(1 for x in conds if x["fact"].get("status") == "ok")
+    insuf = sum(1 for x in conds if x["fact"].get("status") == "insufficient_data")
+    manual = sum(1 for x in conds if x["fact"].get("status") == "manual")
+    result = {"indicator": args.indicator, "source": INDICATOR,
+              "summary": {"total": len(conds), "ok": ok, "insufficient_data": insuf, "manual": manual},
+              "conditions": conds}
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[cross_analyzer] {len(conds)} 条件 (ok={ok} insuf={insuf} manual={manual}) -> {out}")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 def scenario_out_dir(anchor_dir: Path, scenario: str) -> Path:
     """统一的场景产物目录:<anchor_dir>/scot产物/<场景名>。"""
     return Path(anchor_dir) / DEFAULT_OUT_CONTAINER / scenario
@@ -150,23 +278,33 @@ def build_plan(scenario: str, indicators: List[str], tree_rel: str, stem: str = 
     """
     nodes = []
     for i, ind in enumerate(indicators):
-        nxt = indicators[i + 1] if i + 1 < len(indicators) else "rca"
+        nxt = indicators[i + 1] if i + 1 < len(indicators) else "cross"
         nodes.append({
             "id": ind,
             "kind": "script",
             "name": f"{ind}_analyzer",
-            "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按 A–J 模板算好)",
+            "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按类别模板算好)",
             "inputs": {"data": f"$input.{ind}"},
             "outputs": {"result": f"$memory.{ind}_result"},
             "transition": {"next_on_success": nxt},
         })
+    nodes.append({                                       # 跨源判据(param_from/pair_from):要全部源;没跨源绑定时秒过
+        "id": "cross",
+        "kind": "script",
+        "name": "cross_analyzer",
+        "purpose": "跨源判据统计(一条判据动用多个数据源:传参链/两侧比较);CONDITIONS 为空时秒过",
+        "inputs": {"data": "$input.*"},
+        "outputs": {"result": "$memory.cross_result"},
+        "transition": {"next_on_success": "rca"},
+    })
     nodes.append({
         "id": "rca",
         "kind": "agent_skill",
         "name": "fault-tree-rca",
         "purpose": "综合根因分析(消费各源逐条件事实:字面命中只是输入,最终成立/不成立/数据不足由你裁决、并合跨源组合)",
         "inputs": {"fault_tree_md": "$memory.fault_tree_md",
-                   **{ind: f"$memory.{ind}_result" for ind in indicators}},
+                   **{ind: f"$memory.{ind}_result" for ind in indicators},
+                   "cross": "$memory.cross_result"},
         "outputs": {"result": "$output.final_answer"},
         "transition": {"end": True},
     })
@@ -177,7 +315,7 @@ def build_plan(scenario: str, indicators: List[str], tree_rel: str, stem: str = 
             "goal": f"诊断「{scenario}」的根因",
             "success_criteria": ["输出所有成立的根因路径与逐条判断依据"],
         },
-        "entry": indicators[0] if indicators else "rca",
+        "entry": indicators[0] if indicators else "cross",
         "memory_init": {"fault_tree_md": tree_rel},
         "nodes": nodes,
     }
@@ -213,6 +351,10 @@ def main() -> None:
 
     scenario = args.scenario
     indicators = [s.strip() for s in args.indicators.split(",") if s.strip()]
+    if "cross" in indicators:
+        print("不合格:「cross」是保留源名(跨源判据脚本 cross_analyzer.py 自动生成)——给数据源换个名字。",
+              file=sys.stderr)
+        sys.exit(1)
 
     # 统一产物目录:--out 优先;否则按 <out-base 或 xlsx 所在目录>/scot产物/<场景> 推导(与步骤1一致)。
     if args.out:
@@ -294,7 +436,7 @@ def main() -> None:
         (out / "tree" / "solutions.json").unlink()
     # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
     here = Path(__file__).parent
-    copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # A–J 模板库
+    copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # 类别模板库
     copy_into(here / "mo_config.py", out / "scripts" / "mo_config.py")                  # 配置拓扑适配器:MO文本→表 + IP/追溯原语(.txt 配置 + custom 用)
     copy_into(here / "analyzer.py", out / "scripts" / "analyzer.py")                    # 概览辅助:模型先看列再填条件
     copy_into(here.parent / "references" / "condition_binding_schema.md",
@@ -303,13 +445,17 @@ def main() -> None:
     copy_into(here / "import_tree_excel.py", out / "scripts" / "import_tree_excel.py")  # 调优表:Excel→产物(自包含)
     copy_into(here.parent / "references" / "tuning_excel_guide.md",
               out / "tree" / "tuning-guide.md")                                         # 调优表动手说明(业务读者)
+    kn = out / "tree" / "knowledge.md"                   # 外挂知识:业务同事手写的"去哪查/怎么查/什么算正常"
+    if not kn.exists():                                  # 用户手写文件——只建模板,重跑**永不覆盖**
+        kn.write_text(KNOWLEDGE_TEMPLATE, encoding="utf-8")
+        print(f"已建外挂知识模板 → {kn}(业务同事可编辑;绑定简报与 RCA 输入会按分支自动载入)")
     # 重跑 = 重新编译:默认用当前版本的空骨架覆盖旧脚本(这样才能用上刚拷进来的新 condition_kernels/mo_config);
     # 覆盖前若旧脚本不是"全新空骨架"(填过/手改过/上一版骨架)→ 先备份成 .py.bak,绝不静默丢失。
     # 想原样保留已填脚本:加 --keep(老的 skip-if-exists 行为)。
     scaffolded, regenerated = [], []
-    for ind in indicators:
+    for ind in indicators + ["cross"]:                   # cross = 跨源判据脚本(补绑环节填),同一套备份规矩
         target = out / "scripts" / f"{ind}_analyzer.py"
-        pristine = ANALYZER_SCAFFOLD.replace("__IND__", ind)
+        pristine = (CROSS_SCAFFOLD if ind == "cross" else ANALYZER_SCAFFOLD.replace("__IND__", ind))
         if not target.exists():
             target.write_text(pristine, encoding="utf-8")
             scaffolded.append(ind)
@@ -345,19 +491,23 @@ def main() -> None:
 
     print(f"已归集场景产物: {out}")
     print(f"  plan.json(SCoT v4.0)+ manifest.json(产物铭牌,格式契约 v{PRODUCT_FORMAT_VERSION})"
-          f"+ scripts/condition_kernels.py(A–J 模板库)"
+          f"+ scripts/condition_kernels.py(类别模板库)"
           f"+ scripts/<指标>_analyzer.py(待填骨架)+ tree/{stem}.md")
     to_fill = scaffolded + regenerated
     if to_fill:
         if regenerated:
             print(f"  (重跑重铺了 {regenerated},旧脚本各留了 .py.bak;它们现在是空骨架,需重新填 CONDITIONS)")
-        print(f"\n下一步(generate 的关键一步):为 {to_fill} 各自的 <指标>_analyzer.py 填 CONDITIONS——")
+        fill_src = [i for i in to_fill if i != "cross"]
+        print(f"\n下一步(generate 的关键一步):为 {fill_src} 各自的 <指标>_analyzer.py 填 CONDITIONS——")
         print("  先用 analyzer.py 看各源真实列;再按 condition_binding_schema.md,把故障树每条判据")
-        print("  路由到对应源、选 A–J 内核、对哪列(裸名即可,组前缀自动剥)、给阈值/变换;对不上就标数据不足。")
+        print("  路由到对应源、选 A/C/G/D/J/P 内核、对哪列(裸名即可,组前缀自动剥)、给阈值/变换;对不上就标数据不足。")
         print("  默认直接套模板;模板不够用才为个别条件写 custom。填好后用真实数据各跑一遍校验:")
-        for ind in to_fill:
+        for ind in fill_src:
             print(f"    python {out}/scripts/{ind}_analyzer.py <{ind}数据> -o /tmp/{ind}.json && "
                   f"python {here}/validate_conditions.py /tmp/{ind}.json")
+        if "cross" in to_fill:
+            print("  cross_analyzer.py(跨源判据)不在这一步填:单源绑定收齐并 merge 后,若有 cross_source")
+            print("  标记 → python make_dispatch.py --out \"<OUT>\" --cross 生成跨源补绑简报,补绑后再 merge。")
     run_hint = " ".join(f"--data {ind}=<文件>" for ind in indicators)
     print(f"\n填好后执行: python <cs-scot-execute>/scripts/runner.py --plan {out}/plan.json {run_hint}")
 

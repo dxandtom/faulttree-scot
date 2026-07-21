@@ -22,6 +22,9 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 - **`missing_indicators`**(可选,两种形态都可能带):本轮**整个数据源没提供**(execute 部分数据运行,
   解析步骤被跳过)的源名 → 原因。这些源绑定的判据一律「数据不足」——**既未证实也未证伪,别当"不成立/已排除"**;
   最终结论要注明缺口(相关候选进 `probable_causes`/`undetermined`,`blocked_at` 写清缺哪个源)。
+- **`knowledge`**(可选):业务同事手写的外挂知识条目(已按当前分支筛过)。**是判读口径不是事实**:
+  "怎么查/怎么解读/什么算正常"照它办(引用时写知识标题留痕);但**不能拿知识内容顶替实测值**,
+  成立仍要数据里查到的事实。详见 rca_rules.md「输入」。
 
 ## 你要做什么(一个通用法则,不分指标)
 遍历子树,对**每条判断条件**:
@@ -49,7 +52,8 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 ```json
 {
   "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
-     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实;没有写'事实中无此值'>","judgment":"成立/不成立/数据不足"}]} ],
+     "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实;没有写'事实中无此值'>",
+        "how":"<怎么判的人话:事实带 explain 就逐字抄,数字不许改写>","judgment":"成立/不成立/数据不足"}]} ],
   "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low",
      "blocked_at":"<数据不足的节点>","caveats":"<有效样本量/空值比例/语义近似>","support":"<叶子证据>","evidence_path":[…]} ],
   "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…(仅观察,非根因)"]} ],

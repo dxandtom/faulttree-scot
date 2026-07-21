@@ -162,7 +162,8 @@ def main() -> None:
     stem = tis[0].name[: -len(".tree_index.json")]
     old_sol_p = out / "tree" / "solutions.json"
     old_solutions = json.loads(old_sol_p.read_text(encoding="utf-8")) if old_sol_p.exists() else {}
-    existing_aps = sorted((out / "scripts").glob("*_analyzer.py"))
+    existing_aps = sorted(p for p in (out / "scripts").glob("*_analyzer.py")
+                          if p.name != "cross_analyzer.py")   # cross 骨架形态不同,不能当克隆模板
     if not existing_aps:
         raise SystemExit("产物 scripts/ 下没有任何 analyzer,无法落绑定(产物不完整)")
 
@@ -197,6 +198,9 @@ def main() -> None:
             s = hn.split(":", 1)[1].strip()
             if not _SRC_RE.match(s):
                 errors.append(f"表头「{h}」的源名「{s}」不合法(只能用英文字母/数字/下划线,别带空格)")
+            elif s == "cross":
+                errors.append("「绑定:cross」不走调优表——跨源判据(param_from)在 scripts/cross_analyzer.py"
+                              " 由跨源补绑环节维护;删掉这一列")
             elif s in src_col:
                 errors.append(f"表头有两个「绑定:{s}」列——删掉多余的一列")
             else:
@@ -308,7 +312,7 @@ def main() -> None:
                                   f"(只认 {'/'.join(sorted(_DECISIONS))})")
                 elif dec is None and cls not in _CLASSES:
                     errors.append(f"第{rowno}行「{name}」绑定:{s}: class「{b.get('class')}」不认识"
-                                  "(A–J 之一;查不了就写 decision,模板见 tuning-guide.md)")
+                                  "(A/C/D/G/J/P 之一;查不了就写 decision,模板见 tuning-guide.md)")
             binds[s].append((ri, key, items))
 
     roots = [k for k in order if nodes[k]["parent"] is None]
@@ -374,22 +378,33 @@ def main() -> None:
     plan_text = mf_text = None
     if plan_p.exists():
         plan = json.loads(plan_p.read_text(encoding="utf-8"))
+        # cross(跨源判据)不走调优表,但产物里有 cross_analyzer.py 就必须保留其 plan 节点——
+        # 否则重编译一次,param_from 跨源绑定就被静默甩出执行链。
+        has_cross = (out / "scripts" / "cross_analyzer.py").exists()
+        last_next = "cross" if has_cross else "rca"
         pnodes = []
         for i, ind in enumerate(indicators):
-            nxt_id = indicators[i + 1] if i + 1 < len(indicators) else "rca"
+            nxt_id = indicators[i + 1] if i + 1 < len(indicators) else last_next
             pnodes.append({"id": ind, "kind": "script", "name": f"{ind}_analyzer",
-                           "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按 A–J 模板算好)",
+                           "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按类别模板算好)",
                            "inputs": {"data": f"$input.{ind}"},
                            "outputs": {"result": f"$memory.{ind}_result"},
                            "transition": {"next_on_success": nxt_id}})
+        if has_cross:
+            pnodes.append({"id": "cross", "kind": "script", "name": "cross_analyzer",
+                           "purpose": "跨源判据统计(一条判据动用多个数据源:传参链/两侧比较);CONDITIONS 为空时秒过",
+                           "inputs": {"data": "$input.*"},
+                           "outputs": {"result": "$memory.cross_result"},
+                           "transition": {"next_on_success": "rca"}})
         rca = next((n for n in plan.get("nodes", []) if n.get("id") == "rca"), None) or {
             "id": "rca", "kind": "agent_skill", "name": "fault-tree-rca",
             "purpose": "综合根因分析", "outputs": {"result": "$output.final_answer"},
             "transition": {"end": True}}
         rca["inputs"] = {"fault_tree_md": "$memory.fault_tree_md",
-                         **{ind: f"$memory.{ind}_result" for ind in indicators}}
+                         **{ind: f"$memory.{ind}_result" for ind in indicators},
+                         **({"cross": "$memory.cross_result"} if has_cross else {})}
         plan["nodes"] = pnodes + [rca]
-        plan["entry"] = indicators[0] if indicators else "rca"
+        plan["entry"] = indicators[0] if indicators else ("cross" if has_cross else "rca")
         plan_text = json.dumps(plan, ensure_ascii=False, indent=2)
     if mf_p.exists():
         mf = json.loads(mf_p.read_text(encoding="utf-8"))

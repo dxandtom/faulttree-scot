@@ -6,7 +6,7 @@
     GNBCUS1:MOName=GNBCUS1_1,UpEpGroupId=EPGROUP_1,CellId=CELL_1;
     USERPLANEPEER:MOName=UPPEER_1,uppeerid=UPPEER_1,peeripv4=192.168.100.1;
     EPGROUP:MOName=EPGROUP_1,userplanepeerrefs={uppeerid=UPPEER_1,userlabel=SITE_A};   # 值里可带花括号
-不翻成表,F 类(配置检查)、跨 MO 追溯、IP 路由这些判据连数据都拿不到。本模块只做"把它读进来 + 几个原语",
+不翻成表,配置检查类判据、跨 MO 追溯、IP 路由这些判据连数据都拿不到。本模块只做"把它读进来 + 几个原语",
 判断逻辑仍由各条件的 custom 函数组合(返回与内核同形的 fact)。纯标准库,无第三方依赖。
 
 谁用:
