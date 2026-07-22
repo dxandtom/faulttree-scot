@@ -14,18 +14,23 @@ description: 执行一份 SCoT 计划 plan.json(cs-scot-generate 产出的场景
 python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> --data chr=<chr数据>
 ```
 - `--data <指标>=<文件>`:绑定计划里 `$input.<指标>` 引用到实际数据文件(xlsx/csv);有几个指标传几次。
+- **每轮一个独立结果目录(并发安全,默认行为)**:每次运行自动新建 `result-[标签-]<运行号>/`
+  (运行号=时间戳+随机,不会撞),本轮所有产出(`rca_input.json`/`rca.json`/`run.json`/`_compression.txt`)
+  都在里面——**多个人/多份数据同时调同一份产物互不覆盖**,谁也不用协调。**结果路径以 runner 启动时
+  打印的「结果目录:…」为准**,后续写 rca.json、汇报都用它,别猜别的轮次的目录。历史轮次=同级其它
+  `result-*` 目录(目录名按时间排序),总索引在结果根目录 `index.jsonl`(一行一轮:run_id/目录/输入指纹)。
 - **部分数据也能跑**:plan 需要的数据源(如 rb/chr/config)用户只给了一部分时,**不报错**——缺源的解析
   步骤自动 `[skip]`,其余步骤照跑,结尾打印「⚠ 数据源缺口汇总」(缺了啥、跳过了哪些步骤、补数命令);
-  缺口同时写进 `result/run.json`(`missing_inputs`)和 `rca_input.json`(顶层 `missing_indicators`),
+  缺口同时写进本轮结果目录的 `run.json`(`missing_inputs`)和 `rca_input.json`(顶层 `missing_indicators`),
   RCA/辩论引擎把这些源的判据按「数据不足」对待(**不是**"已排除")。**向用户汇报结果时必须带上缺口**:
   结论只代表已提供数据能看到的部分。注意:一个数据源都没给仍是硬报错(用法错误);`--data` 的 key 打错
   会触发「plan 用不到的数据源」告警——看到它先核对 key 名,别让 typo 静默变成跳过。
 - `--base <dir>`:相对路径基准目录,默认是 `plan.json` 所在目录。
-- `--result-base <dir>`:结果输出根目录(`result/` 与 `runs/` 落在它下面),默认=`--base` 即产物目录、
-  老行为不变。**运行平台不允许往技能/产物目录写文件时用它把结果外移**(场景打包形态必用,见下)。
-- `--result-suffix <标识>`:结果目录带后缀(`result-<标识>/`、`runs-<标识>/`,只认字母数字-_)。
-  **同一技能并行跑多份数据必带、每份不同**(建议用站点名/数据文件夹名)——不带时几个并发运行同写
-  `result/rca.json`,互相覆盖(实测);单份数据串行跑可不带,版本管理照旧走归档。
+- `--result-base <dir>`:结果输出根目录(各轮 `result-*/` 与总索引 `index.jsonl` 落在它下面),
+  默认=`--base` 即产物目录。**运行平台不允许往技能/产物目录写文件时用它把结果外移**(场景打包形态必用,见下)。
+- `--result-suffix <标签>`(可选):给本轮目录加个好认的标签(`result-<标签>-<运行号>/`,只认字母数字-_)。
+  隔离不靠它(每轮目录天然独立),纯粹方便人认——多份数据并行时建议带上站点名/数据文件夹名,
+  一眼分清哪轮结果对应哪份数据。
 
 ## 场景打包形态(assets/)——一句话执行
 
@@ -45,12 +50,13 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
    python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" \
      --result-base "<本目录>/../<本技能目录名>-result" --data <指标>=<文件> ...
    ```
-   **`--result-base` 必带**:平台不允许技能写自身目录下的文件,结果(`result/`、`runs/`)写到
-   **与本技能平齐**的 `<本技能目录名>-result/` 目录(如技能叫 `layer-3-service-issues`,结果就在
-   它旁边的 `layer-3-service-issues-result/`);rca 步骤按 `assets/fault-tree-rca/` 的规则做,
-   rca.json 也写在该结果目录(以 runner 打印的路径为准)。
-   **同一技能并行诊断多份数据时,每次执行再加 `--result-suffix <数据标识>`**(如站点名/数据文件夹名)
-   ——各份数据的结果落在 `result-<标识>/` 互不覆盖;汇报时写清各份数据对应的结果目录。
+   **`--result-base` 必带**:平台不允许技能写自身目录下的文件,结果写到**与本技能平齐**的
+   `<本技能目录名>-result/` 目录(如技能叫 `layer-3-service-issues`,结果就在它旁边的
+   `layer-3-service-issues-result/`);每次运行在其下自动新建独立的 `result-<运行号>/`
+   (多人/多份数据同时跑互不覆盖),rca 步骤按 `assets/fault-tree-rca/` 的规则做,
+   rca.json 也写进该轮目录——**一切以 runner 打印的「结果目录」路径为准**。
+   并行诊断多份数据时,建议每次执行加 `--result-suffix <数据标识>`(如站点名/数据文件夹名)
+   ——不是为了隔离(本来就隔离),是让目录名好认;汇报时写清各份数据对应的结果目录。
 4. **【输出汇报】固定模板(默认执行,无须用户要求;各节内容与 rca.json 严格口径一致,别自创表格样式/emoji)**:
    ```
    ## 执行过程
@@ -74,13 +80,13 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
    ```
    **validate_rca 的 ⚠ 软提示必须先逐条处置(升档/补报/excluded_note 留痕/阻塞写实)并重跑校验,
    再产出本报告——"硬检查通过"不等于"没事了"。**
-- `--run-id <id>`(可选):本次运行号(**默认自动**「时间戳+随机」)。**版本管理是默认行为**:`result/` 永远=当前这一轮;重跑前 runner 把**上一轮整体归档到 `runs/<上轮run-id>/`**(`rca_input.json`/`rca.json`/`run.json`/`_compression.txt`),历史不丢、不覆盖、无歧义。每轮写 `result/run.json`(本轮 run_id + 输入数据指纹:路径/大小/sha1)并追加 `runs/index.jsonl`,可溯源、可检索。eval/benchmark 仍读 `result/`(=当前轮),不受影响。(`--new-run` 已是默认,保留仅为兼容。)
+- `--run-id <id>`(可选):本次运行号(**默认自动**「时间戳+随机」,并发/重跑都不撞)。**版本管理是默认行为**:每轮一个独立目录 `result-[标签-]<运行号>/`,历史轮次天然留存(不搬家、不覆盖、无歧义);每轮写该目录下 `run.json`(本轮 run_id + 输入数据指纹:路径/大小/sha1)并往结果根目录 `index.jsonl` 追加一行(run_id/目录名/输入指纹),可溯源、可检索。自定义 `--run-id` 与已有轮次重名会硬报错(换一个或用自动号)。(`--new-run` 已是默认,保留仅为兼容。)
 
 ## 执行模型(真 SCoT)
 1. 从 `entry` 节点开始,用 `memory_init` 初始化工作记忆;
 2. 按节点 `kind` 分派:
    - **`script`**:`name`→`scripts/<name>.py`(generate 生成的逐条件分析脚本),解析 `inputs.data`→数据文件,跑脚本,产出该源**逐条件事实** JSON 按 `outputs` 写入 `$memory`;
-   - **`agent_skill`**:把解析好的 inputs(故障树读成正文 + 各源逐条件事实)备到 `result/rca_input.json`,由 `name` 指定的技能(**fault-tree-rca**)产出结果。该步有**两条可互换路径**:默认模型手工判断(fault-tree-rca),或改跑辩论引擎(**fault-tree-rca-debate** 技能的 `run_debate_rca.py`)——两者吃同一个 rca_input、写同一个 rca.json、过同一个 validate_rca;
+   - **`agent_skill`**:把解析好的 inputs(故障树读成正文 + 各源逐条件事实)备到本轮结果目录的 `rca_input.json`,由 `name` 指定的技能(**fault-tree-rca**)产出结果。该步有**两条可互换路径**:默认模型手工判断(fault-tree-rca),或改跑辩论引擎(**fault-tree-rca-debate** 技能的 `run_debate_rca.py`)——两者吃同一个 rca_input、写同一个 rca.json、过同一个 validate_rca;
 3. 沿 `transition.next_on_success` 前进,`end=true` 结束;
 4. 节点间数据全靠 `$input`/`$memory`/`$step`/`$output` 引用传递。
 
@@ -88,9 +94,9 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
 
 ## 输出
 - `script` 节点产出存入 `$memory`(不单独落盘);
-- `agent_skill`(RCA)节点:把汇总输入写到 `result/rca_input.json` → 由 fault-tree-rca 产出 `result/rca.json`。**`result/` 永远=当前一轮**(干净、无 `.prev` 杂物);重跑前**上一轮整体自动归档到 `runs/<run-id>/`**,历史按版本留存——agent 不会再被"已存在的 rca.json 是上轮还是本轮"困惑。
+- `agent_skill`(RCA)节点:把汇总输入写到本轮结果目录的 `rca_input.json` → 由 fault-tree-rca 在**同一目录**产出 `rca.json`。每轮目录独立新建、只装本轮文件——agent 不会读到别轮的过期结论,并发运行也互不相扰;历史轮次=同级其它 `result-*` 目录。
 
-`result/rca.json` 契约:**权威定义在 fault-tree-rca 技能**——四档 dict(不是裸数组),顶层四键恒在:
+`rca.json` 契约(在本轮结果目录):**权威定义在 fault-tree-rca 技能**——四档 dict(不是裸数组),顶层四键恒在:
 ```json
 {
   "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",

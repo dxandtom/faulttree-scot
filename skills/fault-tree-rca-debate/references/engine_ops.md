@@ -106,7 +106,7 @@ probable 档,四档分数量的是"排序器 vs 事实闭环"的语义差,不是
 
 ## 五、切换/回退
 - 用辩论引擎:runner 之后跑 `run_debate_rca.py`(见 SKILL.md)。
-- 回手工路径:照旧用 `fault-tree-rca` 技能产出。两者写同一个 `result/rca.json`、
+- 回手工路径:照旧用 `fault-tree-rca` 技能产出。两者写同一个结果目录的 `rca.json`、
   过同一个 `validate_rca`、被同一套 eval 打分——**保留手工路径当基线**(难度一 100% / 纠错 73%),
   引擎赢了评测再谈"全盘替代"。
 
@@ -125,7 +125,7 @@ probable 档,四档分数量的是"排序器 vs 事实闭环"的语义差,不是
 冒烟命令(先 `--mock` 验壳,再去掉换真引擎):
 ```bash
 python skills/fault-tree-rca-debate/scripts/run_debate_rca.py \
-  --rca-input <某场景>/result/rca_input.json \
+  --rca-input <某场景>/result-<运行号>/rca_input.json \
   --tree-index <某场景>/tree/<场景>.tree_index.json \
   --out-dir <临时目录> --mechanism all --mock
 ```

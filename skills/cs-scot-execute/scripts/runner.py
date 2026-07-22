@@ -9,7 +9,7 @@
 - script:      跑一个自包含解析脚本(确定性);约定脚本 CLI 为
                `python scripts/<name>.py <数据文件> -o <输出.json>`,产出 JSON 存入 outputs。
 - agent_skill: prompt-only 技能(模型判断,如 fault-tree-rca);runner 把解析好的 inputs
-               备到 result/<id>_input.json,由所在 agent 执行该技能产出结果。
+               备到本轮结果目录 result-<运行号>/<id>_input.json,由所在 agent 执行该技能产出结果。
 
 保持轻量:暂不实现 budget / reflection / parallel_after / conditions 等重型特性。
 
@@ -211,9 +211,9 @@ def _file_fingerprint(path: str) -> dict:
 
 
 def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[str, str], base: Path,
-                        missing_inputs=None, runs_dir: Path = None) -> None:
-    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs 目录的 index.jsonl 追加一行。
-    runs_dir 由调用方给(带 --result-suffix 时是 runs-<后缀>/);缺省=base/runs。"""
+                        missing_inputs=None, index_root: Path = None) -> None:
+    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 index_root/index.jsonl 追加一行
+    (总索引:一行一轮,含结果目录名,事后按输入指纹检索/去重都靠它)。index_root 缺省=base。"""
     import datetime
     created = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     inputs = {k: _file_fingerprint(v) for k, v in data_map.items() if v}  # 空值=没提供:归 missing_inputs,不指纹(Path('') 会指到 CWD)
@@ -222,42 +222,12 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
     if missing_inputs:                                   # 部分数据运行:铭牌上写明缺口,事后一看便知这轮少了啥
         manifest["missing_inputs"] = sorted(missing_inputs)
     (run_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    idx = (runs_dir if runs_dir is not None else base / "runs") / "index.jsonl"
+    idx = (index_root if index_root is not None else base) / "index.jsonl"
     idx.parent.mkdir(parents=True, exist_ok=True)
-    with idx.open("a", encoding="utf-8") as f:           # 一行一运行:run_id + 时间 + 各输入指纹,便于事后检索/去重
-        f.write(json.dumps({"run_id": run_id, "created_at": created,
+    with idx.open("a", encoding="utf-8") as f:           # 一行一运行:run_id + 目录 + 各输入指纹
+        f.write(json.dumps({"run_id": run_id, "created_at": created, "dir": run_dir.name,
                             "inputs": {k: (v.get("sha1") or v.get("bytes")) for k, v in inputs.items()}},
                            ensure_ascii=False) + "\n")
-
-
-def _archive_previous_run(result_dir: Path, runs_dir: Path):
-    """复用产物目录重跑前:把 result/ 里**上一轮**的结果归档到 runs/<上轮run_id>/。
-    以 **run.json 是否存在**为准(每轮启动即写它)——这样即便上一轮在 RCA 完成前中断(没 rca.json),
-    它的运行指纹与已产出的中间结果也照样归档、不被本轮 run.json 覆写、result/ 不会两轮混血。
-    result/ 因此永远=当前一轮,历史在 runs/ 里按 run_id 版本留存。返回归档目录,或 None(首次跑)。"""
-    rj = result_dir / "run.json"
-    if not rj.exists():
-        return None                                    # 首次跑 / 已归档 → 无上一轮可归
-    prev_id = None
-    try:
-        prev_id = json.loads(rj.read_text(encoding="utf-8")).get("run_id")
-    except Exception:                                  # noqa: BLE001
-        prev_id = None
-    if not prev_id:                                    # run.json 损坏/无 run_id → 用可得的最新 mtime 编个号
-        import datetime
-        mts = [(result_dir / f).stat().st_mtime for f in ("rca.json", "run.json") if (result_dir / f).exists()]
-        stamp = (datetime.datetime.fromtimestamp(max(mts)).strftime("%Y%m%dT%H%M%S") if mts else "unknown")
-        prev_id = "run-" + stamp
-    dst = runs_dir / prev_id
-    n = 1
-    while dst.exists():
-        dst = runs_dir / f"{prev_id}-{n}"; n += 1
-    dst.mkdir(parents=True, exist_ok=True)
-    for name in ("rca_input.json", "rca.json", "run.json", "_compression.txt"):
-        f = result_dir / name
-        if f.exists():
-            f.replace(dst / name)
-    return dst
 
 
 def _load_knowledge(tree_dir: Path, name_pool: str) -> list:
@@ -301,7 +271,7 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
                          result_base: Path = None) -> Any:
     """执行 kind=agent_skill 节点:备好输入,交给该 prompt-only 技能(模型)执行。
 
-    runner 自身不调模型;它把解析好的 inputs 写到 result/<id>_input.json 并打印待办,
+    runner 自身不调模型;它把解析好的 inputs 写到本轮结果目录的 <id>_input.json 并打印待办,
     由所在 agent harness 用对应技能产出结果。对 fault-tree-rca,inputs 里的
     fault_tree_md 若是路径会被读成正文。
     """
@@ -374,8 +344,8 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
     in_path = (result_base or base) / result_subdir / f"{node['id']}_input.json"
     in_path.parent.mkdir(parents=True, exist_ok=True)
     in_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 注:上一轮的最终结果已在 main() 启动时整体归档到 runs/<上轮run_id>/,result/ 此刻只剩本轮的新输入,
-    # 模型据此产出本轮 rca.json,不会读到过期结论。
+    # 注:本轮结果目录是独立新建的(result-<run_id>/),里面只有本轮的新输入,
+    # 模型据此产出本轮 rca.json,不会读到别轮的过期结论。
     print(f"[agent_skill] {node['id']}: 已备好输入 → {in_path}")
     if missing_ind:
         print(f"  ⚠ 本轮缺失的数据源已写进输入的 missing_indicators: {', '.join(missing_ind)}"
@@ -414,16 +384,16 @@ def main() -> None:
     ap.add_argument("--data", action="append", default=[],
                     help="$input 绑定,如 --data kpi=path.csv(可多次)")
     ap.add_argument("--base", help="路径解析基准目录(默认取 plan.json 所在目录)")
-    ap.add_argument("--result-base", help="结果输出根目录:result/ 与 runs/ 落在它下面(默认=--base,"
-                                          "即产物目录,老行为不变)。平台不允许技能写自身目录时用它把结果"
-                                          "外移,如 --result-base <技能目录>/../<技能名>-result")
-    ap.add_argument("--result-suffix", help="结果目录后缀:result-<后缀>/、runs-<后缀>/(只认字母数字-_)。"
-                                            "**同一技能并行跑多份数据必带**(建议用数据标识,如站点名/文件夹名)"
-                                            "——不带时多个并发运行同写 result/,会互相覆盖 rca.json")
-    ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」)。result/ 始终=当前一轮;"
-                                     "重跑前自动把上一轮整体归档到 runs/<上轮run_id>/,history 不丢、不覆盖、无歧义")
+    ap.add_argument("--result-base", help="结果输出根目录:各轮 result-<运行号>/ 与总索引 index.jsonl 落在"
+                                          "它下面(默认=--base,即产物目录)。平台不允许技能写自身目录时"
+                                          "用它把结果外移,如 --result-base <技能目录>/../<技能名>-result")
+    ap.add_argument("--result-suffix", help="可选的结果目录标签:result-<标签>-<运行号>/(只认字母数字-_)。"
+                                            "隔离不靠它(每轮目录天然独立),纯粹为了好认——如多份数据并行时"
+                                            "用站点名/数据文件夹名,一眼分清哪轮是谁的")
+    ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」,并发/重跑都不撞)。每轮结果落"
+                                     "独立目录 result-[标签-]<运行号>/,与已有轮次重名会硬报错")
     ap.add_argument("--new-run", action="store_true",
-                    help="(已默认:每轮都自动归档上一轮并带 run_id)保留仅为兼容,无额外效果")
+                    help="(已默认:每轮独立目录)保留仅为兼容,无额外效果")
     args = ap.parse_args()
 
     plan_path = Path(args.plan).resolve()
@@ -480,29 +450,24 @@ def main() -> None:
     print(f"执行 SCoT: {plan.get('plan_id') or plan.get('meta', {}).get('goal', '')} "
           f"(version={plan.get('version')}, nodes={len(nodes)})")
 
-    # 版本管理:result/ 永远=当前这一轮;重跑前把上一轮整体归档到 runs/<上轮run_id>/(留历史、不覆盖、无歧义),
-    # 每轮自动带 run_id(--run-id 可自定义),写 result/run.json 标明本轮身份 + 追加 runs/index.jsonl。
-    # eval/benchmark 仍读 result/(= 当前轮),不受影响。
+    # 版本管理 = 每轮一个独立目录 result-[标签-]<run_id>/:多人/多数据并发调用同一份产物互不相扰,
+    # 历史轮次天然留存(目录名按时间排序),没有"归档搬家"——总索引在结果根目录 index.jsonl(一行一轮)。
+    # 结果路径以本次打印为准,别猜别的轮次的目录。
     run_id = args.run_id or _gen_run_id()
     result_base = Path(args.result_base).resolve() if args.result_base else base
     sfx = re.sub(r"[^0-9A-Za-z_-]", "", args.result_suffix or "")
     if args.result_suffix and not sfx:
-        print(f"[warn] --result-suffix「{args.result_suffix}」清洗后为空(只认字母数字-_),按无后缀处理")
-    result_subdir = f"result-{sfx}" if sfx else "result"     # 并发隔离:每份数据各有 result-<后缀>/,互不覆盖
-    runs_dirname = f"runs-{sfx}" if sfx else "runs"
+        print(f"[warn] --result-suffix「{args.result_suffix}」清洗后为空(只认字母数字-_),按无标签处理")
+    stamp = re.sub(r"[^0-9A-Za-z_-]", "", re.sub(r"^run-", "", run_id)) or "unnamed"
+    result_subdir = f"result-{sfx}-{stamp}" if sfx else f"result-{stamp}"
     result_dir = result_base / result_subdir
-    archived = _archive_previous_run(result_dir, result_base / runs_dirname)
+    if result_dir.exists():                               # 只可能是 --run-id 撞名(自动 run_id 带随机尾不会撞)
+        raise SystemExit(f"结果目录已存在:{result_dir} —— --run-id 与已有轮次重名,换一个(或不传、用自动运行号)")
     result_dir.mkdir(parents=True, exist_ok=True)
     _write_run_manifest(result_dir, run_id, plan, data_map, base, missing_inputs=missing,
-                        runs_dir=result_base / runs_dirname)
-    if sfx:
-        print(f"  结果目录:{result_dir}(--result-suffix={sfx},与其它并行运行隔离)")
-    elif result_base != base:
-        print(f"  结果目录:{result_dir}(--result-base 生效,不往产物/技能目录写)")
-    if archived:
-        print(f"  run_id={run_id};上一轮已归档 → {archived}（result/ 即当前轮，历史在 runs/）")
-    else:
-        print(f"  run_id={run_id}（result/ 即当前轮，历史按 run_id 存 runs/，已记 run.json + runs/index.jsonl）")
+                        index_root=result_base)
+    print(f"  结果目录:{result_dir}(本轮独立目录,并发安全;历史轮次=同级其它 result-*,索引 index.jsonl)")
+    print(f"  run_id={run_id}(已记 run.json;本轮所有产出:rca_input.json / rca.json 都在上面这个目录)")
 
     cur = plan.get("entry")
     visited = 0
