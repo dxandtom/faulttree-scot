@@ -11,13 +11,13 @@ description: 辩论式多代理 RCA 技能:吃 cs-scot-execute 备好的 rca_inp
 
 ## 在流水线里的位置(与 fault-tree-rca 同一接缝、可互换)
 ```
-runner 跑完 script 节点 → result/rca_input.json
+runner 跑完 script 节点 → 本轮结果目录 result-<运行号>/rca_input.json
   ├─ 手工路径:用「fault-tree-rca」技能,模型逐节点判断 → rca.json(事实闭环,四档)
   └─ 本技能  :跑下面这条命令,辩论引擎评分       → rca.json(评分排序;整条路径被证据引擎
      实测成立的自动升确证档 rca_result,其余 probable——升档凭 execute 的事实,不凭辩论得分)
 ```
 ```bash
-python "<本目录>/scripts/run_debate_rca.py" --rca-input "<OUT>/result/rca_input.json" --mechanism all
+python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_input.json" --mechanism all
 ```
 参数名精确是 `--rca-input`(`--input` 也认);标准产物布局下 `--tree-index`(自动在
 `<OUT>/tree/` 找唯一的 `*.tree_index.json`)和 `--out-dir`(默认=rca_input 所在目录)
@@ -27,7 +27,7 @@ python "<本目录>/scripts/run_debate_rca.py" --rca-input "<OUT>/result/rca_inp
   `--k` 调(默认 10;纯切片零成本,config 的 top_k 与引擎默认均被它覆盖)。
   注意排名靠后的条目分数低、confidence 多为 low——它们是"候选清单的尾巴",不是并列结论。
 - **版本管理**:重跑时上一轮 debate 产物自动归档到 `<out-dir>/debate_runs/<时间戳>/`,
-  out-dir 里永远只有当前轮(与 runner 的 runs/ 同一哲学)——已存在的 rca*.json 一律是
+  out-dir 里永远只有当前轮——已存在的 rca*.json 一律是
   上一轮的,要新结论直接重跑即可,别把旧产物当本轮结果汇报。
 - 跑完自动过与手工路径同一道闸门:`fault-tree-rca/scripts/validate_rca.py`。
 

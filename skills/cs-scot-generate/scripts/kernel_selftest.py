@@ -352,6 +352,17 @@ CASES = [
                                 "q": {"column": "b", "expand": "any"}}},
      "expect": {"status": "insufficient_data"}},
 
+    # ---- 命中原文(hits:证据引用代码抓的片段,不过模型的手)----
+    {"name": "G 长回显格命中→hits 带命中位置的原文窗(不整格搬)",
+     "table": _t(["CmdResult"], ["x" * 3000 + " Number of vxlan tunnel : 0 " + "y" * 3000]),
+     "binding": {"class": "G", "column": "CmdResult", "contains": ["Number of vxlan tunnel : 0"]},
+     "expect": {"status": "ok", "matched": 1, "predicate_satisfied": True}, "present": ["hits"]},
+    {"name": "A+extract 命中→hits 带满足比较那格的原文",
+     "table": _t(["echo"], ["CRC: 1,234 packets ok"], ["CRC: 0 packets"]),
+     "binding": {"class": "A", "column": "echo", "extract": {"kv": "CRC"},
+                 "op": ">", "threshold": 0, "scope": "count_rows", "require": 1},
+     "expect": {"status": "ok", "count_satisfied": 1}, "present": ["hits"]},
+
     # ---- 评审整改回归(tuple/set 逃逸、规格白名单、excludes 空行、sub 作用域、字面@值、pair_from 顶层 filter)----
     {"name": "tuple 目标里的 @ 也被守卫拦(圆括号写法不逃逸)",
      "table": _t(["a"], ["x"]),

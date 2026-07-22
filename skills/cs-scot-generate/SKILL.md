@@ -151,7 +151,7 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 ```bash
 python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根目录>/scot技能/<slug>/ 技能目录(与 scot产物 平级;--dest 可改)
 ```
-产出 = execute 执行骨架(SKILL.md 自动改名+按场景写 description)+ `assets/`(本产物 + fault-tree-rca 规则副本),自动排除 overview/dispatch/runs/result/__pycache__ 等临时物。上传后用户一句 `/<slug> 数据在 <zip>,帮我诊断` 即可跑全程(默认约定见 execute SKILL.md「场景打包形态」)。产物没有英文短名时用 `--name` 指定。
+产出 = execute 执行骨架(SKILL.md 自动改名+按场景写 description)+ `assets/`(本产物 + fault-tree-rca 规则副本),自动排除 overview/dispatch/各轮 result-*/index.jsonl/__pycache__ 等临时物。上传后用户一句 `/<slug> 数据在 <zip>,帮我诊断` 即可跑全程(默认约定见 execute SKILL.md「场景打包形态」)。产物没有英文短名时用 `--name` 指定。
 **最终汇报必带**:技能目录完整路径 + 一句"上传该目录即可用 `/<slug>` 一句话诊断"。
 
 ### 步骤 6(人工调优循环):调优表——树+绑定的人可编辑事实源

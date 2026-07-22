@@ -106,6 +106,16 @@ def _decomma(s):
     return t.replace(",", "") if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", t) else s
 
 
+def _hit_snippet(s, pos, width=120):
+    """命中处的原文片段:以命中位置为锚开一个窗(整格回显可达数 KB,不能整格搬)。
+    换行/连排空白压成单空格,截断处加省略号——给证据引用的是**代码抓的原文**,不过模型的手。"""
+    s = str(s)
+    start = max(0, pos - 30)
+    end = min(len(s), start + width)
+    frag = re.sub(r"\s+", " ", s[start:end]).strip()
+    return ("…" if start > 0 else "") + frag + ("…" if end < len(s) else "")
+
+
 # ---------- 数据加载 ----------
 def _decode(raw: bytes) -> str:
     for enc in _ENCODINGS:
@@ -293,6 +303,19 @@ def k_threshold(table, b, cls="A"):
             "transforms": b.get("transforms") or []}
     if spec:
         fact["extract"] = spec
+        # 命中原文:extract 场景格子是杂糅文本,把"满足比较的那几格"的原文片段抓给证据
+        # (纯数值列不抓——格子本身就是那个数,引用无增量)
+        hit_texts = []
+        for raw_v, p in zip(raw, picked):
+            if p is None or len(hit_texts) >= 3:
+                continue
+            x = _apply_transforms(_num(_decomma(p)), b.get("transforms"))
+            if x is not None and _cmp(x, op, thr):
+                s = str(raw_v).strip()
+                pos = s.find(str(p))
+                hit_texts.append(_hit_snippet(s, max(pos, 0)))
+        if hit_texts:
+            fact["hits"] = hit_texts
     if not vals:
         if spec:
             sample = next((str(r.get(col, ""))[:80] for r in rows if not _is_null(r.get(col, ""))), "")
@@ -352,6 +375,7 @@ def k_match(table, b, cls="C"):
     tnorm = [norm(t) for t in targets]
     idc = _id_col(header)
     matched, nulls, samples, dist = 0, 0, [], Counter()
+    hit_texts = []                                      # 命中处的原文片段(代码抓取,证据引用直接抄它)
     by_target = Counter()                               # 每个 target 各命中多少行(多 target 时的可审计分解)
     for i, r in enumerate(rows):
         v = r.get(col, "")
@@ -363,7 +387,7 @@ def k_match(table, b, cls="C"):
             if v is None:
                 nulls += 1                              # 抽不到=该行没有这项信息,按缺测计,不当不命中
                 continue
-        dist[str(v).strip()] += 1                       # 同列取值分布(给 RCA 判分量/主次)
+        dist[str(v).strip()[:80]] += 1                  # 同列取值分布(键截 80 字:整格回显可达数 KB,防 top 爆炸)
         nv = norm(v)
         if mode == "contains":
             hits = [j for j, t in enumerate(tnorm) if t in nv]
@@ -377,6 +401,15 @@ def k_match(table, b, cls="C"):
                 by_target[str(targets[j])] += 1
             if len(samples) < 3:
                 samples.append(str(r.get(idc)) if idc else f"row#{i}")
+            if len(hit_texts) < 3:                      # 命中原文:以首个命中 target 的位置为锚开窗
+                s = str(v).strip()
+                j = hits[0]
+                if mode == "regex":
+                    m = re.search(str(targets[j]), s)
+                    pos = m.start() if m else 0
+                else:
+                    pos = (s.lower() if ci else s).find(tnorm[j])
+                hit_texts.append(_hit_snippet(s, max(pos, 0)))
     total = sum(dist.values())                          # 纳入统计的非空行数 = 占比分母
     if b.get("absent") and total == 0:
         # 负存在判据(故障=「没配置X」)靠"缺行即证据",但整列无值时缺的可能是导出段而非配置——不判成立
@@ -390,6 +423,8 @@ def k_match(table, b, cls="C"):
                                    else matched >= b.get("require", 1)}
     if b.get("absent"):
         fact["absent"] = True                           # 极性标记:matched=0 且成立=「未配置」,让 RCA 读得懂
+    if hit_texts:
+        fact["hits"] = hit_texts                        # 命中原文片段(代码抓的,evidence 引用只许抄它)
     if spec:
         fact["extract"] = spec                          # 审计:值是从格内抽出来的,不是整格
     if len(targets) > 1:                                # 单 target 时分解=matched,冗余不输出

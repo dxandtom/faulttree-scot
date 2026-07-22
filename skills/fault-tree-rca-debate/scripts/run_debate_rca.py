@@ -2,7 +2,7 @@
 """辩论式 RCA 的执行壳:吃 rca_input.json + tree_index.json,吐 rca.json(四档契约)。
 
 在流水线里的位置 = 原 fault-tree-rca 手工步骤的**平替**(runner/plan/generate 零改动):
-    runner 备好 result/rca_input.json 后,原来"请用 fault-tree-rca 技能手工产出",
+    runner 备好本轮结果目录的 rca_input.json 后,原来"请用 fault-tree-rca 技能手工产出",
     现在跑本脚本即可(它自己调 LLM,不需要 harness 模型)。
 
 流程:facts_to_question 渲染证据文本 → tree_to_vendor_xlsx 生成引擎格式故障树 →
@@ -11,7 +11,7 @@
       原始引擎输出落 rca_debate_full.json(排查/审计用)。
 
 用法(标准产物布局下最小命令,tree-index/out-dir 自动推断):
-  run_debate_rca.py --rca-input <OUT>/result/rca_input.json [--mechanism all]
+  run_debate_rca.py --rca-input <OUT>/result-<运行号>/rca_input.json [--mechanism all]
 完整参数(非标准布局/调参时):
   run_debate_rca.py --rca-input <...> [--tree-index <...>] [--out-dir <...>]
       [--mechanism original|softmax|ratio|all] [--k 3] [--mock] [--set K=V ...]
@@ -181,11 +181,11 @@ def main() -> int:
         pass
     ap = argparse.ArgumentParser(description="辩论式 RCA 执行壳(rca_input → rca.json)")
     ap.add_argument("--rca-input", "--input", dest="rca_input", required=True,
-                    help="result/rca_input.json(--input 是别名,写错参数名的容错)")
+                    help="本轮结果目录的 rca_input.json(--input 是别名,写错参数名的容错)")
     ap.add_argument("--tree-index",
                     help="<OUT>/tree/<场景>.tree_index.json;缺省时按标准布局自动发现"
                          "(rca_input 上两级的 tree/ 下唯一的 *.tree_index.json)")
-    ap.add_argument("--out-dir", help="产物目录;缺省=rca_input 所在目录(通常就是 result/)")
+    ap.add_argument("--out-dir", help="产物目录;缺省=rca_input 所在目录(通常就是本轮 result-<运行号>/)")
     ap.add_argument("--mechanism", default="all", choices=list(_MECH_KEY) + ["all"])
     ap.add_argument("--k", type=int, default=10,
                     help="每种机制输出的 Top-K 根因路径数(默认 10)。只影响最后对排序结果的切片,"
@@ -217,7 +217,7 @@ def main() -> int:
 
     # 全部路径先转绝对:真引擎运行时我们会把工作目录切到 vendor/(见下),相对路径会失效
     a.rca_input = str(Path(a.rca_input).resolve())
-    # tree-index / out-dir 按标准产物布局(<OUT>/result/rca_input.json + <OUT>/tree/*.tree_index.json)
+    # tree-index / out-dir 按标准产物布局(<OUT>/result-<运行号>/rca_input.json + <OUT>/tree/*.tree_index.json)
     # 自动推断——最小命令只需 --rca-input;非标准布局(如评测场景)才需要显式传。
     ri_path = Path(a.rca_input)
     if not a.out_dir:
@@ -242,7 +242,7 @@ def main() -> int:
     tree_index = enrich_conditions(tree_index, rca_input)   # 评测树判据在 rca_input 里,合回;生产树无感
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 版本管理(与 runner 的 runs/ 同一哲学):out-dir 里永远只有**当前轮** debate 产物。
+    # 版本管理:out-dir 里永远只有**当前轮** debate 产物。
     # 重跑前把上一轮整体归档到 debate_runs/<时间戳>/——否则新旧 rca.json 混在一起,
     # agent 会把上一轮结果误当本轮汇报(本地真跑实锤过)。
     products = ["rca.json", "rca_debate_full.json", "vendor_fault_tree.xlsx"] \

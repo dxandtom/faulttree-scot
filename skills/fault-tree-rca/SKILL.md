@@ -5,15 +5,15 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 
 # fault-tree-rca —— 综合根因分析
 
-**本文件已加载,不要再次加载或调用本技能;"加载"≠"完成",真正产出根因 JSON 才算完成。** 现在立刻依据 runner 备好的 `result/rca_input.json` 和下文规则产出根因、写到 `result/rca.json`(路径以 runner 打印为准)。
-**runner 已在本轮启动时把上一轮整体归档到 `runs/<上轮run-id>/`,`result/` 此刻只有本轮的新 `rca_input.json`**——基于它产出 `rca.json` 即可,不会有过期 rca.json 干扰,也别去 `runs/` 里翻旧的当本轮答案。
+**本文件已加载,不要再次加载或调用本技能;"加载"≠"完成",真正产出根因 JSON 才算完成。** 现在立刻依据 runner 备好的本轮结果目录的 `rca_input.json` 和下文规则产出根因、写到同目录 `rca.json`(路径以 runner 打印的「结果目录」为准)。
+**每轮运行有自己独立新建的结果目录 `result-<运行号>/`,里面只有本轮的新 `rca_input.json`**——基于它产出 `rca.json` 即可,不会有过期 rca.json 干扰,也别去同级其它 `result-*`(历史轮次)里翻旧的当本轮答案。
 
-> `result/` 目录已由 runner 建好——**直接写 `result/rca.json`,别再 `mkdir`**。Windows 路径用正斜杠 `/`,**勿以反斜杠结尾**(带引号路径写成 `"...\"` 会让 shell 一直等闭合引号而卡住)。
+> 结果目录已由 runner 建好——**直接往里写 `rca.json`,别再 `mkdir`**。Windows 路径用正斜杠 `/`,**勿以反斜杠结尾**(带引号路径写成 `"...\"` 会让 shell 一直等闭合引号而卡住)。
 
 诊断链路的最后一步:把"各指标已经解析好的事实"和"故障子树"放在一起,判定根因。**本技能与指标种类无关**——今天是这几个、明天换成任意新指标,法则都一样。
 
 ## 上游喂给你什么(输入契约)
-通常由 `cs-scot-execute` 汇总在 `result/rca_input.json` 里:
+通常由 `cs-scot-execute` 汇总在本轮结果目录的 `rca_input.json` 里:
 - **`fault_tree_md`**:故障子树正文(`#/##/###` 层级 + 条件)。**人工编写,可能不规整。** —— 或:
 - **`fault_tree`(压缩形态)**:`pruned_nodes`(只含相关节点,每个把事实挂在 `facts` 里 + `condition`/`combine`/`pass_through`/`node_id`),另带 `tree_issues`(覆盖报告)、`unmapped_facts`、**`uncovered_values`(判别列里没被绑定认领的取值+条数 → 据此把漏绑的记录归到保留的"非典型/其他"兜底节点报出,别漏诊)**。两种形态法则一样;`pass_through` 节点不阻断路径;`node_id` 权威、别造不存在的节点。
 - **`indicator_results`**(完整形态时):dict,键是指标名(**任意、不固定**),值是该指标已解析好的**事实**(**只有数据、没有判断**):各字段/项的真实分布、数值摘要或取值。
@@ -43,10 +43,10 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 > **口径一致**:文字总结必须和落盘 `rca.json` 一致——`rca_result` 是 `[]` 就**别**说"发现 N 条根因";疑似就叫疑似。
 
 ## 输入很大时:别一次性读,用导航助手
-`scripts/rca_query.py <result/rca_input.json>`:`--outline`(全局粗状态)/ `--holding`(有"成立"事实的候选节点+根→叶路径)/ `--node nX`(某分支整条路径的条件+事实)。**按分支取,据此判**——别把整个 rca_input 读进上下文(会超长报错),也别自己写脚本硬算 RCA。
+`scripts/rca_query.py <结果目录>/rca_input.json`:`--outline`(全局粗状态)/ `--holding`(有"成立"事实的候选节点+根→叶路径)/ `--node nX`(某分支整条路径的条件+事实)。**按分支取,据此判**——别把整个 rca_input 读进上下文(会超长报错),也别自己写脚本硬算 RCA。
 
 ## 自检(机械兜底,推荐每次跑)
-产出后跑 `python "<本技能目录>/scripts/validate_rca.py" result/rca.json result/rca_input.json`:对 **confirmed 严**(自相矛盾/假根因/缺路径),对 **probable 松**(只查理由齐不齐:`blocked_at`/`caveats`/`support`),**任何档**给"无事实"节点判"成立"→揪(伪造),外加**空诊断**。**报错就挪档/补理由,不是凑路径、不是造节点;⚠ 软提示同样要逐条处置(升档/补报/excluded_note 留痕)并重跑校验——"硬检查通过"不等于交卷。**(带上 `rca_input.json` 才能核对"成立有事实"。)
+产出后跑 `python "<本技能目录>/scripts/validate_rca.py" <结果目录>/rca.json <结果目录>/rca_input.json`:对 **confirmed 严**(自相矛盾/假根因/缺路径),对 **probable 松**(只查理由齐不齐:`blocked_at`/`caveats`/`support`),**任何档**给"无事实"节点判"成立"→揪(伪造),外加**空诊断**。**报错就挪档/补理由,不是凑路径、不是造节点;⚠ 软提示同样要逐条处置(升档/补报/excluded_note 留痕)并重跑校验——"硬检查通过"不等于交卷。**(带上 `rca_input.json` 才能核对"成立有事实"。)
 
 ## 输出契约
 ```json

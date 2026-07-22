@@ -38,6 +38,8 @@ def _ignore(_dirpath, names):
     out = set()
     for n in names:
         if (n in _SKIP_DIRS or n.endswith(".pyc") or n.endswith(".py.bak")
+                or n.startswith("result-") or n.startswith("runs-")   # 每轮独立结果目录(runner 产物,不进技能包)
+                or n == "index.jsonl"                                  # 运行总索引,同属结果不属产物
                 or n == "conditions_all.json" or ("_conditions" in n and n.endswith(".py"))):
             out.add(n)
     return out
