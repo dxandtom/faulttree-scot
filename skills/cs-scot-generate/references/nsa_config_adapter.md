@@ -1,9 +1,5 @@
 # 接入类「配置拓扑」场景适配(NSA 等)—— 怎么把 MO 配置接进来、怎么写 custom
 
-> **⚠ 本文示例写于 v1 内核集**:其中 F 类(配置检查)已封存 `archive/kernels-v1/`——
-> 现役内核集下「参数=期望值」改绑 **C `equals`**(`{"class":"C","column":"<参数列>","equals":["<期望值>"],"match":"exact"}`),
-> 语义等价;其余 A/C/custom 示例照旧可用。要原样复活 F 类见 archive 的 README。
-
 接入类故障(NSA/SA 的 S1/X2 链路、路由、EPGroup、多运营商)很多判据要查**配置**,而配置常是这种**文本**(不是表格):
 
 ```
@@ -23,9 +19,9 @@ IPRT:MOName=IPRT_1,dstip=192.168.100.0,dstmask=255.255.255.0,nexthop=10.200.0.1;
 - 于是"配置参数检查"这类判据,**不用 custom**,直接套现成模板:
 
 ```python
-# NsaDcSwitch 被关 → 触发(F 类:某参数=期望值)
+# NsaDcSwitch 被关 → 触发(C 类精确匹配:某参数=期望值)
 {"id":"L5-dcswitch","node":"DC开关关闭","node_id":"nX","condition_text":"NsaDcSwitch=OFF",
- "class":"F","source":"NRCellAlgoSwitch","param":"NsaDcSwitch","equals":"OFF"}
+ "class":"C","source":"NRCellAlgoSwitch","column":"NsaDcSwitch","equals":["OFF"],"match":"exact"}
 
 # 接入用户数上限配置过小(A 类:阈值比较)
 {"id":"L5-maxuser","node":"接入用户上限过小","node_id":"nY","condition_text":"MaxRrcConnUserNum ≤ 10",

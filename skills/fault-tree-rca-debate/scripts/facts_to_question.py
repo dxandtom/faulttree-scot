@@ -29,7 +29,7 @@ def _fmt_fact(f: dict) -> str:
     D 类组合等瘦身后无数值字段的事实 → 回退成"判定为真(class X)",别渲染出空的「实测:」。"""
     bits = []
     for k in ("resolved_column", "value", "matched", "total", "ratio",
-              "count_satisfied", "matched_sessions", "op", "threshold"):
+              "count_satisfied", "local", "peer", "op", "threshold"):
         if f.get(k) is not None:
             bits.append(f"{k}={f[k]}")
     if not bits:

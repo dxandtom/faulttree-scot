@@ -1,7 +1,7 @@
 # 示例:kpiData(真实表头)+ 生成的逐条件分析脚本
 
 演示最终架构:**generate 时模型为每个源填一份"逐条件分析脚本"(读表→统计),execute 当普通脚本跑**。
-默认套 A–J 模板,模板不够用才写 custom。
+默认套类别模板(A/C/G/D/J/P),模板不够用才写 custom。
 
 ## 文件
 - `fixtures/kpiData.csv`:6 行 2 小区,**真实英文表头(带 `Common:`/`Voice:`/`Interference:` 组前缀)**,含一个 `NIL`、`N.UL.RSSI.Avg` 非 dBm 取值。

@@ -210,6 +210,6 @@
   判据漏没漏"没有机械闸门——多判据节点用 D 类,就把"绑没绑全"收敛回了节点级,闸门看得住。
 
 > 真实例子见 `examples/kpi-tabular/scripts/kpi_analyzer.py`(填好的 `CONDITIONS` + 一条 `custom`)。
-> **接入类「配置拓扑」场景**(NSA 的 S1/X2 链路、路由、EPGroup、多运营商等):配置常是 `MOName:key=val,...;` **文本**(非表格)→ 用 `.txt` 直接喂、每个 MO 类型当**页签**、`source=<MO类型>` 套 A/C;模板搞不定的(IP 网段匹配、跨 MO 追溯、分号多值、动态表头)写 custom + 用 `mo_config` 原语。**详见 `references/nsa_config_adapter.md`(4 个可照抄的 custom 例子;注意其 F 类示例属 v1 内核,现改用 C `equals`)。**
+> **接入类「配置拓扑」场景**(NSA 的 S1/X2 链路、路由、EPGroup、多运营商等):配置常是 `MOName:key=val,...;` **文本**(非表格)→ 用 `.txt` 直接喂、每个 MO 类型当**页签**、`source=<MO类型>` 套 A/C;模板搞不定的(IP 网段匹配、跨 MO 追溯、分号多值、动态表头)写 custom + 用 `mo_config` 原语。**详见 `references/nsa_config_adapter.md`(4 个可照抄的 custom 例子)。**
 > **数通「诊断文件包」场景**(路由器/交换机的 cmd/diag/config/dblg/log/opr/bas 一包 CSV,混血格式故障树·统一走 v2):
 > 7 类文件的内核对号表、EAV 窄表 `filter` 绑法、回显计数器红线、空表语义——**详见 `references/datacom_log_adapter.md`。**

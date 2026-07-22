@@ -94,7 +94,7 @@ python "<OUT>/scripts/analyzer.py" "<该指标数据>" --lean -o "<OUT>/overview
 > **泛化第一(重要)**:绑定按**格式+语义**,别被这次数据带偏。**节点级"整体有没有失败"若本源有该流程同事件的成功率列 → 直接用(A 类,阈值=100/按量纲),这是重述不是代理**;但**特定失败子因的计数器不在本源列里 → `decision:insufficient_data` 或换源,绝不拿通用率代理、绝不把多条判据塞给同一列**(语义错+恒成立+丢泛化)。判别看列**度量什么(建立 vs 掉线)**、别看名字。**绑率前机械自检:① 流程词逐字对上(UECntx/RRC/NGSig/QosFlow 不互代);② 计数器不含 `.FailEst.`(含=子因,禁率)。** 一次生成要能反复执行不同数据。
 > **先认数据词汇再绑值**:枚举/消息名类的目标值(C/G 的 `equals`、EAV 的 `filter.equals`)只能绑
 > **数据里真出现过**或**概览/枚举清单里在册**的写法,**别照故障树正文猜拼写**;概览可能截断,拿不准就
-> 抽全量枚举核对(见 `references/datacom_log_adapter.md`)。(v1 H 类的 has/lacks 词汇规矩随内核封存。)
+> 抽全量枚举核对(见 `references/datacom_log_adapter.md`)。
 > **跨源判据(收齐后的补绑小步)**:单源子代理遇到"先查别处才知道查什么/要与别的源比对"的判据,
 > 会按简报规约写 `decision:"cross_source"` 标记;merge 后若打印出「跨源判据候选 N 条」→ 跑
 > `python "<本目录>/scripts/make_dispatch.py" --out "<OUT>" --cross` 生成**跨源补绑简报**(自带全部源
