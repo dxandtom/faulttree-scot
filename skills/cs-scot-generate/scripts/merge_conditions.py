@@ -45,10 +45,15 @@ def parse_result(path: Path, require_marker: bool = False):
         lo, hi = body.find("["), body.rfind("]")
         if lo < 0 or hi <= lo:
             return None, "解析不出列表(没有 [...])"
+        seg = body[lo:hi + 1]
         try:
-            val = ast.literal_eval(body[lo:hi + 1])
+            val = ast.literal_eval(seg)
         except (ValueError, SyntaxError) as e:
-            return None, f"ast 解析失败:{e}"
+            try:
+                import json as _json                    # 子代理常写 JSON 风格(true/false/null 小写),
+                val = _json.loads(seg)                  # 机械救回——别逼模型"解析失败就自己写脚本硬合"
+            except Exception:  # noqa: BLE001
+                return None, f"ast/json 都解析失败:{e}"
     if not isinstance(val, list) or not all(isinstance(x, dict) for x in val):
         return None, "内容不是 list[dict]"
     return val, None
@@ -130,12 +135,26 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             pass
 
+    # 树权威节点表:机械回填 id/node/condition_text 用(子代理只交"判定",判据逐字由这里补——
+    # 防截断/抄错;模型写了也一律被权威值覆盖)。
+    tree_nodes = {}
+    tis = sorted(out.glob("tree/*.tree_index.json"))
+    if len(tis) == 1:
+        try:
+            import json as _json
+            tree_nodes = _json.loads(tis[0].read_text(encoding="utf-8")).get("nodes") or {}
+        except Exception:  # noqa: BLE001
+            tree_nodes = {}
+    if not tree_nodes:
+        print("⚠ 读不到唯一的 tree/*.tree_index.json——无法机械回填 condition_text 等字段,按子代理原样合并")
+
     pending, all_warns, wrote = [], [], []
     cross_cands = {}                                    # node_id -> {node_id, sources:[…], reasons:[…]}
     pending_inds = set()                                # 有缺批/坏批的源(候选清理要避开不完整的轮次)
     for ind in sorted(plan):
         merged, seen = [], set()
         got = []
+        n_dec = n_marks = 0                             # 灌水/滥标体检用
         for n in sorted(plan[ind]):
             rp = ddir / f"{ind}_batch{n}_result.py"
             tag = rp.stem
@@ -152,6 +171,7 @@ def main() -> int:
                 marks = [e for e in entries            # 不进本源脚本(它不是可执行绑定)
                          if e.get("decision") == "cross_source"]
                 entries = [e for e in entries if e.get("decision") != "cross_source"]
+                n_marks += len(marks)
                 for m in marks:
                     nid = m.get("node_id") or "?"
                     c = cross_cands.setdefault(nid, {"node_id": nid, "node": m.get("node"),
@@ -161,6 +181,24 @@ def main() -> int:
                     r = str(m.get("mapping_reason") or "").strip()
                     if r and r not in c["reasons"]:
                         c["reasons"].append(r)
+            # 机械回填:id/node/condition_text/source 以 tree_index 为权威(子代理只交判定;
+            # 它抄的判据常被截断,一律覆盖)。cross 的 source=查询落点,由补绑代理给,不覆盖。
+            for e in entries:
+                nid = str(e.get("node_id") or "")
+                nd = tree_nodes.get(nid)
+                if nd:
+                    e["id"] = f"{ind}-{nid}"
+                    e["node"] = nd.get("name")
+                    e["condition_text"] = nd.get("condition")
+                    if ind != "cross":
+                        e["source"] = ind
+                    elif not e.get("source"):
+                        all_warns.append(f"  ⚠ [{tag}] 「{nid}」cross 条目缺 source(最终查询落点的真实源名)"
+                                         "——运行时会报「无数据源 cross」,补上")
+                elif nid and tree_nodes:
+                    all_warns.append(f"  ⚠ [{tag}] 「{nid}」不在树里(node_id 抄错?)——该条挂不回任何节点")
+                if e.get("decision") == "insufficient_data":
+                    n_dec += 1
             dup = 0
             for e in entries:
                 key = repr(sorted(e.items(), key=lambda kv: kv[0]))
@@ -183,6 +221,14 @@ def main() -> int:
         wrote.append(ind)
         print(f"{ind}:{' / '.join(got)} → 合并 {len(merged)} 条,已写入 {analyzer.name}"
               + (f"(缺 {len(plan[ind]) - len(got)} 批,到货后重跑本脚本即可)" if len(got) < len(plan[ind]) else ""))
+        # 灌水/滥标体检(软点名):decision 占比畸高=对全树逐条表态(规约明令"不归本源答的整条不写",
+        # 实测 log 源 92 条全 decision 把闸门糊瞎);cross_source 占比畸高=把"不归我答"误标跨源。
+        if len(merged) >= 10 and n_dec > len(merged) * 0.5:
+            all_warns.append(f"  ⚠ [{ind}] 灌水嫌疑:{n_dec}/{len(merged)} 条是 decision 占位——"
+                             "「明显不归本源答的判据整条不写」,占位只给「确属本源该答却答不了」的;复核并删多余占位")
+        if n_marks >= 10 and n_marks > (len(merged) + n_marks) * 0.5:
+            all_warns.append(f"  ⚠ [{ind}] cross_source 滥标嫌疑:{n_marks} 条标记——跨源=「单靠任何一个源都答不完」;"
+                             "「归别的源单独答」不是跨源,整条不写;复核候选清单")
 
     cp = ddir / "cross_candidates.json"
     if cross_cands:
@@ -209,6 +255,9 @@ def main() -> int:
         print(f"\n✗ 未完成 {len(pending)} 项:", file=sys.stderr)
         for x in pending:
             print("  - " + x, file=sys.stderr)
+        print("⛔ 禁止自己写脚本硬合批次结果(会丢 cross_source 标记/去重/守卫/机械回填,实测产出孤儿绑定)。"
+              "处置只有两种:照单同简报重派该批;或主会话自己按简报绑、把结果写成该批 _result.py 再重跑本脚本。",
+              file=sys.stderr)
         return 1
     print(f"\n✓ 全部批次到齐并合并完成({', '.join(wrote)})。接着跑步骤 3 三件套。")
     return 0

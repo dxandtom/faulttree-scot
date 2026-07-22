@@ -164,7 +164,21 @@ def _target_warnings(conditions):
         if short:
             warns.append(f"⚠ 泛词嫌疑:「{cid}」contains 里有超短 target {short}——短子串几乎必是"
                          f"标签/缩写假阳(如 'NP'⊂'snmp'),换专属信号或删掉{detail}")
+        # 命令名当信号(软点名):目标是 display/show 命令字样、又绑在命令名列——健康设备同样执行巡检命令,
+        # 基本必假阳(实测一次 19 条全军覆没)。参考修法:命令列改当 filter,判定落到回显内容列。
+        col = str(f.get("resolved_column") or "")
+        if ("cmd" in col.lower() or "command" in col.lower()) and any(
+                re.match(r"^(display|show)\b", t.strip(), re.I) for t in targets):
+            warns.append(f"⚠ 命令名当信号嫌疑:「{cid}」在命令名列「{col}」里找 {targets[:2]}——"
+                         "命令被执行过≠故障;参考写法:filter 选中该命令的行,判定落在回显内容列(有例外请在"
+                         f"mapping_reason 说明){detail}")
         ct = str(c.get("condition_text") or "")
+        # absent 极性(软点名):判据说"缺失/未配置",绑定却没带 absent——方向多半反了(实测 config 源 4 条)。
+        if (any(w in ct for w in ("缺失", "缺少", "未配置", "没有配置", "不存在", "未使能"))
+                and not f.get("absent")
+                and not any((sf or {}).get("absent") for sf in (f.get("sub_facts") or []))):
+            warns.append(f"⚠ 极性嫌疑:「{cid}」判据含「缺失/未配置」字样,绑定却没有 absent——"
+                         f"现在是「存在才成立」,方向可能反了;确非负存在语义请在 mapping_reason 说明{detail}")
         if any(w in ct for w in _NEG_TREND) and not any(_ALARM_SHAPE.search(t) for t in targets):
             warns.append(f"⚠ 语义错配嫌疑:「{cid}」判据含否定/趋势词(为空/未建立/增长/震荡…),"
                          f"但绑定是文本捞子串且无告警码形 target——子串命中表达不了这类语义。"

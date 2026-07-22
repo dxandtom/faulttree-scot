@@ -445,10 +445,15 @@ def main() -> None:
     copy_into(here / "import_tree_excel.py", out / "scripts" / "import_tree_excel.py")  # 调优表:Excel→产物(自包含)
     copy_into(here.parent / "references" / "tuning_excel_guide.md",
               out / "tree" / "tuning-guide.md")                                         # 调优表动手说明(业务读者)
-    kn = out / "tree" / "knowledge.md"                   # 外挂知识:业务同事手写的"去哪查/怎么查/什么算正常"
-    if not kn.exists():                                  # 用户手写文件——只建模板,重跑**永不覆盖**
-        kn.write_text(KNOWLEDGE_TEMPLATE, encoding="utf-8")
-        print(f"已建外挂知识模板 → {kn}(业务同事可编辑;绑定简报与 RCA 输入会按分支自动载入)")
+    kn = out / "tree" / "knowledge.md"                   # 外挂知识:人手写的"去哪查/怎么查/什么算正常"
+    if not kn.exists():                                  # 手写文件——重跑**永不覆盖**(现场增补不丢)
+        skill_kn = here.parent / "knowledge.md"          # 技能级出厂知识库(与 SKILL.md 平级,生成前预置)
+        if skill_kn.exists():
+            copy_into(skill_kn, kn)
+            print(f"已拷入技能级出厂知识 → {kn}(来源 {skill_kn};绑定简报与 RCA 输入按「适用」标签自动载入)")
+        else:
+            kn.write_text(KNOWLEDGE_TEMPLATE, encoding="utf-8")
+            print(f"已建外挂知识模板 → {kn}(业务同事可编辑;绑定简报与 RCA 输入会按分支自动载入)")
     # 重跑 = 重新编译:默认用当前版本的空骨架覆盖旧脚本(这样才能用上刚拷进来的新 condition_kernels/mo_config);
     # 覆盖前若旧脚本不是"全新空骨架"(填过/手改过/上一版骨架)→ 先备份成 .py.bak,绝不静默丢失。
     # 想原样保留已填脚本:加 --keep(老的 skip-if-exists 行为)。

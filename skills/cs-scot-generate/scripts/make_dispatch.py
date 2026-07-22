@@ -36,6 +36,9 @@ COMMON_RULES = """【公共规约——逐条遵守】
    **跨源联查的判据是第三种情况**:判据要"先查别处拿到值,才知道在本源查什么"(传参链)、或要与别的源
    的数据比对(两侧一致性)→ 本源别硬绑、也别当"不归我答"沉默,写一行标记(它会汇入跨源补绑环节,
    不进本源脚本):{{"node_id":"nN","decision":"cross_source","mapping_reason":"<一句话:缺哪一环>"}}
+   **边界别搞混(实测有源把几十条误标)**:"这判据要的数据在别的源、本源答不了" = 普通的**不归你答,
+   整条不写**——不是 cross_source。cross_source 的判别标准只有一个:**单靠任何一个源都答不完**
+   (要两个源接力/比对)。"归别的源单独答"的判据,让那个源去绑就行。
 3. 树驱动:下面清单里的**每条判据都要过一遍**再决定绑/不绑;按判据要的列+值绑,**不管这次数据里出没出现**
    (值没出现 → 照绑,运行时 matched=0 = 确定排除,不是数据不足)。
 4. 一条判据常含**多个子条件**(换行/且/①② 分隔):本源能答的每个子条件都要绑到(单源多子条件用 D 类组合),
@@ -80,7 +83,21 @@ COMMON_RULES = """【公共规约——逐条遵守】
 - C/G 匹配:column + equals/contains/regex 三选一(都是列表)+ 可选 match/require/absent/filter/extract。
 - D 组合:combine(只认 "AND"/"OR")+ sub:[子绑定…] + 可选 group_by(同对象关联)。
 - P 成对:side_column + value_column + 可选 peer_marker(默认"*")/fault_when/filter/extract。
-- J 人工:note。查不了:{{"decision":"insufficient_data","mapping_reason":"…"}}(不带 class)。"""
+- J 人工:note。查不了:{{"decision":"insufficient_data","mapping_reason":"…"}}(不带 class)。
+
+【参考示例(few-shot;是参考写法不是铁律,遇到判据确有例外就按语义变通,mapping_reason 写清)】
+◇「回显里出现某告警/事件字样」(存在即证据):
+  {{"node_id":"n6","class":"G","column":"CmdResult","filter":{{"column":"CmdName","contains":"display alarm"}},
+    "contains":["hwBaseSocAttackTrap"],"mapping_reason":"告警名只在发生时出现,filter 选中该命令的回显行再找"}}
+◇「根据 display X 查看没有对应的Y」(判定落在**回显内容特征**上;判据下方的回显示例通常就写着
+  故障长什么样——本例特征是 Number of vxlan tunnel : 0):
+  {{"node_id":"n14","class":"G","column":"CmdResult","filter":{{"column":"CmdName","contains":"display vxlan tunnel"}},
+    "contains":["Number of vxlan tunnel : 0"],"mapping_reason":"判据回显示例给出故障特征行,命中即隧道数为0"}}
+◇「未配置/缺失某命令」(缺行即证据):
+  {{"node_id":"n18","class":"G","column":"<配置列>","contains":["advertise encap-type vxlan"],"absent":true,
+    "mapping_reason":"判据='未配置该命令',absent=命中0行才成立;列全空内核自动改判数据不足"}}
+◇反面参考:把"命令名出现在命令列"当故障信号(如 contains:["display vxlan tunnel"] 绑在 CmdName)
+  ——健康设备同样执行巡检命令,基本必假阳;命令列一般只当 filter 用,判定落到内容列上。"""
 
 EAV_RULES = """【EAV 窄表铁规(本源适用)】
 本源是"一行一个量"的窄表:DataItem 说这行是什么指标,DataValue 是值。绑定固定形态:
@@ -112,35 +129,37 @@ CROSS_RULES = """【跨源绑定规约——逐条遵守】
 8. 诚实:参数抽不到/歧义、对端查不到、源没提供 → 内核自动报数据不足,**别**为了"绑上"硬凑;
    mapping_reason 写实(链条每一跳从哪来、到哪去)。"""
 
-CROSS_OUTPUT_FORMAT = """【输出格式】
+CROSS_OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
 把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
 写完后最终回复只报一行「共 N 条,已写 <路径>」。每条字段:
-{"id":"cross-<node_id>","node":"<节点名>","node_id":"<nN>","condition_text":"<逐字抄候选清单的判据原文>",
- "class":"…","source":"<最终查询落点的真实源名,如 config——绝不是 cross>",...类参数/param_from...,
- "mapping_reason":"<链条每一跳写实:参数从哪个源怎么抽、代到哪查什么>"}
+{"node_id":"<nN>","class":"…","source":"<最终查询落点的真实源名,如 config——绝不是 cross,必写>",
+ ...类参数/param_from...,"mapping_reason":"<链条每一跳写实:参数从哪个源怎么抽、代到哪查什么>"}
+(id/node/condition_text 不用写——合并脚本从 tree_index 机械回填,写了也会被覆盖。)
 示例(传参链):
-{"id":"cross-n2","node":"peer-link配置缺失","node_id":"n2","condition_text":"...","class":"G","source":"config",
+{"node_id":"n2","class":"G","source":"config",
  "column":"level2","contains":["mode lacp-static"],"absent":True,
  "filter":{"column":"level1","equals":"@plink"},
  "param_from":{"plink":{"source":"cmd","column":"CmdResult",
                "filter":{"column":"CmdName","contains":"peer-link"},"extract":{"kv":"Port Name"}}},
  "mapping_reason":"回显抽 Port Name → 查该接口配置块,缺 mode lacp-static 即故障"}
 示例(绑不了):
-{"id":"cross-n9","node":"…","node_id":"n9","condition_text":"...","decision":"insufficient_data",
- "mapping_reason":"链条第2跳要的数据本场景未采集"}
+{"node_id":"n9","decision":"insufficient_data","mapping_reason":"链条第2跳要的数据本场景未采集"}
 **结果文件的最后一行**必须是完成标记(单独一行,写在列表 `]` 之后):
 # BATCH_COMPLETE
 (合并脚本靠它识别"写完了"还是"半路截断"——缺这行整批按截断重派。)"""
 
-OUTPUT_FORMAT = """【输出格式】
-把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行,
-合并脚本两种都认);写完后最终回复只报一行「共 N 条,已写 <路径>」。每条字段:
-{{"id":"{ind}-<node_id>","node":"<节点名>","node_id":"<nN>","condition_text":"<逐字抄上面清单的判据原文>",
- "class":"A/C/D/G/J/P 之一(B/E/F/H/I 已封存,别用)","source":"{ind}",...类参数...,"mapping_reason":"<写实>"}}
+OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
+把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
+写完后最终回复只报一行「共 N 条,已写 <路径>」。**每条只写四类字段**:
+{{"node_id":"<nN>","class":"A/C/D/G/J/P 之一(B/E/F/H/I 已封存,别用)",...类参数...,"mapping_reason":"<写实>"}}
+- **id/node/condition_text/source 都不用写**——合并脚本会从 tree_index 机械回填(逐字、权威;
+  你抄反而会截断/抄错,写了也会被覆盖)。这让你的输出短一半以上,别再超长截断;
+- 答不了又确属本源该答 → {{"node_id":"<nN>","decision":"insufficient_data","mapping_reason":"<原因>"}};
+- 明显不归本源答的判据 → **整条不写**(不写=不认领;禁止逐条表态灌水)。
 示例(C 类):
-{{"id":"{ind}-n6","node":"链路改包告警","node_id":"n6","condition_text":"...","class":"C","source":"{ind}","column":"Summary","contains":["hwLinkHeartbeatChangeAlarm"],"mapping_reason":"判据给出具体告警名,本源 Summary 列是告警码枚举,匹配名段即可"}}
+{{"node_id":"n6","class":"C","column":"Summary","contains":["hwLinkHeartbeatChangeAlarm"],"mapping_reason":"判据给出具体告警名,本源 Summary 列是告警码枚举,匹配名段即可"}}
 示例(decision):
-{{"id":"{ind}-n93","node":"LDP会话down","node_id":"n93","condition_text":"...","class":"C","source":"{ind}","decision":"insufficient_data","mapping_reason":"确属本源该答,但已查数据词汇无对应列/枚举项"}}
+{{"node_id":"n93","decision":"insufficient_data","mapping_reason":"确属本源该答,但已查数据词汇无对应列/枚举项"}}
 **结果文件的最后一行**必须是完成标记(单独一行,写在列表 `]` 之后):
 # BATCH_COMPLETE
 (合并脚本靠它识别"写完了"还是"半路截断"——缺这行整批按截断重派。)"""
@@ -151,12 +170,13 @@ def _fail(msg: str) -> None:
 
 
 def load_conditions(ti_path: Path) -> list:
-    """tree_index → [(node_id, 名字, 判据全文)],带非空判据的全部节点(与绑定认领口径一致)。"""
+    """tree_index → [(node_id, 名字, 判据全文)],带非空判据的**诊断节点**(pass_through 不参与绑定:
+    高层分类/选路节点的判据只供人读,绑成判定会把全树确证卡死)。"""
     idx = json.loads(ti_path.read_text(encoding="utf-8"))
     out = []
     for nid, n in (idx.get("nodes") or {}).items():
         cond = str(n.get("condition") or "").strip()
-        if cond:
+        if cond and not n.get("pass_through"):
             out.append((nid, str(n.get("name") or ""), cond))
     return out
 
@@ -291,13 +311,32 @@ def main() -> int:
     if args.cross:                                       # 跨源补绑简报:一份装下全部候选 + 所有源的词汇
         ddir = out / "dispatch"
         cand_p = ddir / "cross_candidates.json"
-        if not cand_p.exists():
-            _fail(f"没有 {cand_p} —— 先完成单源绑定并跑 merge_conditions.py"
-                  "(子代理的 cross_source 标记会汇成候选);没有候选文件=没有跨源判据,无需补绑")
-            return 2
-        cands = json.loads(cand_p.read_text(encoding="utf-8"))
+        cands = json.loads(cand_p.read_text(encoding="utf-8")) if cand_p.exists() else []
+        # 机械兜底:没被**任何**源认领的诊断节点也进候选——cross_source 标记靠子代理自觉,实测会失灵
+        # (没人打标记/合并被绕过),机械补位保证跨源判据不静默消失;补绑代理逐条判"真跨源还是真缺数据"。
+        claimed = set()
+        import ast as _ast
+        for ap_ in sorted(out.glob("scripts/*_analyzer.py")):
+            if ap_.name == "cross_analyzer.py":
+                continue
+            try:
+                for node in _ast.parse(ap_.read_text(encoding="utf-8")).body:
+                    if isinstance(node, _ast.Assign) and any(
+                            isinstance(t, _ast.Name) and t.id == "CONDITIONS" for t in node.targets):
+                        claimed |= {str(e.get("node_id")) for e in _ast.literal_eval(node.value)
+                                    if isinstance(e, dict) and e.get("node_id")}
+            except Exception:  # noqa: BLE001
+                continue
+        cand_ids = {c.get("node_id") for c in cands}
+        unclaimed = [(nid, name) for nid, name, _ in conditions
+                     if nid not in claimed and nid not in cand_ids]
+        for nid, name in unclaimed:
+            cands.append({"node_id": nid, "node": name, "sources": [],
+                          "reasons": ["机械兜底:未被任何源认领——请判断是跨源联查还是确实缺数据"]})
+        if unclaimed:
+            print(f"机械兜底:{len(unclaimed)} 个无人认领的诊断节点已并入候选(不靠标记自觉)")
         if not cands:
-            print("cross_candidates.json 为空——没有跨源判据,无需补绑。")
+            print("没有跨源候选(无 cross_source 标记,诊断节点也都已被认领)——无需补绑。")
             return 0
         cond_by_id = {nid: (name, cond) for nid, name, cond in conditions}
         rp = ddir / "cross_batch1_result.py"

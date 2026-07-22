@@ -306,6 +306,9 @@ def main() -> None:
     ap.add_argument("--sheet", help="只用指定页签(等价按页签名选);不给=所有树页签")
     ap.add_argument("--list", action="store_true", help="列出所有可输入场景名(L2)+ 出处页签")
     ap.add_argument("--include-old", action="store_true", help="保留名字带 old/旧 的页签(默认跳过)")
+    ap.add_argument("--bind-top-levels", action="store_true",
+                    help="让 L1/L2 高层节点的判据也参与绑定/阻断(默认不判:高层判据多为场景分类,"
+                         "绑成判定会把全树确证卡死)")
     ap.add_argument("--slug", help="英文短名(输出文件/目录名用,如 layer-3-service-issues);"
                                    "默认自动取场景所在层的英文列转小写连字符,取不到则沿用中文名")
     ap.add_argument("-o", "--output")
@@ -340,6 +343,18 @@ def main() -> None:
     if not index.get("root"):
         print(f"未在任何树页签找到场景「{args.start_node}」(L{args.start_level})。用 --list 核对名字。", file=sys.stderr)
         sys.exit(1)
+    # 「高层不判断」规则(简单粗暴,用户定案):L1/L2 这种靠根的层级,判据多为场景分类/选路说明,
+    # 不是故障条件——绑成判定会把整树确证卡死(实测:根节点"判断属于哪种场景"不成立 → 全树只能疑似)。
+    # 处理:带判据的 L≤2 节点标 pass_through(不阻断、不参与绑定),判据文本保留供人读;
+    # 某棵树确实要在高层判(少见)→ --bind-top-levels 关掉本规则。
+    if not args.bind_top_levels:
+        topjudge = [nid for nid, nd in index["nodes"].items()
+                    if nd.get("condition") and (nd.get("level") or 99) <= 2]
+        for nid in topjudge:
+            index["nodes"][nid]["pass_through"] = True
+        if topjudge:
+            print(f"高层不判断:L1/L2 带判据节点 {len(topjudge)} 个已标 pass_through(不阻断路径、不参与绑定;"
+                  "判据保留供人读。确要在高层判 → 重跑加 --bind-top-levels)")
     solutions = index.pop("solutions", {})              # 单独落盘,不进 tree_index(别膨胀树契约)
     md = index_to_markdown(index)
 
@@ -384,7 +399,8 @@ def main() -> None:
         print(f"已输出解决方案表: {outp.parent / 'solutions.json'}(节点 {len(solutions)} 个;"
               "RCA 报根因时点查,不进裁决上下文)")
     src_sheets = sorted({s for nd in index["nodes"].values() for s in nd.get("sheets", [])})
-    n_cond = sum(1 for nd in index["nodes"].values() if nd.get("condition"))
+    n_cond = sum(1 for nd in index["nodes"].values()
+                 if nd.get("condition") and not nd.get("pass_through"))
     print(f"场景「{args.start_node}」合并自页签: {src_sheets};节点数 {len(index['nodes'])},带判据节点 {n_cond}")
     if n_cond == 0:
         print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是格式没被识别"
