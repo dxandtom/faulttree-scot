@@ -466,6 +466,9 @@ def main() -> None:
             existing = None
         if existing == pristine:
             continue                                    # 还是全新空骨架,没填过 → 无需动
+        if ind == "cross":                              # 已填过的跨源绑定是补绑环节的手工产物,重跑 assemble
+            print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 由补绑环节维护,不重铺): {target}")
+            continue                                    # 不清空——此前重铺会把 param_from 链静默打回空骨架
         if args.keep:
             print(f"  [keep] 保留已存在脚本(--keep,未刷新骨架/库依赖): {target}")
             continue

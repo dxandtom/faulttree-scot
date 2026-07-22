@@ -14,9 +14,9 @@ INDICATOR = "kpi"
 
 CONDITIONS = [
     {"id": "kpi_qos", "node": "QoS建立失败", "node_id": "n2",
-     "condition_text": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0", "class": "B",
-     "minuend": ["N.QosFlow.Est.Att"], "subtrahend": ["N.QosFlow.Est.Succ"], "op": ">", "threshold": 0,
-     "mapping_reason": "需原始计数 Att/Succ;kpi 只有成功率、无原始计数 → 数据不足"},
+     "condition_text": "N.QosFlow.Est.Att - N.QosFlow.Est.Succ > 0",
+     "decision": "insufficient_data",
+     "mapping_reason": "需原始计数 Att/Succ;kpi 只有裸 SuccRate 列(流程词对不上,不可代)→ 数据不足"},
 ]
 CUSTOM = {}
 

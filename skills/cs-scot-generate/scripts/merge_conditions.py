@@ -26,14 +26,18 @@ from pathlib import Path
 _BRIEF = re.compile(r"^(?P<ind>.+)_batch(?P<n>\d+)\.txt$")
 
 
-def parse_result(path: Path):
-    """结果文件 → (entries, 错误串或None)。认裸列表和 `CONDITIONS = [...]` 两种写法。"""
+def parse_result(path: Path, require_marker: bool = False):
+    """结果文件 → (entries, 错误串或None)。认裸列表和 `CONDITIONS = [...]` 两种写法。
+    require_marker=True(dispatch/manifest.json 声明)时,缺尾部完成标记按截断拒收——
+    弱模型半途而废但输出恰好是合法短列表时,唯有这个机械信号能逮住。"""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         return None, f"读不了:{e}"
     if "�" in text:
         return None, "含 U+FFFD 乱码(编码错配,重写时显式 encoding='utf-8')"
+    if require_marker and "# BATCH_COMPLETE" not in text:
+        return None, "缺完成标记 # BATCH_COMPLETE(疑似半路截断——列表虽可解析,但可能不全)"
     body = text.strip()
     try:
         val = ast.literal_eval(body)
@@ -117,6 +121,14 @@ def main() -> int:
     if not plan:
         print("✗ dispatch/ 里没有任何简报(或 --indicators 全滤掉了)", file=sys.stderr)
         return 2
+    require_marker = False                              # 老 dispatch 目录没铭牌 → 不启用标记检查(向后兼容)
+    mf = ddir / "manifest.json"
+    if mf.exists():
+        try:
+            import json as _json
+            require_marker = _json.loads(mf.read_text(encoding="utf-8")).get("complete_marker") is True
+        except Exception:  # noqa: BLE001
+            pass
 
     pending, all_warns, wrote = [], [], []
     cross_cands = {}                                    # node_id -> {node_id, sources:[…], reasons:[…]}
@@ -131,7 +143,7 @@ def main() -> int:
                 pending.append(f"{ind} 批{n}:结果文件未到({rp.name})——等子代理/同简报重派")
                 pending_inds.add(ind)
                 continue
-            entries, err = parse_result(rp)
+            entries, err = parse_result(rp, require_marker)
             if err:
                 pending.append(f"{ind} 批{n}:{err}——同简报重派该批")
                 pending_inds.add(ind)

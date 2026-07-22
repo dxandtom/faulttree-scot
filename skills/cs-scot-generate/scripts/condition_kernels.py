@@ -66,6 +66,9 @@ def _shape_err(b, need_op=False):
         rq = _num(b["require"])
         if rq is None or rq < 1:
             return f"require「{b['require']}」不合法(须为 ≥1 的数;0 会恒判成立)"
+        if b.get("scope") != "count_rows":               # 实测:忘写 scope 时 require 被静默忽略、按均值出确定结论
+            return ("require 只在 scope:\"count_rows\" 下有效——现在会被静默忽略、按 aggregate 聚合出错误结论;"
+                    "补 \"scope\":\"count_rows\" 或去掉 require")
     return None
 
 
@@ -414,6 +417,9 @@ def k_combo(b, sources, parent_source, _resolved=False):
     if not subs:                                        # 空 AND 的 any(False…)全假 → 恒"成立"(实测假阳),响亮拒绝
         return _insuf("D", "组合绑定缺 sub 子条件列表(字段名写错/被吃掉?)——空组合恒判成立,禁止")
     comb = str(b.get("combine", "AND")).upper()
+    if comb not in ("AND", "OR"):                       # 实测:拼错(如 ANDD)会被静默按 OR 算=方向性假阳
+        return _insuf("D", f"combine「{b.get('combine')}」不认识(只认 AND/OR)——"
+                           "拼错不拦会被静默按 OR 算,'全部满足'悄悄变'任一满足'")
 
     if b.get("group_by"):
         # 分组组合:按 group_by 列切组,**每组单独跑全部子条件**,存在一个组满足 → 节点成立。
@@ -533,6 +539,20 @@ def k_manual(b):
 
 _KERNELS = {"A": k_threshold, "C": k_match, "G": lambda t, b: k_match(t, b, "G"), "P": k_pair}
 _ARCHIVED = set("BEFHI")                                # v1 内核已封存 archive/kernels-v1(数通普查零命中)
+
+# 顶层字段白名单:绑定带清单外的字段 = 响亮拒收("响亮拒收"铁律的 A/D 顶层补漏——实测
+# require 忘配 count_rows、A 里误写 contains、combine 拼错,全都被静默忽略后算出语义错误的确定结论)。
+_META_KEYS = {"id", "node", "node_id", "condition_text", "class", "source", "mapping_reason",
+              "decision", "reason", "mode", "manual", "note", "param_from"}
+_CLASS_KEYS = {
+    "A": {"column", "op", "threshold", "scope", "agg", "transforms", "require", "filter", "extract"},
+    "C": {"column", "equals", "contains", "regex", "match", "case_insensitive", "require",
+          "absent", "filter", "extract"},
+    "D": {"combine", "sub", "group_by", "filter"},       # D 顶层 filter 有专门的响亮拒绝(信息更准)
+    "J": set(),
+    "P": {"side_column", "peer_marker", "value_column", "fault_when", "filter", "extract", "pair_from"},
+}
+_CLASS_KEYS["G"] = _CLASS_KEYS["C"]
 
 
 def _apply_filter(table, flt):
@@ -814,6 +834,12 @@ def evaluate_binding(b, sources, source_name, _resolved=False):
                 "reason": b.get("mapping_reason") or b.get("reason") or f"模型判定:{decided}"}
     if cls == "J" or b.get("manual"):
         return k_manual(b)
+    if cls in _CLASS_KEYS:
+        unknown = set(b) - _META_KEYS - _CLASS_KEYS[cls]
+        if unknown:
+            return _insuf(cls, f"绑定带不认识的字段 {sorted(unknown)}({cls} 类只认 "
+                               f"{sorted(_CLASS_KEYS[cls])})——野字段会被静默忽略、"
+                               "算出语义错误的确定结论,拒收;修字段名或换类别")
     if b.get("param_from"):                              # 参数化查询:先抽参数、再代入(D/P/A/C/G 通吃)
         return _eval_with_params(b, sources, source_name)
     if not _resolved:

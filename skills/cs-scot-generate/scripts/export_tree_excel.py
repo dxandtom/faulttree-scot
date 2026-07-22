@@ -61,11 +61,20 @@ def export(out_dir: Path) -> Path:
         if n.get("code"):
             alias.setdefault(str(n["code"]), nid)
 
-    sources, bind, dropped = [], {}, []
+    sources, bind, dropped, cross_claimed = [], {}, [], []
     for ap in sorted((out_dir / "scripts").glob("*_analyzer.py")):
         src = ap.name[: -len("_analyzer.py")]
         if src == "cross":                               # 跨源判据(param_from 链)是工程师维护的,
-            continue                                     # 不进调优表——防业务同事误改传参链 JSON
+            try:                                         # 不进调优表——但要让业务知道哪些节点被它认领
+                import ast as _ast
+                for node in _ast.parse(ap.read_text(encoding="utf-8")).body:
+                    if isinstance(node, _ast.Assign) and any(
+                            isinstance(t, _ast.Name) and t.id == "CONDITIONS" for t in node.targets):
+                        cross_claimed = sorted({str(e.get("node_id")) for e in _ast.literal_eval(node.value)
+                                                if isinstance(e, dict) and e.get("node_id")})
+            except Exception:  # noqa: BLE001
+                pass
+            continue
         sources.append(src)
         for c in read_conditions(ap):
             if not isinstance(c, dict):
@@ -174,6 +183,10 @@ def export(out_dir: Path) -> Path:
         print(f"⚠ 现有调优表比 tree_index 新(可能有**尚未导入**的人工修改)——已备份到 {bak.name} 再覆盖。"
               "若确有未导入的修改,先跑 import_tree_excel.py 再导出。", file=sys.stderr)
     wb.save(dst)
+    if cross_claimed:                                   # 让业务同事看得见"哪些节点的诊断还挂着跨源绑定"
+        print(f"  ⚠ 以下节点另有**跨源绑定**(scripts/cross_analyzer.py,工程侧维护,不在本表里):"
+              f"{', '.join(cross_claimed)}——在调优表里改这些节点的判据/删这些节点时,请知会工程同事"
+              "(导入时也会自动打印复核提醒)。")
     return dst
 
 

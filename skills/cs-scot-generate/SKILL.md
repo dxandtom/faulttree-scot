@@ -107,7 +107,8 @@ python "<OUT>/scripts/<ind>_analyzer.py" "<该指标数据>" -o /tmp/<ind>.json
 python "<本目录>/scripts/validate_conditions.py" /tmp/<ind>.json
 # 叶子覆盖度闸门(树驱动,与数据取值无关):列出"没被任何绑定认领的叶子";漏绑(条件提到已喂列却没绑)→ 退出码 1
 python "<本目录>/scripts/check_tree_coverage.py" "<OUT>/tree/<短名>.tree_index.json" \
-  --facts /tmp/<ind>.json [--facts /tmp/<其他源>.json ...] --columns "<本源列名,逗号分隔(从概览取)>"
+  --analyzer "<OUT>/scripts/<ind>_analyzer.py" [--analyzer ...] [--facts /tmp/<ind>.json ...]
+# --columns 可省:缺省按 --analyzer 自动读 <OUT>/overview/<ind>_overview.json 的列名(不依赖手抄;显式给了以给的为准)
 ```
 脚本要正常跑出逐条件事实(`indicator/source/summary/conditions`);校验器揪"没解析到列却给判断、数据不足缺理由",并机械逮代理三类:**`[流程不匹配]`(如 UEContext 条件绑了 RRC 率)/ `[建立配掉线]` / `[子因配总率]`(`.FailEst.` 子因绑了总成功率)**。**校验器报"不合格"= 那条多半是代理 → 按提示改成 `decision:insufficient_data` 或换列/换源、重跑,别带病往下走。** custom 写崩了/形状不对,在这步也暴露。**`validate_conditions` 的『覆盖度告警』是数据值级**(绑了的列里哪些取值没被认领)。
 > **`check_tree_coverage.py` 是树驱动的叶子覆盖度闸门**——它从 `tree_index` 枚举每个该绑的叶子,把**没被任何源绑定认领的叶子全列出来**,即便该叶子的码这次数据里没出现(这是值级告警**逮不到**的盲区:没绑就没列、没列就隐形)。**`❌ 漏绑`(叶子条件正文提到本次已喂列、本源能答却没绑)= 退出码 1,必须回去补绑(没出现就让它 `matched=0`)或显式 `decision:insufficient_data`**;`整支未触达/缺源` 逐支确认是真没喂对应数据(信令跟踪/配置文件没传)还是漏判一整支,后者归"非典型/其他"兜底或补绑。**跨源时把各源 `--facts` 都传上,合并判覆盖**——此时还会输出**跨源认领对账**(软提示):各源认领分布、"判据像多个子条件却只有 1 条绑定"、"告警类判据多源在场却单源认领",逐个过一眼,别让"碰了一条就算绑完"和"互相谦让"漏网。
