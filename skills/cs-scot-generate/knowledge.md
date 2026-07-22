@@ -32,6 +32,25 @@
 直接绑「存在X」方向是反的。「配了A但没配B」= 组合:存在A + absent B;
 要求发生在同一接口/对象上时再加 group_by(按接口列分组逐个判)。
 
+### V-STP根桥桥MAC类判据的绑定套路
+适用:V-STP、桥MAC、STP
+"检查配置是否有X、回显是否有Y、配置的值Z是否等于回显里的W"这类多要件判据,绑成
+D AND [前置条件…, D OR [absent 缺失分支, P pair_from 值比对分支]],属跨源绑定(写进 cross_analyzer)。
+可直接套用的完整例子(V-STP 根桥未配置桥MAC;正则要锚在字段名上防误抓):
+{"node_id":"<nN>","class":"D","source":"config","combine":"AND","sub":[
+   {"class":"G","source":"config","column":"level1","contains":["stp v-stp enable"]},
+   {"class":"G","source":"cmd","column":"CmdResult",
+    "filter":{"column":"CmdName","contains":"display stp"},"contains":["This bridge is the root"]},
+   {"class":"D","combine":"OR","source":"config","sub":[
+      {"class":"G","source":"config","column":"level1","contains":["stp bridge-address"],"absent":true},
+      {"class":"P","source":"config","fault_when":"not_equal","pair_from":{
+         "local":{"source":"config","column":"level1",
+                  "filter":{"column":"level1","contains":"stp bridge-address"},
+                  "extract":{"regex":"stp bridge-address ([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})"}},
+         "peer":{"source":"cmd","column":"CmdResult",
+                 "filter":{"column":"CmdName","contains":"display stp v-stp"},
+                 "extract":{"regex":"Bridge Mac\\s*:\\s*Config=[0-9a-fA-F-]+\\s*/\\s*Active=([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})"}}}}]}]}
+
 ### M-LAG场景对端查询方法
 适用:M-LAG
 在 diag 数据中,筛选「DataItem」列为「MLAG_NodeId」的数据,当结果为两条时即可查询到本端与对端的
