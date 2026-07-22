@@ -211,9 +211,9 @@ def _file_fingerprint(path: str) -> dict:
 
 
 def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[str, str], base: Path,
-                        missing_inputs=None, runs_base: Path = None) -> None:
-    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs/index.jsonl 追加一行,供生产侧管理。
-    runs/index.jsonl 落在 runs_base(默认=base;--result-base 生效时=结果根目录)下。"""
+                        missing_inputs=None, runs_dir: Path = None) -> None:
+    """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 runs 目录的 index.jsonl 追加一行。
+    runs_dir 由调用方给(带 --result-suffix 时是 runs-<后缀>/);缺省=base/runs。"""
     import datetime
     created = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     inputs = {k: _file_fingerprint(v) for k, v in data_map.items() if v}  # 空值=没提供:归 missing_inputs,不指纹(Path('') 会指到 CWD)
@@ -222,7 +222,7 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
     if missing_inputs:                                   # 部分数据运行:铭牌上写明缺口,事后一看便知这轮少了啥
         manifest["missing_inputs"] = sorted(missing_inputs)
     (run_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    idx = (runs_base or base) / "runs" / "index.jsonl"
+    idx = (runs_dir if runs_dir is not None else base / "runs") / "index.jsonl"
     idx.parent.mkdir(parents=True, exist_ok=True)
     with idx.open("a", encoding="utf-8") as f:           # 一行一运行:run_id + 时间 + 各输入指纹,便于事后检索/去重
         f.write(json.dumps({"run_id": run_id, "created_at": created,
@@ -417,6 +417,9 @@ def main() -> None:
     ap.add_argument("--result-base", help="结果输出根目录:result/ 与 runs/ 落在它下面(默认=--base,"
                                           "即产物目录,老行为不变)。平台不允许技能写自身目录时用它把结果"
                                           "外移,如 --result-base <技能目录>/../<技能名>-result")
+    ap.add_argument("--result-suffix", help="结果目录后缀:result-<后缀>/、runs-<后缀>/(只认字母数字-_)。"
+                                            "**同一技能并行跑多份数据必带**(建议用数据标识,如站点名/文件夹名)"
+                                            "——不带时多个并发运行同写 result/,会互相覆盖 rca.json")
     ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」)。result/ 始终=当前一轮;"
                                      "重跑前自动把上一轮整体归档到 runs/<上轮run_id>/,history 不丢、不覆盖、无歧义")
     ap.add_argument("--new-run", action="store_true",
@@ -482,13 +485,19 @@ def main() -> None:
     # eval/benchmark 仍读 result/(= 当前轮),不受影响。
     run_id = args.run_id or _gen_run_id()
     result_base = Path(args.result_base).resolve() if args.result_base else base
-    result_dir = result_base / "result"
-    archived = _archive_previous_run(result_dir, result_base / "runs")
+    sfx = re.sub(r"[^0-9A-Za-z_-]", "", args.result_suffix or "")
+    if args.result_suffix and not sfx:
+        print(f"[warn] --result-suffix「{args.result_suffix}」清洗后为空(只认字母数字-_),按无后缀处理")
+    result_subdir = f"result-{sfx}" if sfx else "result"     # 并发隔离:每份数据各有 result-<后缀>/,互不覆盖
+    runs_dirname = f"runs-{sfx}" if sfx else "runs"
+    result_dir = result_base / result_subdir
+    archived = _archive_previous_run(result_dir, result_base / runs_dirname)
     result_dir.mkdir(parents=True, exist_ok=True)
     _write_run_manifest(result_dir, run_id, plan, data_map, base, missing_inputs=missing,
-                        runs_base=result_base)
-    result_subdir = "result"
-    if result_base != base:
+                        runs_dir=result_base / runs_dirname)
+    if sfx:
+        print(f"  结果目录:{result_dir}(--result-suffix={sfx},与其它并行运行隔离)")
+    elif result_base != base:
         print(f"  结果目录:{result_dir}(--result-base 生效,不往产物/技能目录写)")
     if archived:
         print(f"  run_id={run_id};上一轮已归档 → {archived}（result/ 即当前轮，历史在 runs/）")

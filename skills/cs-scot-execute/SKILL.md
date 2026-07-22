@@ -23,6 +23,9 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 - `--base <dir>`:相对路径基准目录,默认是 `plan.json` 所在目录。
 - `--result-base <dir>`:结果输出根目录(`result/` 与 `runs/` 落在它下面),默认=`--base` 即产物目录、
   老行为不变。**运行平台不允许往技能/产物目录写文件时用它把结果外移**(场景打包形态必用,见下)。
+- `--result-suffix <标识>`:结果目录带后缀(`result-<标识>/`、`runs-<标识>/`,只认字母数字-_)。
+  **同一技能并行跑多份数据必带、每份不同**(建议用站点名/数据文件夹名)——不带时几个并发运行同写
+  `result/rca.json`,互相覆盖(实测);单份数据串行跑可不带,版本管理照旧走归档。
 
 ## 场景打包形态(assets/)——一句话执行
 
@@ -46,6 +49,8 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
    **与本技能平齐**的 `<本技能目录名>-result/` 目录(如技能叫 `layer-3-service-issues`,结果就在
    它旁边的 `layer-3-service-issues-result/`);rca 步骤按 `assets/fault-tree-rca/` 的规则做,
    rca.json 也写在该结果目录(以 runner 打印的路径为准)。
+   **同一技能并行诊断多份数据时,每次执行再加 `--result-suffix <数据标识>`**(如站点名/数据文件夹名)
+   ——各份数据的结果落在 `result-<标识>/` 互不覆盖;汇报时写清各份数据对应的结果目录。
 4. **【输出汇报】固定模板(默认执行,无须用户要求;各节内容与 rca.json 严格口径一致,别自创表格样式/emoji)**:
    ```
    ## 执行过程
