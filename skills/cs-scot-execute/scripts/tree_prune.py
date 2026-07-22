@@ -36,9 +36,9 @@ def _facts_by_node(results: dict, alias: dict) -> dict:
 
 
 _FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "value",
-              "matched", "total", "ratio", "top", "count_satisfied", "top1", "top1_ratio",
-              "top1_count", "valid", "n", "n_rows", "filtered_n", "filter_rows", "distinct",
-              "matched_sessions", "lacks_never_seen", "nulls", "op", "threshold", "absent",
+              "matched", "total", "ratio", "top", "count_satisfied",
+              "valid", "n_rows", "filter_rows",
+              "nulls", "op", "threshold", "absent",
               "group_by", "groups", "matched_groups", "sample_group",
               "match", "extract", "local", "peer", "equal", "fault_when", "n_local", "n_peer",
               "params", "expand", "fail_values", "hit_values", "sample_value",
@@ -124,13 +124,13 @@ def _explain(f: dict) -> str:
                 return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {hit} 行"
                         + ("(没有这项内容,即「未配置」)→ 成立" if hit == 0 else "(该内容存在)→ 不成立"))
             return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {f.get('matched')} 行 → {verdict}")
-        if cls in ("A", "B"):
+        if cls == "A":
             ex = f"每格抽{_extract_zh(f['extract'])},再" if f.get("extract") else ""
             op, thr = f.get("op"), f.get("threshold")
             if f.get("scope") == "count_rows":
-                return (pre + f"「{col or '差值'}」{ex}逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足 → {verdict}")
+                return (pre + f"「{col}」{ex}逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足 → {verdict}")
             agg = _AGG_ZH.get(f.get("agg"), f.get("agg") or "")
-            return (pre + f"「{col or '差值'}」{ex}{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}")
+            return (pre + f"「{col}」{ex}{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}")
         if cls == "P":
             ex = f"(每格抽{_extract_zh(f['extract'])})" if f.get("extract") else ""
             rule = "不一致即故障" if f.get("fault_when") == "not_equal" else "一致即故障"
@@ -160,21 +160,6 @@ def _explain(f: dict) -> str:
             detail = _sub_explains(subs)
             return (f"{len(subs)} 个子条件须{need}满足:{detail} → {verdict}" if detail
                     else f"{len(subs)} 个子条件须{need}满足(各子条件详见 sub_facts)→ {verdict}")
-        # ---- 以下为 v1 封存内核类(B/E/F/H/I)的解释,留作旧产物兼容:旧场景包自带旧内核照常出事实 ----
-        if cls == "F":
-            dv = "、".join(str(v) for v in (f.get("distinct_values") or [])[:3])
-            return f"配置「{col}」实际取值:{dv},判「{f.get('compare')} {f.get('expected')}」→ {verdict}"
-        if cls == "E":
-            return (f"按「{f.get('group_by')}」分组,占比最高的是「{f.get('top1')}」占 {f.get('top1_ratio')},"
-                    f"判「{f.get('op')} {f.get('threshold')}」→ {verdict}")
-        if cls == "H":
-            return (f"按「{f.get('key')}」分成 {f.get('groups')} 个会话,满足消息模式的会话 "
-                    f"{f.get('matched_sessions')} 个 → {verdict}")
-        if cls == "I":
-            if f.get("count_satisfied") is not None:
-                return (f"「{col}」逐行判「{f.get('op')} {f.get('threshold')}」:"
-                        f"{f.get('count_satisfied')}/{f.get('valid')} 行满足 → {verdict}")
-            return f"「{col}」列形态检查({f.get('metric')})→ {verdict}"
     except Exception:  # noqa: BLE001
         return ""                                        # 解释拼不出绝不能影响剪枝主流程
     return ""

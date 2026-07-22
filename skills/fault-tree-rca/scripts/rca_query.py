@@ -17,9 +17,9 @@ import sys
 from pathlib import Path
 
 _FACT_KEYS = ("status", "predicate_satisfied", "matched", "total", "ratio", "top",
-              "value", "count_satisfied", "valid", "n", "n_rows", "filtered_n", "distinct",
-              "top1", "top1_ratio", "top1_count", "matched_sessions",
-              "lacks_never_seen", "resolved_column", "reason")
+              "value", "count_satisfied", "valid", "n_rows", "filter_rows",
+              "absent", "matched_groups", "local", "peer", "equal", "params",
+              "resolved_column", "reason")
 
 
 def _fault_tree(data: dict):

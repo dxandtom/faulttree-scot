@@ -203,9 +203,9 @@ def main() -> int:
         # 数据不足 / 列没解析到,却给了判断 → 编造
         if st == "insufficient_data" and pred is not None:
             problems.append(f"[无中生有]「{cid}」数据不足却给了 predicate_satisfied={pred!r}")
-        # 各内核"解析到了什么"的痕迹字段(A/C/G/P:resolved_column;D:sub_facts 或 group_by;
-        # resolved_columns/msg_column 是 v1 封存类的痕迹,旧产物兼容保留)。一个都没有却给了判断,才算无中生有。
-        _prov = ("resolved_column", "resolved_columns", "sub_facts", "msg_column", "group_by")
+        # 各内核"解析到了什么"的痕迹字段(A/C/G/P:resolved_column;D:sub_facts 或 group_by)。
+        # 一个都没有却给了判断,才算无中生有。
+        _prov = ("resolved_column", "sub_facts", "group_by")
         if st == "ok" and pred is not None and not any(f.get(k) is not None for k in _prov):
             problems.append(f"[无中生有]「{cid}」没解析到任何列/痕迹却给了 predicate_satisfied={pred!r}")
         if st == "insufficient_data" and not f.get("reason"):
