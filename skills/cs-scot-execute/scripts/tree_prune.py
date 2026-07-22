@@ -42,7 +42,7 @@ _FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "valu
               "group_by", "groups", "matched_groups", "sample_group",
               "match", "extract", "local", "peer", "equal", "fault_when", "n_local", "n_peer",
               "params", "expand", "fail_values", "hit_values", "sample_value",
-              "local_source", "peer_source")
+              "local_source", "peer_source", "hits")
 
 
 _AGG_ZH = {"mean": "平均", "min": "最小", "max": "最大", "sum": "合计", "last": "最新", "first": "最早"}
@@ -119,18 +119,23 @@ def _explain(f: dict) -> str:
             ex = f" 每格抽{_extract_zh(f['extract'])}后" if f.get("extract") else ""
             verb = "按正则匹配" if f.get("match") == "regex" else "找"
             tgt = "、".join(f"「{t}」" for t in (f.get("targets") or [])[:3])
+            quote = f";命中原文:「{f['hits'][0]}」" if f.get("hits") else ""
             if f.get("absent"):
                 hit = f.get("matched", 0)
                 return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {hit} 行"
-                        + ("(没有这项内容,即「未配置」)→ 成立" if hit == 0 else "(该内容存在)→ 不成立"))
-            return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {f.get('matched')} 行 → {verdict}")
+                        + ("(没有这项内容,即「未配置」)→ 成立" if hit == 0
+                           else f"(该内容存在)→ 不成立{quote}"))
+            return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {f.get('matched')} 行"
+                    f" → {verdict}{quote}")
         if cls == "A":
             ex = f"每格抽{_extract_zh(f['extract'])},再" if f.get("extract") else ""
             op, thr = f.get("op"), f.get("threshold")
+            quote = f";命中原文:「{f['hits'][0]}」" if f.get("hits") else ""
             if f.get("scope") == "count_rows":
-                return (pre + f"「{col}」{ex}逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足 → {verdict}")
+                return (pre + f"「{col}」{ex}逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足"
+                        f" → {verdict}{quote}")
             agg = _AGG_ZH.get(f.get("agg"), f.get("agg") or "")
-            return (pre + f"「{col}」{ex}{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}")
+            return (pre + f"「{col}」{ex}{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}{quote}")
         if cls == "P":
             ex = f"(每格抽{_extract_zh(f['extract'])})" if f.get("extract") else ""
             rule = "不一致即故障" if f.get("fault_when") == "not_equal" else "一致即故障"
