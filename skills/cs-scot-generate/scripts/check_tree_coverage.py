@@ -24,8 +24,9 @@
 用法:
   check_tree_coverage.py <tree_index.json> \
       [--analyzer <ind>_analyzer.py ...] [--facts <ind>_facts.json ...] \
-      [--columns "DCInnerCause,SgNBAddRejCause,..."]   # 只填**本次已喂源**的列名,别把没喂的源的列也塞进来
-至少给一个 --analyzer 或 --facts(可多次,跨源合并 claimed 集)。
+      [--columns "DCInnerCause,SgNBAddRejCause,..."]   # 可省:缺省自动读 <OUT>/overview/<ind>_overview.json
+至少给一个 --analyzer 或 --facts(可多次,跨源合并 claimed 集)。--columns 显式给了以给的为准
+(只填**本次已喂源**的列名);不给则按 --analyzer 对应的概览文件自动取列名。
 node_id 兼容两种写法:短 id `nN`(tree_index 的 key)或节点 `code` 字段——与 schema/RCA 一致。
 """
 from __future__ import annotations
@@ -167,6 +168,28 @@ def main() -> int:
     claimed = set().union(*per_source.values()) if per_source else set()
 
     cols = [c.strip() for c in args.columns.split(",") if c.strip()]
+    if not cols:
+        # 缺省自动读概览列名——闸门的"可答"扳机不再依赖模型手抄 --columns(传空/传错 = 闸门永不硬失败,
+        # 号称机械的闸门扳机却是模型供给的,评审点名)。--columns 显式给了则以给的为准。
+        auto_from = []
+        for apath in args.analyzer:
+            p = Path(apath)
+            ind = p.stem[:-len("_analyzer")] if p.stem.endswith("_analyzer") else p.stem
+            if ind == "cross":                          # cross 无自己的概览(它吃全部源)
+                continue
+            ov = p.resolve().parent.parent / "overview" / f"{ind}_overview.json"
+            if not ov.exists():
+                continue
+            try:
+                cs = ((json.loads(ov.read_text(encoding="utf-8")).get("summary") or {}).get("columns")) or []
+            except Exception:  # noqa: BLE001
+                continue
+            cols += [str(c) for c in cs if str(c).strip()]
+            auto_from.append(ov.name)
+        cols = sorted(set(cols))
+        if auto_from:
+            print(f"[info] --columns 未给,已自动读概览列名({', '.join(auto_from)};共 {len(cols)} 列)"
+                  "用于「本源大概率可答」标记。")
 
     def _mentions(cond: str, col: str) -> bool:
         """条件正文按**词边界**提到该列名(避免 'Cause' 命中 'DCInnerCause' 内部 → 假漏绑)。"""

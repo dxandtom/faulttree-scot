@@ -399,6 +399,26 @@ CASES = [
      "binding": {"class": "G", "source": "cross", "column": "a", "contains": ["x"]},
      "expect": {"status": "insufficient_data"}, "reason_has": "真实源名"},
 
+    # ---- 顶层白名单守卫(设计评审:野字段/枚举拼错不许静默出确定结论)----
+    {"name": "A 带 require 但忘写 count_rows→数据不足(此前被静默忽略按均值算)",
+     "table": _t(["x"], ["5"], ["9"]),
+     "binding": {"class": "A", "column": "x", "op": ">", "threshold": 4, "require": 3},
+     "expect": {"status": "insufficient_data"}, "reason_has": "count_rows"},
+    {"name": "A 里误写 contains→数据不足(白名单拒收,不静默忽略)",
+     "table": _t(["x"], ["5"]),
+     "binding": {"class": "A", "column": "x", "op": ">", "threshold": 4, "contains": ["mode"]},
+     "expect": {"status": "insufficient_data"}, "reason_has": "不认识的字段"},
+    {"name": "D combine 拼错(ANDD)→数据不足(此前被静默按 OR 算=方向性假阳)",
+     "table": _t(["a", "b"], ["x", "y"]),
+     "binding": {"class": "D", "combine": "ANDD", "sub": [
+         {"class": "G", "column": "a", "contains": ["x"]},
+         {"class": "G", "column": "b", "contains": ["没有的"]}]},
+     "expect": {"status": "insufficient_data"}, "reason_has": "只认 AND/OR"},
+    {"name": "P 带野字段(threshold)→数据不足(白名单拒收)",
+     "table": _t(["Object", "ip"], ["MLAG*", "1"], ["MLAG", "2"]),
+     "binding": {"class": "P", "side_column": "Object", "value_column": "ip", "threshold": 1},
+     "expect": {"status": "insufficient_data"}, "reason_has": "不认识的字段"},
+
     # ---- P pair_from(跨源成对比较:两侧各自选行取值)----
     {"name": "P pair_from 两文件比 Nve source 不一致→成立",
      "table": None, "sources": {

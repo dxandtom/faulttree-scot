@@ -98,6 +98,12 @@ def _read_conditions_text(src: str):
     return []
 
 
+def _read_condition_node_ids(path):
+    """从某 analyzer(如 cross_analyzer.py)静态抽 CONDITIONS 里的 node_id 集(联动核对用)。"""
+    entries = _read_conditions_text(path.read_text(encoding="utf-8"))
+    return [str(e.get("node_id")) for e in entries if isinstance(e, dict) and e.get("node_id")]
+
+
 def _no_const(name):
     raise ValueError(f"数字「{name}」不合法(NaN/Infinity 不能用,写具体数字)")
 
@@ -452,6 +458,24 @@ def main() -> None:
     print(f"  判据改动 {len(cond_chg)}: {', '.join(_nm(k, new_nodes) for k in cond_chg) or '无'}")
     print(f"  解决方案改动 {len(sol_chg)}: {', '.join(sorted(sol_chg)) or '无'}")
     print(f"  绑定: {'; '.join(summary_src) or '无'}")
+    # ---- 跨源绑定联动核对:调优表不管 cross_analyzer(工程侧维护),但树在这里改了、cross 不会
+    # 自己跟上——判据改了的/删除了的节点若被 cross 认领,静默漂移(新判据+旧传参链逻辑),必须点名。----
+    cross_ap = out / "scripts" / "cross_analyzer.py"
+    if cross_ap.exists():
+        try:
+            cross_ids = set(_read_condition_node_ids(cross_ap))
+        except Exception:  # noqa: BLE001
+            cross_ids = set()
+        hit_chg = sorted(cross_ids & set(cond_chg))
+        hit_rm = sorted(cross_ids & set(removed))
+        if hit_chg or hit_rm:
+            print("⚠ 以下节点另有**跨源绑定**(scripts/cross_analyzer.py,工程侧维护,不随调优表更新):")
+            if hit_chg:
+                print(f"  判据已改但 cross 绑定未动 {len(hit_chg)}: {', '.join(_nm(k, new_nodes) for k in hit_chg)}"
+                      "——不复核会按旧逻辑算新判据(静默漂移),请知会工程同事核对/更新对应绑定")
+            if hit_rm:
+                print(f"  节点已删除但 cross 仍认领 {len(hit_rm)}: {', '.join(_nm(k, old_nodes) for k in hit_rm)}"
+                      "——运行时会变孤儿事实,请让工程同事删掉对应 cross 绑定")
     print("下一步:重新打包/上传前,建议用真实数据跑一遍 runner 验证。")
 
 

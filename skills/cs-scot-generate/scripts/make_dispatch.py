@@ -70,7 +70,17 @@ COMMON_RULES = """【公共规约——逐条遵守】
    **概览里没看到 ≠ 数据里没有**——列在、格式对就照绑,让内核去数(见第3条)。
 11. 输出:把绑定结果(Python 列表字面量,格式见文末)用 **Write 工具**写到文首【结果文件】路径(UTF-8);
    **最终回复只报一行**「共 N 条,已写 <结果文件路径>」,N 必须等于列表实际长度——结果不要放回复里
-   (上百条的回复会被截断,写文件不会)。"""
+   (上百条的回复会被截断,写文件不会)。
+
+【各类参数速查(字段名照抄;写清单之外的字段/拼错=内核当场拒收)】
+- A 阈值:column + op(< <= > >= == !=)+ threshold(数字不带引号)+ scope 二选一:
+  "count_rows"(逐行比、数满足行数,配 require:至少几行;**判据是"存在越线/出现N次"就用它,首选**)
+  或 "aggregate"(先聚合再比,配 agg:mean/min/max/sum/first/last;注意 mean 无加权,整体水平才用);
+  **require 只在 count_rows 下有效**。可选 transforms/filter/extract。
+- C/G 匹配:column + equals/contains/regex 三选一(都是列表)+ 可选 match/require/absent/filter/extract。
+- D 组合:combine(只认 "AND"/"OR")+ sub:[子绑定…] + 可选 group_by(同对象关联)。
+- P 成对:side_column + value_column + 可选 peer_marker(默认"*")/fault_when/filter/extract。
+- J 人工:note。查不了:{{"decision":"insufficient_data","mapping_reason":"…"}}(不带 class)。"""
 
 EAV_RULES = """【EAV 窄表铁规(本源适用)】
 本源是"一行一个量"的窄表:DataItem 说这行是什么指标,DataValue 是值。绑定固定形态:
@@ -117,7 +127,10 @@ CROSS_OUTPUT_FORMAT = """【输出格式】
  "mapping_reason":"回显抽 Port Name → 查该接口配置块,缺 mode lacp-static 即故障"}
 示例(绑不了):
 {"id":"cross-n9","node":"…","node_id":"n9","condition_text":"...","decision":"insufficient_data",
- "mapping_reason":"链条第2跳要的数据本场景未采集"}"""
+ "mapping_reason":"链条第2跳要的数据本场景未采集"}
+**结果文件的最后一行**必须是完成标记(单独一行,写在列表 `]` 之后):
+# BATCH_COMPLETE
+(合并脚本靠它识别"写完了"还是"半路截断"——缺这行整批按截断重派。)"""
 
 OUTPUT_FORMAT = """【输出格式】
 把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行,
@@ -127,7 +140,10 @@ OUTPUT_FORMAT = """【输出格式】
 示例(C 类):
 {{"id":"{ind}-n6","node":"链路改包告警","node_id":"n6","condition_text":"...","class":"C","source":"{ind}","column":"Summary","contains":["hwLinkHeartbeatChangeAlarm"],"mapping_reason":"判据给出具体告警名,本源 Summary 列是告警码枚举,匹配名段即可"}}
 示例(decision):
-{{"id":"{ind}-n93","node":"LDP会话down","node_id":"n93","condition_text":"...","class":"C","source":"{ind}","decision":"insufficient_data","mapping_reason":"确属本源该答,但已查数据词汇无对应列/枚举项"}}"""
+{{"id":"{ind}-n93","node":"LDP会话down","node_id":"n93","condition_text":"...","class":"C","source":"{ind}","decision":"insufficient_data","mapping_reason":"确属本源该答,但已查数据词汇无对应列/枚举项"}}
+**结果文件的最后一行**必须是完成标记(单独一行,写在列表 `]` 之后):
+# BATCH_COMPLETE
+(合并脚本靠它识别"写完了"还是"半路截断"——缺这行整批按截断重派。)"""
 
 
 def _fail(msg: str) -> None:
@@ -313,6 +329,8 @@ def main() -> int:
         sec.append("\n".join(lines))
         sec.append(CROSS_OUTPUT_FORMAT)
         ddir.mkdir(parents=True, exist_ok=True)
+        (ddir / "manifest.json").write_text(json.dumps({"complete_marker": True}, ensure_ascii=False),
+                                            encoding="utf-8")
         bp = ddir / "cross_batch1.txt"
         bp.write_text("\n\n".join(sec) + "\n", encoding="utf-8")
         print(f"跨源补绑简报 → {bp}(候选 {len(cands)} 条)。派一个子代理处理,结果收 {rp.name},"
@@ -355,6 +373,10 @@ def main() -> int:
                                         ov_text, is_eav, enum_texts, str(rp), knowledge_text), encoding="utf-8")
             written.append((ind, i, len(batch), p))
 
+    # 派发铭牌:声明"结果文件须带完成标记"(merge 据此逮半路截断的合法短列表;
+    # 老 dispatch 目录没有铭牌 → merge 不启用该检查,向后兼容)
+    (ddir / "manifest.json").write_text(json.dumps({"complete_marker": True}, ensure_ascii=False),
+                                        encoding="utf-8")
     print(f"判据共 {len(conditions)} 条 → 每源 {n_batches} 批(≤{args.batch_size} 条/批)。已生成简报 {len(written)} 份:")
     for ind, i, n, p in written:
         print(f"  {ind} 批{i}({n} 条) → {p}")
