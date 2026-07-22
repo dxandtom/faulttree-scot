@@ -142,6 +142,24 @@ CROSS_OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
  "param_from":{"plink":{"source":"cmd","column":"CmdResult",
                "filter":{"column":"CmdName","contains":"peer-link"},"extract":{"kv":"Port Name"}}},
  "mapping_reason":"回显抽 Port Name → 查该接口配置块,缺 mode lacp-static 即故障"}
+示例(复杂组合,few-shot 参考:多要件判据 = 前置条件 AND (缺失 OR 跨源值比对)。
+判据原文:"①配置有 stp v-stp enable;②display stp 回显含 This bridge is the root;③配置有
+stp bridge-address;④且该 MAC = display stp v-stp 回显 Bridge Mac 的 Active 值"——故障 = ①②成立
+且(③缺失 或 ③≠④):
+{"node_id":"n68","class":"D","source":"config","combine":"AND","sub":[
+   {"class":"G","source":"config","column":"level1","contains":["stp v-stp enable"]},
+   {"class":"G","source":"cmd","column":"CmdResult",
+    "filter":{"column":"CmdName","contains":"display stp"},"contains":["This bridge is the root"]},
+   {"class":"D","combine":"OR","source":"config","sub":[
+      {"class":"G","source":"config","column":"level1","contains":["stp bridge-address"],"absent":True},
+      {"class":"P","source":"config","fault_when":"not_equal","pair_from":{
+         "local":{"source":"config","column":"level1",
+                  "filter":{"column":"level1","contains":"stp bridge-address"},
+                  "extract":{"regex":"stp bridge-address ([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})"}},
+         "peer":{"source":"cmd","column":"CmdResult",
+                 "filter":{"column":"CmdName","contains":"display stp v-stp"},
+                 "extract":{"regex":"Bridge Mac\\s*:\\s*Config=[0-9a-fA-F-]+\\s*/\\s*Active=([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})"}}}}]}],
+ "mapping_reason":"四要件:config 有 v-stp enable + 回显含根桥标记 +(config 无 bridge-address【absent】或 config 桥MAC ≠ display stp v-stp 回显 Active 值【P 跨源比对,正则锚在 Bridge Mac 上防误抓其它 Active=】)"}
 示例(绑不了):
 {"node_id":"n9","decision":"insufficient_data","mapping_reason":"链条第2跳要的数据本场景未采集"}
 **结果文件的最后一行**必须是完成标记(单独一行,写在列表 `]` 之后):
