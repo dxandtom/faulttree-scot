@@ -24,7 +24,7 @@ _FACT_KEYS = ("status", "predicate_satisfied", "matched", "total", "ratio", "top
 
 def _fault_tree(data: dict):
     ft = data.get("fault_tree") or {}
-    return ft.get("pruned_nodes") or {}, ft.get("outline") or {}
+    return ft.get("pruned_nodes") or {}, ft.get("outline") or {}, ft.get("outline_legend") or ""
 
 
 def _ff(f: dict) -> dict:
@@ -79,9 +79,11 @@ def main() -> None:
     ap.add_argument("--node")
     args = ap.parse_args()
     data = json.loads(Path(args.input).read_text(encoding="utf-8"))
-    nodes, outline = _fault_tree(data)
+    nodes, outline, legend = _fault_tree(data)
 
     if args.outline:
+        if legend:
+            print(f"# {legend}")
         for nid, status in outline.items():
             n = nodes.get(nid, {})
             print(f"{nid}\t{str(status):<12}\t{n.get('name')}\t(parent={n.get('parent')})")

@@ -367,7 +367,8 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
     print(f"  注意:结果目录 {in_path.parent} 已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"
           "且别让带引号的路径以反斜杠结尾(`...\\\"` 会让 shell 一直等闭合引号而卡住)。")
     print("  ⚠ 输入可能很大:**别一次性把整个 rca_input.json 读进上下文**(会超长报错)。"
-          "先读 `fault_tree.outline`(id→名字→粗状态,很小)把握全局,再**按分支用 python 只提取相关 `pruned_nodes[id]`**。")
+          "先读 `fault_tree.outline`(id→粗状态,很小;状态含义见旁边的 `outline_legend`)把握全局,"
+          "再**按分支用 python 只提取相关 `pruned_nodes[id]`**。")
     # 占位:实际结果由 agent 执行技能后填入;这里存一个待办标记,供下游引用不致 KeyError
     placeholder = {"_pending_skill": name, "_input": str(in_path)}
     store_outputs(node.get("outputs"), placeholder, ctx)
