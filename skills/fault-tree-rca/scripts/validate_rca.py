@@ -8,6 +8,8 @@
   只查 ④ 有没有把理由说清(`blocked_at`/`caveats` + `support`/`evidence`)。
 - **任何档**:⑤ 给"无事实/未覆盖"节点编一个"成立" = 伪造,揪(需传 rca_input.json 才能核对)。
 - ⑥ 空诊断(三档全空)。
+- **undetermined(待确认)**:软点名(计入清零门)——把有"成立"事实且无反证的节点当阻塞点/理由
+  (「成立状态,具体证据待查」)= 填错档:证据在输入里,该升疑似/确证或有据排除,这档不收有证据的候选。
 
 用法:python validate_rca.py <rca.json> [rca_input.json]   # 不合格 → 退出码 1
      (带上 rca_input.json 才能做"成立必须有事实"的伪造核对)
@@ -180,6 +182,47 @@ def _real_blocks(input_path):
         if any(f.get("status") == "ok" for f in (n.get("facts") or [])):
             continue
         out[nid] = str(n.get("name") or "")
+    return out
+
+
+def _undet_holds_check(undet, input_path):
+    """待确认档体检(软,计入清零门):待确认条目把**有'成立'事实且无反证**的节点当阻塞点/理由/观察
+    = 违反档位定义(待确认=既无正向证据又缺数据;hold 节点有正向证据,该进 probable 或有据排除)。
+    实测:确证/疑似/排除相继设检后,弱模型把 outline 里已成立的节点丢进待确认、写"具体证据待查"
+    (旧词 hold 还被读成"搁置待查",故 outline 已改中文标签+自带图例,本检查双保险)
+    交卷——证据就在输入里,"待查"="没查"。这档不能再是空档,否则永远是下一个泄压阀。
+    只核 blocked_at/reason/observed(条目自己给的"为什么待确认"),不核 Fault_tree_path——
+    路径途经成立的祖先、真卡在无数据的叶子,是合法的待确认,不误伤。"""
+    try:
+        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+    except Exception:
+        return []
+    if not pruned:
+        return []
+    holds = {}                                            # nid -> name:成立且无反证、有真条件、非 pass_through
+    for nid, n in pruned.items():
+        facts = n.get("facts") or []
+        hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
+        refuted = any(f.get("status") == "ok" and f.get("predicate_satisfied") is False for f in facts)
+        cond = n.get("condition") or ""
+        has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond
+        if hold and not refuted and has_cond and not n.get("pass_through"):
+            holds[nid] = str(n.get("name") or "")
+    if not holds:
+        return []
+    out = []
+    for u in undet or []:
+        if not isinstance(u, dict):
+            continue
+        why = " ".join([str(u.get("blocked_at", "")), str(u.get("reason", ""))]
+                       + [str(x) for x in (u.get("observed") or [])])
+        ids = set(re.findall(r"\bn\d+\b", why))
+        hit = [i for i in ids if i in holds] + [i for i, nm in holds.items()
+                                                if i not in ids and nm and nm in why]
+        label = (u.get("Fault_tree_path") or ["(未写路径)"])[-1]
+        for nid in dict.fromkeys(hit):                    # 去重保序
+            out.append((str(label), nid, holds[nid]))
     return out
 
 
@@ -391,6 +434,20 @@ def main() -> int:
             print("  → 路径真干净就升确证;确有阻塞就把阻塞节点补进 evidence_path、blocked_at 写实——"
                   "疑似档不是确证的避风港,也不是候选对账的泄压阀。")
 
+    # 待确认档体检(软提示,计入清零门):已成立节点被当成待确认的阻塞/理由 = 填错档
+    if len(sys.argv) >= 3:
+        uh = _undet_holds_check(undet, sys.argv[2])
+        soft_hints += len(uh)
+        if uh:
+            print(f"⚠ 待确认档体检:以下 {len(uh)} 处把**有'成立'事实且无反证**的节点当成了待确认的阻塞点/理由:")
+            for label, nid, nm in uh[:10]:
+                print(f"  - 待确认「{label}」← {nid} 「{nm}」(有成立事实,不是'待查')")
+            if len(uh) > 10:
+                print(f"  …(还有 {len(uh) - 10} 处)")
+            print("  → 待确认=既无正向证据又缺数据;这些节点证据已在输入里:`rca_query --node nX` 拉出事实,"
+                  "路径全成立升确证、上游真缺数进疑似(blocked_at 写那个真缺数的节点)、"
+                  "系背景噪声/有反证则走排除并在 excluded_note 点名。**'具体证据待查'不是档位理由——查就是了。**")
+
     # 排除核对(软提示,不改退出码):被排除/仅观察的"成立且无反证"候选逐条晾出来。
     # 注意:排除是合法出口,这张清单不计入"必须清零"的软提示数(不然有一条合法排除就永远清不了)
     # ——它的处置方式是:报告「已排除的候选」一节逐条晾出站得住的理由(反证/绑定质量)。
@@ -404,8 +461,8 @@ def main() -> int:
             if len(exh) > 10:
                 print(f"  …(还有 {len(exh) - 10} 个)")
             print("  → 排除的合法理由只有两种:①反证(该节点有 ok+不成立 的事实);②绑定质量问题"
-                  "(点名哪条绑定、为何假命中)。**'配置常见/看着正常/证据量比别人少/与已确认根因同源'"
-                  "都不是排除理由——树的判据就是故障标准,你无权推翻树。**理由站不住的,挪回疑似或 undetermined。")
+                  "(点名哪条绑定、为何假命中)。**'配置常见/看着正常/证据量比别人少/只命中一条/占比低/"
+                  "与已确认根因同源'都不是排除理由——树的判据就是故障标准,你无权推翻树。**理由站不住的,挪回疑似或 undetermined。")
 
     # 候选对账(软提示,不改退出码):专逮"有成立事实的候选通篇没下落"的漏裁决
     if len(sys.argv) >= 3:

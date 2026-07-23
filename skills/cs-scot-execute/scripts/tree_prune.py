@@ -188,20 +188,28 @@ def _slim_fact(entry: dict) -> dict:
     return out
 
 
+# outline 图例:随 payload 一起下发(数据自解释)。历史教训:曾用英文缩词 hold/pass 且全链无解释,
+# 弱模型把 hold 读成"搁置待查"(on hold)、把成立的节点丢进待确认写"具体证据待查"——词是给模型看的,
+# 必须不可误读、且定义随数据走,不赌模型去翻文档。
+OUTLINE_LEGEND = ("粗状态图例(仅导航,判档必须读该节点 facts):成立=有查证成功且命中的事实(有正向证据,"
+                  "不许丢待确认);不成立=查了未命中;数据不足=查不了;未覆盖=无任何事实(没人绑/缺数据源);"
+                  "免检=高层分类节点,不参与判断")
+
+
 def _coarse(entry_list, pass_through) -> str:
-    """给 outline 用的粗状态(仅导航,RCA 仍重判):pass/hold/fail/insufficient/uncovered。"""
+    """给 outline 用的粗状态(仅导航,RCA 仍重判):成立/不成立/数据不足/未覆盖/免检(见 OUTLINE_LEGEND)。"""
     if pass_through:
-        return "pass"
+        return "免检"
     if not entry_list:
-        return "uncovered"
+        return "未覆盖"
     pairs = [((e.get("fact") or {}).get("status"), (e.get("fact") or {}).get("predicate_satisfied"))
              for e in entry_list]
     if any(s == "ok" and p is True for s, p in pairs):
-        return "hold"
+        return "成立"
     if any(s == "ok" and p is False for s, p in pairs):
-        return "fail"
+        return "不成立"
     if any(s in ("insufficient_data", "manual") for s, _ in pairs):
-        return "insufficient"
+        return "数据不足"
     return "?"
 
 
@@ -335,6 +343,7 @@ def compose_rca_payload(index: dict, results: dict, md_text: str = "") -> dict:
     pr = prune(index, results)
     cov = pr["coverage"]
     cand = {"fault_tree": {"scenario": pr["scenario"], "root": pr["root"],
+                           "outline_legend": OUTLINE_LEGEND,
                            "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
             "unmapped_facts": pr["unmapped"], "tree_issues": cov,
             # 判别列里没被绑定认领的取值 —— prune() 已算好,必须随压缩形态一起送给 RCA
