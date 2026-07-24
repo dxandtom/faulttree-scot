@@ -226,6 +226,49 @@ def _undet_holds_check(undet, input_path):
     return out
 
 
+_DATA_ABSENT_WORDS = ("数据不足", "证据不足", "无数据", "未获取", "无法获取", "未查证", "待查")
+_SEMANTIC_DOUBT_WORDS = ("语义近似", "存疑", "近似")
+
+
+def _erased_holds_check(doc, input_path):
+    """抹掉成立体检(软,计入清零门):节点事实明明 ok+成立、无反证,报告的 evidence 却给它写
+    "数据不足/证据不足/未获取"类判断 = 对数据存在性的事实性撒谎(实测:n77 成立被写成
+    "binding证据不足,未获取…数据")。与「伪造成立」互为镜像:那边防无中生有,这边防有中生无。
+    语义怀疑是合法出口——judgment 写'语义近似/存疑'(可与降档理由并存)不受本检查影响。"""
+    try:
+        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+    except Exception:
+        return []
+    if not pruned:
+        return []
+    holds = set()
+    for nid, n in pruned.items():
+        facts = n.get("facts") or []
+        hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
+        refuted = any(f.get("status") == "ok" and f.get("predicate_satisfied") is False for f in facts)
+        cond = n.get("condition") or ""
+        if hold and not refuted and cond and "无条件" not in cond and "无判断" not in cond \
+                and not n.get("pass_through"):
+            holds.add(nid)
+    if not holds:
+        return []
+    out = []
+    for tier, key in (("确证", "rca_result"), ("疑似", "probable_causes")):
+        for rc in (doc.get(key) or []) if isinstance(doc, dict) else []:
+            if not isinstance(rc, dict):
+                continue
+            name = rc.get("Root_cause") or rc.get("root_cause") or "(未命名)"
+            for e in _evidence(rc):
+                if not isinstance(e, dict) or str(e.get("node_id")) not in holds:
+                    continue
+                j = str(e.get("judgment", ""))
+                if any(w in j for w in _DATA_ABSENT_WORDS) and \
+                        not any(w in j for w in _SEMANTIC_DOUBT_WORDS):
+                    out.append((tier, str(name), str(e.get("node_id")), str(e.get("node", ""))))
+    return out
+
+
 def _excluded_holds_check(doc, rca_path, input_path):
     """排除核对(软):有'成立'事实、**无任何反证**(无 ok+不成立 事实)、却没进确证/疑似的候选
     (下落只能是 excluded/observed)。排除不一定错(松绑定假命中就该排),但每次排除都要晾出来:
@@ -398,7 +441,7 @@ def main() -> int:
             # 证据链全"成立"→ blocked_at 必须**解析到一个真实阻塞节点**(_real_blocks)。实测:堵住
             # "blocked_at 为空"后,弱模型改往里塞散文("无阻塞,匹配率极低(0.8%)")继续赖在疑似档——
             # 散文不指向任何节点,解析不到=硬拦。真有语义怀疑(如"log 是代理证据")的正道:把存疑
-            # 节点的 judgment 写'数据不足/语义近似/存疑'(NOT_PROVEN 认这些词),不受本检查影响。
+            # 节点的 judgment 写'语义近似/存疑'(有数据)或'数据不足'(真缺数),不受本检查影响。
             ba = str(rc.get("blocked_at") or "").strip()
             resolved = False
             if ba and blocks is None:
@@ -411,7 +454,7 @@ def main() -> int:
                        else f"blocked_at「{ba[:40]}」未指向任何真实阻塞节点(散文式理由不算阻塞)")
                 problems.append(
                     f"[口径不符] 疑似「{name}」evidence_path 全'成立'且 {why}"
-                    f"——全成立该进 rca_result;确有怀疑就写实:存疑节点 judgment 改'数据不足/语义近似',"
+                    f"——全成立该进 rca_result;确有怀疑就写实:存疑节点 judgment 改'语义近似/存疑'(有数据)或'数据不足'(真缺数),"
                     f"blocked_at 指向具体阻塞节点。'单源/保险起见/匹配率低'都不是降档理由")
         _check_fabrication(rc, "疑似", hold_map, problems)
         _check_path_chain(rc, "疑似", parent_map, problems)
@@ -447,6 +490,19 @@ def main() -> int:
             print("  → 待确认=既无正向证据又缺数据;这些节点证据已在输入里:`rca_query --node nX` 拉出事实,"
                   "路径全成立升确证、上游真缺数进疑似(blocked_at 写那个真缺数的节点)、"
                   "系背景噪声/有反证则走排除并在 excluded_note 点名。**'具体证据待查'不是档位理由——查就是了。**")
+
+    # 抹掉成立体检(软提示,计入清零门):有成立事实的节点被写成"数据不足/证据不足" = 有中生无
+    if len(sys.argv) >= 3:
+        eh = _erased_holds_check(doc, sys.argv[2])
+        soft_hints += len(eh)
+        if eh:
+            print(f"⚠ 抹掉成立体检:以下 {len(eh)} 处节点**有 ok+成立 事实且无反证**,evidence 却写'数据不足/证据不足'类判断:")
+            for tier, name, nid, nname in eh[:10]:
+                print(f"  - {tier}「{name}」/节点 {nid}「{nname}」")
+            if len(eh) > 10:
+                print(f"  …(还有 {len(eh) - 10} 处)")
+            print("  → 数据是有的,'数据不足'字面为假:按事实改'成立';确有语义怀疑(代理证据/口径近似)"
+                  "→ judgment 写'语义近似/存疑'并在 caveats 说明,别拿'数据不足'当降档托词。")
 
     # 排除核对(软提示,不改退出码):被排除/仅观察的"成立且无反证"候选逐条晾出来。
     # 注意:排除是合法出口,这张清单不计入"必须清零"的软提示数(不然有一条合法排除就永远清不了)
