@@ -211,27 +211,34 @@ def find_enums(ov_dir: Path, ind: str) -> list:
 
 
 def parse_knowledge(text: str):
-    """knowledge.md 正文 → [{title, tags(或None), body}]。条目=「### 标题」起头,紧跟可选
-    「适用:标签1、标签2」行,其余为正文;首个 ### 之前的说明文字忽略。"""
+    """knowledge.md 正文 → [{title, tags(或None), stage(或None), body}]。条目=「### 标题」起头,
+    紧跟可选「阶段:绑定/诊断」与「适用:标签1、标签2」行(顺序不限),其余为正文;
+    首个 ### 之前的说明文字忽略。"""
     entries, cur = [], None
     for line in text.splitlines():
         if line.startswith("### "):
-            cur = {"title": line[4:].strip(), "tags": None, "body": []}
+            cur = {"title": line[4:].strip(), "tags": None, "stage": None, "body": []}
             entries.append(cur)
         elif cur is not None:
             s = line.strip().replace(":", ":")
             if cur["tags"] is None and not cur["body"] and s.startswith("适用:"):
                 cur["tags"] = [t for t in re.split(r"[、,,/\s]+", s.split(":", 1)[1]) if t]
+            elif cur["stage"] is None and not cur["body"] and s.startswith("阶段:"):
+                cur["stage"] = s.split(":", 1)[1].strip()
             elif line.strip() or cur["body"]:
                 cur["body"].append(line)
     return [e for e in entries if "\n".join(e["body"]).strip()]
 
 
 def match_knowledge(entries, name_pool: str):
-    """按「适用」标签挑与当前树相关的条目:无标签/含「通用」恒选;有标签则任一标签
-    出现在 name_pool(节点名+判据文本拼串)才选——按分支载入,不全量灌。"""
+    """按「阶段」与「适用」双维筛条目——阶段管给谁看:标「诊断」且没提「绑定/生成」的是
+    诊断口径知识,不进绑定简报;无阶段=两边都载。适用管哪个分支看:无标签/含「通用」恒选;
+    有标签则任一标签出现在 name_pool(节点名+判据文本拼串)才选——按分支载入,不全量灌。"""
     picked = []
     for e in entries:
+        st = e.get("stage") or ""
+        if st and "诊断" in st and not ("绑定" in st or "生成" in st):
+            continue                                     # 诊断期专属知识,绑定简报不灌
         if e["tags"] and "通用" not in e["tags"] and not any(t in name_pool for t in e["tags"]):
             continue
         tagline = f"(适用:{'、'.join(e['tags'])})" if e["tags"] else ""

@@ -232,7 +232,10 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
 
 def _load_knowledge(tree_dir: Path, name_pool: str) -> list:
     """tree/knowledge.md(业务同事手写的外挂知识)→ 与当前子树匹配的条目 [{title, tags?, text}]。
-    条目 = 「### 标题」+ 可选「适用:标签1、标签2」行 + 正文;无适用行或含「通用」= 恒载入,
+    条目 = 「### 标题」+ 可选「阶段:绑定/诊断」行 + 可选「适用:标签1、标签2」行 + 正文。
+    阶段管"给谁看":标了「绑定」(或「生成」)且没提「诊断」的条目是生成期手艺知识,**不随 RCA 下发**
+    (实测:绑定避坑清单标「通用」被整段灌进 rca_input,诊断根本用不上、白占弱模型上下文);
+    无阶段行=两边都载(向后兼容)。适用管"哪个分支看":无适用行或含「通用」= 恒载入,
     有标签则任一标签出现在 name_pool(剪枝后节点名/判据/场景名拼串)才载入——按分支载入,不全量灌。
     文件没有/解析失败 → 空列表(知识是增益,绝不因它坏了主流程)。"""
     kf = tree_dir / "knowledge.md"
@@ -245,12 +248,14 @@ def _load_knowledge(tree_dir: Path, name_pool: str) -> list:
     entries, cur = [], None
     for line in text.splitlines():
         if line.startswith("### "):
-            cur = {"title": line[4:].strip(), "tags": None, "body": []}
+            cur = {"title": line[4:].strip(), "tags": None, "stage": None, "body": []}
             entries.append(cur)
         elif cur is not None:
             s = line.strip().replace(":", ":")
             if cur["tags"] is None and not cur["body"] and s.startswith("适用:"):
                 cur["tags"] = [t for t in re.split(r"[、,,/\s]+", s.split(":", 1)[1]) if t]
+            elif cur["stage"] is None and not cur["body"] and s.startswith("阶段:"):
+                cur["stage"] = s.split(":", 1)[1].strip()
             elif line.strip() or cur["body"]:
                 cur["body"].append(line)
     out = []
@@ -258,6 +263,9 @@ def _load_knowledge(tree_dir: Path, name_pool: str) -> list:
         body = "\n".join(e["body"]).strip()
         if not body:
             continue
+        st = e.get("stage") or ""
+        if st and ("绑定" in st or "生成" in st) and "诊断" not in st:
+            continue                                     # 生成期专属知识,诊断不灌
         if e["tags"] and "通用" not in e["tags"] and not any(t in name_pool for t in e["tags"]):
             continue
         item = {"title": e["title"], "text": body}
