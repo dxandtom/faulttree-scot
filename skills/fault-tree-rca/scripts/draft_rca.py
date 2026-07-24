@@ -111,8 +111,13 @@ def _path(nid: str, nodes: dict, limit=400):
     return list(reversed(chain))
 
 
-def draft_pruned(ft: dict) -> dict:
+def draft_pruned(data: dict) -> dict:
+    ft = data.get("fault_tree") or {}
     nodes = ft.get("pruned_nodes") or {}
+    # 未覆盖节点不在 pruned_nodes 里,名字从覆盖报告回填(uncovered_children 只存 id)
+    unc_names = {u.get("id"): u.get("name") for u in
+                 ((data.get("tree_issues") or {}).get("uncovered_condition_nodes") or [])
+                 if isinstance(u, dict)}
     holding, refuted, insuf, conflict = [], [], [], []
     for nid, n in nodes.items():
         cond = n.get("condition") or ""
@@ -137,6 +142,7 @@ def draft_pruned(ft: dict) -> dict:
         n = nodes[nid]
         ev = [_ev(p, nodes[p]) for p in _path(nid, nodes)]
         gaps = [e for e in ev if e["judgment"] in ("数据不足", "冲突")]
+        refutes = [e for e in ev if e["judgment"] == "不成立"]   # 路径上有反证 → 确证免谈(规则:全干净才确证)
         entry = {"node": n.get("name"), "node_id": nid,
                  "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
                  "evidence_prefilled": ev}
@@ -144,15 +150,38 @@ def draft_pruned(ft: dict) -> dict:
         if f:
             entry["support_hint"] = _actual(f)
         unc = n.get("uncovered_children") or []
-        if not gaps and n.get("is_leaf") and not unc:
+        if not gaps and not refutes and n.get("is_leaf") and not unc:
             entry["draft_tier"] = "confirmed_candidate(机械建议:叶子+路径全干净;语义复核后定档)"
             confirmed.append(entry)
         else:
             why = []
+            if refutes:
+                why.append("路径含不成立节点:"
+                           + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in refutes[:3])
+                           + "(可能是真反证、也可能是绑定假象——权衡后进疑似或走排除)")
             if gaps:
                 why.append(f"路径缺口:{'、'.join(e['node'] + '(' + e['node_id'] + ')' for e in gaps[:3])}")
             if not n.get("is_leaf") or unc:
                 why.append("非叶子/有未覆盖子因,叶子因待定")
+                # 直接子节点的三态一览:父成立而已知叶子全被反证 → 真因可能在未覆盖子因/叶子绑定假阴/父命中系背景,
+                # 摆在这让模型一眼看全,不用再逐个 rca_query
+                kids = []
+                for cid, c in nodes.items():
+                    if c.get("parent") != nid:
+                        continue
+                    ccond = c.get("condition") or ""
+                    if c.get("pass_through") or not ccond or "无条件" in ccond or "无判断" in ccond:
+                        continue
+                    cf = c.get("facts") or []
+                    kids.append({"node": c.get("name"), "node_id": cid,
+                                 "状态": _tri(cf) if cf else "未覆盖(没人绑/缺数据)"})
+                for u in unc:
+                    uid = u.get("id") if isinstance(u, dict) else u
+                    if uid and not any(k["node_id"] == uid for k in kids):
+                        nm = (u.get("name") if isinstance(u, dict) else "") or unc_names.get(uid, "")
+                        kids.append({"node": nm, "node_id": uid, "状态": "未覆盖(没人绑/缺数据)"})
+                if kids:
+                    entry["children_status"] = kids
             entry["draft_tier"] = "probable_candidate"
             entry["blocked_at_hint"] = ";".join(why)
             probable.append(entry)
@@ -207,7 +236,7 @@ def main() -> int:
         print(f"无法读取/解析 {src}: {e}", file=sys.stderr)
         return 2
     ft = data.get("fault_tree")
-    draft = draft_pruned(ft) if isinstance(ft, dict) and ft.get("pruned_nodes") else draft_md(data)
+    draft = draft_pruned(data) if isinstance(ft, dict) and ft.get("pruned_nodes") else draft_md(data)
     out = Path(a.out) if a.out else src.parent / "rca_draft.json"
     out.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"骨架已生成 → {out}")
