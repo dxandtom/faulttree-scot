@@ -341,6 +341,11 @@ def k_match(table, b, cls="C"):
     col, how = resolve_column(header, b.get("column", ""))
     if not col:
         return _insuf(cls, f"未找到列「{b.get('column')}」({how})", resolved_column=None)
+    given = [k for k in ("contains", "equals", "regex") if b.get(k)]
+    if len(given) > 1:                                  # 模式并存必拒:曾静默按"regex 模式跑 contains 的目标"
+        return _insuf(cls, f"同时给了 {'/'.join(given)}——匹配模式只能留一个(此前会静默按 regex 模式"
+                           "拿 contains 当目标跑,精心写的正则被丢弃、子串恒真=假阳);删掉多余的键",
+                      resolved_column=col)
     mode = ("regex" if b.get("regex") else "contains" if b.get("contains") else b.get("match", "exact"))
     targets = b.get("contains") or b.get("equals") or b.get("regex") or []
     if not targets:                                     # C/G 只认 contains/equals/regex 列表;op/target 等野字段内核不读。

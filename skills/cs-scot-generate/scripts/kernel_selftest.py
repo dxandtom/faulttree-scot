@@ -54,6 +54,15 @@ CASES = [
      "expect": {"status": "insufficient_data"}},
 
     # ---- C 字段匹配(报分量 total/ratio/top)----
+    {"name": "C/G contains+regex 并存→响亮拒收(曾静默按regex模式跑contains目标)",
+     "table": _t(["CmdResult"], ["CRC: 0 packets"]),
+     "binding": {"class": "G", "column": "CmdResult", "contains": ["CRC", "Symbol"],
+                 "regex": ["CRC:\\s*[1-9]\\d*\\s*packets"]},
+     "expect": {"status": "insufficient_data"}, "reason_has": "匹配模式只能留一个"},
+    {"name": "C equals+contains 并存→响亮拒收",
+     "table": _t(["DCErrType"], ["RNL_Unspecified"]),
+     "binding": {"class": "C", "column": "DCErrType", "equals": ["RNL_Unspecified"], "contains": ["RNL"]},
+     "expect": {"status": "insufficient_data"}, "reason_has": "匹配模式只能留一个"},
     {"name": "C 命中成立 + 报分量", "table": _t(["DCErrType"], ["RNL_Unspecified"], ["OK"], ["OK"]),
      "binding": {"class": "C", "column": "DCErrType", "equals": ["RNL_Unspecified"], "require": 1},
      "expect": {"status": "ok", "matched": 1, "total": 3, "predicate_satisfied": True}, "present": ["ratio", "top"]},

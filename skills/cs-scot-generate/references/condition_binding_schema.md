@@ -31,7 +31,7 @@
 | 类 | 名称 | 关键参数 | 产出事实 |
 |---|---|---|---|
 | **A** | 阈值比较 | `column`,`op`(`< <= > >= == !=`,`=`同`==`),`threshold`,`scope`(`aggregate`/`count_rows`),`agg`(mean/min/max/first/last/sum),`transforms`;可加 `extract`(先从格内抽出数值,见公共字段) | aggregate 给 `value`;count_rows 给 `count_satisfied`/`ratio` |
-| **C** | 字段匹配 | `column`,`equals`:[值…] 或 `contains`:[子串…] 或 **`regex`:[正则…]**(任一命中即命中;regex 用 `re.search`、**大小写敏感**、逐条编译校验坏正则响亮拒收),`match`(`exact`/`contains`/`regex`),`case_insensitive`,`require`(默认1);`absent:true`=负存在(命中**0行**才算故障成立,与 `require` 互斥;列全空→数据不足);可加 `extract`(先抽值再匹配) | `matched` 命中行数 + `total`/`ratio`/`top` + 样例 |
+| **C** | 字段匹配 | `column`,`equals`:[值…] 或 `contains`:[子串…] 或 **`regex`:[正则…]**——**三选一,只能给一种**(并存响亮拒收;曾静默按 regex 模式拿 contains 当目标跑,精写的正则被丢弃)。(任一命中即命中;regex 用 `re.search`、**大小写敏感**、逐条编译校验坏正则响亮拒收),`match`(`exact`/`contains`/`regex`),`case_insensitive`,`require`(默认1);`absent:true`=负存在(命中**0行**才算故障成立,与 `require` 互斥;列全空→数据不足);可加 `extract`(先抽值再匹配) | `matched` 命中行数 + `total`/`ratio`/`top` + 样例 |
 | **D** | 多条件组合 | `combine`(`AND`/`OR`),`sub`:[子绑定…](每个子绑定自带 `class`,可自带 `source`);`group_by`:"<对象列>"=同对象关联(按列切组、每组单独跑全部 sub,任一组全真才成立;sub 不得跨源) | AND:有子False→False、有数据不足→数据不足、否则True;OR 对称;group_by 给 `matched_groups` |
 | **G** | 日志匹配 | `column`(日志文本列),`contains`:[码/串…] / `regex`:[正则…];其余同 C | 同 C(实现即 C) |
 | **J** | 人工确认 | `note` | `status:"manual"`,不给判断 |
