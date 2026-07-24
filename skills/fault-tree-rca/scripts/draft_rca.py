@@ -28,11 +28,19 @@ _README = (
 )
 
 
+def _weak_neg(f) -> bool:
+    """存在类(C/G 非 absent)的 ok+不成立 = **弱阴性**:只说明"这份数据里没找到",不构成反证——
+    别的源找到了,存在就是被证实了(实测:告警源命中 2 行、日志源 0 命中,被错标"真冲突")。
+    强反证 = A 阈值/P 成对/absent 缺失类/D 组合的不成立(两边都是硬话,才配叫冲突)。"""
+    return str(f.get("class") or "").upper() in ("C", "G") and not f.get("absent")
+
+
 def _tri(facts) -> str:
-    """一个节点的机械三态:成立/不成立/冲突/数据不足(未覆盖=没 facts,由调用方判)。"""
+    """一个节点的机械三态:成立/不成立/冲突/数据不足(未覆盖=没 facts,由调用方判)。
+    成立 + 仅存在类弱阴性 → 成立(弱阴性注记进 evidence);成立 + 强反证并存 → 冲突。"""
     ok_t = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
-    ok_f = any(f.get("status") == "ok" and f.get("predicate_satisfied") is False for f in facts)
-    if ok_t and ok_f:
+    ok_f = [f for f in facts if f.get("status") == "ok" and f.get("predicate_satisfied") is False]
+    if ok_t and any(not _weak_neg(f) for f in ok_f):
         return "冲突"
     if ok_t:
         return "成立"
@@ -88,6 +96,12 @@ def _ev(nid: str, n: dict) -> dict:
             e["conflict_actual"] = _actual(g)
             if g and g.get("explain"):
                 e["conflict_how"] = g["explain"]
+        else:
+            misses = [x for x in facts if x.get("status") == "ok" and x.get("predicate_satisfied") is False]
+            if misses:                                   # 存在类弱阴性:如实记一笔,但不拉低判定
+                e["other_source_note"] = (f"另有 {len(misses)} 条存在类绑定未命中"
+                                          f"(如:{(misses[0].get('explain') or '')[:80]})"
+                                          "——存在类的未命中=该份数据里没看见,不构成反证,caveat 提一笔即可")
     elif tri == "不成立":
         f = _pick(facts, False)
         e["actual"] = _actual(f)

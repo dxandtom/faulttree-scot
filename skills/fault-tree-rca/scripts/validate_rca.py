@@ -33,6 +33,15 @@ def _is_clean_hold(judgment: str) -> bool:
     return "成立" in j and not any(m in j for m in NOT_PROVEN)
 
 
+def _strong_refuted(facts) -> bool:
+    """有没有**强反证**:ok+不成立 且不是存在类弱阴性(C/G 非 absent 的未命中="这份数据里没看见",
+    不构成反证——别的源命中了,存在即被证实;与 draft_rca._weak_neg 同口径)。各体检的"有反证豁免"
+    只认强反证,免得双源防漏绑定里另一源的存在类未命中把节点洗出保护网(实测 n25/n26 就是这形态)。"""
+    return any(f.get("status") == "ok" and f.get("predicate_satisfied") is False
+               and not (str(f.get("class") or "").upper() in ("C", "G") and not f.get("absent"))
+               for f in facts)
+
+
 def _tag(judgment: str, tags):
     j = judgment or ""
     return next((t for t in tags if t in j), None)
@@ -204,7 +213,7 @@ def _undet_holds_check(undet, input_path):
     for nid, n in pruned.items():
         facts = n.get("facts") or []
         hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
-        refuted = any(f.get("status") == "ok" and f.get("predicate_satisfied") is False for f in facts)
+        refuted = _strong_refuted(facts)
         cond = n.get("condition") or ""
         has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond
         if hold and not refuted and has_cond and not n.get("pass_through"):
@@ -246,7 +255,7 @@ def _erased_holds_check(doc, input_path):
     for nid, n in pruned.items():
         facts = n.get("facts") or []
         hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
-        refuted = any(f.get("status") == "ok" and f.get("predicate_satisfied") is False for f in facts)
+        refuted = _strong_refuted(facts)
         cond = n.get("condition") or ""
         if hold and not refuted and cond and "无条件" not in cond and "无判断" not in cond \
                 and not n.get("pass_through"):
@@ -295,7 +304,7 @@ def _excluded_holds_check(doc, rca_path, input_path):
     for nid, n in pruned.items():
         facts = n.get("facts") or []
         hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
-        refuted = any(f.get("status") == "ok" and f.get("predicate_satisfied") is False for f in facts)
+        refuted = _strong_refuted(facts)
         cond = n.get("condition") or ""
         has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond
         if not hold or refuted or not has_cond or n.get("pass_through") or nid in reported:
