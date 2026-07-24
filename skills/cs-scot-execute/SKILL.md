@@ -60,7 +60,7 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
 4. **【输出汇报】固定模板(默认执行,无须用户要求;各节内容与 rca.json 严格口径一致,别自创表格样式/emoji)**:
    ```
    ## 执行过程
-   每步一行:脚本/校验的输出要点(含 validate_rca 结果)
+   每步一行:脚本输出要点(含 draft/finalize 的候选与合成统计)
    ## 诊断结论
    ### 确证根因(N 条)
    | 根因 | 故障树路径 | 关键证据 | 推荐解决方案 |
@@ -78,8 +78,8 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
    ## 树/绑定问题
    tree_issues 非空时才有此节
    ```
-   **validate_rca 的 ⚠ 软提示必须先逐条处置(升档/补报/excluded_note 留痕/阻塞写实)并重跑校验,
-   再产出本报告——"硬检查通过"不等于"没事了"。**
+   **rca 步骤按 fault-tree-rca 的「骨架→裁决单→机械合成」三步走:finalize 报错(候选漏裁决/
+   确证路径带伤/排除无理由)就改裁决单重跑,合成成功才写本报告——报告数字与 rca.json 严格一致。**
 5. **【用户反馈自优化】**用户指着某个节点说"你判错了/应该是 XXX"时,这是本技能的自我修正通道,
    按下面四步处置(流程固定,判断只留在分诊一处):
    1) **定位(纯查文件,零判断)**:拿节点名去 `assets/tree/*.tree_index.json` 查 node_id、判据原文、
@@ -108,7 +108,7 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
 1. 从 `entry` 节点开始,用 `memory_init` 初始化工作记忆;
 2. 按节点 `kind` 分派:
    - **`script`**:`name`→`scripts/<name>.py`(generate 生成的逐条件分析脚本),解析 `inputs.data`→数据文件,跑脚本,产出该源**逐条件事实** JSON 按 `outputs` 写入 `$memory`;
-   - **`agent_skill`**:把解析好的 inputs(故障树读成正文 + 各源逐条件事实)备到本轮结果目录的 `rca_input.json`,由 `name` 指定的技能(**fault-tree-rca**)产出结果。该步有**两条可互换路径**:默认模型手工判断(fault-tree-rca),或改跑辩论引擎(**fault-tree-rca-debate** 技能的 `run_debate_rca.py`)——两者吃同一个 rca_input、写同一个 rca.json、过同一个 validate_rca;
+   - **`agent_skill`**:把解析好的 inputs(故障树读成正文 + 各源逐条件事实)备到本轮结果目录的 `rca_input.json`,由 `name` 指定的技能(**fault-tree-rca**)产出结果。该步有**两条可互换路径**:默认模型手工判断(fault-tree-rca),或改跑辩论引擎(**fault-tree-rca-debate** 技能的 `run_debate_rca.py`)——两者吃同一个 rca_input、写同一个 rca.json;
 3. 沿 `transition.next_on_success` 前进,`end=true` 结束;
 4. 节点间数据全靠 `$input`/`$memory`/`$step`/`$output` 引用传递。
 

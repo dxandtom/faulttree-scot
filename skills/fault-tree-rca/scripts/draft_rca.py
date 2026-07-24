@@ -24,7 +24,8 @@ _README = (
     "rca_result,否则降 probable_causes;probable_candidate 补 confidence/caveats/support;"
     "③冲突条目权衡后归档;④排除候选/待确认骨架照对应档写。**任何候选不许无声消失**:不采纳就写进"
     "excluded_note(点名+理由);降档写理由。数据是有的就不许写'数据不足/证据不足'——语义怀疑请写"
-    "'语义近似/存疑'。产出后跑 validate_rca.py 自检。"
+    "'语义近似/存疑'。裁决写成一份小 decisions.json(一个候选一条 verdict),"
+    "然后跑 finalize_rca.py <本骨架> <裁决单> 机械合成最终 rca.json——不要手写 rca.json。"
 )
 
 
@@ -204,7 +205,9 @@ def draft_pruned(data: dict) -> dict:
         "_readme": _README,
         "confirmed_candidates": confirmed,
         "probable_candidates": probable,
-        "conflict_nodes": [{**_ev(nid, nodes[nid]),
+        "conflict_nodes": [{"node": nodes[nid].get("name"), "node_id": nid,
+                            "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
+                            "evidence_prefilled": [_ev(p, nodes[p]) for p in _path(nid, nodes)],
                             "note": "同节点成立与不成立并存(真冲突),权衡后归档并写 caveat"}
                            for nid in sorted(conflict)],
         "excluded_candidates": [_ev(nid, nodes[nid]) for nid in sorted(refuted)],
@@ -263,7 +266,9 @@ def main() -> int:
               f"疑似候选 {len(draft.get('probable_candidates', []))} 条、"
               f"冲突 {len(draft.get('conflict_nodes', []))} 条、排除候选 {len(draft.get('excluded_candidates', []))} 条、"
               f"待确认骨架 {len(draft.get('undetermined_skeleton', []))} 条。")
-    print("  逐条裁决(确认/降档/合并都要落字理由,候选不许无声消失),写成最终 rca.json,再跑 validate_rca.py。")
+    print("  逐条裁决(确认/降档都要落字理由,候选不许无声消失):写一份小裁决单 decisions.json"
+          "(格式见骨架 _readme 或 finalize_rca.py 文件头),然后"
+          "python finalize_rca.py <本骨架> <裁决单> -o <结果目录>/rca.json 机械合成——**不要手写 rca.json**。")
     return 0
 
 
