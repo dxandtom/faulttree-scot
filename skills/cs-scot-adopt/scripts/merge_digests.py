@@ -98,6 +98,15 @@ def main() -> int:
     amap = json.loads(amap_p.read_text(encoding="utf-8")) if amap_p.exists() else []
     by_node = {str(e.get("node_id")): e for e in amap if isinstance(e, dict)}
 
+    # 分批快照(align 写的 node→脚本名):map 在分批后被改过 → 消化批喂的是旧脚本,响亮拦截
+    mf_p = out / "adopt" / "digest_manifest.json"
+    manifest = {}
+    if mf_p.exists():
+        try:
+            manifest = json.loads(mf_p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+
     rdir = out / "adopt" / "digest_results"
     files = sorted(rdir.glob("batch*.json")) if rdir.is_dir() else []
     if not files:
@@ -126,6 +135,14 @@ def main() -> int:
             if not dg:
                 problems.append(f"{f.name}:{nid} 的 digest 为空")
                 continue
+            if manifest.get(nid):                        # 该节点分批时对应的脚本 vs 现在 map 里的脚本
+                cur = (by_node.get(nid) or {})
+                now = Path(str(cur.get("script_local") or cur.get("script") or "")).name
+                if manifest[nid] != now:
+                    problems.append(f"{f.name}:{nid} 的消化批按脚本「{manifest[nid]}」生成,当前 adoption_map "
+                                    f"里是「{now or '已移除'}」——map 在分批之后被改过,这批纪要来自旧脚本:"
+                                    "重跑 align_scripts.py 重新分批,重派含该节点的批再来合并")
+                    continue
             rec = {"digest": dg,
                    "commands": [str(c) for c in (e.get("commands") or []) if str(c).strip()],
                    "regexes": [str(r) for r in (e.get("regexes") or []) if str(r).strip()],
@@ -187,7 +204,10 @@ def main() -> int:
             sols_p.write_text(json.dumps(sols, ensure_ascii=False, indent=2), encoding="utf-8")
 
     expected = [e for e in amap if e.get("script_local")]
-    missing = [f"{e['node_id']}「{e.get('node')}」" for e in expected if str(e["node_id"]) not in digests]
+    missing = [f"{e['node_id']}「{e.get('node')}」"
+               + ("(分批生成于它进 map 之前——重跑 align_scripts.py 重新分批再消化)"
+                  if manifest and str(e["node_id"]) not in manifest else "")
+               for e in expected if str(e["node_id"]) not in digests]
     print(f"已合并 {len(digests)} 条纪要 → {dst}" + (f";solutions 新增 {added} 条" if added else ""))
     if no_marker:
         print(f"⚠ 无完成标记的结果文件:{', '.join(no_marker)}(可能被截断,建议核对条数)")
