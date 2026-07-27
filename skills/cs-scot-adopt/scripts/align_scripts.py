@@ -247,7 +247,10 @@ def main() -> int:
                     else:
                         bad_manual.append(f"{nid}(不在树上)← {e.get('name_zh')}")
         except (OSError, json.JSONDecodeError) as e:
-            print(f"[warn] 既有 adoption_map.json 解析失败({e}),手工条目无法保留")
+            raise SystemExit(f"既有 adoption_map.json 解析失败:{e}\n"
+                             "手工裁决是全流程最贵的人工资产——解析失败还继续跑,会无声从 0 重来"
+                             "(实测 22 条手工裁决全灭)。先修好 JSON(常见病:整文件重写引入 // 注释/尾逗号/"
+                             "裸英文双引号),再重跑本脚本;手工条目一条都不许静默丢。")
     manual_keys = {(norm_name(e.get("name_zh") or ""), Path(str(e.get("script") or "")).name) for e in manual}
     manual_nodes = {str(e["node_id"]) for e in manual}
 
@@ -288,7 +291,27 @@ def main() -> int:
     # 分批快照:记下"这次分批是按哪份 node→脚本 生成的"——merge_digests 据此拦"map 改了、批还是旧的"
     snap = {str(e["node_id"]): Path(str(e.get("script_local") or e.get("script") or "")).name
             for e in aligned if e.get("script_local")}
-    (ddir / "digest_manifest.json").write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 快照变了 → 旧消化结果整体作废(改名 .stale,可救回):旧批按旧 map 生成,直接留着会被"重跑 align 刷新
+    # manifest"洗白混进合并(实测:n28 换了脚本,旧批纪要照样验过)。分批组成会整体挪动,不做逐批甄别。
+    mfp = ddir / "digest_manifest.json"
+    old_snap = {}
+    if mfp.exists():
+        try:
+            old_snap = json.loads(mfp.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            old_snap = {}
+    rd = ddir / "digest_results"
+    if old_snap and old_snap != snap and rd.is_dir():
+        stale = sorted(rd.glob("batch*.json"))
+        for f in stale:
+            t = f.with_name(f.name + ".stale")
+            if t.exists():
+                t.unlink()
+            f.rename(t)
+        if stale:
+            print(f"⚠ 分批口径变了(node→脚本对照与上次不同):旧消化结果 {len(stale)} 个已改名 .stale——"
+                  "旧批按旧 map 生成,直接合并会喂错脚本;按新简报重新消化(确认无用后可删 .stale 文件)")
+    mfp.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
     nb = build_digest_batches(aligned, nodes, out, a.digest_batch_size)
 
     print(f"对齐:{len(aligned)} 对(自动 {len(aligned) - len(manual)} + 手工保留 {len(manual)};"
