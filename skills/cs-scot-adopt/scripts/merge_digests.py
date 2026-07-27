@@ -96,6 +96,18 @@ def main() -> int:
                 rec["depends"] = str(e["depends"]).strip()
             if str(e.get("solution_zh") or "").strip():
                 rec["solution_zh"] = str(e["solution_zh"]).strip()
+            if nid in digests:                           # 同节点多脚本:合并纪要,不许后到的静默覆盖先到的
+                old = digests[nid]
+                rec["digest"] = old["digest"] + "\n---(同节点另一脚本的纪要)---\n" + rec["digest"]
+                for k in ("commands", "regexes", "sources"):
+                    rec[k] = sorted(set(old.get(k, []) + rec.get(k, [])))
+                for k in ("depends", "solution_zh"):
+                    if old.get(k) and not rec.get(k):
+                        rec[k] = old[k]
+                    elif old.get(k) and rec.get(k) and old[k] != rec[k]:
+                        rec[k] = old[k] + "\n" + rec[k]
+                rec["source_script"] = f"{old.get('source_script', '')} + {rec.get('source_script', '')}"
+                print(f"ℹ {nid} 有多个脚本的纪要,已合并(不覆盖)")
             digests[nid] = rec
 
     if problems:
