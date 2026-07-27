@@ -129,11 +129,20 @@ DIGEST_RULES = """\
  "solution_zh": "脚本 OutPut_map 里的中文 solution 文本,没有就省略此键",
  "depends": "入参出参链一句话(如:需要上家的 causation/对端设备名),没有省略"}
 
+【基础知识:平台取数函数 → 平台数据表(读脚本先对号入座,搞清它吃的是什么形态的数据)】
+- self.getCmdPre(...) → CMD 表:命令行及其**原始回显**;
+- self.getCmd(...) → DIAG 表:DataItem 四元组(Object\\SubObject\\DataItem\\DataValue,平台解析好的
+  指标值——**本地没有这张表**,这些值归根到底源自命令/诊断回显);
+- self.getCfg(...) → CONFIG 表:配置层级(Level1\\Level2\\Level3);
+- self.getLog(...) → LOG 表:日志(Module\\Summary\\Content)。
+
 【源路由——按脚本的取数调用标 sources,派发会据此只派对应的源,省大量无用功】
-- self.getCmd(...)(查命令回显)→ 标回显类源 **["cmd","diag"] 两个都标**(本地哪条命令进哪个文件
-  看采集,不强分,宁多勿漏);
-- self.getCfg(...)(查配置层级)→ ["config"];
-- 查告警/日志(Summary/告警名匹配类)→ ["dblg","log"] 都标;
+- getCmdPre(命令行+原始回显)→ ["cmd"];
+- getCmd(DataItem 指标值)→ 本地无 DataItem 表,值来自回显 → **["cmd","diag"] 两个都标**
+  (本地哪条命令进哪个文件看采集,不强分,宁多勿漏);纪要必须把"脚本看哪个 DataItem"翻译成
+  "查哪条 display 命令的回显、看什么关键词"(见铁律2);
+- getCfg(配置层级)→ ["config"];
+- getLog / 查告警日志(Summary/告警名匹配类)→ ["dblg","log"] 都标;
 - self.getKpi(...) → ["kpi"];
 - 脚本查了多个类别 → 全标上;**拿不准 → 空 []**(空=回落广播,每个源都会派,不会漏)。
 - 每个节点下面给了机械预扫的调用提示,核对后照标;sources 只能取本产物真实存在的源名(见下清单)。
@@ -156,13 +165,13 @@ DIGEST_RULES = """\
 """
 
 
-_ACCESSOR_HINTS = (("getCmd(", "getCmd(命令回显)→ 建议 sources 含 cmd/diag"),
+_ACCESSOR_HINTS = (("getCmdPre(", "getCmdPre(CMD 表:命令行+原始回显)→ 建议 sources 含 cmd"),
+                   ("getCmd(", "getCmd(DIAG 表 DataItem 指标值,本地无此表,值源自回显)→ 建议 sources 含 cmd/diag"),
                    ("getCmdStr(", "getCmdStr(补采命令话术,不算取数)"),
-                   ("getCfg(", "getCfg(配置层级)→ 建议 sources 含 config"),
+                   ("getCfg(", "getCfg(CONFIG 配置层级)→ 建议 sources 含 config"),
                    ("getKpi(", "getKpi → 建议 sources 含 kpi"),
-                   ("getLog(", "getLog(日志/告警)→ 建议 sources 含 dblg/log"),
-                   ("getOpr(", "getOpr(操作记录)→ 本地无此源,标注即可"),
-                   ("getCmdPre(", "getCmdPre(采集清单前置检查)→ 缺采集=数据不足口径,不算取数源"))
+                   ("getLog(", "getLog(LOG 表:Module/Summary/Content)→ 建议 sources 含 dblg/log"),
+                   ("getOpr(", "getOpr(操作记录)→ 本地无此源,标注即可"))
 
 
 def _scan_accessors(script_path: str) -> str:

@@ -325,10 +325,11 @@ def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_te
                 extra += "\n现成正则(原样可用):" + " ; ".join(dg["regexes"][:8])
             if dg.get("depends"):
                 extra += "\n依赖:" + dg["depends"]
-            lines.append(f"◆【脚本纪要|平台已验证逻辑,规格以此为准】\n{dg.get('digest', '')[:2000]}{extra}")
+            lines.append(f"◆【脚本纪要 [{nid}]|平台已验证逻辑,规格以此为准】\n{dg.get('digest', '')[:2000]}{extra}")
     if has_digest:
-        lines.insert(1, "(注:带◆【脚本纪要】的判据,纪要提炼自平台上验证过的处理脚本——判据文本再含糊也以"
-                        "纪要为准:命令/关键词/正则/极性照纪要绑,与判据矛盾时在 mapping_reason 写明按纪要。)")
+        lines.insert(1, "(注:◆【脚本纪要 [nN]】块头的 [nN] 就是它所属的判据号,只作用于同号判据。纪要提炼自"
+                        "平台上验证过的处理脚本——判据文本再含糊也以纪要为准:命令/关键词/正则/极性照纪要绑,"
+                        "与判据矛盾时在 mapping_reason 写明按纪要。)")
     sec.append("\n".join(lines))
     sec.append(OUTPUT_FORMAT.format(ind=ind))
     return "\n\n" .join(sec) + "\n"
