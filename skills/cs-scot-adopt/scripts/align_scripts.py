@@ -216,12 +216,32 @@ def main() -> int:
         raise SystemExit("规则 JSON 里没解析到任何 childrenRule 条目——核对文件")
     missing, ambiguous = resolve_scripts(rules, Path(a.scripts).expanduser().resolve())
 
+    # 手工裁决保留:既有 adoption_map.json 里 auto:false 的条目是模型/人补的残差裁决,
+    # **重跑不冲掉**(实测:v1 每次重生成,把 17 条手工裁决全灭了——补完重跑=白补)。
+    manual, bad_manual = [], []
+    amap_p = out / "adopt" / "adoption_map.json"
+    if amap_p.exists():
+        try:
+            for e in json.loads(amap_p.read_text(encoding="utf-8")):
+                if isinstance(e, dict) and e.get("auto") is False:
+                    nid = str(e.get("node_id") or "")
+                    if nid in nodes:
+                        manual.append(e)
+                    else:
+                        bad_manual.append(f"{nid}(不在树上)← {e.get('name_zh')}")
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"[warn] 既有 adoption_map.json 解析失败({e}),手工条目无法保留")
+    manual_keys = {(norm_name(e.get("name_zh") or ""), Path(str(e.get("script") or "")).name) for e in manual}
+    manual_nodes = {str(e["node_id"]) for e in manual}
+
     by_norm = {}
     for nid, n in nodes.items():
         by_norm.setdefault(norm_name(n["name"]), []).append(nid)
-    aligned, un_rules = [], []
-    used_nodes = set()
+    aligned, un_rules = list(manual), []
+    used_nodes = set(manual_nodes)
     for r in rules:
+        if (norm_name(r["name_zh"]), Path(r["script"]).name) in manual_keys:
+            continue                                     # 手工已裁,不重复也不进残差
         cand = by_norm.get(norm_name(r["name_zh"]), [])
         if len(cand) == 1:
             nid = cand[0]
@@ -236,6 +256,10 @@ def main() -> int:
                              "note": "归一后无唯一匹配" if not cand else f"归一后命中 {len(cand)} 个节点:{cand}"})
     un_nodes = [{"node_id": nid, "node": n["name"], "pass_through": n["pass_through"]}
                 for nid, n in nodes.items() if nid not in used_nodes and n["condition"]]
+    dup = {}
+    for e in aligned:
+        dup.setdefault(str(e["node_id"]), []).append(Path(str(e.get("script") or "")).name)
+    multi = {k: v for k, v in dup.items() if len(v) > 1}
 
     ddir = out / "adopt"
     ddir.mkdir(parents=True, exist_ok=True)
@@ -244,8 +268,14 @@ def main() -> int:
     (ddir / "unmatched_nodes.json").write_text(json.dumps(un_nodes, ensure_ascii=False, indent=2), encoding="utf-8")
     nb = build_digest_batches(aligned, nodes, out, a.digest_batch_size)
 
-    print(f"对齐:自动配上 {len(aligned)} 对(规则共 {len(rules)} 条、树上带判据节点共 "
+    print(f"对齐:{len(aligned)} 对(自动 {len(aligned) - len(manual)} + 手工保留 {len(manual)};"
+          f"规则共 {len(rules)} 条、树上带判据节点共 "
           f"{sum(1 for n in nodes.values() if n['condition'])} 个)→ {ddir / 'adoption_map.json'}")
+    if bad_manual:
+        print(f"⚠ 手工条目被丢弃 {len(bad_manual)} 条(node_id 不在树上):{'; '.join(bad_manual[:5])}")
+    if multi:
+        print(f"ℹ 同节点配了多个脚本 {len(multi)} 处(合法;消化后 merge 会合并纪要):"
+              + "; ".join(f"{k}←{v}" for k, v in list(multi.items())[:5]))
     if missing:
         print(f"⚠ 脚本文件缺失 {len(missing)} 个(规则有、脚本目录里没有):")
         for m in missing[:10]:
