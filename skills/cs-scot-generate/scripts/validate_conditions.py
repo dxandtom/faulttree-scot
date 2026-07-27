@@ -162,8 +162,11 @@ def _target_warnings(conditions):
         detail = ("(各 target 命中: " + ", ".join(f"{k}={v}" for k, v in bt.items()) + ")") if bt else ""
         short = [t for t in targets if _SHORT_ASCII.match(t)]
         if short:
-            warns.append(f"⚠ 泛词嫌疑:「{cid}」contains 里有超短 target {short}——短子串几乎必是"
-                         f"标签/缩写假阳(如 'NP'⊂'snmp'),换专属信号或删掉{detail}")
+            warns.append(f"⚠ 泛词嫌疑:「{cid}」contains 里有超短 target {short}——判据要这个值本身可能是"
+                         f"合法语义(如 Causation 不为「-」),但**裸 contains 在整列捞短子串必假阳**"
+                         f"(如 '-'⊂任意含连字符的格、'NP'⊂'snmp')。正确形态:filter 选中相关行 + extract 抽出"
+                         f"字段值,再 equals/absent 对值判;已是该形态或值确属专属信号 → 保留并在 mapping_reason "
+                         f"写明{detail}")
         # 命令名当信号(软点名):目标是 display/show 命令字样、又绑在命令名列——健康设备同样执行巡检命令,
         # 基本必假阳(实测一次 19 条全军覆没)。参考修法:命令列改当 filter,判定落到回显内容列。
         col = str(f.get("resolved_column") or "")

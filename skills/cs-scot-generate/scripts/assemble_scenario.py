@@ -434,10 +434,26 @@ def main() -> None:
         (out / sub).mkdir(parents=True, exist_ok=True)
 
     copy_into(work / "tree" / f"{stem}.md", out / "tree" / f"{stem}.md")
-    if (work / "tree" / "solutions.json").exists():      # 推荐解决方案表(可选):RCA 报根因时点查
-        copy_into(work / "tree" / "solutions.json", out / "tree" / "solutions.json")
-    elif (out / "tree" / "solutions.json").exists():     # work 侧没有 → out 侧的是陈旧副本,清掉防错挂
-        (out / "tree" / "solutions.json").unlink()
+    # 推荐解决方案表(可选,RCA 报根因时点查):树侧为准、**增量并入**——out 侧可能有 cs-scot-adopt
+    # 从平台脚本并入的方案,整表覆盖/删除都会把收编成果静默清掉(实测审计发现);
+    # 树上已不存在的节点条目留着无害(点查不中)。
+    wsol, osol = work / "tree" / "solutions.json", out / "tree" / "solutions.json"
+    if wsol.exists():
+        merged_sol = json.loads(wsol.read_text(encoding="utf-8"))
+        kept = 0
+        if osol.exists():
+            try:
+                for _nid, _v in json.loads(osol.read_text(encoding="utf-8")).items():
+                    if _nid not in merged_sol:
+                        merged_sol[_nid] = _v
+                        kept += 1
+            except json.JSONDecodeError:
+                print("[warn] out 侧 solutions.json 解析失败,按树侧全量重写")
+        osol.write_text(json.dumps(merged_sol, ensure_ascii=False, indent=2), encoding="utf-8")
+        if kept:
+            print(f"solutions.json:树侧 {len(merged_sol) - kept} 条 + 保留 out 侧既有 {kept} 条(如 adopt 并入的方案)")
+    elif osol.exists():
+        print("solutions.json:树侧本次没有,out 侧既有的**保留不删**(可能含 adopt 并入的方案)")
     # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
     here = Path(__file__).parent
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # 类别模板库

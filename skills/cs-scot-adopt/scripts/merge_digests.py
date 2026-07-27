@@ -6,8 +6,9 @@
 - node_id 必须在 tree_index 里(编造节点响亮拒收);digest 非空;
 - 完成标记 # BATCH_COMPLETE 缺失 = 疑似截断,该批拒收点名(向后兼容:纯 JSON 数组无标记也认,
   但会提示);
-- 合并为 <OUT>/tree/script_digests.json:{node_id: {digest, commands, regexes, depends?,
-  source_script, name_zh?}}——make_dispatch 据此把纪要逐条附进绑定简报;
+- 合并为 <OUT>/tree/script_digests.json:{node_id: {digest, commands, regexes, sources,
+  source_script, depends?, unusable?, solution_zh?}}——make_dispatch 据此把纪要逐条附进绑定简报
+  (unusable 且无正文的只留档、不注入;depends 只随跨源补绑简报下发);
 - solution_zh 非空的,并进 <OUT>/tree/solutions.json(已有条目**不覆盖**);
 - 对账:adoption_map 里对齐了脚本却没交纪要的节点点名(消化不许静默漏)。
 
@@ -132,8 +133,11 @@ def main() -> int:
                 problems.append(f"{f.name}:node_id「{nid}」不在树上(别编节点)")
                 continue
             dg = str(e.get("digest") or "").strip()
-            if not dg:
-                problems.append(f"{f.name}:{nid} 的 digest 为空")
+            un = str(e.get("unusable") or "").strip()
+            if not un and dg.startswith("脚本不可用"):   # 旧式写法兼容:自动转 unusable(不再顶权威帽子进简报)
+                un, dg = dg, ""
+            if not dg and not un:
+                problems.append(f"{f.name}:{nid} 的 digest 为空(脚本读不懂/透传壳请交 unusable 字段)")
                 continue
             if manifest.get(nid):                        # 该节点分批时对应的脚本 vs 现在 map 里的脚本
                 cur = (by_node.get(nid) or {})
@@ -149,16 +153,19 @@ def main() -> int:
                    "sources": [str(s).strip() for s in (e.get("sources") or []) if str(s).strip()],
                    "source_script": (by_node.get(nid) or {}).get("script_local")
                                     or (by_node.get(nid) or {}).get("script") or ""}
+            if un:
+                rec["unusable"] = un                     # 留档审计;派发端对无 digest 正文的不注入简报
             if str(e.get("depends") or "").strip():
                 rec["depends"] = str(e["depends"]).strip()
             if str(e.get("solution_zh") or "").strip():
                 rec["solution_zh"] = str(e["solution_zh"]).strip()
             if nid in digests:                           # 同节点多脚本:合并纪要,不许后到的静默覆盖先到的
                 old = digests[nid]
-                rec["digest"] = old["digest"] + "\n---(同节点另一脚本的纪要)---\n" + rec["digest"]
+                bodies = [x for x in (old.get("digest"), rec.get("digest")) if x]
+                rec["digest"] = "\n---(同节点另一脚本的纪要)---\n".join(bodies)
                 for k in ("commands", "regexes", "sources"):
                     rec[k] = sorted(set(old.get(k, []) + rec.get(k, [])))
-                for k in ("depends", "solution_zh"):
+                for k in ("depends", "solution_zh", "unusable"):
                     if old.get(k) and not rec.get(k):
                         rec[k] = old[k]
                     elif old.get(k) and rec.get(k) and old[k] != rec[k]:

@@ -120,14 +120,17 @@ DIGEST_RULES = """\
 【每个节点交一条 JSON,所有节点写完后整体存为一个 JSON 数组到下面的结果文件】
 {"node_id": "nX",
  "digest": "多行文本,写清:①查哪条命令/哪个数据源(cmd 回显/config 层级/dblg/log 告警);\
-②判定规则(什么状态字/什么值=异常,极性别搞反:正常态是什么);③脚本里的现成正则**原样抄**\
-(这是最值钱的部分);④前置采集清单(脚本开头 checkCmdCollect 之类列的命令,缺=数据不足);\
-⑤复杂逻辑(本端对端配对/取最新一次采集/跨命令合并)标注「复杂逻辑:建议 cross/代理口径」并一句话说明",
- "commands": ["display …", …],            // 该节点涉及的采集命令
- "regexes": ["脚本里的现成正则,原样"],     // 没有就 []
+②判定规则(什么状态字/什么值=异常,**极性别搞反:先写清正常态是什么**);③复杂逻辑\
+(本端对端配对/取最新一次采集/跨命令合并)标注「复杂逻辑:建议 cross/代理口径」并一句话说明。\
+**正则只放 regexes 字段、正文别重复罗列;前置采集清单不用写**(缺采集=内核运行时自动判数据不足)",
+ "unusable": "**脚本不可用时改交此字段、并省略 digest**(一句原因,如:run() 纯透传无判定逻辑)——\
+该节点绑定自动回落判据原文;别把「脚本不可用」写进 digest 顶着权威帽子进简报",
+ "commands": ["display …", …],            // 该节点涉及的采集命令(命令名归这里,别混进 regexes)
+ "regexes": ["脚本里的现成正则,原样"],     // 没有就 [];这是最值钱的部分
  "sources": ["cmd", "diag"],              // 该节点该去哪些本地源绑定(见下「源路由」),拿不准就 []
  "solution_zh": "脚本 OutPut_map 里的中文 solution 文本,没有就省略此键",
- "depends": "入参出参链一句话(如:需要上家的 causation/对端设备名),没有省略"}
+ "depends": "入参出参链一句话(如:需要上家的 causation/对端设备名),没有省略——\
+只随跨源补绑简报下发(param_from 的字段名原料),单源绑定简报不带它"}
 
 【基础知识:平台取数函数 → 平台数据表(读脚本先对号入座,搞清它吃的是什么形态的数据)】
 - self.getCmdPre(...) → CMD 表:命令行及其**原始回显**;
@@ -152,7 +155,8 @@ DIGEST_RULES = """\
 2. 我们的本地数据是**原始回显**(cmd 表 CmdName+CmdResult)与 config 层级表(level1~5)、
    dblg/log 表(Summary/Content/Log)——脚本里的 DataItem 名(如 EthTrunk_Operatestatus)本地
    **没有**,纪要要落到"查哪条 display 命令的回显、看什么关键词/字段"这一层;
-3. 脚本读不懂/文件缺失的节点,digest 写"脚本不可用:<原因>",别编;
+3. 脚本读不懂/文件缺失/纯透传壳的节点,交 unusable 字段(见模板)并省略 digest,别编——
+   让它响亮地缺着,绑定回落判据原文;
 4. **JSON 字符串里别放裸的英文双引号**:正文要引用状态字/取值时用中文「」(如 缺一侧即为「单归」),
    别写 …为"单归"…(会把 JSON 截断,整批合并失败——实测高频翻车点);正则里的反斜杠记得双写(\\d);
 5. **regexes 只放判定用的正则**(从回显/配置里抠值、匹配故障特征的那些),**别带 Python 的 r'' 包装**
@@ -247,7 +251,10 @@ def main() -> int:
                     else:
                         bad_manual.append(f"{nid}(不在树上)← {e.get('name_zh')}")
         except (OSError, json.JSONDecodeError) as e:
-            print(f"[warn] 既有 adoption_map.json 解析失败({e}),手工条目无法保留")
+            raise SystemExit(f"既有 adoption_map.json 解析失败:{e}\n"
+                             "手工裁决是全流程最贵的人工资产——解析失败还继续跑,会无声从 0 重来"
+                             "(实测 22 条手工裁决全灭)。先修好 JSON(常见病:整文件重写引入 // 注释/尾逗号/"
+                             "裸英文双引号),再重跑本脚本;手工条目一条都不许静默丢。")
     manual_keys = {(norm_name(e.get("name_zh") or ""), Path(str(e.get("script") or "")).name) for e in manual}
     manual_nodes = {str(e["node_id"]) for e in manual}
 
@@ -288,7 +295,27 @@ def main() -> int:
     # 分批快照:记下"这次分批是按哪份 node→脚本 生成的"——merge_digests 据此拦"map 改了、批还是旧的"
     snap = {str(e["node_id"]): Path(str(e.get("script_local") or e.get("script") or "")).name
             for e in aligned if e.get("script_local")}
-    (ddir / "digest_manifest.json").write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 快照变了 → 旧消化结果整体作废(改名 .stale,可救回):旧批按旧 map 生成,直接留着会被"重跑 align 刷新
+    # manifest"洗白混进合并(实测:n28 换了脚本,旧批纪要照样验过)。分批组成会整体挪动,不做逐批甄别。
+    mfp = ddir / "digest_manifest.json"
+    old_snap = {}
+    if mfp.exists():
+        try:
+            old_snap = json.loads(mfp.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            old_snap = {}
+    rd = ddir / "digest_results"
+    if old_snap and old_snap != snap and rd.is_dir():
+        stale = sorted(rd.glob("batch*.json"))
+        for f in stale:
+            t = f.with_name(f.name + ".stale")
+            if t.exists():
+                t.unlink()
+            f.rename(t)
+        if stale:
+            print(f"⚠ 分批口径变了(node→脚本对照与上次不同):旧消化结果 {len(stale)} 个已改名 .stale——"
+                  "旧批按旧 map 生成,直接合并会喂错脚本;按新简报重新消化(确认无用后可删 .stale 文件)")
+    mfp.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
     nb = build_digest_batches(aligned, nodes, out, a.digest_batch_size)
 
     print(f"对齐:{len(aligned)} 对(自动 {len(aligned) - len(manual)} + 手工保留 {len(manual)};"

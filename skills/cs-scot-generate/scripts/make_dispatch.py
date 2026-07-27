@@ -280,13 +280,15 @@ def load_digests(out: Path) -> dict:
         return {}
 
 
-def digest_block(nid: str, dg: dict) -> str:
-    """一条纪要 → 简报里的 ◆ 块。单源批与 --cross 补绑简报共用同一份形态(含"依赖仅供理解"的
-    防投降括注),防两处走形。"""
+def digest_block(nid: str, dg: dict, include_depends: bool = False) -> str:
+    """一条纪要 → 简报里的 ◆ 块(单源批与 --cross 补绑简报共用,防两处走形)。
+    depends 只在 include_depends=True(跨源补绑简报)时附——单源批里它唯一的实测作用是投降诱饵
+    ("需上游传参"→insufficient_data 化石),本地绑定落点由纪要正文的命令/字段给出,不需要入参链;
+    跨源批则相反:param_from 传参链要靠这些字段名当原料。"""
     extra = ""
     if dg.get("regexes"):
         extra += "\n现成正则(原样可用):" + " ; ".join(dg["regexes"][:8])
-    if dg.get("depends"):
+    if include_depends and dg.get("depends"):
         extra += ("\n依赖(平台入参链,仅供理解定位字段):" + dg["depends"]
                   + "\n(平台靠上游传参,本地绑定**直接查对应命令回显/配置字段**;不许以"
                     "「需上游传参/需平台JSON/DataItem 本地没有」为由写 insufficient_data——"
@@ -340,9 +342,9 @@ def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_te
     for nid, name, cond in batch:
         lines.append(f"\n[{nid}] {name}\n{cond}")
         dg = (digests or {}).get(nid)
-        if dg:
+        if dg and str(dg.get("digest") or "").strip():   # 空壳(unusable)不注入:零规格不配权威帽子
             has_digest = True
-            lines.append(digest_block(nid, dg))
+            lines.append(digest_block(nid, dg, include_depends=False))
     if has_digest:
         lines.insert(1, "(注:◆【脚本纪要 [nN]】块头的 [nN] 就是它所属的判据号,只作用于同号判据。纪要提炼自"
                         "平台上验证过的处理脚本——判据文本再含糊也以纪要为准:命令/关键词/正则/极性照纪要绑,"
@@ -449,9 +451,11 @@ def main() -> int:
                 sec.append(f"【{ind} 源数据词汇——枚举清单原文:{f.name}】\n"
                            + f.read_text(encoding="utf-8").strip())
         digests = load_digests(out)
+        digests = {k: v for k, v in digests.items() if str(v.get("digest") or "").strip()}  # 空壳不注入
         if digests:
             n_hit = sum(1 for c in cands if str(c.get("node_id")) in digests)
-            print(f"脚本纪要:跨源候选命中 {n_hit}/{len(cands)} 条——◆块已附进补绑简报(规格以纪要为准)")
+            print(f"脚本纪要:跨源候选命中 {n_hit}/{len(cands)} 条——◆块已附进补绑简报(规格以纪要为准,"
+                  "含依赖字段供 param_from 取材)")
         lines = [f"【候选判据清单(共 {len(cands)} 条;condition_text 必须逐字取自这里)】"]
         for c in cands:
             nid = c.get("node_id")
@@ -462,7 +466,7 @@ def main() -> int:
             lines.append(f"\n[{nid}] {name}(由 {srcs} 源标记" + (f":{reasons}" if reasons else "") + f")\n{cond}")
             dg = digests.get(str(nid))
             if dg:
-                lines.append(digest_block(str(nid), dg))
+                lines.append(digest_block(str(nid), dg, include_depends=True))
         sec.append("\n".join(lines))
         sec.append(CROSS_OUTPUT_FORMAT)
         ddir.mkdir(parents=True, exist_ok=True)
@@ -475,9 +479,19 @@ def main() -> int:
         return 0
 
     digests = load_digests(out)
+    # 可注入 = 有正文的;空壳(unusable,脚本不可用)只留档——零规格顶着"规格以此为准"进简报是自相矛盾,
+    # 还白吃字符预算撑批(实测 500+ 字/条)。路由(sources)仍用全量:不可用脚本的取数预扫也可能是对的。
+    inject = {k: v for k, v in digests.items() if str(v.get("digest") or "").strip()}
     if digests:
-        n_hit = sum(1 for c in conditions if c[0] in digests)
-        print(f"脚本纪要:{len(digests)} 条(本树判据命中 {n_hit} 条)——逐条附进简报,按字符预算分批")
+        n_un = len(digests) - len(inject)
+        n_hit = sum(1 for c in conditions if c[0] in inject)
+        print(f"脚本纪要:{len(inject)} 条可注入(本树判据命中 {n_hit} 条)——逐条附进简报,按字符预算分批"
+              + (f";另有 {n_un} 条脚本不可用,留档不注入(对应节点按判据原文绑)" if n_un else ""))
+        trunc = [k for k, v in inject.items()
+                 if len(str(v.get("digest") or "")) > 2000 or len(v.get("regexes") or []) > 8]
+        if trunc:
+            print(f"⚠ 纪要超长截断 {len(trunc)} 条(正文>2000字或正则>8条,超出部分不进简报,"
+                  f"必要时精简纪要):{'、'.join(trunc[:6])}")
 
     def routed_conditions(ind):
         """源路由:纪要声明了 sources 的判据只进对应源的批(省无用功);没纪要/没声明/声明的源
@@ -530,14 +544,14 @@ def main() -> int:
         if not ind_conds:
             print(f"  {ind}:没有归本源的判据(纪要全路由走了),本源不出简报")
             continue
-        batches = split_batches(ind_conds, digests, args.batch_size)
+        batches = split_batches(ind_conds, inject, args.batch_size)
         n_batches = len(batches)
         for i, batch in enumerate(batches, 1):
             p = ddir / f"{ind}_batch{i}.txt"
             rp = ddir / f"{ind}_batch{i}_result.py"
             p.write_text(build_briefing(ind, scenario, i, n_batches, batch, len(ind_conds),
                                         ov_text, is_eav, enum_texts, str(rp), knowledge_text,
-                                        digests=digests), encoding="utf-8")
+                                        digests=inject), encoding="utf-8")
             written.append((ind, i, len(batch), p))
 
     # 派发铭牌:声明"结果文件须带完成标记"(merge 据此逮半路截断的合法短列表;
