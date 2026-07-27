@@ -295,8 +295,9 @@ def main() -> None:
                       "code": (old_nodes.get(nid) or {}).get("code") if nid else None,
                       "children": [], "condition": condition,
                       "combine": _infer_combine(condition), "data_source": data_source,
-                      "pass_through": (not condition) or lvl <= 2,   # 高层不判断规则:L1/L2 判据只供人读,
-                      "sheets": ["tuning"], "meta": meta}            # 不阻断、不参与绑定(与 excel_to_tree_v2 一致)
+                      "pass_through": (not condition) or lvl <= 2 or parent is None,
+                      "sheets": ["tuning"], "meta": meta}   # 高层不判断规则:L1/L2 与场景根(parent 为空)的
+                                                            # 判据只供人读,不阻断、不参与绑定(与 v2 一致)
         order.append(key)
         if parent:
             nodes[parent]["children"].append(key)

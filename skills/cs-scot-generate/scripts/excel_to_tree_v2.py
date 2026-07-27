@@ -345,15 +345,17 @@ def main() -> None:
         sys.exit(1)
     # 「高层不判断」规则(简单粗暴,用户定案):L1/L2 这种靠根的层级,判据多为场景分类/选路说明,
     # 不是故障条件——绑成判定会把整树确证卡死(实测:根节点"判断属于哪种场景"不成立 → 全树只能疑似)。
-    # 处理:带判据的 L≤2 节点标 pass_through(不阻断、不参与绑定),判据文本保留供人读;
+    # 场景**根节点不看母表层号一律豁免**(实测:场景在母表更深层时,根的"参考下级节点"判据被派了绑定,
+    # 谁也绑不上 → 数据不足挂在全树每条路径上)。
+    # 处理:带判据的 L≤2 节点与场景根标 pass_through(不阻断、不参与绑定),判据文本保留供人读;
     # 某棵树确实要在高层判(少见)→ --bind-top-levels 关掉本规则。
     if not args.bind_top_levels:
         topjudge = [nid for nid, nd in index["nodes"].items()
-                    if nd.get("condition") and (nd.get("level") or 99) <= 2]
+                    if nd.get("condition") and ((nd.get("level") or 99) <= 2 or nid == index.get("root"))]
         for nid in topjudge:
             index["nodes"][nid]["pass_through"] = True
         if topjudge:
-            print(f"高层不判断:L1/L2 带判据节点 {len(topjudge)} 个已标 pass_through(不阻断路径、不参与绑定;"
+            print(f"高层不判断:L1/L2/场景根带判据节点 {len(topjudge)} 个已标 pass_through(不阻断路径、不参与绑定;"
                   "判据保留供人读。确要在高层判 → 重跑加 --bind-top-levels)")
     solutions = index.pop("solutions", {})              # 单独落盘,不进 tree_index(别膨胀树契约)
     md = index_to_markdown(index)
