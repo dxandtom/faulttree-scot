@@ -258,8 +258,43 @@ def load_knowledge(out: Path, name_pool: str):
     return "\n\n".join(picked) if picked else None
 
 
+def load_digests(out: Path) -> dict:
+    """<OUT>/tree/script_digests.json(cs-scot-adopt 收编的平台脚本纪要)→ {node_id: rec};
+    没有/坏了 → 空 dict(纪要是增益,不因它坏主流程,但坏文件要响亮提示)。"""
+    p = out / "tree" / "script_digests.json"
+    if not p.exists():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"[warn] script_digests.json 读取失败({e}),本轮简报不带脚本纪要", file=sys.stderr)
+        return {}
+
+
+def split_batches(conditions, digests: dict, batch_size: int, char_budget: int = 30000):
+    """切批:无纪要时按条数(老行为);有纪要时再叠一个字符预算——带纪要的判据体积大,
+    固定条数会把简报撑爆,按「判据+纪要」总字符封顶自动少装几条。"""
+    if not digests:
+        import math as _m
+        n = max(1, _m.ceil(len(conditions) / batch_size))
+        return [conditions[i * batch_size:(i + 1) * batch_size] for i in range(n)]
+    batches, cur, cur_chars = [], [], 0
+    for c in conditions:
+        nid = c[0]
+        w = len(c[2]) + len((digests.get(nid) or {}).get("digest", ""))
+        if cur and (len(cur) >= batch_size or cur_chars + w > char_budget):
+            batches.append(cur)
+            cur, cur_chars = [], 0
+        cur.append(c)
+        cur_chars += w
+    if cur:
+        batches.append(cur)
+    return batches
+
+
 def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_text, is_eav, enum_texts, result_path,
-                   knowledge_text=None):
+                   knowledge_text=None, digests=None):
     sec = []
     sec.append(f"# 绑定简报:{ind} 源 · 第 {batch_no}/{n_batches} 批(本批 {len(batch)} 条判据,全树共 {total} 条;"
                f"其余批由别的子代理处理,你只管本批)\n【结果文件】{result_path}")
@@ -279,8 +314,21 @@ def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_te
     for name, text in enum_texts:
         sec.append(f"【本源数据词汇——枚举清单原文:{name}】\n" + text.strip())
     lines = [f"【本批判据清单原文(共 {len(batch)} 条;condition_text 必须逐字取自这里)】"]
+    has_digest = False
     for nid, name, cond in batch:
         lines.append(f"\n[{nid}] {name}\n{cond}")
+        dg = (digests or {}).get(nid)
+        if dg:
+            has_digest = True
+            extra = ""
+            if dg.get("regexes"):
+                extra += "\n现成正则(原样可用):" + " ; ".join(dg["regexes"][:8])
+            if dg.get("depends"):
+                extra += "\n依赖:" + dg["depends"]
+            lines.append(f"◆【脚本纪要|平台已验证逻辑,规格以此为准】\n{dg.get('digest', '')[:2000]}{extra}")
+    if has_digest:
+        lines.insert(1, "(注:带◆【脚本纪要】的判据,纪要提炼自平台上验证过的处理脚本——判据文本再含糊也以"
+                        "纪要为准:命令/关键词/正则/极性照纪要绑,与判据矛盾时在 mapping_reason 写明按纪要。)")
     sec.append("\n".join(lines))
     sec.append(OUTPUT_FORMAT.format(ind=ind))
     return "\n\n" .join(sec) + "\n"
@@ -401,8 +449,29 @@ def main() -> int:
               "然后重跑 merge_conditions.py 合并进 cross_analyzer.py。")
         return 0
 
-    n_batches = max(1, math.ceil(len(conditions) / args.batch_size))
-    batches = [conditions[i * args.batch_size:(i + 1) * args.batch_size] for i in range(n_batches)]
+    digests = load_digests(out)
+    if digests:
+        n_hit = sum(1 for c in conditions if c[0] in digests)
+        print(f"脚本纪要:{len(digests)} 条(本树判据命中 {n_hit} 条)——逐条附进简报,按字符预算分批")
+
+    def routed_conditions(ind):
+        """源路由:纪要声明了 sources 的判据只进对应源的批(省无用功);没纪要/没声明/声明的源
+        与本产物源集全对不上(响亮告警过)→ 广播(进每个源的批,老行为,谁能答谁答)。"""
+        outc = []
+        for c in conditions:
+            srcs = (digests.get(c[0]) or {}).get("sources") or []
+            known = [s for s in srcs if s in inds]
+            if not known or ind in known:
+                outc.append(c)
+        return outc
+
+    if digests:
+        orphan = [c for c in conditions
+                  if (digests.get(c[0]) or {}).get("sources")
+                  and not any(s in inds for s in (digests.get(c[0]) or {}).get("sources", []))]
+        if orphan:
+            print(f"⚠ {len(orphan)} 条判据的纪要 sources 与本产物源集全对不上(将回落广播):"
+                  + "、".join(f"{c[0]}" for c in orphan[:8]))
     ddir = out / "dispatch"
     ddir.mkdir(parents=True, exist_ok=True)
 
@@ -430,11 +499,20 @@ def main() -> int:
                 f"\"<{ind}的csv>\" > \"{ov_dir / (ind + '_dataitem枚举.txt')}\"")
             continue
         enum_texts = [(f.name, f.read_text(encoding="utf-8")) for f in enum_files]
+        ind_conds = routed_conditions(ind)
+        if digests and len(ind_conds) < len(conditions):
+            print(f"  {ind}:源路由后 {len(ind_conds)}/{len(conditions)} 条(其余判据的纪要声明归别的源)")
+        if not ind_conds:
+            print(f"  {ind}:没有归本源的判据(纪要全路由走了),本源不出简报")
+            continue
+        batches = split_batches(ind_conds, digests, args.batch_size)
+        n_batches = len(batches)
         for i, batch in enumerate(batches, 1):
             p = ddir / f"{ind}_batch{i}.txt"
             rp = ddir / f"{ind}_batch{i}_result.py"
-            p.write_text(build_briefing(ind, scenario, i, n_batches, batch, len(conditions),
-                                        ov_text, is_eav, enum_texts, str(rp), knowledge_text), encoding="utf-8")
+            p.write_text(build_briefing(ind, scenario, i, n_batches, batch, len(ind_conds),
+                                        ov_text, is_eav, enum_texts, str(rp), knowledge_text,
+                                        digests=digests), encoding="utf-8")
             written.append((ind, i, len(batch), p))
 
     # 派发铭牌:声明"结果文件须带完成标记"(merge 据此逮半路截断的合法短列表;
