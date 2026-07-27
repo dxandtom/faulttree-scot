@@ -21,7 +21,8 @@ _README = (
     "本骨架由代码从 rca_input 机械枚举:候选=有'成立'事实的节点(路径+证据已预填,how 逐字来自 explain)。"
     "你的工作=逐条裁决,不是重新发现:①语义复核(mapping_reason 与判据是否真等,近似就降档并把该节点 "
     "judgment 改'语义近似/存疑');②定档:draft_tier 只是机械建议——confirmed_candidate 语义过硬才进 "
-    "rca_result,否则降 probable_causes;probable_candidate 补 confidence/caveats/support;"
+    "rca_result,否则降 probable_causes;祖先『数据不足』不拦确证也不构成降档理由(零信息不冒充反证,"
+    "见候选的 ancestor_insufficient 注记,finalize 自动落 caveats);probable_candidate 补 confidence/caveats/support;"
     "③冲突条目权衡后归档;④排除候选/待确认骨架照对应档写。**任何候选不许无声消失**:不采纳就写进"
     "excluded_note(点名+理由);降档写理由。数据是有的就不许写'数据不足/证据不足'——语义怀疑请写"
     "'语义近似/存疑'。裁决写成一份小 decisions.json(一个候选一条 verdict),"
@@ -156,17 +157,27 @@ def draft_pruned(data: dict) -> dict:
     for nid in sorted(deepest, key=lambda x: int(x[1:]) if x[1:].isdigit() else 10 ** 9):
         n = nodes[nid]
         ev = [_ev(p, nodes[p]) for p in _path(nid, nodes)]
-        gaps = [e for e in ev if e["judgment"] in ("数据不足", "冲突")]
-        refutes = [e for e in ev if e["judgment"] == "不成立"]   # 路径上有反证 → 确证免谈(规则:全干净才确证)
+        # 祖先的「数据不足」=零信息:查不了不冒充反证,**不拦确证**(大类语义由本节点成立事实自下而上蕴含),
+        # 单独注记让裁决落 caveat;冲突是证据,照拦。(实测:根/大类判据"参考下级节点"谁也绑不上,
+        # 数据不足挂在每条路径上,心跳 Lost 这种硬证据也永远只能疑似。)
+        anc_insuf = [e for e in ev[:-1] if e["judgment"] == "数据不足"]
+        gaps = [e for e in ev if e["judgment"] == "冲突"]
+        refutes = [e for e in ev if e["judgment"] == "不成立"]   # 路径上有反证 → 确证免谈
         entry = {"node": n.get("name"), "node_id": nid,
                  "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
                  "evidence_prefilled": ev}
         f = _pick(n.get("facts") or [], True)
         if f:
             entry["support_hint"] = _actual(f)
+        if anc_insuf:
+            entry["ancestor_insufficient"] = (
+                "祖先大类自身判据未独立验证(数据不足):"
+                + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in anc_insuf[:5])
+                + "——由本节点成立事实自下而上蕴含,不拦确证、不构成降档理由;finalize 会自动写进 caveats")
         unc = n.get("uncovered_children") or []
         if not gaps and not refutes and n.get("is_leaf") and not unc:
-            entry["draft_tier"] = "confirmed_candidate(机械建议:叶子+路径全干净;语义复核后定档)"
+            entry["draft_tier"] = ("confirmed_candidate(机械建议:叶子+路径无反证/冲突"
+                                   "(祖先数据不足不拦,已注记);语义复核后定档)")
             confirmed.append(entry)
         else:
             why = []
@@ -175,7 +186,7 @@ def draft_pruned(data: dict) -> dict:
                            + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in refutes[:3])
                            + "(可能是真反证、也可能是绑定假象——权衡后进疑似或走排除)")
             if gaps:
-                why.append(f"路径缺口:{'、'.join(e['node'] + '(' + e['node_id'] + ')' for e in gaps[:3])}")
+                why.append(f"路径含冲突节点:{'、'.join(e['node'] + '(' + e['node_id'] + ')' for e in gaps[:3])}")
             if not n.get("is_leaf") or unc:
                 why.append("非叶子/有未覆盖子因,叶子因待定")
                 # 直接子节点的三态一览:父成立而已知叶子全被反证 → 真因可能在未覆盖子因/叶子绑定假阴/父命中系背景,

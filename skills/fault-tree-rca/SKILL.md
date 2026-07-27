@@ -8,7 +8,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 **本文件已加载,不要再次加载或调用本技能;"加载"≠"完成",真正产出根因 JSON 才算完成。** 现在立刻三步走(路径以 runner 打印的「结果目录」为准):
 1. **跑 `python "<本技能目录>/scripts/draft_rca.py" <结果目录>/rca_input.json`**:机械生成诊断骨架 `rca_draft.json`——所有"成立"节点已枚举成候选、根→叶路径与证据已预填,你**不需要也不允许**自己逐个节点翻找候选;
 2. **写一份小裁决单** `<结果目录>/decisions.json`(一个候选一条,只写判定与理由,格式见 finalize_rca.py 文件头):逐条语义复核后给 `verdict`(confirmed/probable/excluded/undetermined),疑似补 confidence/caveats/blocked_at,排除必须给 reason;
-3. **跑 `python "<本技能目录>/scripts/finalize_rca.py" <结果目录>/rca_draft.json <结果目录>/decisions.json -o <结果目录>/rca.json`**(有 `assets/tree/solutions.json` 时加 `--solutions`,再加 `--rca-input <结果目录>/rca_input.json` 抄 tree_issues)——几百行 rca.json 由代码机械拼装,**不要手写 rca.json**。合成器自带结构闸:候选漏裁决/确证路径带伤/排除无理由/有证据的塞待确认,都会响亮拒收——**报错就改裁决单重跑,合成成功即为最终交付,无需再跑校验**。
+3. **跑 `python "<本技能目录>/scripts/finalize_rca.py" <结果目录>/rca_draft.json <结果目录>/decisions.json -o <结果目录>/rca.json`**(有 `assets/tree/solutions.json` 时加 `--solutions`,再加 `--rca-input <结果目录>/rca_input.json` 抄 tree_issues)——几百行 rca.json 由代码机械拼装,**不要手写 rca.json**。合成器自带结构闸:候选漏裁决/确证路径带反证・冲突・存疑(祖先「数据不足」不拦,自动落 caveats)/排除无理由/有证据的塞待确认,都会响亮拒收——**报错就改裁决单重跑,合成成功即为最终交付,无需再跑校验**。
 **每轮运行有自己独立新建的结果目录 `result-<运行号>/`,里面只有本轮的新 `rca_input.json`**——基于它产出 `rca.json` 即可,不会有过期 rca.json 干扰,也别去同级其它 `result-*`(历史轮次)里翻旧的当本轮答案。
 
 > 结果目录已由 runner 建好——**直接往里写 `rca.json`,别再 `mkdir`**。Windows 路径用正斜杠 `/`,**勿以反斜杠结尾**(带引号路径写成 `"...\"` 会让 shell 一直等闭合引号而卡住)。
@@ -40,7 +40,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 **三条铁律(最重要)**:
 1. **只用真实事实,绝不顶替**:`actual` 逐字引用事实里的真实值;禁止引入事实里没有的数字;**条件要 X 就不能拿相关的 Y 算个数顶成"X 成立"**("有定义/有旁证"≠"成立");**精确匹配**(差一个字符即没命中)。
 2. **要 X 却拿不到 X 的实测值 → 该条件"数据不足"**,不得当成立或不成立。
-3. **四档分流**(详见 rca_rules.md):路径每个带条件节点都成立 → **确证根因**`rca_result`;有节点不成立 → **排除**;无不成立但有"数据不足"且叶子有强证据 → **疑似**`probable_causes`(带 confidence + caveat,**别凑路径、别造节点**);其余 → `undetermined`。**`rca_result` 为 `[]` 很正常(上游缺话统/信令时),强证据放疑似。**
+3. **四档分流**(详见 rca_rules.md):候选自身成立、路径无不成立/冲突 → **确证根因**`rca_result`(**祖先的「数据不足」不拦确证**——查不了是零信息,不冒充反证,大类由子节点事实自下而上蕴含;finalize 自动在 caveats 留痕);路径有节点不成立 → **排除**;有反证/冲突要权衡、或候选非叶子/子因未闭合 → **疑似**`probable_causes`(带 confidence + caveat,**别凑路径、别造节点**);其余 → `undetermined`。**`rca_result` 为 `[]` 很正常(上游缺话统/信令时),强证据放疑似。**
 
 > 聚合数据里常并存多种失败模式 → **每个有正向事实的不同叶子/失败模式都各自报一条(别过度合并、别只挑最强的一两条,尽量报全)**;确证的要完整证实、疑似的要标 caveat,去重 + 排序。**有"未覆盖取值"且树里有"非典型场景/其他"兜底节点的,归过去报一条 + 附原始特征码,别漏诊。**
 > **口径一致**:文字总结必须和落盘 `rca.json` 一致——`rca_result` 是 `[]` 就**别**说"发现 N 条根因";疑似就叫疑似。
@@ -52,7 +52,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 **别把整个 rca_input 读进上下文**(会超长报错),也别自己写脚本硬算 RCA、别绕过合成器手写 rca.json。
 
 ## 诚实性:靠合成器的结构闸,不靠事后校验
-诚实性检查已内建在 finalize_rca 的合成过程里(候选一条不许漏裁决、确证要路径全干净、排除必须给 reason、有成立事实的候选不收待确认、evidence 逐字来自骨架改不了数字)——**合成成功即交付,不需要再跑 validate_rca**。(`scripts/validate_rca.py` 保留:辩论引擎路径与人工抽查仍可用。)
+诚实性检查已内建在 finalize_rca 的合成过程里(候选一条不许漏裁决、确证闸=候选自身干净+路径无反证/冲突/存疑(祖先「数据不足」豁免并自动落 caveats 留痕)、排除必须给 reason、有成立事实的候选不收待确认、evidence 逐字来自骨架改不了数字)——**合成成功即交付,不需要再跑 validate_rca**。(`scripts/validate_rca.py` 保留:辩论引擎路径与人工抽查仍可用。)
 
 ## 输出契约
 ```json
@@ -61,7 +61,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
      "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实;没有写'事实中无此值'>",
         "how":"<怎么判的人话:事实带 explain 就逐字抄,数字不许改写>","judgment":"成立/不成立/数据不足"}]} ],
   "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low",
-     "blocked_at":"<数据不足的节点>","caveats":"<有效样本量/空值比例/语义近似>","support":"<叶子证据>","evidence_path":[…]} ],
+     "blocked_at":"<卡点:反证/冲突/未闭合的子因>","caveats":"<有效样本量/空值比例/语义近似>","support":"<叶子证据>","evidence_path":[…]} ],
   "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…(仅观察,非根因)"]} ],
   "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }
 }

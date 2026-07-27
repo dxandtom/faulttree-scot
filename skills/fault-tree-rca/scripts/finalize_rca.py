@@ -4,7 +4,9 @@
 实测病根:draft 治了"忘候选",但模型仍要手打整份 rca.json(几百行,写半天还会抄错)。
 与绑定产线同配方——模型只交判定,机械字段代码填。诚实性从"事后校验"改成"结构上做不出假的":
 - 骨架里的候选**一条都不许漏裁决**(漏了响亮报错,候选想消失必须显式给 verdict+理由);
-- verdict=confirmed 只收"路径全干净"的候选(路径带 数据不足/不成立/冲突 → 拒收,只能 probable/excluded);
+- verdict=confirmed 的闸:候选自身必须干净,路径上的 不成立/冲突/存疑 → 拒收,只能 probable/excluded;
+  **祖先的「数据不足」不拦**(零信息不冒充反证,大类语义由子节点事实自下而上蕴含)——
+  但会机械写进该条 caveats 留痕,不许无痕;
 - 有成立事实的候选 verdict=undetermined → 拒收(有证据的不收待确认);
 - verdict=excluded 必须给 reason(排除无理由拒收);
 - evidence_path/Fault_tree_path 逐字来自骨架(代码抓的原文),模型改不了数字。
@@ -63,9 +65,24 @@ def _ev_final(entry, overrides):
 
 
 def _dirty(ev):
-    """路径上"不干净"的条目(数据不足/不成立/冲突/存疑…——凡不是 成立/无独立条件 的都算)。"""
-    return [e for e in ev if not any(c in str(e.get("judgment", "")) for c in _CLEAN)
-            or "不成立" in str(e.get("judgment", ""))]
+    """确证闸的"不干净"条目:凡不是 成立/无独立条件 的都算——唯一豁免:**祖先**(路径非末位)的
+    「数据不足」(零信息,查不了不冒充反证;由 _anc_insuf 落 caveats 留痕)。存疑/语义近似在祖先也照拦
+    (那是对证据的怀疑,不是缺席)。"""
+    last = len(ev) - 1
+    bad = []
+    for i, e in enumerate(ev):
+        j = str(e.get("judgment", ""))
+        if any(c in j for c in _CLEAN) and "不成立" not in j:
+            continue
+        if i < last and j == "数据不足":
+            continue
+        bad.append(e)
+    return bad
+
+
+def _anc_insuf(ev):
+    """路径祖先里「数据不足」的条目(确证时机械写进 caveats,诚实留痕)。"""
+    return [e for e in ev[:-1] if str(e.get("judgment", "")) == "数据不足"]
 
 
 def main() -> int:
@@ -123,11 +140,20 @@ def main() -> int:
             if bad:
                 raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但路径不干净:"
                                  + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad[:3])
-                                 + " —— 确证要路径全成立;改 probable(带 blocked_at/caveats)或 excluded(带 reason)")
-            rca_result.append({"Root_cause": e.get("node"), "Fault_tree_path": path,
-                               "node_id": nid,
-                               "support": d.get("support") or e.get("support_hint") or "",
-                               "evidence_path": ev})
+                                 + " —— 确证要求:候选自身成立,路径无不成立/冲突/存疑(祖先「数据不足」除外);"
+                                   "改 probable(带 blocked_at/caveats)或 excluded(带 reason)")
+            item = {"Root_cause": e.get("node"), "Fault_tree_path": path,
+                    "node_id": nid,
+                    "support": d.get("support") or e.get("support_hint") or "",
+                    "evidence_path": ev}
+            anc = _anc_insuf(ev)
+            note = ("祖先节点自身判据未独立验证(数据不足):"
+                    + "、".join(f"{x.get('node')}({x.get('node_id')})" for x in anc[:5])
+                    + "——由本节点成立事实自下而上蕴含") if anc else ""
+            cav = ";".join(x for x in (str(d.get("caveats") or "").strip(), note) if x)
+            if cav:
+                item["caveats"] = cav
+            rca_result.append(item)
         elif v == "probable":
             probable.append({"Root_cause": e.get("node"), "Fault_tree_path": path,
                              "node_id": nid,
