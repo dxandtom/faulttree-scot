@@ -125,8 +125,18 @@ DIGEST_RULES = """\
 ⑤复杂逻辑(本端对端配对/取最新一次采集/跨命令合并)标注「复杂逻辑:建议 cross/代理口径」并一句话说明",
  "commands": ["display …", …],            // 该节点涉及的采集命令
  "regexes": ["脚本里的现成正则,原样"],     // 没有就 []
+ "sources": ["cmd", "diag"],              // 该节点该去哪些本地源绑定(见下「源路由」),拿不准就 []
  "solution_zh": "脚本 OutPut_map 里的中文 solution 文本,没有就省略此键",
  "depends": "入参出参链一句话(如:需要上家的 causation/对端设备名),没有省略"}
+
+【源路由——按脚本的取数调用标 sources,派发会据此只派对应的源,省大量无用功】
+- self.getCmd(...)(查命令回显)→ 标回显类源 **["cmd","diag"] 两个都标**(本地哪条命令进哪个文件
+  看采集,不强分,宁多勿漏);
+- self.getCfg(...)(查配置层级)→ ["config"];
+- 查告警/日志(Summary/告警名匹配类)→ ["dblg","log"] 都标;
+- self.getKpi(...) → ["kpi"];
+- 脚本查了多个类别 → 全标上;**拿不准 → 空 []**(空=回落广播,每个源都会派,不会漏)。
+- 每个节点下面给了机械预扫的调用提示,核对后照标;sources 只能取本产物真实存在的源名(见下清单)。
 
 【铁律】
 1. 只抄脚本里有的事实,不发挥:命令名/状态字/正则/阈值逐字来自脚本;
@@ -138,21 +148,50 @@ DIGEST_RULES = """\
 """
 
 
+_ACCESSOR_HINTS = (("getCmd(", "getCmd(命令回显)→ 建议 sources 含 cmd/diag"),
+                   ("getCmdStr(", "getCmdStr(补采命令话术,不算取数)"),
+                   ("getCfg(", "getCfg(配置层级)→ 建议 sources 含 config"),
+                   ("getKpi(", "getKpi → 建议 sources 含 kpi"),
+                   ("getLog(", "getLog(日志/告警)→ 建议 sources 含 dblg/log"),
+                   ("getOpr(", "getOpr(操作记录)→ 本地无此源,标注即可"),
+                   ("getCmdPre(", "getCmdPre(采集清单前置检查)→ 缺采集=数据不足口径,不算取数源"))
+
+
+def _scan_accessors(script_path: str) -> str:
+    """机械预扫脚本里的取数调用,给消化子代理当 sources 提示(只提示不定案,模型核对后标)。"""
+    try:
+        text = Path(script_path).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return "(脚本读取失败,预扫缺席)"
+    hits = [hint for key, hint in _ACCESSOR_HINTS if key in text]
+    return ";".join(hits) if hits else "(未扫到已知取数调用,sources 留空=广播)"
+
+
+def _available_indicators(out_dir: Path) -> list:
+    """本产物真实存在的源名 = scripts/<ind>_analyzer.py 的前缀(cross 除外)。"""
+    return sorted(p.name[:-len("_analyzer.py")] for p in (out_dir / "scripts").glob("*_analyzer.py")
+                  if p.name != "cross_analyzer.py" and not p.name.startswith("analyzer"))
+
+
 def build_digest_batches(aligned, nodes, out_dir: Path, batch_size: int):
     ddir = out_dir / "adopt"
     ddir.mkdir(parents=True, exist_ok=True)
     rdir = ddir / "digest_results"
     rdir.mkdir(exist_ok=True)
+    inds = _available_indicators(out_dir)
+    ind_line = ("【本产物的源清单(sources 只能从这里选)】" + "、".join(inds)) if inds else \
+        "【本产物源清单未知(scripts/ 下没找到 *_analyzer.py)——sources 一律留空,回落广播】"
     items = [a for a in aligned if a.get("script_local")]
     batches = [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
     for i, b in enumerate(batches, 1):
         sec = [f"# 脚本消化任务 · 第 {i}/{len(batches)} 批(本批 {len(b)} 个节点)",
-               f"【结果文件】{rdir / f'batch{i}.json'}", DIGEST_RULES,
+               f"【结果文件】{rdir / f'batch{i}.json'}", DIGEST_RULES, ind_line,
                "【本批节点】"]
         for a in b:
             n = nodes.get(a["node_id"], {})
             sec.append(f"--- {a['node_id']}「{n.get('name')}」 ---\n"
                        f"脚本文件:{a['script_local']}\n"
+                       f"取数调用预扫:{_scan_accessors(a['script_local'])}\n"
                        f"判据原文(仅参考,以脚本为准):\n{(n.get('condition') or '(无)')[:1500]}")
         (ddir / f"digest_task_batch{i}.txt").write_text("\n\n".join(sec) + "\n", encoding="utf-8")
     return len(batches)

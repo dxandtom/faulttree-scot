@@ -89,6 +89,7 @@ def main() -> int:
             rec = {"digest": dg,
                    "commands": [str(c) for c in (e.get("commands") or []) if str(c).strip()],
                    "regexes": [str(r) for r in (e.get("regexes") or []) if str(r).strip()],
+                   "sources": [str(s).strip() for s in (e.get("sources") or []) if str(s).strip()],
                    "source_script": (by_node.get(nid) or {}).get("script_local")
                                     or (by_node.get(nid) or {}).get("script") or ""}
             if str(e.get("depends") or "").strip():
@@ -102,6 +103,16 @@ def main() -> int:
         for p in problems:
             print(f"  - {p}")
         return 1
+
+    # sources 软校验:声明了本产物不存在的源名 → 点名(不拒收;派发端对"全对不上"的会回落广播)
+    inds = sorted(p.name[:-len("_analyzer.py")] for p in (out / "scripts").glob("*_analyzer.py")
+                  if p.name != "cross_analyzer.py" and not p.name.startswith("analyzer"))
+    if inds:
+        for nid, rec in digests.items():
+            unknown = [s for s in rec.get("sources") or [] if s not in inds]
+            if unknown:
+                print(f"⚠ {nid} 的 sources 含本产物没有的源:{unknown}(本产物只有 {inds});"
+                      "派发端会忽略未知名,全对不上则回落广播——建议修正")
 
     dst = out / "tree" / "script_digests.json"
     dst.write_text(json.dumps(digests, ensure_ascii=False, indent=2), encoding="utf-8")

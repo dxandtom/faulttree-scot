@@ -450,11 +450,28 @@ def main() -> int:
         return 0
 
     digests = load_digests(out)
-    batches = split_batches(conditions, digests, args.batch_size)
-    n_batches = len(batches)
     if digests:
         n_hit = sum(1 for c in conditions if c[0] in digests)
         print(f"脚本纪要:{len(digests)} 条(本树判据命中 {n_hit} 条)——逐条附进简报,按字符预算分批")
+
+    def routed_conditions(ind):
+        """源路由:纪要声明了 sources 的判据只进对应源的批(省无用功);没纪要/没声明/声明的源
+        与本产物源集全对不上(响亮告警过)→ 广播(进每个源的批,老行为,谁能答谁答)。"""
+        outc = []
+        for c in conditions:
+            srcs = (digests.get(c[0]) or {}).get("sources") or []
+            known = [s for s in srcs if s in inds]
+            if not known or ind in known:
+                outc.append(c)
+        return outc
+
+    if digests:
+        orphan = [c for c in conditions
+                  if (digests.get(c[0]) or {}).get("sources")
+                  and not any(s in inds for s in (digests.get(c[0]) or {}).get("sources", []))]
+        if orphan:
+            print(f"⚠ {len(orphan)} 条判据的纪要 sources 与本产物源集全对不上(将回落广播):"
+                  + "、".join(f"{c[0]}" for c in orphan[:8]))
     ddir = out / "dispatch"
     ddir.mkdir(parents=True, exist_ok=True)
 
@@ -482,10 +499,18 @@ def main() -> int:
                 f"\"<{ind}的csv>\" > \"{ov_dir / (ind + '_dataitem枚举.txt')}\"")
             continue
         enum_texts = [(f.name, f.read_text(encoding="utf-8")) for f in enum_files]
+        ind_conds = routed_conditions(ind)
+        if digests and len(ind_conds) < len(conditions):
+            print(f"  {ind}:源路由后 {len(ind_conds)}/{len(conditions)} 条(其余判据的纪要声明归别的源)")
+        if not ind_conds:
+            print(f"  {ind}:没有归本源的判据(纪要全路由走了),本源不出简报")
+            continue
+        batches = split_batches(ind_conds, digests, args.batch_size)
+        n_batches = len(batches)
         for i, batch in enumerate(batches, 1):
             p = ddir / f"{ind}_batch{i}.txt"
             rp = ddir / f"{ind}_batch{i}_result.py"
-            p.write_text(build_briefing(ind, scenario, i, n_batches, batch, len(conditions),
+            p.write_text(build_briefing(ind, scenario, i, n_batches, batch, len(ind_conds),
                                         ov_text, is_eav, enum_texts, str(rp), knowledge_text,
                                         digests=digests), encoding="utf-8")
             written.append((ind, i, len(batch), p))
