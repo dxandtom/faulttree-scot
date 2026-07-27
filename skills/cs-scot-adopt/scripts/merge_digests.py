@@ -22,23 +22,61 @@ import sys
 from pathlib import Path
 
 
+_QUOTE_HINT = ("常见病:digest/solution 文本里有**未转义的英文双引号**(如 …为\"单归\"…)把 JSON 字符串"
+               "提前截断——把正文里的 \" 改成中文「」(或转义成 \\\"),只改那一处,**别整文件重写**")
+
+
+def _snippet(body: str, pos: int, width: int = 60) -> str:
+    s = body[max(0, pos - width):pos + width].replace("\n", " ")
+    return f"…{s}…"
+
+
+def _salvage(body: str):
+    """整体解析失败后的逐条抢救:按 {"node_id" 边界切块逐条 json/ast 试——坏条目点名到节点+出错现场,
+    好条目照收。治的是"整批报废+模糊报错→弱模型开始手抄重写文件"的实测灾难。"""
+    import re
+    starts = [m.start() for m in re.finditer(r"\{\s*['\"]node_id['\"]", body)]
+    if not starts:
+        return [], ["找不到任何 {\"node_id\": …} 条目"]
+    entries, errs = [], []
+    for i, j in zip(starts, starts[1:] + [len(body)]):
+        chunk = body[i:j].strip().rstrip(",]").strip()
+        head = chunk[:60].replace("\n", " ")
+        try:
+            entries.append(json.loads(chunk))
+            continue
+        except json.JSONDecodeError as e:
+            pos = e.pos
+        try:
+            entries.append(ast.literal_eval(chunk))
+            continue
+        except (ValueError, SyntaxError):
+            pass
+        errs.append(f"条目「{head}…」在出错位置附近:{_snippet(chunk, pos)}\n      → {_QUOTE_HINT}")
+    return entries, errs
+
+
 def parse_result(p: Path):
-    """结果文件 → (entries, 有无完成标记)。json 优先,ast 兜底(弱模型爱写单引号)。"""
+    """结果文件 → (entries, 有无完成标记, 坏条目错误列表)。json 优先,ast 兜底(弱模型爱写单引号),
+    双双失败再逐条抢救(错误精确到条目+现场)。"""
     text = p.read_text(encoding="utf-8")
     has_marker = "# BATCH_COMPLETE" in text
     body = text.replace("# BATCH_COMPLETE", "").strip()
     try:
         d = json.loads(body)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as je:
         try:
             d = ast.literal_eval(body)
-        except (ValueError, SyntaxError) as e:
-            raise ValueError(f"解析失败:{e}")
+        except (ValueError, SyntaxError):
+            entries, errs = _salvage(body)
+            if not entries and not errs:
+                raise ValueError(f"解析失败:{je}(位置 {je.pos}:{_snippet(body, je.pos)})")
+            return entries, has_marker, errs
     if isinstance(d, dict):
         d = d.get("results") or d.get("digests") or [d]
     if not isinstance(d, list):
         raise ValueError("结果须是 JSON 数组(每节点一条)")
-    return d, has_marker
+    return d, has_marker, []
 
 
 def main() -> int:
@@ -68,10 +106,12 @@ def main() -> int:
     digests, problems, no_marker = {}, [], []
     for f in files:
         try:
-            entries, marker = parse_result(f)
+            entries, marker, chunk_errs = parse_result(f)
         except ValueError as e:
             problems.append(f"{f.name}:{e}")
             continue
+        for ce in chunk_errs:
+            problems.append(f"{f.name}:{ce}")
         if not marker:
             no_marker.append(f.name)
         for e in entries:

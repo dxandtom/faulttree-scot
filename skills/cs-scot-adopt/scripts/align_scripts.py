@@ -144,7 +144,15 @@ DIGEST_RULES = """\
    dblg/log 表(Summary/Content/Log)——脚本里的 DataItem 名(如 EthTrunk_Operatestatus)本地
    **没有**,纪要要落到"查哪条 display 命令的回显、看什么关键词/字段"这一层;
 3. 脚本读不懂/文件缺失的节点,digest 写"脚本不可用:<原因>",别编;
-4. 写完结果文件最后一行加一行注释 # BATCH_COMPLETE(截断自检)。
+4. **JSON 字符串里别放裸的英文双引号**:正文要引用状态字/取值时用中文「」(如 缺一侧即为「单归」),
+   别写 …为"单归"…(会把 JSON 截断,整批合并失败——实测高频翻车点);正则里的反斜杠记得双写(\\d);
+5. **regexes 只放判定用的正则**(从回显/配置里抠值、匹配故障特征的那些),**别带 Python 的 r'' 包装**
+   (裸字符串,如 "\\\\(\\\\*\\\\)");采集命令名归 commands,别混进 regexes(实测:checkCmdCollect 的命令名
+   正则被塞进 regexes,绑定照抄就错);
+6. **solution 抄脚本原文**:URL 保持纯文本,**别转成 markdown 链接**(实测被写成 [http](url) 丢了原文);
+7. **sources 只按脚本真正取数的调用标**:继承链/无关 import 不算(实测:只查配置的脚本被标了 dblg/log,
+   白白广播);
+8. 写完结果文件最后一行加一行注释 # BATCH_COMPLETE(截断自检)。
 """
 
 
