@@ -254,8 +254,9 @@ def main() -> int:
     by_norm = {}
     for nid, n in nodes.items():
         by_norm.setdefault(norm_name(n["name"]), []).append(nid)
-    aligned, un_rules = list(manual), []
-    used_nodes = set(manual_nodes)
+    aligned, un_rules = [], []                           # 自动条目在前;手工条目最后 extend 到**文件末尾**
+    used_nodes = set(manual_nodes)                       # (与「手工条目追加到数组末尾」的操作习惯一致——
+                                                         # 实测弱模型爱读文件尾核对,手工排开头会被误判"被清空")
     for r in rules:
         if (norm_name(r["name_zh"]), Path(r["script"]).name) in manual_keys:
             continue                                     # 手工已裁,不重复也不进残差
@@ -271,6 +272,7 @@ def main() -> int:
             un_rules.append({"name_zh": r["name_zh"], "script": Path(r["script"]).name,
                              "script_local": r.get("script_local"),
                              "note": "归一后无唯一匹配" if not cand else f"归一后命中 {len(cand)} 个节点:{cand}"})
+    aligned.extend(manual)
     un_nodes = [{"node_id": nid, "node": n["name"], "pass_through": n["pass_through"]}
                 for nid, n in nodes.items() if nid not in used_nodes and n["condition"]]
     dup = {}
@@ -283,13 +285,18 @@ def main() -> int:
     (ddir / "adoption_map.json").write_text(json.dumps(aligned, ensure_ascii=False, indent=2), encoding="utf-8")
     (ddir / "unmatched_rules.json").write_text(json.dumps(un_rules, ensure_ascii=False, indent=2), encoding="utf-8")
     (ddir / "unmatched_nodes.json").write_text(json.dumps(un_nodes, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 分批快照:记下"这次分批是按哪份 node→脚本 生成的"——merge_digests 据此拦"map 改了、批还是旧的"
+    snap = {str(e["node_id"]): Path(str(e.get("script_local") or e.get("script") or "")).name
+            for e in aligned if e.get("script_local")}
+    (ddir / "digest_manifest.json").write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
     nb = build_digest_batches(aligned, nodes, out, a.digest_batch_size)
 
     print(f"对齐:{len(aligned)} 对(自动 {len(aligned) - len(manual)} + 手工保留 {len(manual)};"
           f"规则共 {len(rules)} 条、树上带判据节点共 "
           f"{sum(1 for n in nodes.values() if n['condition'])} 个)→ {ddir / 'adoption_map.json'}")
-    if bad_manual:
-        print(f"⚠ 手工条目被丢弃 {len(bad_manual)} 条(node_id 不在树上):{'; '.join(bad_manual[:5])}")
+    if manual:
+        print(f"  (手工条目 {len(manual)} 条已保留、排在文件**末尾**;以本行统计为准,别再读文件肉眼核对。"
+              "改过 adoption_map 后**必须重跑本脚本重新分批**再消化——消化批内容按 map 生成,map 变批不变=喂错脚本)")
     if multi:
         print(f"ℹ 同节点配了多个脚本 {len(multi)} 处(合法;消化后 merge 会合并纪要):"
               + "; ".join(f"{k}←{v}" for k, v in list(multi.items())[:5]))

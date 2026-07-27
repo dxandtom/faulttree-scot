@@ -33,9 +33,12 @@ description: 业务脚本收编:故障树平台上每个节点已有验证过的
    `digest_task_batch<N>.txt`。
 2. **残差裁决(模型,量小)**:逐条看 `unmatched_rules.json`——确属某个树节点的
    (如"M-LAG场景的限制"↔"M-LAG场景限制"),把条目**补进 adoption_map.json**
-   (照已有条目格式,`"auto": false` 并加一句 `mapping_reason`;建议**追加到数组末尾**,别动已有条目);
-   确实无对应节点的不动。补完**重跑第 1 步命令**——`auto:false` 的手工条目**重跑会保留**
-   (并从残差清单里扣掉),消化分批会把手工条目一起排进去;残差裁决只做一轮,别循环。
+   (照已有条目格式,`"auto": false` 并加一句 `mapping_reason`;**追加到数组末尾,只增量改,
+   禁止整文件重写**);确实无对应节点的不动。补完**重跑第 1 步命令**——`auto:false` 的手工条目
+   **重跑会保留**(并从残差清单里扣掉),重跑后手工条目排在文件**末尾**、自动条目在前,
+   **以打印的统计行为准,别再读文件肉眼核对**;残差裁决只做一轮,别循环。
+   **凡是改过 adoption_map(补条目/换脚本/删条目),都必须重跑第 1 步重新分批再消化**——
+   消化批的内容是按 map 生成的,map 变了批不变=把旧脚本喂给子代理(第 4 步会按分批快照拦下来)。
 3. **消化(模型,分批派发)**:按 `digest_task_batch<N>.txt` 逐批派子代理
    (**一次最多并行 5 个**),每个子代理读本批节点的脚本文件,按简报里的模板产出纪要
    JSON 数组,写到 `<OUT>/adopt/digest_results/batch<N>.json`(末尾带 `# BATCH_COMPLETE`)。
@@ -45,8 +48,10 @@ description: 业务脚本收编:故障树平台上每个节点已有验证过的
    ```
    python "<本目录>/scripts/merge_digests.py" --out "<OUT>"
    ```
-   编造节点/空纪要/截断响亮拒收;合并为 `<OUT>/tree/script_digests.json`;脚本里的
-   solution 文本并进 `tree/solutions.json`(已有不覆盖);对齐了脚本却没交纪要的点名。
+   编造节点/空纪要/截断响亮拒收;**消化批过期也拒收**(按分批快照 `digest_manifest.json` 校验:
+   某节点分批时的脚本 ≠ 当前 map 里的脚本 → 点名"map 改过、批是旧的",重跑第 1 步重新分批再消化);
+   合并为 `<OUT>/tree/script_digests.json`;脚本里的 solution 文本并进 `tree/solutions.json`
+   (已有不覆盖);对齐了脚本却没交纪要的点名。
 
 完成后**回 cs-scot-generate 步骤 3**(make_dispatch 派绑定):简报会把纪要逐条附在对应判据下
 (◆【脚本纪要】,并声明"规格以纪要为准"),批次按字符预算自动变小,不用手调 batch-size。
