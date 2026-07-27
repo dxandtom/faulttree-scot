@@ -192,13 +192,16 @@ def main() -> int:
                     e["condition_text"] = nd.get("condition")
                     if ind != "cross":
                         e["source"] = ind
-                    elif not e.get("source"):
-                        all_warns.append(f"  ⚠ [{tag}] 「{nid}」cross 条目缺 source(最终查询落点的真实源名)"
-                                         "——运行时会报「无数据源 cross」,补上")
+                    elif e.get("class") and not e.get("source"):   # decision 占位本就不带 source(规约示例即三字段),只查真绑定
+                        all_warns.append(f"  ⚠ [{tag}] 「{nid}」cross 真绑定缺顶层 source(最终查询落点的真实源名;"
+                                         "D 组合写第一个 sub 的源)——运行时按顶层 source 取数,缺了整条数据不足,补上")
                 elif nid and tree_nodes:
                     all_warns.append(f"  ⚠ [{tag}] 「{nid}」不在树里(node_id 抄错?)——该条挂不回任何节点")
                 if e.get("decision") == "insufficient_data":
                     n_dec += 1
+                    if ind == "cross" and not str(e.get("mapping_reason") or "").strip():
+                        all_warns.append(f"  ⚠ [{tag}] 「{nid}」decision 占位没写 mapping_reason——"
+                                         "cross 规约:绑不了必须写清缺哪一跳,空理由等于没表态")
             dup = 0
             for e in entries:
                 key = repr(sorted(e.items(), key=lambda kv: kv[0]))
@@ -223,7 +226,9 @@ def main() -> int:
               + (f"(缺 {len(plan[ind]) - len(got)} 批,到货后重跑本脚本即可)" if len(got) < len(plan[ind]) else ""))
         # 灌水/滥标体检(软点名):decision 占比畸高=对全树逐条表态(规约明令"不归本源答的整条不写",
         # 实测 log 源 92 条全 decision 把闸门糊瞎);cross_source 占比畸高=把"不归我答"误标跨源。
-        if len(merged) >= 10 and n_dec > len(merged) * 0.5:
+        # cross 批不适用:CROSS_RULES 要求每条候选都表态,decision 占位是义务不是灌水(实测 8/13 占位
+        # 被误点名,弱模型照"删多余占位"的建议琢磨删条目)——cross 的体检是上面的"占位必须带理由"。
+        if ind != "cross" and len(merged) >= 10 and n_dec > len(merged) * 0.5:
             all_warns.append(f"  ⚠ [{ind}] 灌水嫌疑:{n_dec}/{len(merged)} 条是 decision 占位——"
                              "「明显不归本源答的判据整条不写」,占位只给「确属本源该答却答不了」的;复核并删多余占位")
         if n_marks >= 10 and n_marks > (len(merged) + n_marks) * 0.5:
