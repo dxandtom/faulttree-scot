@@ -130,7 +130,12 @@ CROSS_RULES = """【跨源绑定规约——逐条遵守】
    (同一张表里靠标记分侧的,用普通 P:side_column+peer_marker,不用 pair_from。)
 7. filter 子句除 equals/contains 还认 **excludes**(不含才保留,如挑「Object 不带 * 」的对端行)。
 8. 诚实:参数抽不到/歧义、对端查不到、源没提供 → 内核自动报数据不足,**别**为了"绑上"硬凑;
-   mapping_reason 写实(链条每一跳从哪来、到哪去)。"""
+   mapping_reason 写实(链条每一跳从哪来、到哪去)。
+9. **「上游传参/平台脚本入参链/平台JSON」不是"绑不了"的理由**:平台的"上游出参"落到本地,就是
+   某条 display 回显或配置/EAV 表里的字段——把链条写成 param_from(先查A抽参数、代入B查)或
+   pair_from(两侧比对);带◆【脚本纪要】的候选以纪要为规格。真绑不了只有一种:链条某一跳要的
+   数据本场景**没采集**,mapping_reason 写清缺哪一跳(实测:拿"依赖上游传参"投降的判词会被冻进
+   产物,数据齐了也醒不来)。"""
 
 CROSS_OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
 把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
@@ -275,6 +280,20 @@ def load_digests(out: Path) -> dict:
         return {}
 
 
+def digest_block(nid: str, dg: dict) -> str:
+    """一条纪要 → 简报里的 ◆ 块。单源批与 --cross 补绑简报共用同一份形态(含"依赖仅供理解"的
+    防投降括注),防两处走形。"""
+    extra = ""
+    if dg.get("regexes"):
+        extra += "\n现成正则(原样可用):" + " ; ".join(dg["regexes"][:8])
+    if dg.get("depends"):
+        extra += ("\n依赖(平台入参链,仅供理解定位字段):" + dg["depends"]
+                  + "\n(平台靠上游传参,本地绑定**直接查对应命令回显/配置字段**;不许以"
+                    "「需上游传参/需平台JSON/DataItem 本地没有」为由写 insufficient_data——"
+                    "实测这类投降判词会被冻进产物,换了齐全数据它也醒不来)")
+    return f"◆【脚本纪要 [{nid}]|平台已验证逻辑,规格以此为准】\n{dg.get('digest', '')[:2000]}{extra}"
+
+
 def split_batches(conditions, digests: dict, batch_size: int, char_budget: int = 30000):
     """切批:无纪要时按条数(老行为);有纪要时再叠一个字符预算——带纪要的判据体积大,
     固定条数会把简报撑爆,按「判据+纪要」总字符封顶自动少装几条。"""
@@ -323,15 +342,7 @@ def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_te
         dg = (digests or {}).get(nid)
         if dg:
             has_digest = True
-            extra = ""
-            if dg.get("regexes"):
-                extra += "\n现成正则(原样可用):" + " ; ".join(dg["regexes"][:8])
-            if dg.get("depends"):
-                extra += ("\n依赖(平台入参链,仅供理解定位字段):" + dg["depends"]
-                          + "\n(平台靠上游传参,本地绑定**直接查对应命令回显/配置字段**;不许以"
-                            "「需上游传参/需平台JSON/DataItem 本地没有」为由写 insufficient_data——"
-                            "实测这类投降判词会被冻进产物,换了齐全数据它也醒不来)")
-            lines.append(f"◆【脚本纪要 [{nid}]|平台已验证逻辑,规格以此为准】\n{dg.get('digest', '')[:2000]}{extra}")
+            lines.append(digest_block(nid, dg))
     if has_digest:
         lines.insert(1, "(注:◆【脚本纪要 [nN]】块头的 [nN] 就是它所属的判据号,只作用于同号判据。纪要提炼自"
                         "平台上验证过的处理脚本——判据文本再含糊也以纪要为准:命令/关键词/正则/极性照纪要绑,"
@@ -437,6 +448,10 @@ def main() -> int:
             for f in find_enums(ov_dir, ind):
                 sec.append(f"【{ind} 源数据词汇——枚举清单原文:{f.name}】\n"
                            + f.read_text(encoding="utf-8").strip())
+        digests = load_digests(out)
+        if digests:
+            n_hit = sum(1 for c in cands if str(c.get("node_id")) in digests)
+            print(f"脚本纪要:跨源候选命中 {n_hit}/{len(cands)} 条——◆块已附进补绑简报(规格以纪要为准)")
         lines = [f"【候选判据清单(共 {len(cands)} 条;condition_text 必须逐字取自这里)】"]
         for c in cands:
             nid = c.get("node_id")
@@ -445,6 +460,9 @@ def main() -> int:
             srcs = "、".join(c.get("sources") or [])
             reasons = ";".join(c.get("reasons") or [])
             lines.append(f"\n[{nid}] {name}(由 {srcs} 源标记" + (f":{reasons}" if reasons else "") + f")\n{cond}")
+            dg = digests.get(str(nid))
+            if dg:
+                lines.append(digest_block(str(nid), dg))
         sec.append("\n".join(lines))
         sec.append(CROSS_OUTPUT_FORMAT)
         ddir.mkdir(parents=True, exist_ok=True)

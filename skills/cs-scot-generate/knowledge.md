@@ -54,6 +54,17 @@ D AND [前置条件…, D OR [absent 缺失分支, P pair_from 值比对分支]]
                  "filter":{"column":"CmdName","contains":"display stp v-stp"},
                  "extract":{"regex":"Bridge Mac\\s*:\\s*Config=[0-9a-fA-F-]+\\s*/\\s*Active=([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})"}}}}]}]}
 
+### M-LAG端口信息(上游传参)的本地查法
+阶段:绑定
+适用:M-LAG、端口、LACP、单归
+平台脚本里的 mlagPort/PortStateL/PortNameL/MlagIDL 等「上游传参」,本地**不需要任何上游**:
+- cmd 源:display dfs-group 1 m-lag / display dfs-group node 的回显里有端口名、端口状态(Port State)
+  等字段——filter 选中对应 CmdName 的回显行,再从内容里抠字段;
+- diag 源(EAV 窄表):DataItem 列的 MLAG_PortState/MLAG_ID/MLAG_NodeId 等指标(**以本产物
+  diag 枚举清单里真实出现的名字为准**),本端对端按「M-LAG场景对端查询方法」的口径区分。
+两端比对/接力链写 param_from/pair_from(跨源,进 cross_analyzer);别以「需上游传参/需平台JSON」
+为由写 insufficient_data。
+
 ### M-LAG场景对端查询方法
 适用:M-LAG
 在 diag 数据中,筛选「DataItem」列为「MLAG_NodeId」的数据,当结果为两条时即可查询到本端与对端的
