@@ -961,8 +961,10 @@ def evaluate_binding(b, sources, source_name, _resolved=False):
             return _insuf(cls, f"绑定带不认识的字段 {sorted(unknown)}({cls} 类只认 "
                                f"{sorted(_CLASS_KEYS[cls])})——野字段会被静默忽略、"
                                "算出语义错误的确定结论,拒收;修字段名或换类别")
-    if cls == "S" and b.get("param_from"):
-        return _insuf("S", "S 类不支持 param_from——参数直接写进 args,取其他源在函数里用 load('<源名>')")
+    if cls == "S":                                       # 代码类:在 cross 里跑,全部源经 load 可取;
+        if b.get("param_from"):                          # source 可选=主表便利(缺省 table=None 全靠 load)
+            return _insuf("S", "S 类不支持 param_from——参数直接写进 args,取源在函数里用 load('<源名>')")
+        return k_script(sources.get(source_name), b, sources)
     if b.get("param_from"):                              # 参数化查询:先抽参数、再代入(D/P/A/C/G 通吃)
         return _eval_with_params(b, sources, source_name)
     if not _resolved:
@@ -984,8 +986,6 @@ def evaluate_binding(b, sources, source_name, _resolved=False):
     if not table[1]:                                     # 空表(仅表头、0 行):没数据 ≠ 排除——
         return _insuf(cls or "?",                        # 别让 matched=0/0 冒充"确定不成立"
                       "数据源为空表(仅表头、0 行数据),无从判定——不当'不成立'处理")
-    if cls == "S":                                       # 代码类:函数自己选行抽值,load 可取其他源
-        return k_script(table, b, sources)
     fn = _KERNELS.get(cls)
     if not fn:
         if cls in _ARCHIVED:

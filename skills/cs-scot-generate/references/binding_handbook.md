@@ -314,7 +314,7 @@ python "<generate技能>/scripts/validate_conditions.py" out.json
 
 **它是什么**:DSL 表达不了的判定逻辑(两值相加比阈值、"取最新一次采集再判"、回显段落状态机、任意跨源组合),用一小段 Python 实现,仍然产出与其他类别**同形的事实**。**只给人手调优用**——生成期的模型子代理不知道也不许用这类(合并器会机械拒收模型产出的 S 条目)。只支持 Python,不支持 bash。
 
-三个落点先记住:**预制函数库**在 `scripts/custom_lib.py`(已随产物分发,自带 `sum_extracts_vs_threshold`/`latest_by_seq_then_match` 两个函数和 `pick_values` 工具);**单节点脚本**放 `scripts/custom/` 目录;**要动多个源的 S 绑定写进「绑定:cross」列**——单源列里的 S 只拿得到本源的表(load 其他源会是 None)。
+三个落点先记住:**S 绑定统一写在「绑定:cross」列**(导入校验会拦别处的)——cross 执行时**全部数据源都在**,脚本里 `load("config")`/`load("log")`/`load("diag")` 想取哪张表取哪张,这正是"脚本入参=三张表"的形态;**预制函数库**在 `scripts/custom_lib.py`(已随产物分发,自带 `sum_extracts_vs_threshold`/`latest_by_seq_then_match` 两个函数和 `pick_values` 工具);**单节点脚本**放 `scripts/custom/` 目录。`source` 字段对 S 是**可选**的:声明了,那张表会作为 `table` 参数递给你(单表脚本的便利);不声明,`table` 为 None,全部用 `load` 取。
 
 ### 绑定怎么写(两种形态)
 

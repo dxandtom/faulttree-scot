@@ -27,6 +27,8 @@ def pick_values(table, spec):
     """工具:按取值子句 {filter?, column, extract?} 从表抽出值列表(复用内核的 filter/extract 语义;
     抽不到返回 [])。spec 与绑定手册第二节的取值子句同形。"""
     import condition_kernels as _k
+    if not table:
+        return []                                        # 没声明 source(table=None)/该源没喂:抽不到
     header, rows = table
     flt = spec.get("filter")
     if flt:
@@ -93,6 +95,9 @@ def latest_by_seq_then_match(table, args, load):
     args: {"filter": 选行(可选,同 filter 子句), "seq_column": "CmdSeq",
            "column": "DataValue", "contains": "Down"}"""
     import condition_kernels as _k
+    if not table:
+        return {"status": "insufficient_data",
+                "reason": "本函数要主表:绑定里声明 source=<要判的源>(或该源本轮没喂数据)"}
     header, rows = table
     flt = args.get("filter")
     if flt:
