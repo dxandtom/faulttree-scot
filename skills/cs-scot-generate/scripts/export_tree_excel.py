@@ -88,13 +88,20 @@ def export(out_dir: Path) -> Path:
         for d in dropped:
             print(f"  - {d}", file=sys.stderr)
 
-    # DFS(父先子后)+ 层级列范围
+    # DFS(父先子后)+ 层级列范围。
+    # 列位用**相对深度**(根=L1,由 parent 链推导),不用节点存的母表层级号——多页签合并的树
+    # 层级号可能内部不自洽(父子同号/兄弟异号),按它摆列会同列互相覆盖、导入按列重建父链必炸
+    # (实测:零改动纯往返报 73 处"上级和上文对不上"+83 个根)。深度永远自洽。
     order, stack = [], [root]
     while stack:
         nid = stack.pop()
         order.append(nid)
         stack.extend(reversed(nodes[nid].get("children") or []))
-    levels = sorted({nodes[n].get("level") or 1 for n in order})
+    depth = {}
+    for nid in order:                                    # order 父先子后,父的深度必已算出
+        p = nodes[nid].get("parent")
+        depth[nid] = 1 if not p else depth[p] + 1
+    levels = sorted({depth[n] for n in order})
 
     # 判据以 condition 为准:能由 data_source 逐字拼回 condition 的按标签拆列;拼不回的走「原文」列
     tags, need_raw, cond_cells = [], False, {}
@@ -141,7 +148,7 @@ def export(out_dir: Path) -> Path:
         row = [""] * len(header)
         row[0] = nid
         for anc in path_ids(nid):
-            li = lcol.get(nodes[anc].get("level") or 1)
+            li = lcol.get(depth[anc])
             if li:
                 row[li - 1] = nodes[anc].get("name") or ""
         kind_ds = cond_cells.get(nid)

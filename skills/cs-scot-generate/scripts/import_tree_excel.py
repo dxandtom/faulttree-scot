@@ -292,9 +292,12 @@ def main() -> None:
                       "code": (old_nodes.get(nid) or {}).get("code") if nid else None,
                       "children": [], "condition": condition,
                       "combine": _infer_combine(condition), "data_source": data_source,
-                      "pass_through": (not condition) or lvl <= 2 or parent is None,
-                      "sheets": ["tuning"], "meta": meta}   # 高层不判断规则:L1/L2 与场景根(parent 为空)的
-                                                            # 判据只供人读,不阻断、不参与绑定(与 v2 一致)
+                      "pass_through": (not condition) or (
+                          old_nodes[nid].get("pass_through", False) if nid in old_nodes
+                          else parent is None),
+                      "sheets": ["tuning"], "meta": meta}
+        # pass_through:既有节点**保留原值**(建树时按母表层级定的"高层不判断"标记,调优表的列号
+        # 是相对深度、语义已不同,按列号重算会误伤);新增节点默认只豁免根,带判据的新行照常参与绑定。
         order.append(key)
         if parent:
             nodes[parent]["children"].append(key)
