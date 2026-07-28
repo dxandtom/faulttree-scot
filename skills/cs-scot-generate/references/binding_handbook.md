@@ -24,7 +24,7 @@ source(在哪个数据源查)→ filter(选哪些行)→ column(看哪一格)
 - `"count_rows"`:**逐行**比,数满足的行数,可配 `require`(至少几行才算成立,默认 1)。判据是"存在越线/出现 N 次"就用它,**首选**;
 - `"aggregate"`:全列**先聚合再比**,配 `agg`(mean/min/max/sum/first/last)。只在判"整体水平"时用;注意 mean 无加权。
 
-可选:`filter`(选行)、`extract`(格内抽数,千分位如 `1,234` 自动归一)、`transforms`。
+可选:`filter`(选行)、`extract`(格内抽数,千分位如 `1,234` 自动归一)、`transforms`(比较前先对数值做变换,列表按序执行:`"scale:<系数>"` 乘系数(如百分数换算写 `scale:0.01`)、`"abs"` 取绝对值、`"neg"` 取负、`"round:<位数>"` 四舍五入、`"log10"`(≤0 无对数按缺测处理,不编值);用不到就别写)。
 
 ```json
 {"node_id":"n9","class":"A","column":"CmdResult",
@@ -85,7 +85,14 @@ C 和 G 是**同一个内核的两个标签**(习惯:C=在枚举/取值列上对
 
 **什么时候用**:本端/对端(或两处配置)一致性——"两侧 SystemID 是否一致"。
 
-**形态一(同一张表里分侧)**:`side_column`(分侧列,带 `*` 标记的=本端,标记可用 `peer_marker` 改)+ `value_column`(取值列)+ `fault_when`("not_equal"=不一致即故障)。
+**形态一(同一张表里分侧)**:`side_column`(分侧列,含 `*` 标记的行=本端,标记字符可用 `peer_marker` 改)+ `value_column`(取值列)。
+
+**`fault_when` 只有两个取值**,决定"比出什么结果算故障成立":
+
+- `"not_equal"`(**默认**):两侧**不相等**=故障成立(一致性类判据,"两端 X 必须一致"用它);
+- `"equal"`:两侧**相等**=故障成立(反向,少见——判据是"两端 X 不应相同"时才用)。
+
+**内置守卫**(机器自动执行,不用你操心):任一侧查不到行/抽不到值 → **数据不足**("查不到对端"不是"不成立");一侧抽出多个不同值 → 数据不足(歧义,附样例让人看)。
 
 ```json
 {"node_id":"n25","class":"P","side_column":"Object","value_column":"DataValue",
@@ -157,10 +164,13 @@ C 和 G 是**同一个内核的两个标签**(习惯:C=在枚举/取值列上对
 
 ### 去哪写
 
-跨源绑定统一放在 **`scripts/cross_analyzer.py` 的 `CONDITIONS` 列表**里——**不在调优表里**(调优表只有各单源的绑定列;打包时会打印"以下节点另有跨源绑定,工程侧维护"提醒你哪些节点要去那儿看)。它有两条产生途径:
+跨源绑定统一落在 **`scripts/cross_analyzer.py` 的 `CONDITIONS` 列表**里,有三条途径进出:
 
+- **调优表(推荐人工路径)**:调优表最后有一列「**绑定:cross**」——导出时把 cross_analyzer 里的绑定带出来,你在 Excel 里改,导入时机械写回 cross_analyzer。**每条必须带 `source`=最终查询落点的真实源名**(导入校验会拦没写的);
 - **生成期自动**:单源绑定发现跨源判据 → 写 `decision:"cross_source"` 标记 → merge 汇总候选 → `make_dispatch --cross` 生成补绑简报 → 子代理写好 → merge 合并进 cross_analyzer;
-- **人工直改**:直接编辑 cross_analyzer.py 的 CONDITIONS(条目格式与本手册完全相同),改完单跑验证——**要把用到的所有源都喂上**:
+- **直改文件**:直接编辑 cross_analyzer.py 的 CONDITIONS(条目格式与本手册完全相同)。注意:直改后若又用调优表导入且表里有「绑定:cross」列,以表为准。
+
+改完单跑验证——**要把用到的所有源都喂上**:
 
 ```bash
 python "<产物>/scripts/cross_analyzer.py" -o out.json --data cmd="<cmd文件>" --data config="<config文件>" --data diag="<diag文件>"
@@ -174,9 +184,32 @@ python "<产物>/scripts/cross_analyzer.py" -o out.json --data cmd="<cmd文件>"
 
 ### 三种形态(可嵌套混用)
 
-**形态 1|param_from 接力**("先查 A 拿值,代入 B 再查",完整例子见套路 7):先按取值子句抽参数,`"@参数名"` 整串代入主查询(filter 值、contains/equals/regex 目标里都可用)再执行。参数按声明顺序解析、后面的可引用前面的=多跳;默认要求唯一值(多值=歧义→数据不足);"每个 X 都查"加 `"expand":"all"/"any"`。
+**形态 1|param_from 接力**("先查 A 拿值,代入 B 再查"):
 
-**形态 2|pair_from 两侧比对**(两侧在不同命令/不同源,完整例子见第一节 P 类形态二):local/peer 各自"选行→取列→抽值",再按 `fault_when` 比。
+```json
+{"node_id":"n4","class":"G","source":"config","column":"level2",
+ "contains":["mode lacp-static"],"absent":true,
+ "filter":{"column":"level1","equals":"@plink"},
+ "param_from":{"plink":{"source":"cmd","column":"CmdResult",
+               "filter":{"column":"CmdName","contains":"display dfs-group 1 peer-link"},
+               "extract":{"kv":"Port Name"}}},
+ "mapping_reason":"第1跳:cmd 回显抽 peer-link 口名;第2跳:该接口配置块缺 mode lacp-static 即故障"}
+```
+
+机器先按取值子句解析参数(此例从 cmd 抽出如 `Eth-Trunk0`),把 `"@plink"` **整串代入**主查询(filter 值、contains/equals/regex 目标里都可用)再到 config 执行。参数按声明顺序解析、后面的可引用前面的=多跳;默认要求**唯一值**(抽出多个=歧义→数据不足);判据要"**每个** X 都查"才加 `"expand":"all"`(全部满足)或 `"any"`(任一满足)。
+
+**形态 2|pair_from 两侧比对**(两侧在不同命令/不同源):local/peer 各自"选行→取列→抽值",再按 `fault_when` 比(fault_when 的取值与守卫见第一节 P 类):
+
+```json
+{"node_id":"n17b","class":"P","source":"config","fault_when":"not_equal","pair_from":{
+   "local":{"source":"config","column":"level1",
+            "filter":{"column":"level1","contains":"stp bridge-address"},
+            "extract":{"regex":"stp bridge-address ([0-9a-fA-F-]+)"}},
+   "peer":{"source":"cmd","column":"CmdResult",
+           "filter":{"column":"CmdName","contains":"display stp v-stp"},
+           "extract":{"regex":"Active=([0-9a-fA-F-]+)"}}},
+ "mapping_reason":"config 配的桥MAC 必须等于回显里的 Active 值,不等=故障"}
+```
 
 **形态 3|D 跨源组合**(多要件分散在多个源):sub 各带 source,AND/OR 由内核合;还能把前两种形态嵌进 sub。判据"①配置有 v-stp ②回显含根桥标记 ③配置有桥MAC 且 ④等于回显 Active 值"(故障=①②成立且(③缺失 或 ③≠④))的完整写法:
 
@@ -227,21 +260,9 @@ python "<产物>/scripts/cross_analyzer.py" -o out.json --data cmd="<cmd文件>"
 
 常见错法:`"contains":["-"]` 在整坨文本里裸捞单字符——'-' 到处都是,必假阳。**判"某字段的值"要先 extract 抽值再 equals。**
 
-**套路 6|两侧一致**:P(同表用 side_column,跨命令/跨源用 pair_from,第一节 P 两例)。
+**套路 6|两侧一致**:P 类——同表分侧用 side_column(第一节 P 类形态一例),跨命令/跨源用 pair_from(第三节形态 2 例)。
 
-**套路 7|先查 A 拿值、代入 B 再查(传参链,写在 cross_analyzer)**:
-
-```json
-{"node_id":"n4","class":"G","source":"config","column":"level2",
- "contains":["mode lacp-static"],"absent":true,
- "filter":{"column":"level1","equals":"@plink"},
- "param_from":{"plink":{"source":"cmd","column":"CmdResult",
-               "filter":{"column":"CmdName","contains":"display dfs-group 1 peer-link"},
-               "extract":{"kv":"Port Name"}}},
- "mapping_reason":"第1跳:回显抽 peer-link 口名;第2跳:该接口配置块缺 mode lacp-static 即故障"}
-```
-
-机制:先按取值子句解析参数(如抽出 Eth-Trunk0),把 `"@plink"` **整串代入**主查询(filter 值/判定目标里都可用)再执行。参数按声明顺序解析、后面的可引用前面的=多跳;默认要求**唯一值**(抽出多个=歧义→数据不足);判据要"**每个** X 都查"才加 `"expand":"all"`(全部满足)或 `"any"`(任一满足)。参数抽不到/对端查不到=数据不足,机器自动如实报。
+**套路 7|先查 A 拿值、代入 B 再查**:param_from 传参链,写在 cross(第三节形态 1 例)。
 
 **套路 8|真判不了**:decision:insufficient_data + mapping_reason 写清缺什么(第一节 decision 例)。这是诚实,不是失败。
 
@@ -285,3 +306,119 @@ python "<generate技能>/scripts/validate_conditions.py" out.json
 ```
 
 完整契约见 `scripts/condition_binding_schema.md`(字段全集与极性铁律,以它为准)。
+
+---
+
+## 七、S 类(代码类)——预告:规范已定,内核暂未上线
+
+> **状态**:本节是提前公布的规范,让要准备脚本的人**先照规矩写**;内核落地前,写了 S 绑定也不会执行。上线后本节转正。
+
+**它是什么**:DSL 表达不了的判定逻辑(两值相加比阈值、"取最新一次采集再判"、回显段落状态机、任意跨源组合),用一小段 Python 实现,仍然产出与其他类别**同形的事实**。**只给人手调优用**——生成期的模型子代理不知道也不许用这类(合并器会机械拒收模型产出的 S 条目)。只支持 Python,不支持 bash。
+
+### 绑定怎么写(两种形态)
+
+形态一:引用**预制函数库**(`scripts/custom_lib.py` 里注册好的函数):
+
+```json
+{"node_id":"n30","class":"S","source":"cmd",
+ "func":"sum_extracts_vs_threshold",
+ "args":{"a":{"filter":{"column":"CmdName","contains":"display bgp routing-table"},
+              "extract":{"kv":"Total Number of Routes"}},
+         "b":{"filter":{"column":"CmdName","contains":"display ip routing-table"},
+              "extract":{"kv":"Total Number of Routes"}},
+         "op":">=","threshold":60000},
+ "mapping_reason":"DSL 无加法:BGP+ASBR 路由数相加比阈值(人工调优)"}
+```
+
+形态二:**一节点一个 py 文件**(放 `scripts/custom/` 目录,随产物打包):
+
+```json
+{"node_id":"n31","class":"S","source":"diag",
+ "file":"custom/n31_mlag_port_check.py",
+ "args":{"item":"MLAG_PortState","bad_value":"Down"},
+ "mapping_reason":"多步判定见文件内注释;args 里是可调参数"}
+```
+
+### 脚本怎么写(入参/出参契约)
+
+统一入口签名——库函数和单文件都一样:
+
+```python
+def check(table, args, load):
+    """table = 绑定 source 那个源的表,形态是 (header, rows):
+             header = ["CmdName", "CmdResult", ...]  列名列表
+             rows   = [{"CmdName": "...", "CmdResult": "..."}, ...]  一行一个 dict
+       args  = 绑定 JSON 里的 args 原样传入(dict)
+       load  = 函数:load("config") 取其他源的表(同样 (header, rows));该源没喂返回 None
+       返回:与内核同形的事实 dict(见下),别 print、别写文件、别自己去读 excel。"""
+```
+
+返回值二选一(**必须**是这两种形状之一,wrapper 会校验):
+
+```python
+# 判定得出结论(成立/不成立):
+return {"status": "ok", "predicate_satisfied": True,       # True=判据成立(故障), False=不成立
+        "value": 61234, "op": ">=", "threshold": 60000,    # 证据字段随意加,人要能复算
+        "explain": "BGP(35010)+ASBR(26224)=61234 >= 60000 → 成立"}   # 一句人话,报告直接展示
+
+# 查不了(数据里没有/抽不到):
+return {"status": "insufficient_data", "reason": "display bgp 未采集,抽不到路由总数"}
+```
+
+**兜底规矩(wrapper 自动执行)**:函数抛异常 → 一律记为数据不足(绝不冒充"不成立");返回形状不对 → 拒收;函数名/文件找不到 → 数据不足并列出可用清单。所以脚本里**不用写 try/except 包一切**,专心写判定逻辑即可。
+
+### 预制函数库长什么样(scripts/custom_lib.py)
+
+```python
+"""预制 S 类函数库:每个函数用 @register 挂名,绑定 JSON 用 func 引用。"""
+REGISTRY = {}
+
+def register(name):
+    def deco(fn):
+        REGISTRY[name] = fn
+        return fn
+    return deco
+
+@register("sum_extracts_vs_threshold")
+def sum_extracts_vs_threshold(table, args, load):
+    """两处各抽一个数,相加比阈值。args: {"a": 取值子句, "b": 取值子句, "op": ">=", "threshold": N}"""
+    header, rows = table
+    nums = []
+    for key in ("a", "b"):
+        spec = args[key]
+        vals = _pick_values(rows, spec)          # 按 filter 选行 + extract 抽值(工具函数)
+        if not vals:
+            return {"status": "insufficient_data",
+                    "reason": f"args[{key}] 一个值也没抽到(filter/extract 与数据对不上)"}
+        nums.append(float(vals[0].replace(",", "")))
+    total, thr = sum(nums), float(args["threshold"])
+    ok = {"<": total < thr, "<=": total <= thr, ">": total > thr,
+          ">=": total >= thr, "==": total == thr}[args.get("op", ">=")]
+    return {"status": "ok", "predicate_satisfied": ok, "value": total,
+            "op": args.get("op", ">="), "threshold": thr,
+            "explain": f"{nums[0]:g}+{nums[1]:g}={total:g} {args.get('op', '>=')} {thr:g} → "
+                       f"{'成立' if ok else '不成立'}"}
+```
+
+### 一节点一文件长什么样(scripts/custom/n31_mlag_port_check.py)
+
+```python
+"""n31:M-LAG 端口状态检查(示例)。判定:diag 里 MLAG_PortState 最新一轮采集出现 Down 即故障。
+args: {"item": "MLAG_PortState", "bad_value": "Down"}"""
+
+def check(table, args, load):
+    header, rows = table
+    hits = [r for r in rows if r.get("DataItem") == args["item"]]
+    if not hits:
+        return {"status": "insufficient_data",
+                "reason": f"DataItem={args['item']} 一行都没有(该指标未采集)"}
+    latest_seq = max(r.get("CmdSeq", "") for r in hits)          # 只看最新一轮采集
+    latest = [r for r in hits if r.get("CmdSeq", "") == latest_seq]
+    bad = [r for r in latest if args["bad_value"] in str(r.get("DataValue", ""))]
+    return {"status": "ok", "predicate_satisfied": bool(bad),
+            "matched": len(bad), "total": len(latest),
+            "explain": f"最新一轮(CmdSeq={latest_seq}){args['item']} 共 {len(latest)} 行,"
+                       f"值含「{args['bad_value']}」的 {len(bad)} 行 → {'成立' if bad else '不成立'}"}
+```
+
+**改完怎么验证**:与其他绑定一样——单跑对应 analyzer(cross 的话把所有源都喂上),看 out.json 里该节点的事实与 explain 是否符合预期;S 函数抛错会以"数据不足+异常摘要"出现在事实里,步骤 3 校验器同样能逮到。

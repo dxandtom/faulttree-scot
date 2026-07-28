@@ -31,7 +31,7 @@ from pathlib import Path
 _LVL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
 _NID_RE = re.compile(r"^n\d+$")
 _SRC_RE = re.compile(r"^[A-Za-z0-9_]+$")
-_CLASSES = set("ABCDEFGHIJ")
+_CLASSES = set("ABCDEFGHIJ") | {"P"}   # A-J 含封存字母(老产物兼容);P(成对)是现役,漏收过(实测被拦)
 _DECISIONS = {"insufficient_data", "manual", "not_applicable"}
 _CURLY = {"“": '"', "”": '"', "‘": "'", "’": "'"}
 RAW_TAG = "原文"
@@ -204,9 +204,6 @@ def main() -> None:
             s = hn.split(":", 1)[1].strip()
             if not _SRC_RE.match(s):
                 errors.append(f"表头「{h}」的源名「{s}」不合法(只能用英文字母/数字/下划线,别带空格)")
-            elif s == "cross":
-                errors.append("「绑定:cross」不走调优表——跨源判据(param_from)在 scripts/cross_analyzer.py"
-                              " 由跨源补绑环节维护;删掉这一列")
             elif s in src_col:
                 errors.append(f"表头有两个「绑定:{s}」列——删掉多余的一列")
             else:
@@ -321,6 +318,10 @@ def main() -> None:
                 elif dec is None and cls not in _CLASSES:
                     errors.append(f"第{rowno}行「{name}」绑定:{s}: class「{b.get('class')}」不认识"
                                   "(A/C/D/G/J/P 之一;查不了就写 decision,模板见 tuning-guide.md)")
+                elif s == "cross" and dec is None and str(b.get("source") or "") in ("", "cross"):
+                    errors.append(f"第{rowno}行「{name}」绑定:cross: 每条跨源绑定必须带"
+                                  " source=最终查询落点的**真实源名**(如 config;没有叫 cross 的数据源)"
+                                  "——写法见 binding-handbook.md 第三节")
             binds[s].append((ri, key, items))
 
     roots = [k for k in order if nodes[k]["parent"] is None]
@@ -356,7 +357,8 @@ def main() -> None:
     solutions = {rid(k): v for k, v in solutions.items()}
 
     # ---- 备料:各源 CONDITIONS 与 analyzer 文本(全部成功才进入写盘)----
-    indicators = [s for s in src_col if any(it for _r, _k, it in binds[s])]
+    # cross 不是数据指标(不进 plan 的指标链、不参与克隆),但它的绑定照常从「绑定:cross」列写回
+    indicators = [s for s in src_col if s != "cross" and any(it for _r, _k, it in binds[s])]
     writes, summary_src = [], []
     for s in src_col:
         full = []
@@ -371,6 +373,9 @@ def main() -> None:
         if ap_path.exists():
             src_text = ap_path.read_text(encoding="utf-8")
             before = len(_read_conditions_text(src_text))
+        elif s == "cross":                                # cross 骨架形态特殊,不能克隆普通 analyzer 充数
+            raise SystemExit("不合格(未改动任何文件):表有「绑定:cross」列,但产物没有"
+                             " scripts/cross_analyzer.py 骨架——先跑 assemble_scenario 补齐再导入")
         else:                                             # 新增数据源:克隆现有 analyzer 换 INDICATOR
             src_text = existing_aps[0].read_text(encoding="utf-8")
             src_text = re.sub(r'(?m)^INDICATOR = .*$', f'INDICATOR = "{s}"', src_text, count=1)
@@ -386,8 +391,8 @@ def main() -> None:
     plan_text = mf_text = None
     if plan_p.exists():
         plan = json.loads(plan_p.read_text(encoding="utf-8"))
-        # cross(跨源判据)不走调优表,但产物里有 cross_analyzer.py 就必须保留其 plan 节点——
-        # 否则重编译一次,param_from 跨源绑定就被静默甩出执行链。
+        # cross 现也走调优表(「绑定:cross」列);表里没这列时既有绑定原样不动。无论哪种,
+        # 产物里有 cross_analyzer.py 就必须保留其 plan 节点——否则跨源绑定被静默甩出执行链。
         has_cross = (out / "scripts" / "cross_analyzer.py").exists()
         last_next = "cross" if has_cross else "rca"
         pnodes = []
@@ -460,10 +465,11 @@ def main() -> None:
     print(f"  判据改动 {len(cond_chg)}: {', '.join(_nm(k, new_nodes) for k in cond_chg) or '无'}")
     print(f"  解决方案改动 {len(sol_chg)}: {', '.join(sorted(sol_chg)) or '无'}")
     print(f"  绑定: {'; '.join(summary_src) or '无'}")
-    # ---- 跨源绑定联动核对:调优表不管 cross_analyzer(工程侧维护),但树在这里改了、cross 不会
-    # 自己跟上——判据改了的/删除了的节点若被 cross 认领,静默漂移(新判据+旧传参链逻辑),必须点名。----
+    # ---- 跨源绑定联动核对:仅当调优表**没有**「绑定:cross」列时才需要——那时 cross_analyzer 是表外
+    # 维护的,树在这里改了它不会跟上(新判据+旧传参链=静默漂移),必须点名;表里有 cross 列时
+    # 绑定刚按表重写,天然一致,不提醒。----
     cross_ap = out / "scripts" / "cross_analyzer.py"
-    if cross_ap.exists():
+    if cross_ap.exists() and "cross" not in src_col:
         try:
             cross_ids = set(_read_condition_node_ids(cross_ap))
         except Exception:  # noqa: BLE001

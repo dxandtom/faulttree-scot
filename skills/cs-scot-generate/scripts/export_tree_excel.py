@@ -61,21 +61,11 @@ def export(out_dir: Path) -> Path:
         if n.get("code"):
             alias.setdefault(str(n["code"]), nid)
 
-    sources, bind, dropped, cross_claimed = [], {}, [], []
+    sources, bind, dropped = [], {}, []
     for ap in sorted((out_dir / "scripts").glob("*_analyzer.py")):
         src = ap.name[: -len("_analyzer.py")]
-        if src == "cross":                               # 跨源判据(param_from 链)是工程师维护的,
-            try:                                         # 不进调优表——但要让业务知道哪些节点被它认领
-                import ast as _ast
-                for node in _ast.parse(ap.read_text(encoding="utf-8")).body:
-                    if isinstance(node, _ast.Assign) and any(
-                            isinstance(t, _ast.Name) and t.id == "CONDITIONS" for t in node.targets):
-                        cross_claimed = sorted({str(e.get("node_id")) for e in _ast.literal_eval(node.value)
-                                                if isinstance(e, dict) and e.get("node_id")})
-            except Exception:  # noqa: BLE001
-                pass
-            continue
-        sources.append(src)
+        sources.append(src)                              # cross 也进表(「绑定:cross」列,人可调优;
+                                                         # 其条目自带 source=真实落点,默认剥离不会误伤)
         for c in read_conditions(ap):
             if not isinstance(c, dict):
                 continue
@@ -92,6 +82,7 @@ def export(out_dir: Path) -> Path:
             if cell.get("condition_text") == cond_ref:
                 cell.pop("condition_text", None)         # 与节点判据一致省略;逐字子句保留
             bind.setdefault((rnid, src), []).append(cell)
+    sources = [s for s in sources if s != "cross"] + (["cross"] if "cross" in sources else [])  # cross 列放最后
     if dropped:
         print("⚠ 以下绑定的 node_id 在树里找不到,未能进调优表(孤儿绑定,请先修产物):", file=sys.stderr)
         for d in dropped:
@@ -183,10 +174,11 @@ def export(out_dir: Path) -> Path:
         print(f"⚠ 现有调优表比 tree_index 新(可能有**尚未导入**的人工修改)——已备份到 {bak.name} 再覆盖。"
               "若确有未导入的修改,先跑 import_tree_excel.py 再导出。", file=sys.stderr)
     wb.save(dst)
-    if cross_claimed:                                   # 让业务同事看得见"哪些节点的诊断还挂着跨源绑定"
-        print(f"  ⚠ 以下节点另有**跨源绑定**(scripts/cross_analyzer.py,工程侧维护,不在本表里):"
-              f"{', '.join(cross_claimed)}——在调优表里改这些节点的判据/删这些节点时,请知会工程同事"
-              "(导入时也会自动打印复核提醒)。")
+    n_cross = sorted({nid for (nid, s) in bind if s == "cross"})
+    if n_cross:
+        print(f"  跨源绑定已进「绑定:cross」列(涉及节点 {len(n_cross)} 个:{', '.join(n_cross[:8])}"
+              f"{'…' if len(n_cross) > 8 else ''})——每条必须带 source=最终查询落点的真实源名;"
+              "写法见 tree/binding-handbook.md 第三节。")
     return dst
 
 
