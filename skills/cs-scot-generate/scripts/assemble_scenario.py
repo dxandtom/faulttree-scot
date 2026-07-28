@@ -457,6 +457,7 @@ def main() -> None:
     # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
     here = Path(__file__).parent
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # 类别模板库
+    copy_into(here / "custom_lib.py", out / "scripts" / "custom_lib.py")                # S 类预制函数库(人手调优用)
     copy_into(here / "mo_config.py", out / "scripts" / "mo_config.py")                  # 配置拓扑适配器:MO文本→表 + IP/追溯原语(.txt 配置 + custom 用)
     copy_into(here / "analyzer.py", out / "scripts" / "analyzer.py")                    # 概览辅助:模型先看列再填条件
     copy_into(here.parent / "references" / "condition_binding_schema.md",

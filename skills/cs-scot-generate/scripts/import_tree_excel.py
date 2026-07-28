@@ -31,7 +31,7 @@ from pathlib import Path
 _LVL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
 _NID_RE = re.compile(r"^n\d+$")
 _SRC_RE = re.compile(r"^[A-Za-z0-9_]+$")
-_CLASSES = set("ABCDEFGHIJ") | {"P"}   # A-J 含封存字母(老产物兼容);P(成对)是现役,漏收过(实测被拦)
+_CLASSES = set("ABCDEFGHIJ") | {"P", "S"}   # A-J 含封存字母(老产物兼容);P 成对;S 代码类(人手调优专用)
 _DECISIONS = {"insufficient_data", "manual", "not_applicable"}
 _CURLY = {"“": '"', "”": '"', "‘": "'", "’": "'"}
 RAW_TAG = "原文"
@@ -321,6 +321,9 @@ def main() -> None:
                 elif dec is None and cls not in _CLASSES:
                     errors.append(f"第{rowno}行「{name}」绑定:{s}: class「{b.get('class')}」不认识"
                                   "(A/C/D/G/J/P 之一;查不了就写 decision,模板见 tuning-guide.md)")
+                elif dec is None and cls == "S" and bool(b.get("func")) == bool(b.get("file")):
+                    errors.append(f"第{rowno}行「{name}」绑定:{s}: S 类须 func(函数库函数名)/"
+                                  "file(scripts 下脚本路径,如 custom/n31_xxx.py)二选一——写法见 binding-handbook.md 第七节")
                 elif s == "cross" and dec is None and str(b.get("source") or "") in ("", "cross"):
                     errors.append(f"第{rowno}行「{name}」绑定:cross: 每条跨源绑定必须带"
                                   " source=最终查询落点的**真实源名**(如 config;没有叫 cross 的数据源)"

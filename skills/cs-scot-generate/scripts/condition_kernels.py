@@ -586,7 +586,8 @@ _CLASS_KEYS = {
     "D": {"combine", "sub", "group_by", "filter"},       # D 顶层 filter 有专门的响亮拒绝(信息更准)
     "J": set(),
     "P": {"side_column", "peer_marker", "value_column", "fault_when", "filter", "extract", "pair_from"},
-}
+    "S": {"func", "file", "args"},                       # 代码类(人手调优专用):选行/抽值都在函数里做,
+}                                                        # 不吃 filter/extract 顶层字段
 _CLASS_KEYS["G"] = _CLASS_KEYS["C"]
 
 
@@ -851,6 +852,91 @@ def k_pair_from(b, sources, parent_source):
             "predicate_satisfied": (not same) if fw == "not_equal" else same}
 
 
+# ---------- S:代码类(人手调优专用)——预制函数库 / 单节点脚本,产出与内核同形的事实 ----------
+# 只给人手调优用:生成期简报不介绍本类,merge_conditions 对绑定子代理产出的 S 条目机械拒收。
+# 入口契约:check(table, args, load) → {"status":"ok","predicate_satisfied":bool,…} 或
+#           {"status":"insufficient_data","reason":"…"};异常一律按数据不足(绝不冒充"不成立")。
+_SCRIPT_CACHE = {}
+
+
+def _load_py(path: Path, tag: str):
+    key = str(path)
+    if key not in _SCRIPT_CACHE:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(tag, path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SCRIPT_CACHE[key] = mod
+    return _SCRIPT_CACHE[key]
+
+
+def _resolve_script(b):
+    """S 绑定 → (callable, 标签, None) 或 (None, None, 错误串)。func=custom_lib 注册表;file=单节点脚本。"""
+    here = Path(__file__).resolve().parent
+    func, file = b.get("func"), b.get("file")
+    if bool(func) == bool(file):
+        return None, None, "S 类须 func(函数库函数名)/file(scripts 下脚本路径)二选一,且只选一个"
+    if func:
+        lib = here / "custom_lib.py"
+        if not lib.exists():
+            return None, None, "scripts/custom_lib.py 不存在(产物缺函数库,重跑 assemble 补齐)"
+        try:
+            mod = _load_py(lib, "custom_lib")
+        except Exception as e:  # noqa: BLE001
+            return None, None, f"custom_lib.py 加载失败:{type(e).__name__}: {e}"
+        reg = getattr(mod, "REGISTRY", {})
+        fn = reg.get(str(func))
+        if not callable(fn):
+            return None, None, f"函数「{func}」未注册——custom_lib.REGISTRY 现有:{sorted(reg) or '(空)'}"
+        return fn, f"func:{func}", None
+    p = (here / str(file)).resolve()
+    if not str(p).startswith(str(here)):
+        return None, None, f"file 路径越界(必须在 scripts/ 之下,如 custom/<节点>.py):{file}"
+    if not p.exists():
+        return None, None, f"脚本文件不存在:{file}(相对 scripts/ 目录,如 custom/n31_xxx.py)"
+    try:
+        mod = _load_py(p, f"s_{p.stem}")
+    except Exception as e:  # noqa: BLE001
+        return None, None, f"脚本 {file} 加载失败:{type(e).__name__}: {e}"
+    fn = getattr(mod, "check", None)
+    if not callable(fn):
+        return None, None, f"脚本 {file} 没有入口函数 check(table, args, load)"
+    return fn, f"file:{file}", None
+
+
+def k_script(table, b, sources):
+    fn, label, err = _resolve_script(b)
+    if err:
+        return _insuf("S", err)
+
+    def load(name):
+        return sources.get(str(name))
+
+    try:
+        fact = fn(table, b.get("args") or {}, load)
+    except Exception as e:  # noqa: BLE001
+        return _insuf("S", f"S 脚本异常({label}):{type(e).__name__}: {e}——异常一律按数据不足,"
+                           "绝不冒充'不成立'", script=label)
+    if isinstance(fact, dict) and fact.get("status") == "insufficient_data":
+        out = dict(fact)
+        out.setdefault("class", "S")
+        out["script"] = label
+        out.setdefault("predicate_satisfied", None)
+        if not str(out.get("reason") or "").strip():
+            out["reason"] = "S 脚本报数据不足但没写 reason——脚本里补一句缺什么"
+        return out
+    if isinstance(fact, dict) and fact.get("status") == "ok" \
+            and isinstance(fact.get("predicate_satisfied"), bool):
+        out = dict(fact)
+        out.setdefault("class", "S")
+        out["script"] = label
+        out.setdefault("explain", f"S 脚本({label})判定 → "
+                                  f"{'成立' if out['predicate_satisfied'] else '不成立'}")
+        return out
+    return _insuf("S", f"S 脚本返回不合契约({label}):须 {{status:'ok', predicate_satisfied:bool, …}} 或 "
+                       f"{{status:'insufficient_data', reason:'…'}};实际收到:{str(fact)[:120]}", script=label)
+
+
 def evaluate_binding(b, sources, source_name, _resolved=False):
     """按 b['class'] 分派到对应内核;D 递归,J 人工,无源/未知类别 → 数据不足。
     若绑定带 `decision`(模型生成时已判本条无法机械评估)→ 直接按该判定出 status,**不跑内核、不给判断**。
@@ -875,6 +961,8 @@ def evaluate_binding(b, sources, source_name, _resolved=False):
             return _insuf(cls, f"绑定带不认识的字段 {sorted(unknown)}({cls} 类只认 "
                                f"{sorted(_CLASS_KEYS[cls])})——野字段会被静默忽略、"
                                "算出语义错误的确定结论,拒收;修字段名或换类别")
+    if cls == "S" and b.get("param_from"):
+        return _insuf("S", "S 类不支持 param_from——参数直接写进 args,取其他源在函数里用 load('<源名>')")
     if b.get("param_from"):                              # 参数化查询:先抽参数、再代入(D/P/A/C/G 通吃)
         return _eval_with_params(b, sources, source_name)
     if not _resolved:
@@ -896,6 +984,8 @@ def evaluate_binding(b, sources, source_name, _resolved=False):
     if not table[1]:                                     # 空表(仅表头、0 行):没数据 ≠ 排除——
         return _insuf(cls or "?",                        # 别让 matched=0/0 冒充"确定不成立"
                       "数据源为空表(仅表头、0 行数据),无从判定——不当'不成立'处理")
+    if cls == "S":                                       # 代码类:函数自己选行抽值,load 可取其他源
+        return k_script(table, b, sources)
     fn = _KERNELS.get(cls)
     if not fn:
         if cls in _ARCHIVED:
