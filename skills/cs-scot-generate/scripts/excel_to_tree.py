@@ -31,7 +31,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-_LEVEL_RE = re.compile(r"^L(\d+)\(Chinese\)$")
+_LEVEL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")     # 裸 L7 也认(实测:手工补列常无 (Chinese) 后缀,
+                                                        # 老正则静默丢整层、该层判据错挂到上一层)
 _CODE_RE = re.compile(r"^L(\d+) Code$")
 _JUDGMENT_HEADER = "Judgment Condition(Chinese)"
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
@@ -85,14 +86,17 @@ def _read_table(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
 
 
 def find_level_columns(headers: List[str]) -> List[Tuple[str, int]]:
-    """从表头里找出所有 Ln(Chinese) 层级列,按层级升序返回 (列名, 层级)。"""
-    cols: List[Tuple[str, int]] = []
+    """从表头里找出所有 Ln(Chinese)/Ln 层级列,按层级升序返回 (列名, 层级)。
+    同层裸列与 (Chinese) 列并存时取中文列(与 v2 的混血表口径一致),每层只留一列。"""
+    cols: Dict[int, str] = {}
     for h in headers:
         m = _LEVEL_RE.match((h or "").strip())
-        if m:
-            cols.append((h, int(m.group(1))))
-    cols.sort(key=lambda x: x[1])
-    return cols
+        if not m:
+            continue
+        lvl = int(m.group(1))
+        if lvl not in cols or ("(Chinese)" in h and "(Chinese)" not in cols[lvl]):
+            cols[lvl] = h
+    return sorted(((h, l) for l, h in cols.items()), key=lambda x: x[1])
 
 
 def find_judgment_column(headers: List[str]) -> Optional[str]:
