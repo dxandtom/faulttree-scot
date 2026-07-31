@@ -255,6 +255,11 @@ def _fc_normalize(result):
     det = result.get("details")
     if isinstance(det, dict) and isinstance(det.get("devices"), dict):
         return det["devices"]
+    inner = result.get("results")                        # {"fault_node":…, "results":{网元:{…}}} 信封形态
+    if isinstance(inner, dict) and inner and all(
+            isinstance(v, dict) and ("matched" in v or "error" in v or "status" in v)
+            for v in inner.values()):
+        return inner
     if "matched" in result or "error" in result:         # 全局裸结果(脚本不分网元、只给一个总结论)
         return {"(整体)": result}
     if result and all(isinstance(v, dict) and ("matched" in v or "error" in v or "status" in v)
