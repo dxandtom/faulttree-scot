@@ -194,6 +194,63 @@ def run_step(product: Path, script_name: str, desc: str) -> None:
         print(f"    {l}")
 
 
+# 产物里属于"引擎"的自包含副本(assemble 拷进去的,工具链所有,人不该手改):
+# 迁移依赖其中的 S 类内核(condition_kernels)、fault_check 转接头(custom_lib)、
+# S 放行校验(import_tree_excel)——打包时代久远的产物这些都是旧版,必须先补全。
+ENGINE_FILES = ("condition_kernels.py", "custom_lib.py", "mo_config.py", "analyzer.py",
+                "export_tree_excel.py", "import_tree_excel.py")
+
+
+def refresh_engine(product: Path) -> None:
+    """产物引擎体检+补全:与本机 cs-scot-generate 的当前版逐文件比对,不一致就刷新
+    (.bak 备份;custom_lib 里检测到手工注册的函数被覆盖会点名提醒从 .bak 拿回)。
+    产物在打包技能里(assets/ 形态)时,顺带刷新技能根下的 runner.py(引擎,无人工内容)。
+    本机没有 cs-scot-generate 又确认产物缺 S 支持 → 硬停(迁过去也是全线'未知类别')。"""
+    sdir = product / "scripts"
+    gen = Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts"
+    kern = sdir / "condition_kernels.py"
+    kern_text = kern.read_text(encoding="utf-8", errors="replace") if kern.exists() else ""
+    s_ok = "def k_script" in kern_text and "def alias_sources" in kern_text
+    if not gen.is_dir():
+        if not s_ok:
+            raise SystemExit("产物引擎不支持 S 类(condition_kernels.py 是旧版/缺失),且本机找不到 "
+                             "cs-scot-generate 无法补全——先装最新 cs-scot-generate 再迁移,"
+                             "否则迁过去每条 S 绑定都会报「未知条件类别」。")
+        return
+    changed, extra_regs = [], set()
+    for name in ENGINE_FILES:
+        src = gen / name
+        if not src.exists():
+            continue
+        dst = sdir / name
+        new_text = src.read_text(encoding="utf-8")
+        old_text = dst.read_text(encoding="utf-8", errors="replace") if dst.exists() else None
+        if old_text == new_text:
+            continue
+        if name == "custom_lib.py" and old_text:         # 手工 @register 的函数会被引擎版顶掉:点名,别静默丢
+            extra_regs = set(re.findall(r'@register\("([^"]+)"\)', old_text)) \
+                - set(re.findall(r'@register\("([^"]+)"\)', new_text))
+        if dst.exists():
+            shutil.copy2(dst, dst.with_suffix(".py.bak"))
+        shutil.copy2(src, dst)
+        changed.append(name)
+    if changed:
+        print(f"  产物引擎补全:{', '.join(changed)} 已刷新到当前版(旧副本各备份 .py.bak)"
+              "——旧版不认识 S 类/fault_check,不刷新迁移无效")
+    if extra_regs:
+        print(f"  ⚠ 旧 custom_lib.py 里有手工注册的函数 {sorted(extra_regs)} 被引擎版顶掉——"
+              "从 custom_lib.py.bak 把它们拷回文件末尾,否则对应 S 绑定会报「未注册」")
+    # 打包技能形态:assets/ 的上一级是技能根(有 SKILL.md + scripts/runner.py)→ runner 一并刷新
+    skill_root = product.parent
+    run_dst = skill_root / "scripts" / "runner.py"
+    run_src = Path(__file__).resolve().parents[2] / "cs-scot-execute" / "scripts" / "runner.py"
+    if run_dst.exists() and (skill_root / "SKILL.md").exists() and run_src.exists():
+        if run_dst.read_text(encoding="utf-8", errors="replace") != run_src.read_text(encoding="utf-8"):
+            shutil.copy2(run_dst, run_dst.with_suffix(".py.bak"))
+            shutil.copy2(run_src, run_dst)
+            print("  打包技能的 runner.py 已刷新到当前版(旧版不认 raw 通道/双代源名,备份 .py.bak)")
+
+
 def upgrade_cross_scaffold(product: Path) -> None:
     """产物 cross_analyzer.py 骨架过旧(无 S 全量喂源/raw 通道)→ 借 generate 的手术就地升级。"""
     ca = product / "scripts" / "cross_analyzer.py"
@@ -285,6 +342,9 @@ def main() -> None:
         if kwargs and not a.entry_kwargs:
             print(f"[warn] 入口 {entry} 有额外必填参数 {sorted(kwargs)},已按空 dict 传入;"
                   "不对就用 --entry-kwargs 显式指定")
+
+        # 0. 引擎体检+补全(旧产物的内核/函数库/导入校验不认 S 类,先刷新再动手术)
+        refresh_engine(product)
 
         # 1. 脚本进场
         custom = product / "scripts" / "custom"

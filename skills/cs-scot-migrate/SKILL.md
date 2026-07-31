@@ -52,7 +52,9 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 候选分数接近、或都不像同一个故障 → 把候选列表给用户,让用户指定节点号,再执行落地。
 **禁止在拿不准时赌分数最高的。**
 
-脚本自动完成:拷脚本进 `scripts/custom/` → 调优表手术(判据/绑定)→ import 编译回产物 →
+脚本自动完成:**引擎体检+补全**(旧产物/打包技能里的 condition_kernels、custom_lib、
+import 校验、runner 不认 S 类,自动刷新到当前版并 .bak 备份——同事拿旧 execute 打的包也能收)
+→ 拷脚本进 `scripts/custom/` → 调优表手术(判据/绑定)→ import 编译回产物 →
 调优表回导同步 → cross 骨架过旧则就地升级 → 写迁移台账。
 
 入口函数自动探测(diagnose/main/check_ne…);探测不准时报错或告警,按提示加
