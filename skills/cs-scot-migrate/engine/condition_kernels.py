@@ -931,6 +931,10 @@ def k_script(table, b, sources):
 
     try:
         fact = fn(table, b.get("args") or {}, load)
+    except SystemExit as e:                              # CLI 型脚本把"出错"写成 print+sys.exit:SystemExit
+        return _insuf("S", f"S 脚本调用了 sys.exit({e.code})——库调用不该退出进程"    # 不是 Exception 子类,
+                           "(脚本把错误当命令行处理了,如'目录不存在就 exit');"       # 不拦会炸掉整个 cross
+                           "按数据不足处理,绝不冒充'不成立'", script=label)
     except Exception as e:  # noqa: BLE001
         import traceback
         frames = traceback.extract_tb(e.__traceback__)
