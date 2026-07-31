@@ -53,7 +53,9 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 **禁止在拿不准时赌分数最高的。**
 
 脚本自动完成:**引擎体检+补全**(旧产物/打包技能里的 condition_kernels、custom_lib、
-import 校验、runner 不认 S 类,自动刷新到当前版并 .bak 备份——同事拿旧 execute 打的包也能收)
+import 校验、runner 不认 S 类 → 从引擎源刷新并 .bak 备份——同事拿旧 execute 打的包也能收。
+按**能力标记**只补缺、不追平:文件能力齐全就一律不碰,绝不把更新的产物降级。引擎源自包含:
+优先本机同门 cs-scot-generate/execute,没有就用本技能自带的 `engine/` 目录,单装本技能也能迁)
 → 拷脚本进 `scripts/custom/` → 调优表手术(判据/绑定)→ import 编译回产物 →
 调优表回导同步 → cross 骨架过旧则就地升级 → 写迁移台账。
 
@@ -78,3 +80,9 @@ import 校验、runner 不认 S 类,自动刷新到当前版并 .bak 备份—�
 - 结果三态:任一网元命中→成立;全网元报错/无网元→**数据不足**(不冒充"正常");其余→不成立。
 - 产物若已打包成场景技能,记得重新跑 package_scenario.py。
 - 同一节点重复迁移(交付包更新)= 直接重跑第 2 步,台账覆盖更新。
+
+## 维护(工具链开发者看,业务使用无关)
+
+`engine/` 是内核/函数库/调优表往返/骨架/runner 的内置副本,让本技能不依赖同门技能也能补全
+旧产物。cs-scot-generate / cs-scot-execute 侧改了这些文件后,跑一次
+`python skills/cs-scot-migrate/scripts/sync_engine.py` 对齐。

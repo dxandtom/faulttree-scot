@@ -194,61 +194,75 @@ def run_step(product: Path, script_name: str, desc: str) -> None:
         print(f"    {l}")
 
 
-# 产物里属于"引擎"的自包含副本(assemble 拷进去的,工具链所有,人不该手改):
-# 迁移依赖其中的 S 类内核(condition_kernels)、fault_check 转接头(custom_lib)、
-# S 放行校验(import_tree_excel)——打包时代久远的产物这些都是旧版,必须先补全。
-ENGINE_FILES = ("condition_kernels.py", "custom_lib.py", "mo_config.py", "analyzer.py",
-                "export_tree_excel.py", "import_tree_excel.py")
+# 产物里属于"引擎"的自包含副本(assemble 拷进去的,工具链所有,人不该手改)。
+# 补全按**能力标记**判:目标文件里这些标记都在 → 一律不碰(它可能比本技能还新,
+# 字节比对会把"人家更新"误当"过时"而降级);缺任一 → 用引擎源补。
+# 引擎源两级:本机同门 cs-scot-generate / cs-scot-execute(更新鲜)→ 本技能内置 engine/
+# (自包含兜底;维护:引擎侧改动后跑 scripts/sync_engine.py 对齐)。
+ENGINE_CAPS = {
+    "condition_kernels.py": ("def k_script", "def alias_sources"),
+    "custom_lib.py": ('@register("fault_check")',),
+    "import_tree_excel.py": ('{"P", "S"}',),             # S/P 放行 + cross 列支持同代
+    "export_tree_excel.py": ('!= "cross"',),             # cross 列进表 + 相对深度同代
+}
+RUNNER_CAP = "源名兼容"                                  # raw 通道 / diag↔cmd 互认同代
+
+
+def _engine_src(name: str, caps, sibling: Path):
+    """引擎文件取源:同门技能优先,内置 engine/ 兜底;两处都必须带齐能力标记才可信。"""
+    for d in (sibling, Path(__file__).resolve().parents[1] / "engine"):
+        p = d / name
+        if p.exists():
+            text = p.read_text(encoding="utf-8", errors="replace")
+            if all(c in text for c in caps):
+                return p
+    return None
 
 
 def refresh_engine(product: Path) -> None:
-    """产物引擎体检+补全:与本机 cs-scot-generate 的当前版逐文件比对,不一致就刷新
-    (.bak 备份;custom_lib 里检测到手工注册的函数被覆盖会点名提醒从 .bak 拿回)。
-    产物在打包技能里(assets/ 形态)时,顺带刷新技能根下的 runner.py(引擎,无人工内容)。
-    本机没有 cs-scot-generate 又确认产物缺 S 支持 → 硬停(迁过去也是全线'未知类别')。"""
+    """产物引擎体检+补全(只补缺,不追平):逐文件查能力标记,齐的不碰,缺的从引擎源刷新
+    (.bak 备份;custom_lib 里手工注册的函数被顶掉会点名提醒从 .bak 拿回)。
+    产物在打包技能里(assets/ 形态)时,顺带体检技能根下的 runner.py。
+    某文件缺能力又找不到可信引擎源 → 硬停(迁过去也是全线'未知类别')。"""
     sdir = product / "scripts"
     gen = Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts"
-    kern = sdir / "condition_kernels.py"
-    kern_text = kern.read_text(encoding="utf-8", errors="replace") if kern.exists() else ""
-    s_ok = "def k_script" in kern_text and "def alias_sources" in kern_text
-    if not gen.is_dir():
-        if not s_ok:
-            raise SystemExit("产物引擎不支持 S 类(condition_kernels.py 是旧版/缺失),且本机找不到 "
-                             "cs-scot-generate 无法补全——先装最新 cs-scot-generate 再迁移,"
-                             "否则迁过去每条 S 绑定都会报「未知条件类别」。")
-        return
     changed, extra_regs = [], set()
-    for name in ENGINE_FILES:
-        src = gen / name
-        if not src.exists():
-            continue
+    for name, caps in ENGINE_CAPS.items():
         dst = sdir / name
-        new_text = src.read_text(encoding="utf-8")
-        old_text = dst.read_text(encoding="utf-8", errors="replace") if dst.exists() else None
-        if old_text == new_text:
-            continue
-        if name == "custom_lib.py" and old_text:         # 手工 @register 的函数会被引擎版顶掉:点名,别静默丢
+        old_text = dst.read_text(encoding="utf-8", errors="replace") if dst.exists() else ""
+        if old_text and all(c in old_text for c in caps):
+            continue                                     # 能力齐全:不碰(可能比本技能还新)
+        src = _engine_src(name, caps, gen)
+        if src is None:
+            raise SystemExit(f"产物 scripts/{name} 缺 S 迁移所需能力,且本机同门技能与内置 engine/ "
+                             "都拿不出可信版本——迁移技能安装不完整(engine/ 目录丢了?),重装后再迁。")
+        if name == "custom_lib.py" and old_text:         # 手工 @register 的函数会被顶掉:点名,别静默丢
             extra_regs = set(re.findall(r'@register\("([^"]+)"\)', old_text)) \
-                - set(re.findall(r'@register\("([^"]+)"\)', new_text))
+                - set(re.findall(r'@register\("([^"]+)"\)', src.read_text(encoding="utf-8")))
         if dst.exists():
             shutil.copy2(dst, dst.with_suffix(".py.bak"))
         shutil.copy2(src, dst)
         changed.append(name)
     if changed:
-        print(f"  产物引擎补全:{', '.join(changed)} 已刷新到当前版(旧副本各备份 .py.bak)"
+        print(f"  产物引擎补全:{', '.join(changed)} 缺 S 能力已刷新(旧副本各备份 .py.bak)"
               "——旧版不认识 S 类/fault_check,不刷新迁移无效")
     if extra_regs:
         print(f"  ⚠ 旧 custom_lib.py 里有手工注册的函数 {sorted(extra_regs)} 被引擎版顶掉——"
               "从 custom_lib.py.bak 把它们拷回文件末尾,否则对应 S 绑定会报「未注册」")
-    # 打包技能形态:assets/ 的上一级是技能根(有 SKILL.md + scripts/runner.py)→ runner 一并刷新
+    # 打包技能形态:assets/ 的上一级是技能根(有 SKILL.md + scripts/runner.py)→ runner 一并体检
     skill_root = product.parent
     run_dst = skill_root / "scripts" / "runner.py"
-    run_src = Path(__file__).resolve().parents[2] / "cs-scot-execute" / "scripts" / "runner.py"
-    if run_dst.exists() and (skill_root / "SKILL.md").exists() and run_src.exists():
-        if run_dst.read_text(encoding="utf-8", errors="replace") != run_src.read_text(encoding="utf-8"):
-            shutil.copy2(run_dst, run_dst.with_suffix(".py.bak"))
-            shutil.copy2(run_src, run_dst)
-            print("  打包技能的 runner.py 已刷新到当前版(旧版不认 raw 通道/双代源名,备份 .py.bak)")
+    if run_dst.exists() and (skill_root / "SKILL.md").exists():
+        if RUNNER_CAP not in run_dst.read_text(encoding="utf-8", errors="replace"):
+            run_src = _engine_src("runner.py", (RUNNER_CAP,),
+                                  Path(__file__).resolve().parents[2] / "cs-scot-execute" / "scripts")
+            if run_src is None:
+                print("  [warn] 打包技能的 runner.py 是旧版且无处取新版——不影响 S 判定,"
+                      "但 --data 里 diag/cmd 两代源名不互认,喂数据时按 plan 要的名字写")
+            else:
+                shutil.copy2(run_dst, run_dst.with_suffix(".py.bak"))
+                shutil.copy2(run_src, run_dst)
+                print("  打包技能的 runner.py 已刷新(旧版不认 raw 通道/双代源名,备份 .py.bak)")
 
 
 def upgrade_cross_scaffold(product: Path) -> None:
@@ -259,10 +273,11 @@ def upgrade_cross_scaffold(product: Path) -> None:
     text = ca.read_text(encoding="utf-8", errors="replace")
     if "raw_dir" in text and "load_all" in text:
         return                                           # 已是新骨架
-    gen = Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts"
+    asm_p = _engine_src("assemble_scenario.py", ("raw_dir", "_upgrade_cross_scaffold"),
+                        Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts")
     try:
         import importlib.util
-        spec = importlib.util.spec_from_file_location("asm_for_migrate", gen / "assemble_scenario.py")
+        spec = importlib.util.spec_from_file_location("asm_for_migrate", asm_p)
         asm = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(asm)
         up, why = asm._upgrade_cross_scaffold(text, asm.CROSS_SCAFFOLD)
