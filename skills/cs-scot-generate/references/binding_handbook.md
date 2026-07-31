@@ -423,3 +423,24 @@ def check(table, args, load):
 ```
 
 **改完怎么验证**:与其他绑定一样——单跑对应 analyzer(cross 的话把所有源都喂上),看 out.json 里该节点的事实与 explain 是否符合预期;S 函数抛错会以"数据不足+异常摘要"出现在事实里,步骤 3 校验器同样能逮到。
+
+### 现成脚本收编:fault_check(datacom-fault-tree-tester 交付包专用)
+
+业务侧用 datacom-fault-tree-tester 技能产出的 `fault_check_*.py`(吃 `<网元>/CONFIG|CMD|LOG` 裸文本目录、
+吐 `{matched, evidence, details}`),**不用改一行代码**就能当判据跑:把脚本(连同它依赖的
+`search_config.py` 等)拷进产物 `scripts/custom/`,「绑定:cross」列写一条:
+
+```json
+{"class": "S", "func": "fault_check",
+ "args": {"script": "custom/fault_check_MPLS_TE_配置缺失.py", "entry": "diagnose"},
+ "mapping_reason": "迁移自 tester 交付包:判断逻辑=脚本原样(经人确认+真实数据验证)"}
+```
+
+args 三个可调项:`entry`=入口函数名(默认 `diagnose`;老脚本入口名各异,如 vstp 是 `main`)、
+`per_ne: true`=入口吃单网元目录(如 `check_ne(ne_dir)`),由转接头逐网元调用汇总、
+`entry_kwargs`=入口的额外关键字参数。数据供给两条路,自动选:执行时给了
+`--data raw=<原始数据目录>`(zip2csv 输出的 `extracted/`)就直读原始 txt(零转换,最忠实);
+没给就从 config/log/cmd 三表**兜底重建**临时目录(DIAG 目录名自动别名成 CMD)。
+结果翻译:任一网元 matched → 成立;全网元报 error / 一个网元都没读到 → **数据不足**(不冒充"正常");
+其余 → 不成立(个别网元 error 会在 explain 里如实注记)。整包迁移(判据+脚本+绑定一条龙)用
+cs-scot-migrate 技能,不必手工做这些。
