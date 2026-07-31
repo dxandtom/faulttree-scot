@@ -167,6 +167,13 @@ def main() -> int:
                 pending.append(f"{ind} 批{n}:{err}——同简报重派该批")
                 pending_inds.add(ind)
                 continue
+            s_ids = [str(e.get("node_id") or "?") for e in entries
+                     if isinstance(e, dict) and str(e.get("class") or "").upper() == "S"]
+            if s_ids:                                    # S(代码类)只认人工/调优表来源:模型产出=绕过全部 DSL 闸门
+                pending.append(f"{ind} 批{n}:含 class:S 条目({', '.join(s_ids[:5])})——代码类只许人工/调优表"
+                               "来源,绑定子代理不得产出;从结果文件删掉这些条目再重跑(确需脚本逻辑请人工补)")
+                pending_inds.add(ind)
+                continue
             if ind != "cross":                          # 子代理的「涉及多源」标记:抽出来汇入补绑候选,
                 marks = [e for e in entries            # 不进本源脚本(它不是可执行绑定)
                          if e.get("decision") == "cross_source"]

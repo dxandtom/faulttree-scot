@@ -289,6 +289,7 @@ python "<产物>/scripts/cross_analyzer.py" -o out.json --data cmd="<cmd文件>"
 | `pair_from` | P | 跨表/跨源两侧取值比对 |
 | `param_from` / `expand` | 跨源 | 传参链与逐值展开 |
 | `note` | J | 人工检查项说明 |
+| `func` / `file` / `args` | S | 代码类:函数库函数名 / scripts 下脚本路径(二选一)+ 参数;仅人手调优,见第七节 |
 | `decision` | 通用 | insufficient_data / not_applicable / cross_source(生成期) |
 | `mapping_reason` | 通用 | 人话写清"为什么这么绑" |
 
@@ -309,11 +310,11 @@ python "<generate技能>/scripts/validate_conditions.py" out.json
 
 ---
 
-## 七、S 类(代码类)——预告:规范已定,内核暂未上线
-
-> **状态**:本节是提前公布的规范,让要准备脚本的人**先照规矩写**;内核落地前,写了 S 绑定也不会执行。上线后本节转正。
+## 七、S 类(代码类)——写代码兜底的逃生舱(仅人手调优可用)
 
 **它是什么**:DSL 表达不了的判定逻辑(两值相加比阈值、"取最新一次采集再判"、回显段落状态机、任意跨源组合),用一小段 Python 实现,仍然产出与其他类别**同形的事实**。**只给人手调优用**——生成期的模型子代理不知道也不许用这类(合并器会机械拒收模型产出的 S 条目)。只支持 Python,不支持 bash。
+
+三个落点先记住:**S 绑定统一写在「绑定:cross」列**(导入校验会拦别处的)——cross 执行时**全部数据源都在**,脚本里 `load("config")`/`load("log")`/`load("diag")` 想取哪张表取哪张,这正是"脚本入参=三张表"的形态;**预制函数库**在 `scripts/custom_lib.py`(已随产物分发,自带 `sum_extracts_vs_threshold`/`latest_by_seq_then_match` 两个函数和 `pick_values` 工具);**单节点脚本**放 `scripts/custom/` 目录。`source` 字段对 S 是**可选**的:声明了,那张表会作为 `table` 参数递给你(单表脚本的便利);不声明,`table` 为 None,全部用 `load` 取。
 
 ### 绑定怎么写(两种形态)
 
@@ -386,7 +387,7 @@ def sum_extracts_vs_threshold(table, args, load):
     nums = []
     for key in ("a", "b"):
         spec = args[key]
-        vals = _pick_values(rows, spec)          # 按 filter 选行 + extract 抽值(工具函数)
+        vals = pick_values(table, spec)          # 库自带工具:filter 选行 + extract 抽值(与取值子句同形)
         if not vals:
             return {"status": "insufficient_data",
                     "reason": f"args[{key}] 一个值也没抽到(filter/extract 与数据对不上)"}
@@ -422,3 +423,24 @@ def check(table, args, load):
 ```
 
 **改完怎么验证**:与其他绑定一样——单跑对应 analyzer(cross 的话把所有源都喂上),看 out.json 里该节点的事实与 explain 是否符合预期;S 函数抛错会以"数据不足+异常摘要"出现在事实里,步骤 3 校验器同样能逮到。
+
+### 现成脚本收编:fault_check(datacom-fault-tree-tester 交付包专用)
+
+业务侧用 datacom-fault-tree-tester 技能产出的 `fault_check_*.py`(吃 `<网元>/CONFIG|CMD|LOG` 裸文本目录、
+吐 `{matched, evidence, details}`),**不用改一行代码**就能当判据跑:把脚本(连同它依赖的
+`search_config.py` 等)拷进产物 `scripts/custom/`,「绑定:cross」列写一条:
+
+```json
+{"class": "S", "func": "fault_check",
+ "args": {"script": "custom/fault_check_MPLS_TE_配置缺失.py", "entry": "diagnose"},
+ "mapping_reason": "迁移自 tester 交付包:判断逻辑=脚本原样(经人确认+真实数据验证)"}
+```
+
+args 三个可调项:`entry`=入口函数名(默认 `diagnose`;老脚本入口名各异,如 vstp 是 `main`)、
+`per_ne: true`=入口吃单网元目录(如 `check_ne(ne_dir)`),由转接头逐网元调用汇总、
+`entry_kwargs`=入口的额外关键字参数。数据供给两条路,自动选:执行时给了
+`--data raw=<原始数据目录>`(zip2csv 输出的 `extracted/`)就直读原始 txt(零转换,最忠实);
+没给就从 config/log/cmd 三表**兜底重建**临时目录(DIAG 目录名自动别名成 CMD)。
+结果翻译:任一网元 matched → 成立;全网元报 error / 一个网元都没读到 → **数据不足**(不冒充"正常");
+其余 → 不成立(个别网元 error 会在 explain 里如实注记)。整包迁移(判据+脚本+绑定一条龙)用
+cs-scot-migrate 技能,不必手工做这些。
