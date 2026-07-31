@@ -147,7 +147,12 @@ def rank_nodes(index, pkg_name: str, pkg_cond: str, top=5):
 # ---------- 调优表手术 ----------
 def edit_tuning_excel(product: Path, nid: str, condition: str, binding: dict):
     from openpyxl import load_workbook
-    xls = sorted((product / "tree").glob("*.tuning.xlsx"))
+    locks = sorted((product / "tree").glob("~$*.xlsx"))
+    if locks:                                            # Excel 锁文件:表多半正被 Excel 打开,写盘会坏/被拒
+        raise SystemExit(f"检测到 Excel 锁文件 {locks[0].name}——调优表可能正被 Excel 打开。"
+                         "关掉 Excel 再重跑;若确认没开(Excel 崩溃残留的锁),删掉该文件再来。")
+    xls = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
+                 if not p.name.startswith("~$"))
     if len(xls) != 1:
         raise SystemExit(f"tree/ 下应恰有一份调优表,现有 {len(xls)} 份")
     wb = load_workbook(xls[0])
@@ -169,12 +174,13 @@ def edit_tuning_excel(product: Path, nid: str, condition: str, binding: dict):
                 if str(ws.cell(row=r, column=id_col).value or "").strip() == nid), None)
     if row is None:
         raise SystemExit(f"调优表里找不到节点 {nid} 的行(表刚由 export 生成,不该缺——核对节点号)")
-    ws.cell(row=row, column=raw_col, value=condition)    # 判据整段进原文列(逐字保真)
+    # 注意:openpyxl 的 ws.cell(..., value=None) 是"不赋值"而非"清空"——清格必须走 .value = None
+    ws.cell(row=row, column=raw_col).value = condition   # 判据整段进原文列(逐字保真)
     for c in tag_cols:
-        ws.cell(row=row, column=c, value=None)           # 标签列清空(原文/标签二选一)
+        ws.cell(row=row, column=c).value = None          # 标签列清空(原文/标签二选一)
     for src, c in bind_cols.items():
-        ws.cell(row=row, column=c,
-                value=json.dumps(binding, ensure_ascii=False) if src == "cross" else None)
+        ws.cell(row=row, column=c).value = (json.dumps(binding, ensure_ascii=False)
+                                            if src == "cross" else None)
     wb.save(xls[0])
     return xls[0]
 
@@ -371,7 +377,8 @@ def main() -> None:
         # 2. 调优表手术。表比 tree_index 新(可能有未导入的人工修改,也可能只是上次迁移的回导)
         # → 先导入收编,绝不覆盖:合法修改被收进产物;表填坏了 import 会响亮失败、迁移就此打住。
         tis = sorted((product / "tree").glob("*.tree_index.json"))
-        xls = sorted((product / "tree").glob("*.tuning.xlsx"))
+        xls = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
+                     if not p.name.startswith("~$"))
         if xls and tis and xls[0].stat().st_mtime > tis[0].stat().st_mtime:
             print("  [0/3] 调优表比 tree_index 新 → 先导入收编现有内容(有未导入的人工修改也不会丢)…")
             run_step(product, "import_tree_excel.py", "预导入(收编现有调优表)")

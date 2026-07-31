@@ -159,7 +159,8 @@ def main() -> None:
     a = ap.parse_args()
     out = Path(a.out).expanduser().resolve()
 
-    xls = sorted((out / "tree").glob("*.tuning.xlsx"))
+    xls = sorted(p for p in (out / "tree").glob("*.tuning.xlsx")
+                 if not p.name.startswith("~$"))          # ~$xxx = Excel 打开时的锁文件,不是调优表
     tis = sorted((out / "tree").glob("*.tree_index.json"))
     if len(xls) != 1 or len(tis) != 1:
         raise SystemExit(f"tree/ 下应各有一份调优表与 tree_index(现有 {len(xls)} / {len(tis)} 份)")
