@@ -232,6 +232,9 @@ def main() -> None:
     ap.add_argument("--package", required=True, help="交付包目录或 zip")
     ap.add_argument("--product", required=True, help="场景产物目录(或打包技能的 assets/ 目录)")
     ap.add_argument("--node", help="目标节点号(如 n17);不给=只做匹配、列候选")
+    ap.add_argument("--auto", action="store_true",
+                    help="节点名与树上某节点**一字不差且唯一**时直接落地(对号第一级:代码精确匹配);"
+                         "无精确命中则列候选后以退出码 3 结束(交模型/人对齐)")
     ap.add_argument("--script", help="包里有多个 fault_check_*.py 时指定文件名")
     ap.add_argument("--entry", help="入口函数名(默认自动探测)")
     ap.add_argument("--per-ne", action="store_true", help="入口吃单网元目录(自动探测不准时手工指定)")
@@ -254,15 +257,27 @@ def main() -> None:
         print(f"交付包:节点名称「{method['name']}」 脚本 {fc.name} 入口 {entry or '?'}"
               f"{'(单网元模式)' if per_ne else ''} 共享模块 {[d.name for d in deps] or '无'}")
 
-        if not a.node:                                   # 匹配模式:列候选,人确认后带 --node 重跑
-            print("\n候选节点(相似度=名字 0.6 + 判据正文 0.4):")
-            for score, nid, name in rank_nodes(index, method["name"], method["condition"]):
-                print(f"  {score:5.3f}  {nid:>6}  {name}")
-            print("\n确认后执行:加 --node <节点号> 重跑本命令落地迁移。")
-            return
-
-        nid = a.node.strip()
+        # 对号三级:① 代码精确匹配(名字一字不差且唯一)→ --auto 直接落地;
+        #          ② 无精确命中 → 列候选,模型按语义对齐后带 --node 重跑;
+        #          ③ 模型也拿不准 → 问人。②③发生在技能层,本脚本只负责①和出候选。
         nodes = index.get("nodes") or {}
+        exact = [nid for nid, nd in nodes.items()
+                 if str(nd.get("name") or "").strip() == method["name"].strip()]
+        nid = a.node.strip() if a.node else None
+        if nid is None and a.auto and len(exact) == 1:
+            nid = exact[0]
+            print(f"精确命中:{nid}「{nodes[nid].get('name')}」(节点名与交付包一字不差)——按 --auto 直接落地")
+        if nid is None:                                  # 匹配模式:列候选
+            if len(exact) > 1:
+                print(f"[warn] 树上有 {len(exact)} 个同名节点({exact})——精确匹配不唯一,必须人工指定")
+            print("\n候选节点(相似度=名字 0.6 + 判据正文 0.4;=为一字不差):")
+            for score, cnid, name in rank_nodes(index, method["name"], method["condition"]):
+                mark = "=" if cnid in exact else " "
+                print(f"  {mark}{score:5.3f}  {cnid:>6}  {name}")
+            print("\n确认后执行:加 --node <节点号> 重跑本命令落地迁移。")
+            if a.auto:
+                sys.exit(3)                              # 给上层一个"没能自动对号"的机器可读信号
+            return
         if nid not in nodes:
             raise SystemExit(f"节点 {nid} 不在故障树里——先跑匹配模式看候选")
         if entry is None:
@@ -278,12 +293,13 @@ def main() -> None:
             shutil.copy2(p, custom / p.name)
         print(f"  已拷入 scripts/custom/:{fc.name}" + (f" + {len(deps)} 个共享模块" if deps else ""))
 
-        # 2. 调优表手术(未导入的人工修改 → 硬停,绝不覆盖)
+        # 2. 调优表手术。表比 tree_index 新(可能有未导入的人工修改,也可能只是上次迁移的回导)
+        # → 先导入收编,绝不覆盖:合法修改被收进产物;表填坏了 import 会响亮失败、迁移就此打住。
         tis = sorted((product / "tree").glob("*.tree_index.json"))
         xls = sorted((product / "tree").glob("*.tuning.xlsx"))
         if xls and tis and xls[0].stat().st_mtime > tis[0].stat().st_mtime:
-            raise SystemExit(f"调优表 {xls[0].name} 比 tree_index 新——可能有**尚未导入**的人工修改。"
-                             "先跑 import_tree_excel.py 收编(或确认丢弃后删掉调优表),再重跑迁移。")
+            print("  [0/3] 调优表比 tree_index 新 → 先导入收编现有内容(有未导入的人工修改也不会丢)…")
+            run_step(product, "import_tree_excel.py", "预导入(收编现有调优表)")
         print("  [1/3] 导出调优表…")
         run_step(product, "export_tree_excel.py", "导出调优表")
         binding = {"class": "S", "func": "fault_check",
