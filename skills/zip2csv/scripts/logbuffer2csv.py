@@ -1,23 +1,25 @@
 """
-Switch02 logbuffer.txt -> CSV 转换脚本
-核心逻辑：
-1. 跳过前7行，从第8行开始为有效业务数据
-2. 用正则解析每行的 NEName、Time、Module、Level、Summary、Content、Log
-3. 从 Content 中提取 key=value 参数对，映射到 Para1~Para20 及 Para1Name~Para20Name
-4. CSV 中换行符替换为字面量 \\n 以保证 Excel 兼容性
+Switch02 logbuffer.txt -> CSV 转换脚本 v2
+修复内容（相比 v1）：
+1. skip_lines 默认值改为 5，避免多跳过有效数据行
+2. LINE_PATTERN 支持 _active: / _clear: 格式（无 (l)/(s)/(t) 标记的日志）
+3. PARAM_PATTERN 支持 Content 以 ').'' 结尾的情况
+4. MAX_PARA 从 20 提升到 30，避免参数被截断
+5. 支持多行日志条目：续行合并到上一条记录
 """
 
 import re
 import csv
 from datetime import datetime
 
-MAX_PARA = 20
+MAX_PARA = 30
 
 # ============================================================
 # 核心解析逻辑
 # ============================================================
 
 # 行格式：Jul 20 2020 19:12:19-05:00 Switch02 %%01NTP/2/NTP_TRAP_SYNCHRONIZE_STATUS(l):CID=0x803603fe;...
+# 同时支持 _active: / _clear: 格式（无括号标记）
 LINE_PATTERN = re.compile(
     r'^(\w{3}\s+\d{1,2}\s+\d{4})\s+'   # 1: 日期 (Jul 20 2020)
     r'(\d{2}:\d{2}:\d{2})'              # 2: 时间 (19:12:19)
@@ -27,13 +29,18 @@ LINE_PATTERN = re.compile(
     r'(\w+)/'                            # 5: Module (NTP)
     r'(\d+)/'                            # 6: Level (2)
     r'(\w+)'                             # 7: Summary (NTP_TRAP_SYNCHRONIZE_STATUS)
-    r'\([a-z]*\):'                        # (l): / (t): / (): 分隔符
+    r'(?:\([a-z]*\))?:'                  # (l): / (t): / (): / 直接冒号（_active/_clear格式）
     r'(.*)'                              # 8: Content (剩余全部)
 )
 
+# 用于判断一行是否为新日志条目的起始行
+NEW_ENTRY_PATTERN = re.compile(
+    r'^\w{3}\s+\d{1,2}\s+\d{4}\s+\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s+\S+\s+%%\d+'
+)
+
 # 从 Content 末尾提取包含 key=value 的括号组
-# key 可以含连字符和空格，如 M-LAG ID、LocalIfname
-PARAM_PATTERN = re.compile(r'\(([^()]*=[^()]*)\)\s*$')
+# 修复：支持以 ). 结尾（句号在括号外）
+PARAM_PATTERN = re.compile(r'\(([^()]*=[^()]*)\)\.?\s*$')
 
 # 单个 key=value 对：key 支持字母/数字/连字符/空格，value 支持任意字符（含空格、连字符）
 # 用前瞻匹配到下一个 key 或结尾，避免多词 value 被截断
@@ -93,7 +100,7 @@ def parse_line(line: str) -> dict | None:
         'Content': content,
         'Log': log,
     }
-    # 填充 Para1~Para20 及对应 Name，缺失则留空
+    # 填充 Para1~ParaN 及对应 Name，缺失则留空
     for i in range(1, MAX_PARA + 1):
         row[f'Para{i}Name'] = params.get(f'Para{i}Name', '')
         row[f'Para{i}'] = params.get(f'Para{i}', '')
@@ -134,6 +141,20 @@ SAMPLE_LINE_3 = (
     "The status of M-LAG member interfaces changes to Up, or the M-LAG member interfaces "
     "have non-dual-homing configurations. "
     "(M-LAG ID=3, LocalIfname=Eth-Trunk3, LocalSystemMAC=8ce5-ef19-54c1, RemoteSystemMAC=8ce5-ef19-5601)"
+)
+
+# v2 新增测试：_active 格式（无括号标记）
+SAMPLE_LINE_4 = (
+    "Jul  5 2026 02:36:25+03:00 DMM-ASG-02 %%01FEI/2/hwLinkHeartbeatChangeAlarm_active:"
+    "The link-heartbeat function detected that the packet modification rate reached or exceeded the threshold. "
+    "(InterfaceIfIndex=1, InterfaceName=400GE1/1/0, IfIndex=1, IfName=400GE1/1/0, ExtIfIndex=1)"
+)
+
+# v2 新增测试：Content 以 ). 结尾
+SAMPLE_LINE_5 = (
+    "Jul  5 2026 02:21:09+03:00 DMM-ASG-02 %%01ISIS/4/ISIS_LDP_SYNC_EVENT(l):"
+    "CID=0x80860586;Interface Eth-Trunk100.21 received LDP event NbrDown, "
+    "LDP synchronization state Init change to Init (IsisSysInstance=11, SuppressCount=0)."
 )
 
 
@@ -222,24 +243,83 @@ def test_single_line():
         },
     )
 
+    ok4 = _run_test(
+        "4. _active 格式（无括号标记）",
+        SAMPLE_LINE_4,
+        {
+            'NEName': 'DMM-ASG-02',
+            'Time': '2026/07/05 02:36:25',
+            'Module': 'FEI',
+            'Level': '2',
+            'Summary': 'hwLinkHeartbeatChangeAlarm_active',
+            'Para1': '1',
+            'Para1Name': 'InterfaceIfIndex',
+            'Para2': '400GE1/1/0',
+            'Para2Name': 'InterfaceName',
+            'Para3': '1',
+            'Para3Name': 'IfIndex',
+            'Para4': '400GE1/1/0',
+            'Para4Name': 'IfName',
+        },
+    )
+
+    ok5 = _run_test(
+        "5. Content 以 ). 结尾",
+        SAMPLE_LINE_5,
+        {
+            'NEName': 'DMM-ASG-02',
+            'Time': '2026/07/05 02:21:09',
+            'Module': 'ISIS',
+            'Level': '4',
+            'Summary': 'ISIS_LDP_SYNC_EVENT',
+            'Para1': '11',
+            'Para1Name': 'IsisSysInstance',
+            'Para2': '0',
+            'Para2Name': 'SuppressCount',
+        },
+    )
+
     print("=" * 70)
-    print(f"全部测试: {'ALL PASSED' if ok1 and ok2 and ok3 else 'HAS FAILURES'}")
+    all_ok = ok1 and ok2 and ok3 and ok4 and ok5
+    print(f"全部测试: {'ALL PASSED' if all_ok else 'HAS FAILURES'}")
 
 
 # ============================================================
 # 文件转换
 # ============================================================
 
-def convert_file(input_path: str, output_path: str, skip_lines: int = 7):
+def merge_multiline(lines: list[str]) -> list[str]:
+    """
+    将多行日志合并为单条：如果一行不是新日志条目的起始行，
+    则将其追加到前一条有效记录的内容中。
+    """
+    merged = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if NEW_ENTRY_PATTERN.match(stripped):
+            merged.append(stripped)
+        elif merged:
+            # 续行：追加到上一行，用空格分隔
+            merged[-1] += ' ' + stripped
+        # else: 首部之前的非空行，丢弃
+    return merged
+
+
+def convert_file(input_path: str, output_path: str, skip_lines: int = 5):
     """读取 txt 文件并转换为 CSV"""
     with open(input_path, 'r', encoding='utf-8', errors='replace') as f:
         lines = f.readlines()
 
+    # 先跳过头部行
+    data_lines = lines[skip_lines:]
+
+    # 合并多行日志条目
+    merged_lines = merge_multiline(data_lines)
+
     rows = []
-    for line in lines[skip_lines:]:
-        line = line.strip()
-        if not line:
-            continue
+    for line in merged_lines:
         row = parse_line(line)
         if row:
             rows.append(row)
