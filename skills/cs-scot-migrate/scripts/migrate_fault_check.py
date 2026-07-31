@@ -220,7 +220,7 @@ def run_step(product: Path, script_name: str, desc: str) -> None:
 # 引擎源两级:本机同门 cs-scot-generate / cs-scot-execute(更新鲜)→ 本技能内置 engine/
 # (自包含兜底;维护:引擎侧改动后跑 scripts/sync_engine.py 对齐)。
 ENGINE_CAPS = {
-    "condition_kernels.py": ("def k_script", "def alias_sources"),
+    "condition_kernels.py": ("def k_script", "def alias_sources", "【位置 "),   # 末项=S 异常带定位
     # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")'),

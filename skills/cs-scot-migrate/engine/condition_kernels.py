@@ -932,8 +932,15 @@ def k_script(table, b, sources):
     try:
         fact = fn(table, b.get("args") or {}, load)
     except Exception as e:  # noqa: BLE001
-        return _insuf("S", f"S 脚本异常({label}):{type(e).__name__}: {e}——异常一律按数据不足,"
-                           "绝不冒充'不成立'", script=label)
+        import traceback
+        frames = traceback.extract_tb(e.__traceback__)
+        here_s = str(Path(__file__).resolve().parent)    # 只报 scripts/ 下的帧:stdlib 内部帧(如 re 的
+        ours = [f for f in frames                        # _parser.py)定位不到病灶行,过滤掉
+                if str(Path(f.filename).resolve()).startswith(here_s)]
+        where = " ← ".join(f"{Path(f.filename).name}:{f.lineno}({f.name})"
+                           for f in reversed((ours or frames)[-3:])) or "?"
+        return _insuf("S", f"S 脚本异常({label}):{type(e).__name__}: {e}【位置 {where}】"
+                           "——异常一律按数据不足,绝不冒充'不成立'", script=label)
     if isinstance(fact, dict) and fact.get("status") == "insufficient_data":
         out = dict(fact)
         out.setdefault("class", "S")
