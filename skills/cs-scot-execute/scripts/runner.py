@@ -391,7 +391,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="轻量 SCoT 计划执行器")
     ap.add_argument("--plan", required=True)
     ap.add_argument("--data", action="append", default=[],
-                    help="$input 绑定,如 --data kpi=path.csv(可多次)")
+                    help="$input 绑定,如 --data kpi=path.csv(可多次)。特殊源名 raw=<原始数据目录>"
+                         "(zip2csv 的 extracted/)只递给跨源步骤,供 S 类脚本直读原始 txt")
     ap.add_argument("--base", help="路径解析基准目录(默认取 plan.json 所在目录)")
     ap.add_argument("--result-base", help="结果输出根目录:各轮 result-<运行号>/ 与总索引 index.jsonl 落在"
                                           "它下面(默认=--base,即产物目录)。平台不允许技能写自身目录时"
@@ -431,6 +432,13 @@ def main() -> None:
         if n.get("kind") == "script" and k:
             required.setdefault(k, []).append(n["id"])
     provided = {k for k, v in data_map.items() if v}
+    # 平台改名兼容(diag→cmd):plan 里的源名和 --data 的源名两代混用也能对上——
+    # plan 要 diag 而只给了 cmd(或反之)时把同一路径补挂到 plan 要的名字下,不复制文件。
+    for a, b in (("diag", "cmd"), ("cmd", "diag")):
+        if a in required and a not in provided and b in provided:
+            data_map[a] = data_map[b]
+            provided.add(a)
+            print(f"[info] 源名兼容:plan 需要「{a}」,按同义源名「{b}」的数据供给(diag/cmd 是同一类数据的两代名字)")
     missing = {k: ids for k, ids in required.items() if k not in provided}
     unused = sorted(provided - set(required))
     has_star = any((n.get("inputs") or {}).get("data") == "$input.*"

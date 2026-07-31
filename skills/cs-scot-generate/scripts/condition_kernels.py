@@ -41,6 +41,19 @@ _ID_COLS = ("CALLID", "CallID", "Call_Id", "CellId", "cellName", "CellName",
 _FW_OPS = {"≥": ">=", "≤": "<=", "≠": "!=", "＞": ">", "＜": "<", "＝": "=="}   # 全角/数学符 → 归一
 _AGGS = {"mean", "min", "max", "sum", "last", "first"}
 _SCOPES = {"aggregate", "count_rows"}
+# 平台改名兼容(2026-07 起 diag 更名 cmd):同一份数据两代列名/源名互认,旧绑定/旧调优表不作废。
+# 列名同义(键/值都用 _norm 归一形态):diag 的 ObjContent ↔ cmd 汇总表的 CmdResult。
+_COL_ALIASES = {"objcontent": ("cmdresult",), "cmdresult": ("objcontent",)}
+_SOURCE_ALIASES = {"diag": "cmd", "cmd": "diag"}         # 源名同义:绑定写哪个名都能找到数据
+
+
+def alias_sources(sources: dict) -> dict:
+    """源名兼容整形:sources 里只有 cmd/diag 之一时,补一个同义键指向**同一张表**(不复制)。
+    绑定/调优表用旧名、数据用新名(或反之)都能对上;两名都给了(真有两份数据)则各归各,不覆盖。"""
+    for a, b in _SOURCE_ALIASES.items():
+        if a in sources and b not in sources:
+            sources[b] = sources[a]
+    return sources
 
 
 def _shape_err(b, need_op=False):
@@ -227,7 +240,7 @@ def _norm(s: str) -> str:
 
 def resolve_column(header, wanted):
     """把绑定里写的列名解析到真实表头。返回 (列名 | None, 命中方式)。
-    顺序:精确 → 剥组前缀后精确 → 归一化(去前缀/空格/大小写)唯一 → 嵌套路径取末段。
+    顺序:精确 → 剥组前缀后精确 → 归一化(去前缀/空格/大小写)唯一 → 已知同义列名 → 嵌套路径取末段。
     解析不到/有歧义 → (None, 原因),交由上层判数据不足,绝不乱配。"""
     w = str(wanted or "").strip()
     if not w:
@@ -243,6 +256,10 @@ def resolve_column(header, wanted):
         return cand[0], "normalized"
     if len(cand) > 1:
         return None, f"ambiguous:{cand[:5]}"
+    for al in _COL_ALIASES.get(wn, ()):                  # 平台改名兼容:绑定写旧名、数据是新名(或反之)也能对上
+        hit = [h for h in header if _norm(h) == al]
+        if len(hit) == 1:
+            return hit[0], f"alias:{w}"
     if "->" in w:  # 嵌套路径(如 A->B->DCInnerCause)取末段再试
         return resolve_column(header, w.split("->")[-1].strip())
     return None, "not_found"

@@ -176,6 +176,8 @@ CROSS_SCAFFOLD = '''#!/usr/bin/env python3
 execute 当普通脚本跑(runner 自动把全部数据源递进来):
     python cross_analyzer.py --data cmd=<文件> --data config=<文件> ... -o out.json
 绑定写法见同目录 condition_binding_schema.md 的「参数化查询(param_from)」与 P 类 pair_from。
+S 类(代码类)补充:--data raw=<原始数据目录>(如 zip2csv 输出的 extracted/)是可选通道,
+S 脚本经 load("raw_dir") 拿到该路径直接读原始 txt;没提供也能跑(custom_lib 会从三表兜底重建)。
 """
 import argparse
 import json
@@ -183,7 +185,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from condition_kernels import load_table, evaluate_binding
+from condition_kernels import load_table, evaluate_binding, alias_sources
 
 INDICATOR = "cross"
 
@@ -229,18 +231,29 @@ def main():
             sys.exit(2)
         k, v = item.split("=", 1)
         paths[k.strip()] = v.strip()
+    # 「raw」是保留通道:原始数据**目录**(zip2csv 的 extracted/),不是表,不进 load_table;
+    # 单独摘出,以 raw_dir 键挂进 sources,S 脚本用 load("raw_dir") 拿路径。
+    raw_dir = paths.pop("raw", None) or paths.pop("raw_dir", None)
+    if paths.get("cmd") and paths.get("cmd") == paths.get("diag"):
+        paths.pop("cmd")                                 # 同一文件挂了两代源名(runner 兼容补挂):只读一份,别名回填
     # 懒加载:只读 CONDITIONS 真正引用到的源(cmd 这类大 CSV 不白读);没提供的源不造空表,
     # 让内核报「无数据源」而不是把"没喂"错当"空表"。
+    # 例外:S 类(代码类)拿的是全部源(load 想取哪张取哪张,不靠声明)→ 有 S 条目就全量加载。
+    load_all = any(str(c.get("class", "")).upper() == "S" and not c.get("decision")
+                   for c in CONDITIONS)
     sources = {}
     for c in CONDITIONS:
         if c.get("decision") in ("insufficient_data", "manual", "not_applicable"):
             continue
-        for s in _referenced_sources(c):
+        for s in (paths if load_all else _referenced_sources(c)):
             if s in paths and s not in sources:
                 try:
                     sources[s] = load_table(paths[s])
                 except Exception:                        # 读坏了当空表:该条自然数据不足,不崩整脚本
                     sources[s] = ([], [])
+    alias_sources(sources)                               # cmd/diag 两代源名互认(同一张表,不复制)
+    if raw_dir:
+        sources["raw_dir"] = raw_dir
     conds = []
     for c in CONDITIONS:
         if c.get("mode") == "custom" and c.get("id") in CUSTOM:
@@ -264,6 +277,53 @@ def main():
 if __name__ == "__main__":
     main()
 '''
+
+
+def _extract_block(src: str, name: str):
+    """顶层 `NAME = ...` 赋值块的原文;找不到/语法错 → None。(cross 骨架升级手术用)"""
+    import ast
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name
+                                                for t in node.targets):
+            lines = src.splitlines(keepends=True)
+            return "".join(lines[node.lineno - 1: node.end_lineno])
+    return None
+
+
+def _upgrade_cross_scaffold(existing: str, pristine: str):
+    """已填绑定的 cross_analyzer.py 骨架升级:引擎部分换当前版,CONDITIONS/CUSTOM 赋值块**原文保留**。
+    返回 (结果, 原因):结果=新文本(需写盘)/ existing(引擎已是当前版,不动)/ None(结构超出骨架
+    认知——如手写了辅助函数——不敢动,附原因;绑定安全第一,拿不准就不碰)。"""
+    import ast
+    try:
+        et, pt = ast.parse(existing), ast.parse(pristine)
+    except SyntaxError as e:
+        return None, f"解析失败:{e}"
+
+    def _names(tree):
+        out = set()
+        for n in tree.body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                out.add(n.name)
+            elif isinstance(n, ast.Assign):
+                out.update(t.id for t in n.targets if isinstance(t, ast.Name))
+        return out
+    extra = _names(et) - _names(pt)
+    if extra:
+        return None, f"文件里有骨架之外的顶层定义 {sorted(extra)}(可能是手写的 CUSTOM 辅助函数)"
+    out = pristine
+    for key in ("CONDITIONS", "CUSTOM"):
+        old_blk, new_blk = _extract_block(existing, key), _extract_block(out, key)
+        if old_blk is None or new_blk is None:
+            return None, f"定位不到 {key} 赋值块"
+        out = out.replace(new_blk, old_blk, 1)
+    if out == existing:
+        return existing, ""                              # 引擎部分一字不差 → 已是当前版
+    return out, ""
 
 
 def scenario_out_dir(anchor_dir: Path, scenario: str) -> Path:
@@ -495,8 +555,22 @@ def main() -> None:
         if existing == pristine:
             continue                                    # 还是全新空骨架,没填过 → 无需动
         if ind == "cross":                              # 已填过的跨源绑定是补绑环节的手工产物,重跑 assemble
-            print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 由补绑环节维护,不重铺): {target}")
-            continue                                    # 不清空——此前重铺会把 param_from 链静默打回空骨架
+            upgraded, why = _upgrade_cross_scaffold(existing, pristine)
+            if upgraded is not None and upgraded != existing:
+                bakc = target.with_name("cross_analyzer.py.bak")
+                try:
+                    shutil.copy2(target, bakc)
+                except Exception:
+                    pass
+                target.write_text(upgraded, encoding="utf-8")
+                print(f"  [upgrade] cross_analyzer.py 骨架已升级到当前版本,**已填绑定原样保留**"
+                      f"(旧文件备份 → {bakc.name})")
+            elif upgraded is None:
+                print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 骨架无法自动升级:{why};"
+                      f"绑定不动。若需 S 类/raw 通道等新能力,先手工迁出 CONDITIONS 再删文件重铺): {target}")
+            else:
+                print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 骨架已是当前版本,不重铺): {target}")
+            continue                                    # 绑定绝不清空——此前重铺会把 param_from 链静默打回空骨架
         if args.keep:
             print(f"  [keep] 保留已存在脚本(--keep,未刷新骨架/库依赖): {target}")
             continue
