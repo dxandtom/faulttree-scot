@@ -223,7 +223,7 @@ ENGINE_CAPS = {
     "condition_kernels.py": ("def k_script", "def alias_sources", "【位置 "),   # 末项=S 异常带定位
     # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
-    "custom_lib.py": ('@register("fault_check")', 'result.get("results")'),
+    "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak"),
     "import_tree_excel.py": ('{"P", "S"}',),             # S/P 放行 + cross 列支持同代
     "export_tree_excel.py": ('!= "cross"',),             # cross 列进表 + 相对深度同代
 }
