@@ -119,7 +119,7 @@ def check_ne(ne_dir, judgment_conditions):
     检查单个网元的故障状态
     """
     result = {
-        "matched": False,
+        "matched": "false",
         "evidence": [],
         "details": {},
         "total_interfaces": 0,
@@ -171,7 +171,7 @@ def check_ne(ne_dir, judgment_conditions):
         input_rate, output_rate = parse_interface_rates(interface)
         
         if input_rate == 0 or output_rate == 0:
-            result["matched"] = True
+            result["matched"] = "true"
             result["evidence"].append({
                 "interface": name,
                 "current_state": state,
