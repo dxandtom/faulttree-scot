@@ -59,7 +59,10 @@ def unpack(package: Path, tmp: Path) -> Path:
 
 
 def parse_method_md(pkg: Path):
-    """判断方法.md → {name, condition, full}。规范格式(## 分节)解析;解析不动就整文兜底。"""
+    """判断方法.md → {name, condition(=全文逐字), core(=判断条件段,只用于相似度匹配), file}。
+    判据替换用**全文**:故障描述/判断条件/命中条件/输出/数据来源表/注意事项一个不丢——
+    树上的判据从此就是整份规范文档(数据来源表是核对采集覆盖的依据,绝不能丢);
+    对号匹配仍用「判断条件」段,免得模板固定段落稀释相似度。"""
     cands = [p for p in pkg.rglob("判断方法*.md") if "规范" not in p.name]
     if not cands:
         raise SystemExit(f"交付包里找不到 判断方法*.md(排除规范文件):{pkg}")
@@ -81,11 +84,10 @@ def parse_method_md(pkg: Path):
     if not name:
         m = re.search(r"^#\s*判断方法[::]\s*(\S.*?)\s*$", text, re.M)
         name = m.group(1) if m else cands[0].stem.replace("判断方法_", "")
-    condition = secs.get("判断条件") or ""
-    if not condition:
-        print("[warn] 判断方法.md 里没解析到「## 判断条件」——判据将用整份文档正文,建议核对格式")
-        condition = text.strip()
-    return {"name": name, "condition": condition.strip(), "file": cands[0]}
+    core = secs.get("判断条件") or ""
+    if not core:
+        print("[warn] 判断方法.md 里没解析到「## 判断条件」——格式不合规范,对号匹配退化为全文比对,建议核对")
+    return {"name": name, "condition": text.strip(), "core": (core or text).strip(), "file": cands[0]}
 
 
 def find_scripts(pkg: Path, script_arg: str | None):
@@ -372,7 +374,7 @@ def main() -> None:
             if len(exact) > 1:
                 print(f"[warn] 树上有 {len(exact)} 个同名节点({exact})——精确匹配不唯一,必须人工指定")
             print("\n候选节点(相似度=名字 0.6 + 判据正文 0.4;=为一字不差):")
-            for score, cnid, name in rank_nodes(index, method["name"], method["condition"]):
+            for score, cnid, name in rank_nodes(index, method["name"], method["core"]):
                 mark = "=" if cnid in exact else " "
                 print(f"  {mark}{score:5.3f}  {cnid:>6}  {name}")
             print("\n确认后执行:加 --node <节点号> 重跑本命令落地迁移。")
@@ -431,7 +433,7 @@ def main() -> None:
         mig_p.write_text(json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
 
         print(f"\n迁移完成:{nid}「{nodes[nid].get('name')}」")
-        print(f"  判据 ← 判断方法.md「判断条件」;绑定 ← S(fault_check → custom/{fc.name}:{entry})")
+        print(f"  判据 ← 判断方法.md 全文(含故障描述/判断条件/数据来源表等);绑定 ← S(fault_check → custom/{fc.name}:{entry})")
         print(f"  台账 → tree/migrations.json;调优表已同步,后续人工调优照常。")
         print("  执行提示:runner 加 --data raw=<zip2csv 的 extracted 目录> 可让脚本直读原始 txt"
               "(不加也能跑,自动从三表重建);产物在打包技能里的话记得重新 package。")
