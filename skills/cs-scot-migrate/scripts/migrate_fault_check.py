@@ -247,7 +247,7 @@ ENGINE_CAPS = {
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
                       "_fc_tristate"),                  # 末项=tester 新契约字符串三态/全局形态识别
     "import_tree_excel.py": ('{"P", "S"}',),             # S/P 放行 + cross 列支持同代
-    "export_tree_excel.py": ('!= "cross"',),             # cross 列进表 + 相对深度同代
+    "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
 RUNNER_CAP = "源名兼容"                                  # raw 通道 / diag↔cmd 互认同代
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -181,6 +182,11 @@ def export(out_dir: Path) -> Path:
         print(f"⚠ 现有调优表比 tree_index 新(可能有**尚未导入**的人工修改)——已备份到 {bak.name} 再覆盖。"
               "若确有未导入的修改,先跑 import_tree_excel.py 再导出。", file=sys.stderr)
     wb.save(dst)
+    try:                                                 # 刚导出的表内容必与产物同步:把表 mtime 对齐 index,
+        st = tis[0].stat()                               # 消除"表比 index 新"的常驻假警报(迁移/打包每次都误报)。
+        os.utime(dst, (st.st_atime, st.st_mtime))        # 此后人工真改过表,mtime 变新,新旧检测照常灵。
+    except OSError:
+        pass
     n_cross = sorted({nid for (nid, s) in bind if s == "cross"})
     if n_cross:
         print(f"  跨源绑定已进「绑定:cross」列(涉及节点 {len(n_cross)} 个:{', '.join(n_cross[:8])}"
