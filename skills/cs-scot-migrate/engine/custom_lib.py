@@ -247,6 +247,22 @@ def _fc_prepare_data(load, tmp_root):
     return root, "无原始目录,已从数据表兜底重建"
 
 
+def _fc_tristate(v):
+    """matched 值 → True / False / None(判不了)。tester 新契约是**字符串**三态
+    ("true"/"false"/"undetermined"),旧契约是 bool——字符串 "false" 按真值判会极性反转
+    (非空字符串恒真),必须显式映射;大小写不敏感;数值当 bool;认不出的值按判不了(诚实)。"""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    s = str(v).strip().lower()
+    if s == "true":
+        return True
+    if s == "false":
+        return False
+    return None                                          # "undetermined" / 空 / 未知值
+
+
 def _fc_normalize(result):
     """脚本产出 → {网元: 单元结果} 映射。认三种形状:全局包裹(details.devices)/
     网元名直挂顶层 / 单网元裸结果。认不出 → None。"""
@@ -276,7 +292,11 @@ def fault_check(table, args, load):
            "per_ne": false(true=入口吃单网元目录,本壳逐网元调用汇总),
            "entry_kwargs": {}(入口额外关键字参数,如 judgment_conditions)}
     数据:优先 load("raw_dir")(runner --data raw=<extracted目录>);没有则三表兜底重建。
-    翻译:任一网元 matched → 成立;全网元 error/无网元 → 数据不足;否则不成立(网元级 error 如实注记)。"""
+    结果四种形态都认:旧按网元 map(matched 为 bool)/ results 信封 / details.devices 包裹 /
+    tester 新契约**全局形态**(顶层一个 matched,字符串三态 "true"/"false"/"undetermined",
+    evidence 为 {type,id,data} 结构体数组)。
+    翻译:任一实体判真 → 成立;全部实体 error/undetermined/无实体 → 数据不足(不冒充"正常");
+    否则不成立;matched:false 却带 details.error(缺数据冒充阴性的老毛病)按判不了处理。"""
     import contextlib
     import importlib.util
     import io as _io
@@ -337,10 +357,22 @@ def fault_check(table, args, load):
     for ne, r in ne_map.items():
         if not isinstance(r, dict) or ("matched" not in r):
             bad.append((ne, str((r or {}).get("error") or r)[:120] if isinstance(r, dict) else str(r)[:120]))
-        elif r.get("matched"):
+            continue
+        tri = _fc_tristate(r.get("matched"))
+        det = r.get("details") if isinstance(r.get("details"), dict) else {}
+        err = det.get("error") or r.get("error")
+        if tri is None:                                  # undetermined / 认不出的值 → 该实体判不了
+            bad.append((ne, str(det.get("reason") or err or f"matched={r.get('matched')!r},判不了")[:120]))
+        elif tri is False and err:                       # 缺数据却报 false+error(冒充阴性的老毛病)→ 按判不了
+            bad.append((ne, str(err)[:120]))
+        elif tri:
             hit.append(ne)
             for ev in (r.get("evidence") or [])[:5]:
-                evidence.append(f"{ne}: {str(ev)[:200]}" if not str(ev).startswith(f"{ne}:") else str(ev)[:200])
+                if isinstance(ev, dict):                 # 新契约证据条目:{type, id, data:{…}} 结构体
+                    label = ":".join(str(ev[k]) for k in ("type", "id") if ev.get(k)) or str(ev)[:200]
+                    evidence.append((f"{ne}: " if ne != "(整体)" else "") + label[:200])
+                else:
+                    evidence.append(f"{ne}: {str(ev)[:200]}" if not str(ev).startswith(f"{ne}:") else str(ev)[:200])
         else:
             miss.append(ne)
     if not hit and not miss:                             # 全部网元都没给出 matched(error/坏形状)

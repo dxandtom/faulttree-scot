@@ -441,6 +441,9 @@ args 三个可调项:`entry`=入口函数名(默认 `diagnose`;老脚本入口�
 `entry_kwargs`=入口的额外关键字参数。数据供给两条路,自动选:执行时给了
 `--data raw=<原始数据目录>`(zip2csv 输出的 `extracted/`)就直读原始 txt(零转换,最忠实);
 没给就从 config/log/cmd 三表**兜底重建**临时目录(DIAG 目录名自动别名成 CMD)。
-结果翻译:任一网元 matched → 成立;全网元报 error / 一个网元都没读到 → **数据不足**(不冒充"正常");
-其余 → 不成立(个别网元 error 会在 explain 里如实注记)。整包迁移(判据+脚本+绑定一条龙)用
-cs-scot-migrate 技能,不必手工做这些。
+结果四种形态都认:旧按网元 map(matched 为 bool)、results 信封、details.devices 包裹、
+tester **新契约全局形态**(顶层一个 matched,字符串三态 "true"/"false"/"undetermined",
+evidence 为 {type,id,data} 结构体)。翻译:任一实体判真 → 成立;全部实体 error/undetermined/
+一个实体都没读到 → **数据不足**(不冒充"正常");其余 → 不成立(个别实体 error 如实注记;
+matched:"false" 却带 details.error 的按判不了处理,不当阴性)。整包迁移(判据+脚本+绑定一条龙)
+用 cs-scot-migrate 技能,不必手工做这些。
