@@ -158,7 +158,7 @@ def check_vlan_mismatch(interfaces):
 def diagnose_ne(ne_dir):
     """诊断单个网元"""
     result = {
-        'matched': False,
+        'matched': "false",
         'evidence': [],
         'details': {}
     }
@@ -183,7 +183,7 @@ def diagnose_ne(ne_dir):
     mismatches = check_vlan_mismatch(all_interfaces)
     
     if mismatches:
-        result['matched'] = True
+        result['matched'] = "true"
         for mismatch in mismatches:
             evidence = f"子接口 ID {mismatch['sub_id']}: {mismatch['reason']}"
             result['evidence'].append(evidence)
