@@ -68,7 +68,7 @@ def check_vstp_bridge_mac_fault(config_file, cmd_file):
         dict: 包含 matched, evidence, details
     """
     result = {
-        "matched": False,
+        "matched": "false",
         "evidence": [],
         "details": {
             "step1_vstp_enabled": None,
@@ -123,12 +123,12 @@ def check_vstp_bridge_mac_fault(config_file, cmd_file):
     if configured_mac is None:
         # 未配置桥MAC，与 Active 不一致 → 故障
         result["details"]["step3_comparison"] = "config_none_vs_active"
-        result["matched"] = True
+        result["matched"] = "true"
         result["evidence"].append("结论: 配置未设置桥MAC，与Active MAC不一致 → 故障")
     elif active_mac and configured_mac.lower() != active_mac.lower():
         # 配置的 MAC 与 Active MAC 不一致 → 故障
         result["details"]["step3_comparison"] = "mismatch"
-        result["matched"] = True
+        result["matched"] = "true"
         result["evidence"].append(f"结论: 配置MAC({configured_mac}) ≠ Active MAC({active_mac}) → 故障")
     else:
         # 一致 → 正常
