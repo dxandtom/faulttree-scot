@@ -463,7 +463,9 @@ def main() -> None:
         print(f"  判据 ← 判断方法.md 全文(含故障描述/判断条件/数据来源表等);绑定 ← S(fault_check → custom/{fc.name}:{entry})")
         print(f"  台账 → tree/migrations.json;调优表已同步,后续人工调优照常。")
         print("  执行提示:runner 加 --data raw=<zip2csv 的 extracted 目录> 可让脚本直读原始 txt"
-              "(不加也能跑,自动从三表重建);产物在打包技能里的话记得重新 package。")
+              "(不加也能跑,自动从三表重建)。")
+        print("  打包说明:迁移是**就地生效**——产物就是打包技能的 assets/ 时,技能已更新完毕,"
+              "**无需重新打包**;只有在独立产物目录上迁移、之后要发布成技能时才跑 package_scenario.py。")
 
 
 if __name__ == "__main__":

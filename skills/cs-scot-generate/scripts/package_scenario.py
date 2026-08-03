@@ -149,7 +149,13 @@ def main() -> None:
 
     shutil.copytree(exe, dest, ignore=_ignore)                       # 执行骨架
     rewrite_skill_md(dest / "SKILL.md", name, scenario)              # 技能身份:名字+场景描述
-    shutil.copytree(out, dest / "assets", ignore=_ignore)            # 诊断产物(排除临时物)
+
+    def _ignore_out(d, names):                           # --out 若是"已打包技能的 assets/"(就地调优/迁移后再克隆),
+        ig = set(_ignore(d, names))                      # 里面已带上次打包放的 fault-tree-rca 副本——拷贝时剔除,
+        if Path(d).resolve() == out.resolve():           # 随后统一放新副本,免得同名目录相撞(实测炸在 copytree)
+            ig |= {n for n in names if n == "fault-tree-rca"}
+        return ig
+    shutil.copytree(out, dest / "assets", ignore=_ignore_out)        # 诊断产物(排除临时物)
     shutil.copytree(rca, dest / "assets" / "fault-tree-rca", ignore=_ignore)   # 根因规则副本
 
     n_scripts = len(list((dest / "assets" / "scripts").glob("*_analyzer.py")))
