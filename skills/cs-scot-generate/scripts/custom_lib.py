@@ -255,6 +255,11 @@ def _fc_normalize(result):
     det = result.get("details")
     if isinstance(det, dict) and isinstance(det.get("devices"), dict):
         return det["devices"]
+    inner = result.get("results")                        # {"fault_node":…, "results":{网元:{…}}} 信封形态
+    if isinstance(inner, dict) and inner and all(
+            isinstance(v, dict) and ("matched" in v or "error" in v or "status" in v)
+            for v in inner.values()):
+        return inner
     if "matched" in result or "error" in result:         # 全局裸结果(脚本不分网元、只给一个总结论)
         return {"(整体)": result}
     if result and all(isinstance(v, dict) and ("matched" in v or "error" in v or "status" in v)
@@ -302,20 +307,24 @@ def fault_check(table, args, load):
         spec = importlib.util.spec_from_file_location(f"fc_{script.stem}", script)
         mod = importlib.util.module_from_spec(spec)
         sink = _io.StringIO()
-        with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-            spec.loader.exec_module(mod)                 # 脚本运行期的 print 全部收走,不进执行日志
-            fn = getattr(mod, entry_name, None)
-            if not callable(fn):
-                cands = [n for n in dir(mod) if callable(getattr(mod, n)) and not n.startswith("_")]
-                return {"status": "insufficient_data",
-                        "reason": f"脚本没有入口函数「{entry_name}」;文件顶层可调用:{cands[:8]}"}
-            if args.get("per_ne"):
-                ne_map = {}
-                for ne_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-                    r = fn(str(ne_dir), **kwargs)
-                    ne_map[ne_dir.name] = r if isinstance(r, dict) else {"error": f"入口返回非 dict:{type(r).__name__}"}
-            else:
-                ne_map = _fc_normalize(fn(str(root), **kwargs))
+        argv_bak, _sys.argv = _sys.argv, [str(script)]   # argv 隔离:CLI 型脚本库调用时常仍偷读 sys.argv,
+        try:                                             # 会吃到 cross_analyzer 的 -o 临时路径当自己的参数
+            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):     # (实测:路径当正则炸 \U)
+                spec.loader.exec_module(mod)             # 脚本运行期的 print 全部收走,不进执行日志
+                fn = getattr(mod, entry_name, None)
+                if not callable(fn):
+                    cands = [n for n in dir(mod) if callable(getattr(mod, n)) and not n.startswith("_")]
+                    return {"status": "insufficient_data",
+                            "reason": f"脚本没有入口函数「{entry_name}」;文件顶层可调用:{cands[:8]}"}
+                if args.get("per_ne"):
+                    ne_map = {}
+                    for ne_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+                        r = fn(str(ne_dir), **kwargs)
+                        ne_map[ne_dir.name] = r if isinstance(r, dict) else {"error": f"入口返回非 dict:{type(r).__name__}"}
+                else:
+                    ne_map = _fc_normalize(fn(str(root), **kwargs))
+        finally:
+            _sys.argv = argv_bak
 
     if ne_map is None:
         return {"status": "insufficient_data",

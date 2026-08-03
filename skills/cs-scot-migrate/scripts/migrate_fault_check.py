@@ -107,18 +107,32 @@ def find_scripts(pkg: Path, script_arg: str | None):
 
 
 def detect_entry(script: Path):
-    """静态探测入口函数:diagnose > main > check_ne > diagnose_ne > check;
-    单网元入口(check_ne/diagnose_ne)→ per_ne;首参之外的无默认值参数 → entry_kwargs 需求。"""
+    """静态探测入口函数:diagnose > main > check_ne > diagnose_ne > check。
+    入口契约=至少接收 1 个位置参数(数据目录);0 参函数(从 sys.argv 自取路径的老脚本)一律跳过
+    并记入 note——运行期转接头必传目录参数,选了 0 参入口就是必炸的 TypeError,在迁移时拦下。
+    单网元入口(check_ne/diagnose_ne)→ per_ne;首参之外的无默认值参数 → entry_kwargs 需求。
+    返回 (entry, per_ne, kwargs, 顶层函数清单, argc 表, note)。"""
     tree = ast.parse(script.read_text(encoding="utf-8", errors="replace"))
     defs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
-    entry = next((c for c in ("diagnose", "main", "check_ne", "diagnose_ne", "check") if c in defs), None)
+    argc = {n: len(f.args.args) for n, f in defs.items()}
+    entry, skipped = None, []
+    for c in ("diagnose", "main", "check_ne", "diagnose_ne", "check"):
+        if c not in defs:
+            continue
+        if argc[c] < 1:
+            skipped.append(c)
+            continue
+        entry = c
+        break
+    note = (f"({'/'.join(skipped)}() 不接收数据目录参数——脚本从 sys.argv 自取路径,不符合入口契约,已跳过)"
+            if skipped else "")
     if entry is None:
-        return None, False, {}, sorted(defs)
+        return None, False, {}, sorted(defs), argc, note
     fn = defs[entry]
     pos = [a.arg for a in fn.args.args]
     required_extra = pos[1: len(pos) - len(fn.args.defaults)] if len(pos) > 1 else []
     kwargs = {p: {} for p in required_extra}             # 常见如 judgment_conditions={};其余待人核
-    return entry, entry in ("check_ne", "diagnose_ne"), kwargs, sorted(defs)
+    return entry, entry in ("check_ne", "diagnose_ne"), kwargs, sorted(defs), argc, note
 
 
 # ---------- 节点匹配 ----------
@@ -206,8 +220,11 @@ def run_step(product: Path, script_name: str, desc: str) -> None:
 # 引擎源两级:本机同门 cs-scot-generate / cs-scot-execute(更新鲜)→ 本技能内置 engine/
 # (自包含兜底;维护:引擎侧改动后跑 scripts/sync_engine.py 对齐)。
 ENGINE_CAPS = {
-    "condition_kernels.py": ("def k_script", "def alias_sources"),
-    "custom_lib.py": ('@register("fault_check")',),
+    "condition_kernels.py": ("def k_script", "def alias_sources", "【位置 ",
+                             "except SystemExit"),      # 末两项=S 异常带定位 + sys.exit 拦截
+    # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
+    # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
+    "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak"),
     "import_tree_excel.py": ('{"P", "S"}',),             # S/P 放行 + cross 列支持同代
     "export_tree_excel.py": ('!= "cross"',),             # cross 列进表 + 相对深度同代
 }
@@ -326,14 +343,19 @@ def main() -> None:
         pkg = unpack(Path(a.package).expanduser().resolve(), Path(td))
         method = parse_method_md(pkg)
         fc, deps = find_scripts(pkg, a.script)
-        entry, per_ne, kwargs, all_defs = detect_entry(fc)
+        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(fc)
         if a.entry:
             entry, per_ne = a.entry, a.per_ne
+            if argc.get(entry, 1) < 1:                   # 手工指定也过同一道闸:0 参入口运行期必炸
+                raise SystemExit(f"--entry 指定的「{entry}」不接收数据目录参数(脚本从 sys.argv 自取路径)"
+                                 "——转接头必传目录参数,选它运行期必报 TypeError。"
+                                 "让交付方按规范改成 diagnose(data_dir),或选一个吃目录参数的函数。")
         if a.entry_kwargs:
             kwargs = json.loads(a.entry_kwargs)
         index = load_index(product)
         print(f"交付包:节点名称「{method['name']}」 脚本 {fc.name} 入口 {entry or '?'}"
-              f"{'(单网元模式)' if per_ne else ''} 共享模块 {[d.name for d in deps] or '无'}")
+              f"{'(单网元模式)' if per_ne else ''} 共享模块 {[d.name for d in deps] or '无'}"
+              + (f"\n  ⚠ {note}" if note else ""))
 
         # 对号三级:① 代码精确匹配(名字一字不差且唯一)→ --auto 直接落地;
         #          ② 无精确命中 → 列候选,模型按语义对齐后带 --node 重跑;
@@ -359,7 +381,9 @@ def main() -> None:
         if nid not in nodes:
             raise SystemExit(f"节点 {nid} 不在故障树里——先跑匹配模式看候选")
         if entry is None:
-            raise SystemExit(f"探测不到入口函数(脚本顶层函数:{all_defs[:8]})——用 --entry 指定")
+            raise SystemExit(f"探测不到可用入口函数(脚本顶层函数:{all_defs[:8]}{';' + note if note else ''})"
+                             "——入口须接收数据目录参数,如 diagnose(data_dir);让交付方按规范改脚本,"
+                             "或用 --entry 指定一个吃目录参数的函数")
         if kwargs and not a.entry_kwargs:
             print(f"[warn] 入口 {entry} 有额外必填参数 {sorted(kwargs)},已按空 dict 传入;"
                   "不对就用 --entry-kwargs 显式指定")
