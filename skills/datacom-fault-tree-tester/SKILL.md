@@ -41,6 +41,10 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 
 > **注意**：`display current-configuration` 必须放在 `CONFIG/`，`display logbuffer`/`display trapbuffer` 必须放在 `LOG/`。
 
+**自动识别**：脚本内部自动检测目录结构
+- 多网元结构：`data_dir` 下存在网元子目录（每个子目录为一个网元）
+- 单网元结构：`data_dir` 下直接是 `CONFIG/`、`CMD/`、`LOG/` 目录（网元名取 `data_dir` 目录名）
+
 ---
 
 ## 执行流程概览
@@ -153,32 +157,100 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 
 脚本要求：
 
-1. **目录遍历**：遍历网元目录下所有子目录（每个子目录为一个网元）
-2. **输出格式**：返回 JSON 格式结果
+1. **输入参数**：`<data_dir>` 即可，额外参数通过 `sys.argv` 传递（如有）
+2. **目录遍历**：遍历网元目录下所有子目录（每个子目录为一个网元）。脚本内部自动检测目录结构：
+   - 多网元结构：`data_dir` 下存在网元子目录
+   - 单网元结构：`data_dir` 下直接是 `CONFIG/`、`CMD/`、`LOG/` 目录（网元名取 `data_dir` 目录名）
+3. **输出格式**：返回 JSON 格式结果
    ```json
-   {"网元名": {"matched": true/false, "evidence": [...], "details": {...}}}
+   {
+     "matched": "true" | "false" | "undetermined",
+     "evidence": [
+       {
+         "type": "ne|interface|port|tunnel",
+         "id": "网元名|Tunnel0/0/1|...",
+         "matched": "true",
+         "data": {
+           "source_files": [
+             {"file": "CMD/display bfd session all verbose.txt", "line_range": "1-50", "content": "完整命令回显块..."}
+           ],
+           "matched_items": [
+             {
+               "name": "TELSPToAcc1",
+               "state": "Down",
+               "bind_interface": "Tunnel0/0/1",
+               "_source_line": "23-28"
+             }
+           ]
+         }
+       }
+     ],
+     "details": {
+       "reason": "无法判断的原因（当 matched 为 undetermined 时）"
+     }
+   }
    ```
-3. **文件命名**：存放在 `scripts/` 目录下
-4. **通用能力复用**：**必须**使用 `scripts/search_config.py` 中的 `parse_config_file()`, `find_config_item()`, `get_group_items()` 函数进行配置解析，**禁止**自行实现配置解析逻辑（详见 `判断方法_规范.md` 附录）
-5. **统一入口**：必须提供 `diagnose(data_dir)` 函数作为唯一对外入口（内部怎么组织不限），返回上述 JSON 对象；`print` 和 **读 `sys.argv`** 都只允许出现在 `if __name__ == '__main__'` 分支（库调用时 sys.argv 属于宿主进程，拿它当自己的参数会吃进别人的命令行）
-6. **三态诚实（禁止拿"没故障"糊弄）**：某网元判定所需数据缺失（命令没采集、目录/文件缺失、解析失败）时，该网元必须输出 `{"error": "缺什么"}`（不带 matched 字段）；**禁止**输出 matched:false 冒充"正常"，**禁止**把该网元从结果里静默剔除，**禁止**解析失败后降级用其它方式继续判
-7. **数据来源表列全**：判断方法.md 的「数据来源」表必须把脚本实际用到的每条命令都列上（下游对接靠它核对采集覆盖）
+   - `matched`：判断结果（字符串类型）
+     - `"true"`：故障条件匹配，检测到目标故障
+     - `"false"`：故障条件不匹配，未检测到目标故障
+     - `"undetermined"`：无法判断，脚本期待入参但实际未传对应入参、或入参类型/值不符合预期、或关键数据缺失
+   - `type`：实体类型（ne/interface/port/tunnel 等）
+   - `id`：实体标识（网元名、接口名、隧道名等）
+   - `data.source_files`：原始证据块，包含文件路径、行号范围、完整内容
+   - `data.matched_items`：命中的具体项，关键字段 + `_source_line` 指向原始位置
+   - `details.reason`：当 `matched` 为 `"undetermined"` 时，必须说明原因
+4. **文件命名**：存放在 `scripts/` 目录下
+5. **通用能力复用**：**必须**使用 `scripts/search_config.py` 中的 `parse_config_file()`, `find_config_item()`, `get_group_items()` 函数进行配置解析，**禁止**自行实现配置解析逻辑（详见 `判断方法_规范.md` 附录）
 
 生成完成后，输出脚本路径供用户确认。
 
 
 生成 Python 脚本 `fault_check_[故障节点名].py`，脚本要求：
 
-1. **目录遍历**：遍历网元目录下所有子目录（每个子目录为一个网元）
-2. **输出格式**：返回 JSON 格式结果
+1. **输入参数**：`<data_dir>` 即可，额外参数通过 `sys.argv` 传递（如有）
+2. **目录遍历**：遍历网元目录下所有子目录（每个子目录为一个网元）。脚本内部自动检测目录结构：
+   - 多网元结构：`data_dir` 下存在网元子目录
+   - 单网元结构：`data_dir` 下直接是 `CONFIG/`、`CMD/`、`LOG/` 目录（网元名取 `data_dir` 目录名）
+3. **输出格式**：返回 JSON 格式结果
    ```json
-   {"网元名": {"matched": true/false, "evidence": [...], "details": {...}}}
+   {
+     "matched": "true" | "false" | "undetermined",
+     "evidence": [
+       {
+         "type": "ne|interface|port|tunnel",
+         "id": "网元名|Tunnel0/0/1|...",
+         "matched": "true",
+         "data": {
+           "source_files": [
+             {"file": "CMD/display bfd session all verbose.txt", "line_range": "1-50", "content": "完整命令回显块..."}
+           ],
+           "matched_items": [
+             {
+               "name": "TELSPToAcc1",
+               "state": "Down",
+               "bind_interface": "Tunnel0/0/1",
+               "_source_line": "23-28"
+             }
+           ]
+         }
+       }
+     ],
+     "details": {
+       "reason": "无法判断的原因（当 matched 为 undetermined 时）"
+     }
+   }
    ```
-3. **文件命名**：存放在 `scripts/` 目录下
-4. **通用能力复用**：**必须**使用 `scripts/search_config.py` 中的 `parse_config_file()`, `find_config_item()`, `get_group_items()` 函数进行配置解析，**禁止**自行实现配置解析逻辑（详见 `判断方法_规范.md` 附录）
-5. **统一入口**：必须提供 `diagnose(data_dir)` 函数作为唯一对外入口（内部怎么组织不限），返回上述 JSON 对象；`print` 和 **读 `sys.argv`** 都只允许出现在 `if __name__ == '__main__'` 分支（库调用时 sys.argv 属于宿主进程，拿它当自己的参数会吃进别人的命令行）
-6. **三态诚实（禁止拿"没故障"糊弄）**：某网元判定所需数据缺失（命令没采集、目录/文件缺失、解析失败）时，该网元必须输出 `{"error": "缺什么"}`（不带 matched 字段）；**禁止**输出 matched:false 冒充"正常"，**禁止**把该网元从结果里静默剔除，**禁止**解析失败后降级用其它方式继续判
-7. **数据来源表列全**：判断方法.md 的「数据来源」表必须把脚本实际用到的每条命令都列上（下游对接靠它核对采集覆盖）
+   - `matched`：判断结果（字符串类型）
+     - `"true"`：故障条件匹配，检测到目标故障
+     - `"false"`：故障条件不匹配，未检测到目标故障
+     - `"undetermined"`：无法判断，脚本期待入参但实际未传对应入参、或入参类型/值不符合预期、或关键数据缺失
+   - `type`：实体类型（ne/interface/port/tunnel 等）
+   - `id`：实体标识（网元名、接口名、隧道名等）
+   - `data.source_files`：原始证据块，包含文件路径、行号范围、完整内容
+   - `data.matched_items`：命中的具体项，关键字段 + `_source_line` 指向原始位置
+   - `details.reason`：当 `matched` 为 `"undetermined"` 时，必须说明原因
+4. **文件命名**：存放在 `scripts/` 目录下
+5. **通用能力复用**：**必须**使用 `scripts/search_config.py` 中的 `parse_config_file()`, `find_config_item()`, `get_group_items()` 函数进行配置解析，**禁止**自行实现配置解析逻辑（详见 `判断方法_规范.md` 附录）
 
 ---
 
