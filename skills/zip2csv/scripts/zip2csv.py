@@ -48,7 +48,7 @@ def find_data_dirs(extract_dir):
     支持 ZIP 内有多层嵌套，如 Switch01/DIAG/ 或直接 DIAG/。
     返回 dict: {'LOG': [path1, ...], 'CONFIG': [path1, ...], 'DIAG': [path1, ...]}
     """
-    result = {'LOG': [], 'CONFIG': [], 'DIAG': [], 'CMD': []}   # 命名迁移:原DIAG→CMD、原DBLG→DIAG;CMD 按回显解析
+    result = {'LOG': [], 'CONFIG': [], 'DIAG': [], 'CMD': []}   # 命名迁移:DIAG 更名 CMD(两名并存兼容:新包 CMD、老包 DIAG 都认,同款回显解析)
     for dirpath, dirnames, filenames in os.walk(extract_dir):
         dirname = os.path.basename(dirpath).upper()
         if dirname in result:
@@ -159,7 +159,7 @@ def process_diag_dirs(diag_dirs, csv_dir, extract_dir):
 
 
 def process_cmd_dirs(cmd_dirs, csv_dir, extract_dir):
-    """遍历所有 CMD/ 目录下 .txt 文件(命名迁移后的命令回显,原 DIAG 同款),
+    """遍历所有 CMD/ 目录下 .txt 文件(DIAG 更名 CMD 后的命令回显,解析与 DIAG 同款),
     调用 parse_diag_to_csv 转换,输出到 csv/<NE>/CMD/(列 NEName/CmdName/ObjContent;
     下游内核认 ObjContent↔CmdResult 同义,直接当 cmd 表喂)。"""
     if not cmd_dirs:
@@ -294,7 +294,7 @@ def main():
     # Step 5: 处理 DIAG，收集输出 CSV 路径
     diag_csvs = process_diag_dirs(data_dirs['DIAG'], csv_dir, extract_dir)
 
-    # Step 5b: 处理 CMD(命名迁移后的命令回显,原 DIAG 同款解析)
+    # Step 5b: 处理 CMD(DIAG 更名 CMD;老包的 DIAG 目录上面照旧处理,两名并存兼容)
     process_cmd_dirs(data_dirs['CMD'], csv_dir, extract_dir)
 
     # Step 6: 生成 CMD CSV
