@@ -157,6 +157,10 @@ def main() -> None:
         return ig
     shutil.copytree(out, dest / "assets", ignore=_ignore_out)        # 诊断产物(排除临时物)
     shutil.copytree(rca, dest / "assets" / "fault-tree-rca", ignore=_ignore)   # 根因规则副本
+    z2c = Path(__file__).resolve().parents[2] / "zip2csv"          # 裸 txt→三表转换器:有就随包内置
+    if z2c.is_dir() and not (dest / "assets" / "zip2csv").exists():  # (SKILL.md 数据入口按它指路;
+        shutil.copytree(z2c, dest / "assets" / "zip2csv", ignore=_ignore)      # 产物 assets 已自带则不重复)
+        print("  已内置 zip2csv 转换器 → assets/zip2csv/(裸 txt 数据现场直转三表)")
 
     n_scripts = len(list((dest / "assets" / "scripts").glob("*_analyzer.py")))
     has_sol = (dest / "assets" / "tree" / "solutions.json").exists()
