@@ -46,14 +46,14 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
    - **已解析的表**(csv/xlsx,表头带 NEName/CmdName/Summary/level1 这类列)→ 按第 2 条匹配指标直接喂;
    - **裸 txt 原始采集**(特征:网元目录下有 `CONFIG/`、`CMD/`(或 `DIAG/`)、`LOG/` 子目录,里面是 .txt
      命令回显)→ **先转再喂**,按下面三步做,一步都不能省:
-     1. 用 assets 里内置的转换器转成三表:`python "<本目录>/assets/…/zip2csv.py" <zip路径> [输出目录]`
-        (在 assets/ 下找 zip2csv.py,常见位置 `assets/zip2csv/scripts/zip2csv.py`;它只吃 zip——用户给的
-        是**目录**就先压一个临时 zip 再喂,两行 python:`shutil.make_archive`)。转出的 csv 在
+     1. 用 assets 里内置的转换器转成三表:`python "<本目录>/assets/…/zip2csv.py" <zip或目录> -o <输出目录>`
+        (在 assets/ 下找 zip2csv.py,常见位置 `assets/zip2csv/scripts/zip2csv.py`;zip、目录都直接吃,
+        **目录不用先压 zip**;旧版只吃 zip 的才需要 `shutil.make_archive` 先打包)。转出的 csv 在
         `<输出>/csv/<网元>/LOG|CONFIG|DIAG|CMD/*.csv`,按**子目录名**对应指标(DIAG 与 diag/cmd 同义,
         runner 认两代名);多网元产出多份同类 csv 时,同表头首行保留、其余逐文件追加合并成一个再喂;
-     2. **无论转没转,把原始 txt 目录用 `--data raw=<原始目录>` 一并传给 runner**(zip2csv 输出里的
-        `extracted/` 就是)——S 类脚本绑定(scripts/custom/ 下的节点脚本)靠它直读原始回显,不传则这类
-        节点只能走三表兜底重建,数据不齐时会报"数据不足,脚本未运行";
+     2. **无论转没转,把原始 txt 目录用 `--data raw=<原始目录>` 一并传给 runner**(zip 输入时是 zip2csv
+        输出里的 `extracted/`,目录输入时就是那个目录本身)——S 类脚本绑定(scripts/custom/ 下的节点脚本)
+        靠它直读原始回显,不传则这类节点只能走三表兜底重建,数据不齐时会报"数据不足,脚本未运行";
      3. 转换失败/找不到 zip2csv 时**明说**,不许拿裸 txt 文件路径冒充某指标的表去喂(txt 不是表,解析
         出来是没有预期列的假表,全体判据会错报数据不足)。
 2. **数据↔指标匹配**:指标名 = `assets/scripts/` 下的 `<指标>_analyzer.py` 前缀;数据文件按

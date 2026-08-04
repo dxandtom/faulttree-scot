@@ -22,9 +22,11 @@ ZIP 解压 + 自动转换流水线
     <output_dir>/<zip_basename>_csv.zip
 
 用法：
-    python zip2csv.py <zip_file_path> [output_dir]
+    python zip2csv.py <zip包或原始数据目录> [output_dir]     # 目录直接给,无需先压成 zip
+    python zip2csv.py <zip包或原始数据目录> -o <output_dir>
 """
 
+import argparse
 import sys
 import os
 import zipfile
@@ -56,17 +58,20 @@ def find_data_dirs(extract_dir):
     return result
 
 
+DEFAULT_NE = 'NE'   # 平铺形态(数据类型目录直接在根下,没有网元层)的兜底网元名;目录输入时用目录名
+
+
 def get_ne_name(data_dir, extract_dir):
     """
     从数据目录路径中提取 NE 名称。
     例如 extract_dir/extracted/Switch01/DIAG -> Switch01
-    如果没有中间层，返回 'NE'。
+    如果没有中间层，返回 DEFAULT_NE。
     """
     rel = os.path.relpath(data_dir, extract_dir)
     parts = rel.replace('\\', '/').split('/')
     if len(parts) >= 2:
         return parts[-2]
-    return 'NE'
+    return DEFAULT_NE
 
 
 def unzip_file(zip_path, extract_dir):
@@ -253,32 +258,56 @@ def pack_csv_to_zip(csv_dir, output_dir, zip_basename):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("用法: python zip2csv.py <zip_file_path> [output_dir]")
-        sys.exit(1)
+    global DEFAULT_NE
+    try:                                                  # Windows GBK 控制台下中文输出乱码 → 统一 utf-8
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    # argparse 而非裸 sys.argv:实测 `-o <目录>` 被裸解析当成第二个位置参数,输出静默落进
+    # 字面叫 "-o" 的目录——写错要响亮报错,不能静默吞参
+    ap = argparse.ArgumentParser(
+        description="原始采集包 → config/log/cmd 三表 CSV(zip 或目录都行,目录直接给、无需先压 zip)")
+    ap.add_argument("src", help="原始数据 zip 包,或原始数据目录(内含 LOG/CONFIG/DIAG/CMD 子目录,可带网元层)")
+    ap.add_argument("out_pos", nargs="?", metavar="output_dir",
+                    help="输出目录(可选;zip 默认=zip 同名目录,目录默认=<目录>_csv)")
+    ap.add_argument("-o", "--out", dest="out_opt", metavar="output_dir",
+                    help="输出目录(与位置参数二选一,别两个都给)")
+    args = ap.parse_args()
+    if args.out_pos and args.out_opt:
+        print(f"错误: 输出目录给了两次(位置参数「{args.out_pos}」和 -o「{args.out_opt}」)——留一个")
+        sys.exit(2)
+    out_arg = args.out_pos or args.out_opt
 
-    zip_path = os.path.abspath(sys.argv[1])
-    if not os.path.isfile(zip_path):
-        print(f"错误: 文件不存在 - {zip_path}")
-        sys.exit(1)
+    src = os.path.abspath(args.src)
+    if os.path.isdir(src):
+        # 目录输入:免解压直接扫描(此前只吃 zip,逼着现场先 make_archive 再转,纯绕路)
+        extract_dir = src
+        zip_basename = os.path.basename(src.rstrip('/\\')) or 'data'
+        DEFAULT_NE = zip_basename                         # 平铺单网元目录:网元名=目录名,别叫 'NE'
+        output_dir = os.path.abspath(out_arg) if out_arg else src.rstrip('/\\') + '_csv'
+        csv_dir = os.path.join(output_dir, 'csv')
+        print(f"[1/7] 目录输入,跳过解压,直接扫描: {src}")
+        print(f"  输出目录: {output_dir}")
+    elif os.path.isfile(src):
+        zip_path = src
+        # 输出目录：默认为 zip 文件同名目录（去掉 .zip 后缀）
+        output_dir = os.path.abspath(out_arg) if out_arg else os.path.splitext(zip_path)[0]
 
-    # 输出目录：默认为 zip 文件同名目录（去掉 .zip 后缀）
-    if len(sys.argv) >= 3:
-        output_dir = os.path.abspath(sys.argv[2])
+        # ZIP 文件基本名（用于命名输出 ZIP）
+        zip_basename = os.path.basename(zip_path)
+        if zip_basename.lower().endswith('.zip'):
+            zip_basename = zip_basename[:-4]
+
+        # 解压目录和 CSV 输出目录
+        extract_dir = os.path.join(output_dir, 'extracted')
+        csv_dir = os.path.join(output_dir, 'csv')
+
+        # Step 1: 解压
+        unzip_file(zip_path, extract_dir)
     else:
-        output_dir = os.path.splitext(zip_path)[0]
-
-    # ZIP 文件基本名（用于命名输出 ZIP）
-    zip_basename = os.path.basename(zip_path)
-    if zip_basename.lower().endswith('.zip'):
-        zip_basename = zip_basename[:-4]
-
-    # 解压目录和 CSV 输出目录
-    extract_dir = os.path.join(output_dir, 'extracted')
-    csv_dir = os.path.join(output_dir, 'csv')
-
-    # Step 1: 解压
-    unzip_file(zip_path, extract_dir)
+        print(f"错误: 文件/目录不存在 - {src}")
+        sys.exit(1)
 
     # Step 2: 自动扫描 LOG/CONFIG/DIAG 目录
     data_dirs = find_data_dirs(extract_dir)
