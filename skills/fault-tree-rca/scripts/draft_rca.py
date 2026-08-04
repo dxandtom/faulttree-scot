@@ -21,8 +21,10 @@ _README = (
     "本骨架由代码从 rca_input 机械枚举:候选=有'成立'事实的节点(路径+证据已预填,how 逐字来自 explain)。"
     "你的工作=逐条裁决,不是重新发现:①语义复核(mapping_reason 与判据是否真等,近似就降档并把该节点 "
     "judgment 改'语义近似/存疑');②定档:draft_tier 只是机械建议——confirmed_candidate 语义过硬才进 "
-    "rca_result,否则降 probable_causes;祖先『数据不足』不拦确证也不构成降档理由(零信息不冒充反证,"
-    "见候选的 ancestor_insufficient 注记,finalize 自动落 caveats);probable_candidate 补 confidence/caveats/support;"
+    "rca_result,否则降 probable_causes;**祖先的『数据不足/不成立/冲突』都不拦确证也不构成降档理由**"
+    "(确证闸只看叶子候选自身;祖先带伤见候选的 ancestor_insufficient/ancestor_refuted/ancestor_conflict "
+    "注记,finalize 自动落 caveats 标出留痕——冲突细节在 evidence 该条目的 conflict_actual/conflict_how 里);"
+    "probable_candidate 补 confidence/caveats/support;"
     "③冲突条目权衡后归档;④排除候选/待确认骨架照对应档写。**任何候选不许无声消失**:不采纳就写进"
     "excluded_note(点名+理由);降档写理由。数据是有的就不许写'数据不足/证据不足'——语义怀疑请写"
     "'语义近似/存疑'。裁决写成一份小 decisions.json(一个候选一条 verdict),"
@@ -157,12 +159,13 @@ def draft_pruned(data: dict) -> dict:
     for nid in sorted(deepest, key=lambda x: int(x[1:]) if x[1:].isdigit() else 10 ** 9):
         n = nodes[nid]
         ev = [_ev(p, nodes[p]) for p in _path(nid, nodes)]
-        # 祖先的「数据不足」=零信息:查不了不冒充反证,**不拦确证**(大类语义由本节点成立事实自下而上蕴含),
-        # 单独注记让裁决落 caveat;冲突是证据,照拦。(实测:根/大类判据"参考下级节点"谁也绑不上,
-        # 数据不足挂在每条路径上,心跳 Lost 这种硬证据也永远只能疑似。)
+        # 确证闸只看叶子候选自身——祖先的状态一律不拦、只注记(finalize 机械落 caveats 留痕):
+        # ①「数据不足」=零信息,查不了不冒充反证;②「不成立/冲突」=树逻辑与叶子命中矛盾,通常是
+        # 祖先绑定假阴或叶子命中系背景——按叶子事实确证(树的判据就是标准,叶子脚本/绑定是人验过的),
+        # 矛盾点名给人复核,不再压成疑似逼模型逐条权衡(实测:压档后弱模型权衡半天还权衡错,诊断变慢)。
         anc_insuf = [e for e in ev[:-1] if e["judgment"] == "数据不足"]
-        gaps = [e for e in ev if e["judgment"] == "冲突"]
-        refutes = [e for e in ev if e["judgment"] == "不成立"]   # 路径上有反证 → 确证免谈
+        gaps = [e for e in ev[:-1] if e["judgment"] == "冲突"]
+        refutes = [e for e in ev[:-1] if e["judgment"] == "不成立"]
         entry = {"node": n.get("name"), "node_id": nid,
                  "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
                  "evidence_prefilled": ev}
@@ -174,40 +177,44 @@ def draft_pruned(data: dict) -> dict:
                 "祖先大类自身判据未独立验证(数据不足):"
                 + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in anc_insuf[:5])
                 + "——由本节点成立事实自下而上蕴含,不拦确证、不构成降档理由;finalize 会自动写进 caveats")
+        if refutes:
+            entry["ancestor_refuted"] = (
+                "祖先节点判定不成立:"
+                + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in refutes[:5])
+                + "——与本叶子命中矛盾(通常是该祖先绑定假阴、或叶子命中系背景),不拦确证、"
+                  "不构成降档理由;finalize 会自动写进 caveats,报告里提醒复核该祖先绑定")
+        if gaps:
+            entry["ancestor_conflict"] = (
+                "祖先节点证据冲突(成立与强反证并存):"
+                + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in gaps[:5])
+                + "——不拦确证、不构成降档理由;冲突两边的实测值已摆在 evidence 该条目的 "
+                  "conflict_actual/conflict_how,finalize 会自动写进 caveats,报告里把冲突点标出来")
         unc = n.get("uncovered_children") or []
-        if not gaps and not refutes and n.get("is_leaf") and not unc:
-            entry["draft_tier"] = ("confirmed_candidate(机械建议:叶子+路径无反证/冲突"
-                                   "(祖先数据不足不拦,已注记);语义复核后定档)")
+        if n.get("is_leaf") and not unc:
+            entry["draft_tier"] = ("confirmed_candidate(机械建议:叶子成立;祖先数据不足/不成立/冲突"
+                                   "均不拦,已各自注记;语义复核后定档)")
             confirmed.append(entry)
         else:
-            why = []
-            if refutes:
-                why.append("路径含不成立节点:"
-                           + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in refutes[:3])
-                           + "(可能是真反证、也可能是绑定假象——权衡后进疑似或走排除)")
-            if gaps:
-                why.append(f"路径含冲突节点:{'、'.join(e['node'] + '(' + e['node_id'] + ')' for e in gaps[:3])}")
-            if not n.get("is_leaf") or unc:
-                why.append("非叶子/有未覆盖子因,叶子因待定")
-                # 直接子节点的三态一览:父成立而已知叶子全被反证 → 真因可能在未覆盖子因/叶子绑定假阴/父命中系背景,
-                # 摆在这让模型一眼看全,不用再逐个 rca_query
-                kids = []
-                for cid, c in nodes.items():
-                    if c.get("parent") != nid:
-                        continue
-                    ccond = c.get("condition") or ""
-                    if c.get("pass_through") or not ccond or "无条件" in ccond or "无判断" in ccond:
-                        continue
-                    cf = c.get("facts") or []
-                    kids.append({"node": c.get("name"), "node_id": cid,
-                                 "状态": _tri(cf) if cf else "未覆盖(没人绑/缺数据)"})
-                for u in unc:
-                    uid = u.get("id") if isinstance(u, dict) else u
-                    if uid and not any(k["node_id"] == uid for k in kids):
-                        nm = (u.get("name") if isinstance(u, dict) else "") or unc_names.get(uid, "")
-                        kids.append({"node": nm, "node_id": uid, "状态": "未覆盖(没人绑/缺数据)"})
-                if kids:
-                    entry["children_status"] = kids
+            why = ["非叶子/有未覆盖子因,叶子因待定"]
+            # 直接子节点的三态一览:父成立而已知叶子全被反证 → 真因可能在未覆盖子因/叶子绑定假阴/父命中系背景,
+            # 摆在这让模型一眼看全,不用再逐个 rca_query
+            kids = []
+            for cid, c in nodes.items():
+                if c.get("parent") != nid:
+                    continue
+                ccond = c.get("condition") or ""
+                if c.get("pass_through") or not ccond or "无条件" in ccond or "无判断" in ccond:
+                    continue
+                cf = c.get("facts") or []
+                kids.append({"node": c.get("name"), "node_id": cid,
+                             "状态": _tri(cf) if cf else "未覆盖(没人绑/缺数据)"})
+            for u in unc:
+                uid = u.get("id") if isinstance(u, dict) else u
+                if uid and not any(k["node_id"] == uid for k in kids):
+                    nm = (u.get("name") if isinstance(u, dict) else "") or unc_names.get(uid, "")
+                    kids.append({"node": nm, "node_id": uid, "状态": "未覆盖(没人绑/缺数据)"})
+            if kids:
+                entry["children_status"] = kids
             entry["draft_tier"] = "probable_candidate"
             entry["blocked_at_hint"] = ";".join(why)
             probable.append(entry)

@@ -52,7 +52,7 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 **别把整个 rca_input 读进上下文**(会超长报错),也别自己写脚本硬算 RCA、别绕过合成器手写 rca.json。
 
 ## 诚实性:靠合成器的结构闸,不靠事后校验
-诚实性检查已内建在 finalize_rca 的合成过程里(候选一条不许漏裁决、确证闸=候选自身干净+路径无反证/冲突/存疑(祖先「数据不足」豁免并自动落 caveats 留痕)、排除必须给 reason、有成立事实的候选不收待确认、evidence 逐字来自骨架改不了数字)——**合成成功即交付,不需要再跑 validate_rca**。(`scripts/validate_rca.py` 保留:辩论引擎路径与人工抽查仍可用。)
+诚实性检查已内建在 finalize_rca 的合成过程里(候选一条不许漏裁决、确证闸=**叶子候选自身成立**——祖先的「数据不足/不成立/冲突/存疑」一律不拦确证,但全部自动落 caveats 标出留痕(冲突的两边实测值在 evidence 该条目的 conflict_actual/conflict_how 里,报告要把矛盾点复述给人复核)、排除必须给 reason、有成立事实的候选不收待确认、evidence 逐字来自骨架改不了数字)——**合成成功即交付,不需要再跑 validate_rca**。(`scripts/validate_rca.py` 保留:辩论引擎路径与人工抽查仍可用。)
 
 ## 输出契约
 ```json
