@@ -99,6 +99,19 @@ def sum_extracts_vs_threshold(table, args, load):
 # 责任边界(用户拍板):脚本内部判断逻辑照单全收,对错归脚本;本壳只在「数据整体缺失」
 # (一个网元都没备出来)时报数据不足——那是我们自己的边界,不是替脚本兜。
 
+class _StrPath(str):
+    """路径 str/Path 双兼容:是 str(老脚本 os.path.join/字符串拼接照旧零影响),又能当 pathlib 用
+    (/ 拼接、exists/glob/iterdir 等)。交付脚本两种写法都常见,且规范此前没钉死类型——实测按 Path
+    写的入口(`ne_dir / "CMD"`)吃到纯 str 直接 TypeError(fault_check_LDP定时器超时.py:185)。"""
+
+    def __truediv__(self, other):
+        import os as _os
+        return _StrPath(_os.path.join(str(self), str(other)))
+
+    def __getattr__(self, name):                         # str 没有的属性(exists/glob/name…)转给 Path
+        return getattr(Path(str(self)), name)
+
+
 def _fc_ne_names(*tables):
     """从各表的 NEName 列收集网元名(保持出现顺序);一个都没有 → ["NE"]。"""
     seen = []
@@ -339,10 +352,10 @@ def fault_check(table, args, load):
                 if args.get("per_ne"):
                     ne_map = {}
                     for ne_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-                        r = fn(str(ne_dir), **kwargs)
+                        r = fn(_StrPath(ne_dir), **kwargs)
                         ne_map[ne_dir.name] = r if isinstance(r, dict) else {"error": f"入口返回非 dict:{type(r).__name__}"}
                 else:
-                    ne_map = _fc_normalize(fn(str(root), **kwargs))
+                    ne_map = _fc_normalize(fn(_StrPath(root), **kwargs))
         finally:
             _sys.argv = argv_bak
 
