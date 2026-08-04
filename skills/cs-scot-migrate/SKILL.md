@@ -21,7 +21,7 @@ description: 把 datacom-fault-tree-tester 的交付包(判断方法.md + fault_
 
 | 参数 | 说明 |
 |------|------|
-| 交付包 | `<节点名>.zip` 或解压后的目录(内含 判断方法.md + fault_check_*.py) |
+| 交付包 | `<节点名>.zip` 或解压后的目录(内含 判断方法.md + fault_check_*.py);**多节点合集包**(zip 里套多个节点 zip/子目录)也直接给,配合 `--auto` 批量循环 |
 | 场景产物目录 | 生成链路的产物目录;打包成技能形态的话给它的 `assets/` 目录 |
 
 ## 流程(对号三级:代码 → 模型 → 人)
@@ -35,6 +35,17 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 
 - 交付包节点名与树上某节点**一字不差且唯一** → 脚本直接落地迁移,到此结束,不用打扰用户;
 - 没有精确命中 → 打印候选列表(相似度排序,退出码 3),进入第 2 级。
+
+**多节点合集包(批量)**:命令一模一样——`--auto` 遇到合集包自动逐子包循环,能精确对号的
+**一轮手术原子落地**(任一行编译不过整批不生效),对不上号/探不到入口的决不赌,结尾统一列清单,
+每个附好补对号命令。之后没对上的逐个走第 2/3 级:
+
+```bash
+python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
+    --package <合集包> --product <产物目录> --only "<包节点名>" --node <节点号>
+```
+
+(`--only` 从合集包里选定一个子包,其余单节点参数 `--entry`/`--per-ne`/`--entry-kwargs` 都可配。)
 
 ### 第 2 级:模型语义对齐
 
@@ -78,6 +89,8 @@ import 校验、runner 不认 S 类 → 从引擎源刷新并 .bak 备份——�
 - 执行诊断时可加 `--data raw=<zip2csv 输出的 extracted 目录>`,让脚本直读原始 txt(最忠实);
   不加也能跑,转接头会从 config/log/cmd 三表自动重建。
 - 结果三态:任一网元命中→成立;全网元报错/无网元→**数据不足**(不冒充"正常");其余→不成立。
+- 证据保真:脚本给的**命中原文(matched_items)、出处文件(source_files)、判定理由(details.reason)**
+  逐字进事实(定长截断防上下文爆炸),随 rca_input 一路带进根因报告的 evidence_path。
 - **打包说明**:迁移就地生效——产物就是打包技能的 `assets/` 时,技能已更新完毕,**无需重新打包**;
   只有在独立产物目录上迁移、之后要发布成技能时才跑 package_scenario.py。
 - 同一节点重复迁移(交付包更新)= 直接重跑第 2 步,台账覆盖更新。

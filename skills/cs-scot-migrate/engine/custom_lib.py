@@ -353,7 +353,7 @@ def fault_check(table, args, load):
     if not ne_map:
         return {"status": "insufficient_data", "reason": "脚本一个网元都没读到(目录结构与脚本预期对不上,或数据缺失)"}
     hit, miss, bad = [], [], []
-    evidence = []
+    evidence, hits_raw, hit_why, miss_why = [], [], [], []
     for ne, r in ne_map.items():
         if not isinstance(r, dict) or ("matched" not in r):
             bad.append((ne, str((r or {}).get("error") or r)[:120] if isinstance(r, dict) else str(r)[:120]))
@@ -361,31 +361,54 @@ def fault_check(table, args, load):
         tri = _fc_tristate(r.get("matched"))
         det = r.get("details") if isinstance(r.get("details"), dict) else {}
         err = det.get("error") or r.get("error")
+        reason = str(det.get("reason") or "").strip()
         if tri is None:                                  # undetermined / 认不出的值 → 该实体判不了
-            bad.append((ne, str(det.get("reason") or err or f"matched={r.get('matched')!r},判不了")[:120]))
+            bad.append((ne, str(reason or err or f"matched={r.get('matched')!r},判不了")[:120]))
         elif tri is False and err:                       # 缺数据却报 false+error(冒充阴性的老毛病)→ 按判不了
             bad.append((ne, str(err)[:120]))
         elif tri:
             hit.append(ne)
+            if reason:                                   # 脚本给的命中理由(人话)不能丢,进 explain
+                hit_why.append((ne, reason[:200]))
             for ev in (r.get("evidence") or [])[:5]:
-                if isinstance(ev, dict):                 # 新契约证据条目:{type, id, data:{…}} 结构体
+                if isinstance(ev, dict):                 # 新契约证据条目:{type, id, data:{source_files, matched_items}}
                     label = ":".join(str(ev[k]) for k in ("type", "id") if ev.get(k)) or str(ev)[:200]
-                    evidence.append((f"{ne}: " if ne != "(整体)" else "") + label[:200])
+                    data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
+                    items = data.get("matched_items")
+                    if isinstance(items, list) and items:    # 命中原文逐字引用(定长截断防上下文爆炸)
+                        label += f" 命中{len(items)}条:" + "、".join(f"「{str(x)[:120]}」" for x in items[:2])
+                        for x in items:
+                            if len(hits_raw) < 3:
+                                hits_raw.append(str(x)[:160])
+                    srcs = data.get("source_files")
+                    if isinstance(srcs, list) and srcs:
+                        names = "、".join(str(s).replace("\\", "/").rsplit("/", 1)[-1] for s in srcs[:2])
+                        label += f"(来源:{names}{'…' if len(srcs) > 2 else ''})"
+                    evidence.append(((f"{ne}: " if ne != "(整体)" else "") + label)[:400])
                 else:
                     evidence.append(f"{ne}: {str(ev)[:200]}" if not str(ev).startswith(f"{ne}:") else str(ev)[:200])
         else:
             miss.append(ne)
+            if reason:                                   # 未命中的人话理由同样留痕(如"步骤1成立但步骤2输出非空")
+                miss_why.append((ne, reason[:160]))
     if not hit and not miss:                             # 全部网元都没给出 matched(error/坏形状)
         return {"status": "insufficient_data",
                 "reason": "所有网元都未产出判定:" + "; ".join(f"{n}: {e}" for n, e in bad[:5])}
     sat = bool(hit)
     note = f";另有 {len(bad)} 个网元未判({'; '.join(f'{n}: {e}' for n, e in bad[:3])})" if bad else ""
-    return {"status": "ok", "predicate_satisfied": sat,
-            "matched_nes": hit, "checked_nes": len(hit) + len(miss), "data_via": how,
-            "evidence": evidence[:8],
-            "explain": (f"脚本判定:{len(hit)}/{len(hit) + len(miss)} 个网元命中"
-                        f"({'、'.join(hit[:5])})" if sat
-                        else f"脚本判定:{len(hit) + len(miss)} 个网元均未命中") + note}
+    if sat and hit_why:
+        note = ";脚本说明:" + "; ".join((f"{n}: " if n != "(整体)" else "") + w for n, w in hit_why[:2]) + note
+    elif not sat and miss_why:
+        note = ";未命中说明:" + "; ".join((f"{n}: " if n != "(整体)" else "") + w for n, w in miss_why[:2]) + note
+    out = {"status": "ok", "predicate_satisfied": sat,
+           "matched_nes": hit, "checked_nes": len(hit) + len(miss), "data_via": how,
+           "evidence": evidence[:8],
+           "explain": (f"脚本判定:{len(hit)}/{len(hit) + len(miss)} 个网元命中"
+                       f"({'、'.join(hit[:5])})" if sat
+                       else f"脚本判定:{len(hit) + len(miss)} 个网元均未命中") + note}
+    if hits_raw:
+        out["hits"] = hits_raw                           # 命中原文 → draft_rca 的 actual 里"命中原文:「…」"
+    return out
 
 
 @register("latest_by_seq_then_match")

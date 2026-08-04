@@ -4,12 +4,15 @@
 链路(用户拍板):a. 把交付包里人确认过的「判断方法」替换到故障树对应节点的判据上;
 b. 把该节点旧绑定去掉,换成一条 S 绑定(func=fault_check 通用转接头),直接跑交付的脚本。
 
-两种模式:
+三种模式:
   匹配模式(不带 --node):解析交付包,和产物故障树逐节点算相似度,列出候选——
       python migrate_fault_check.py --package <交付包目录|zip> --product <场景产物目录>
   执行模式(带 --node):人确认节点号后落地迁移——
       python migrate_fault_check.py --package <…> --product <…> --node n17
       可选:--entry <入口函数名> --per-ne --entry-kwargs '<JSON>'(自动探测不准时手工指定)
+  批量模式(多节点合集包 + --auto):逐子包循环,精确同名唯一的全部自动落地(一轮手术原子落地),
+      对不上号的列候选决不赌;之后逐个 --only "<包节点名>" --node nX 补对号——
+      python migrate_fault_check.py --package <合集包.zip> --product <…> --auto
 
 落地动作(全走产物自带的调优表往返,复用其全部校验):
   1. 交付包脚本(fault_check_*.py + search_*.py 共享模块)拷进 产物/scripts/custom/;
@@ -71,6 +74,30 @@ def unpack(package: Path, tmp: Path) -> Path:
     return inner[0] if len(inner) == 1 and not any(dst.glob("*.md")) else dst
 
 
+def find_subpackages(pkg: Path):
+    """多节点合集包探测:按「判断方法*.md 所在的顶层子目录」分组。
+    返回 {子包根: [md 路径…]};单节点包 → {pkg: [md]}。顶层与子目录同时有 md 的奇形包 → 硬停
+    (分不清哪份文档配哪个脚本,机器不猜)。"""
+    cands = [p for p in pkg.rglob("判断方法*.md") if "规范" not in p.name]
+    groups: dict[Path, list[Path]] = {}
+    for p in cands:
+        rel = p.relative_to(pkg)
+        top = pkg / rel.parts[0] if len(rel.parts) > 1 else pkg
+        groups.setdefault(top, []).append(p)
+    if pkg in groups and len(groups) > 1:
+        raise SystemExit("交付包顶层和子目录**同时**有判断方法.md——分不清哪份文档配哪个脚本,"
+                         "人工把顶层那份挪进对应子目录(或删掉多余的)再迁。")
+    return groups
+
+
+def _safe_name(sub: Path):
+    """子包的「节点名称」;解析不动(嵌套合集/缺文档)→ None,由调用方决定怎么报。"""
+    try:
+        return parse_method_md(sub)["name"].strip()
+    except SystemExit:
+        return None
+
+
 def parse_method_md(pkg: Path):
     """判断方法.md → {name, condition(=全文逐字), core(=判断条件段,只用于相似度匹配), file}。
     判据替换用**全文**:故障描述/判断条件/命中条件/输出/数据来源表/注意事项一个不丢——
@@ -81,9 +108,9 @@ def parse_method_md(pkg: Path):
         raise SystemExit(f"交付包里找不到 判断方法*.md(排除规范文件):{pkg}")
     if len({p.parent for p in cands}) > 1:               # 不同子目录各有一份 = 多节点合集包:决不能闷头拿第一份
         subs = sorted({str(p.parent) for p in cands})
-        raise SystemExit("这是**多节点合集包**(发现 {} 份判断方法.md,分居不同子目录)——本工具一次迁一个节点。\n"
-                         "逐个迁移:把下列子目录各自当交付包再跑一次:\n  ".format(len(cands))
-                         + "\n  ".join(subs))
+        raise SystemExit("这是**多节点合集包**(发现 {} 份判断方法.md,分居不同子目录)。\n"
+                         "批量:对整包用 --auto 自动循环;或把下列子目录各自当交付包(--only 选定)再跑:\n  "
+                         .format(len(cands)) + "\n  ".join(subs))
     if len(cands) > 1:
         print(f"[warn] 交付包里有多份判断方法文档,用第一份:{[c.name for c in cands]}")
     text = cands[0].read_text(encoding="utf-8", errors="replace")
@@ -245,7 +272,7 @@ ENGINE_CAPS = {
     # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
-                      "_fc_tristate"),                  # 末项=tester 新契约字符串三态/全局形态识别
+                      "_fc_tristate", "matched_items"), # 末两项=新契约三态识别 + 证据保真(命中原文/出处/理由)
     "import_tree_excel.py": ('{"P", "S"}',),             # S/P 放行 + cross 列支持同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
@@ -337,6 +364,134 @@ def upgrade_cross_scaffold(product: Path) -> None:
         print("  cross_analyzer.py 骨架已升级(绑定原样保留,旧文件备份 .py.bak)")
 
 
+# ---------- 落地动作(单节点与批量共用) ----------
+def _binding(fc_name: str, entry: str, per_ne: bool, kwargs: dict, pkg_node: str) -> dict:
+    return {"class": "S", "func": "fault_check",
+            "args": {"script": f"custom/{fc_name}", "entry": entry,
+                     **({"per_ne": True} if per_ne else {}),
+                     **({"entry_kwargs": kwargs} if kwargs else {})},
+            "mapping_reason": f"迁移自 tester 交付包「{pkg_node}」:判断逻辑=脚本原样"
+                              "(经业务确认+样本数据验证);数据优先 --data raw= 原始目录直读,否则三表兜底重建"}
+
+
+def _copy_scripts(product: Path, fc: Path, deps) -> None:
+    custom = product / "scripts" / "custom"
+    custom.mkdir(parents=True, exist_ok=True)
+    for p in [fc] + list(deps):
+        shutil.copy2(p, custom / p.name)
+
+
+def _surgery(product: Path, edits) -> None:
+    """edits=[(nid, condition, binding)…]:预导入收编(如需)→ 一次导出 → 改 N 行 → 一次导入 → 回导。
+    批量也只走一轮 export/import:落地是**原子**的——任一行编译不过,整批不生效,响亮报错。
+    表比 tree_index 新(可能有未导入的人工修改,也可能只是上次迁移的回导)→ 先导入收编,绝不覆盖。"""
+    tis = sorted((product / "tree").glob("*.tree_index.json"))
+    xls = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
+                 if not p.name.startswith("~$"))
+    if xls and tis and xls[0].stat().st_mtime > tis[0].stat().st_mtime:
+        print("  [0/3] 调优表比 tree_index 新 → 先导入收编现有内容(有未导入的人工修改也不会丢)…")
+        try:
+            run_step(product, "import_tree_excel.py", "预导入(收编现有调优表)")
+        except SystemExit as e:
+            raise SystemExit(str(e) + "\n提示:预导入失败卡的是**存量调优表**,不是这次的交付包。"
+                             "若这份调优表里没有【尚未导入】的手工修改,把 tree/ 下的 *.tuning.xlsx 删掉重跑迁移即可"
+                             "(会用当前版导出器从产物重建;「多个顶层节点/层级列错位」这类结构病多为旧版导出器所产)。")
+    print("  [1/3] 导出调优表…")
+    run_step(product, "export_tree_excel.py", "导出调优表")
+    for nid, cond, b in edits:
+        edit_tuning_excel(product, nid, cond, b)
+    print(f"  [2/3] 已改调优表 {len(edits)} 行:判据→原文列,旧绑定清空,绑定:cross→S(fault_check)")
+    print("  [3/3] 编译回产物…")
+    run_step(product, "import_tree_excel.py", "导入编译")
+    run_step(product, "export_tree_excel.py", "回导调优表(同步)")
+
+
+def _ledger(product: Path, entries) -> None:
+    mig_p = product / "tree" / "migrations.json"
+    mig = json.loads(mig_p.read_text(encoding="utf-8")) if mig_p.exists() else {}
+    for nid, pkg_node, fc_name, entry, per_ne, kwargs in entries:
+        mig[nid] = {"package_node": pkg_node, "script": f"custom/{fc_name}", "entry": entry,
+                    "per_ne": per_ne, "entry_kwargs": kwargs or {},
+                    "migrated_at": datetime.datetime.now().isoformat(timespec="seconds")}
+    mig_p.write_text(json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ---------- 批量模式(多节点合集包 + --auto) ----------
+def migrate_batch(a, pkg: Path, product: Path) -> None:
+    """逐子包全自动循环:精确同名唯一的直接落地(一轮手术原子落地);对不上号/探不到入口的
+    **决不赌**——收集起来最后统一列清单,每个附补对号命令(退出码 3=还有没落地的)。"""
+    groups = find_subpackages(pkg)
+    subs = sorted(groups, key=lambda p: p.name)
+    index = load_index(product)
+    nodes = index.get("nodes") or {}
+    print(f"合集包:{len(subs)} 个子包,逐个对号(精确同名唯一才自动落地,其余列候选)…")
+    oks, fails = [], []                                  # ok=(sub,method,fc,deps,entry,per_ne,kwargs,nid,note)
+    seen_nid, seen_fc = {}, {}
+    for sub in subs:
+        label = sub.name
+        try:
+            method = parse_method_md(sub)
+            label = method["name"]
+            fc, deps = find_scripts(sub, None)
+        except SystemExit as e:
+            fails.append((label, str(e), None))
+            continue
+        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(fc)
+        if entry is None:
+            fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})",
+                          f'--only "{label}" --node <节点号> --entry <吃目录参数的函数名>'))
+            continue
+        exact = [cnid for cnid, nd in nodes.items()
+                 if str(nd.get("name") or "").strip() == method["name"].strip()]
+        if len(exact) != 1:
+            cand = "\n".join(f"         {s:5.3f}  {cnid:>6}  {nm}"
+                             for s, cnid, nm in rank_nodes(index, method["name"], method["core"]))
+            why = ((f"树上有 {len(exact)} 个同名节点({exact}),精确匹配不唯一" if exact
+                    else "无精确同名节点") + ",候选:\n" + cand)
+            fails.append((label, why, f'--only "{label}" --node <节点号>'))
+            continue
+        nid = exact[0]
+        if nid in seen_nid:
+            fails.append((label, f"与子包「{seen_nid[nid]}」都对到 {nid}——同一节点两份交付包,人工定夺谁算数",
+                          f'--only "{label}" --node {nid}'))
+            continue
+        prev = seen_fc.get(fc.name)
+        if prev is not None and prev[1] != fc.read_bytes():
+            fails.append((label, f"脚本文件名「{fc.name}」与子包「{prev[0]}」撞车且内容不同"
+                                 "——让交付方改名后把该子包单独再迁", None))
+            continue
+        seen_nid[nid], seen_fc[fc.name] = label, (label, fc.read_bytes())
+        oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note))
+
+    if oks:
+        refresh_engine(product)
+        for _sub, _m, fc, deps, *_rest in oks:
+            _copy_scripts(product, fc, deps)
+        _surgery(product, [(nid, m["condition"], _binding(fc.name, entry, per_ne, kwargs, m["name"]))
+                           for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note in oks])
+        upgrade_cross_scaffold(product)
+        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs)
+                          for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note in oks])
+
+    print(f"\n批量迁移汇总:落地 {len(oks)}/{len(subs)} 个")
+    for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, note in oks:
+        print(f"  ✓ {nid}「{nodes[nid].get('name')}」 ← 「{m['name']}」({fc.name}:{entry}"
+              + ("/单网元" if per_ne else "") + ")" + (f"  ⚠ {note}" if note else ""))
+        if kwargs:
+            print(f"      ⚠ 入口有额外必填参数 {sorted(kwargs)},已按空 dict 传入;"
+                  f"不对就 --only \"{m['name']}\" --node {nid} --entry-kwargs 重迁指定")
+    if fails:
+        print(f"\n  未落地 {len(fails)} 个(对不上号决不赌,逐个补对号):")
+        for label, why, cmd in fails:
+            print(f"  ✗ 「{label}」:{why}")
+            if cmd:
+                print(f"     → 确认后重跑:--package \"{a.package}\" --product \"{a.product}\" {cmd}")
+    if oks:
+        print("\n  迁移就地生效(产物=打包技能 assets/ 时无需重新打包);台账 → tree/migrations.json;"
+              "执行时 runner 加 --data raw=<原始目录> 最忠实。")
+    sys.exit(3 if fails else 0)
+
+
 # ---------- 主流程 ----------
 def main() -> None:
     try:
@@ -350,7 +505,10 @@ def main() -> None:
     ap.add_argument("--node", help="目标节点号(如 n17);不给=只做匹配、列候选")
     ap.add_argument("--auto", action="store_true",
                     help="节点名与树上某节点**一字不差且唯一**时直接落地(对号第一级:代码精确匹配);"
-                         "无精确命中则列候选后以退出码 3 结束(交模型/人对齐)")
+                         "无精确命中则列候选后以退出码 3 结束(交模型/人对齐)。"
+                         "多节点合集包 + --auto = 批量循环:能精确对号的全部落地,其余列候选")
+    ap.add_argument("--only", help="多节点合集包里只处理指定「包节点名」的那个子包"
+                                   "(批量没对上号的,逐个用它配合 --node/--entry 补对号)")
     ap.add_argument("--script", help="包里有多个 fault_check_*.py 时指定文件名")
     ap.add_argument("--entry", help="入口函数名(默认自动探测)")
     ap.add_argument("--per-ne", action="store_true", help="入口吃单网元目录(自动探测不准时手工指定)")
@@ -366,6 +524,40 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="migrate_") as td:
         pkg = unpack(Path(a.package).expanduser().resolve(), Path(td))
+        groups = find_subpackages(pkg)
+        if not groups:
+            raise SystemExit(f"交付包里找不到 判断方法*.md(排除规范文件):{pkg}")
+
+        def _sub_names():
+            out = []
+            for sub in sorted(groups, key=lambda p: p.name):
+                try:
+                    out.append(parse_method_md(sub)["name"])
+                except SystemExit:
+                    out.append(f"{sub.name}(判断方法解析失败)")
+            return out
+
+        if a.only:                                       # 合集包单挑:选定子包后走单节点流程(全部参数可用)
+            hit = next((sub for sub in groups
+                        if _safe_name(sub) == a.only.strip()), None)
+            if hit is None:
+                raise SystemExit(f"--only「{a.only}」在包里找不到;包里的节点:{_sub_names()}")
+            pkg = hit
+        elif len(groups) > 1:                            # 多节点合集包
+            if a.node or a.script or a.entry or a.per_ne or a.entry_kwargs:
+                raise SystemExit("这是多节点合集包:--node/--script/--entry/--per-ne/--entry-kwargs "
+                                 "不知道给哪个子包用——加 --only \"<包节点名>\" 选定子包再带这些参数。")
+            if not a.auto:
+                print(f"多节点合集包({len(groups)} 个子包),两种走法:")
+                print("  批量全自动:原命令加 --auto(精确同名的全部落地,其余列候选)")
+                print("  单挑一个:加 --only \"<包节点名>\"(可配 --node/--entry 等)")
+                print("包里的节点:")
+                for nm in _sub_names():
+                    print(f"  - {nm}")
+                sys.exit(3)
+            migrate_batch(a, pkg, product)
+            return                                       # migrate_batch 自带退出码,到不了这里
+
         method = parse_method_md(pkg)
         fc, deps = find_scripts(pkg, a.script)
         entry, per_ne, kwargs, all_defs, argc, note = detect_entry(fc)
@@ -417,47 +609,16 @@ def main() -> None:
         refresh_engine(product)
 
         # 1. 脚本进场
-        custom = product / "scripts" / "custom"
-        custom.mkdir(parents=True, exist_ok=True)
-        for p in [fc] + list(deps):
-            shutil.copy2(p, custom / p.name)
+        _copy_scripts(product, fc, deps)
         print(f"  已拷入 scripts/custom/:{fc.name}" + (f" + {len(deps)} 个共享模块" if deps else ""))
 
-        # 2. 调优表手术。表比 tree_index 新(可能有未导入的人工修改,也可能只是上次迁移的回导)
-        # → 先导入收编,绝不覆盖:合法修改被收进产物;表填坏了 import 会响亮失败、迁移就此打住。
-        tis = sorted((product / "tree").glob("*.tree_index.json"))
-        xls = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
-                     if not p.name.startswith("~$"))
-        if xls and tis and xls[0].stat().st_mtime > tis[0].stat().st_mtime:
-            print("  [0/3] 调优表比 tree_index 新 → 先导入收编现有内容(有未导入的人工修改也不会丢)…")
-            try:
-                run_step(product, "import_tree_excel.py", "预导入(收编现有调优表)")
-            except SystemExit as e:
-                raise SystemExit(str(e) + "\n提示:预导入失败卡的是**存量调优表**,不是这次的交付包。"
-                                 "若这份调优表里没有【尚未导入】的手工修改,把 tree/ 下的 *.tuning.xlsx 删掉重跑迁移即可"
-                                 "(会用当前版导出器从产物重建;「多个顶层节点/层级列错位」这类结构病多为旧版导出器所产)。")
-        print("  [1/3] 导出调优表…")
-        run_step(product, "export_tree_excel.py", "导出调优表")
-        binding = {"class": "S", "func": "fault_check",
-                   "args": {"script": f"custom/{fc.name}", "entry": entry,
-                            **({"per_ne": True} if per_ne else {}),
-                            **({"entry_kwargs": kwargs} if kwargs else {})},
-                   "mapping_reason": f"迁移自 tester 交付包「{method['name']}」:判断逻辑=脚本原样"
-                                     "(经业务确认+样本数据验证);数据优先 --data raw= 原始目录直读,否则三表兜底重建"}
-        edit_tuning_excel(product, nid, method["condition"], binding)
-        print(f"  [2/3] 已改调优表:{nid} 判据→原文列,旧绑定清空,绑定:cross→S(fault_check)")
-        print("  [3/3] 编译回产物…")
-        run_step(product, "import_tree_excel.py", "导入编译")
-        run_step(product, "export_tree_excel.py", "回导调优表(同步)")
+        # 2. 调优表手术(预导入收编→导出→改行→导入→回导,细节见 _surgery)
+        _surgery(product, [(nid, method["condition"],
+                            _binding(fc.name, entry, per_ne, kwargs, method["name"]))])
 
         # 3. 骨架体检 + 台账
         upgrade_cross_scaffold(product)
-        mig_p = product / "tree" / "migrations.json"
-        mig = json.loads(mig_p.read_text(encoding="utf-8")) if mig_p.exists() else {}
-        mig[nid] = {"package_node": method["name"], "script": f"custom/{fc.name}", "entry": entry,
-                    "per_ne": per_ne, "entry_kwargs": kwargs or {},
-                    "migrated_at": datetime.datetime.now().isoformat(timespec="seconds")}
-        mig_p.write_text(json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
+        _ledger(product, [(nid, method["name"], fc.name, entry, per_ne, kwargs)])
 
         print(f"\n迁移完成:{nid}「{nodes[nid].get('name')}」")
         print(f"  判据 ← 判断方法.md 全文(含故障描述/判断条件/数据来源表等);绑定 ← S(fault_check → custom/{fc.name}:{entry})")
