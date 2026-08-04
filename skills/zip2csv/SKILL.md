@@ -1,6 +1,6 @@
 ---
 name: zip2csv
-description: 解压华为交换机诊断 ZIP 包，批量将 LOG/CONFIG/DIAG 目录下的 txt 文件转换为结构化 CSV，并生成 cmd 汇总 CSV。当用户提到"解压zip转csv"、"zip转csv"、"批量转换诊断文件"、"处理zip包"时使用此技能。
+description: 把华为设备诊断数据(ZIP 包或原始目录)批量转换为结构化 CSV——LOG/CONFIG/DIAG/CMD 目录下的 txt 逐个转表,并生成 cmd 汇总 CSV。当用户提到"解压zip转csv"、"zip转csv"、"批量转换诊断文件"、"处理zip包"时使用此技能。
 disable-model-invocation: false
 ---
 
@@ -8,9 +8,9 @@ disable-model-invocation: false
 
 ## 功能概述
 
-接收一个 ZIP 压缩包，自动完成以下流水线：
+接收一个 ZIP 压缩包**或原始数据目录**（目录直接给，无需先压 zip），自动完成以下流水线：
 
-1. **解压 ZIP** 到本地目录
+1. **解压 ZIP** 到本地目录（目录输入则跳过解压、就地扫描）
 2. **LOG/** — 遍历所有 `.txt` 文件，调用 `logbuffer2csv.convert_file()` 转换为 CSV
    (命名迁移:**DIAG 更名 CMD**——两名并存兼容,新包 CMD、老包 DIAG 都认,同款回显解析)
 3. **CONFIG/** — 遍历所有 `.txt` 文件，调用 `config2csv.parse_config_to_csv()` 转换为 CSV
@@ -20,19 +20,20 @@ disable-model-invocation: false
 
 ## 执行前检查
 
-1. 确认用户提供了 ZIP 文件路径
-2. 确认 ZIP 文件存在且可读
+1. 确认用户提供了 ZIP 文件或原始数据目录的路径
+2. 确认该路径存在且可读
 3. 确认 Python 环境可用
 
 ## 执行方式
 
 ```bash
-python "skills/zip2csv/scripts/zip2csv.py" <zip_path> [output_dir]
+python "skills/zip2csv/scripts/zip2csv.py" <zip或目录> [output_dir]
+python "skills/zip2csv/scripts/zip2csv.py" <zip或目录> -o <output_dir>
 ```
 
 参数说明：
-- `zip_path`（必填）：ZIP 压缩包的完整路径
-- `output_dir`（可选）：输出目录，默认为 ZIP 文件同名目录（去掉 `.zip` 后缀）
+- `zip或目录`（必填）：ZIP 压缩包路径,或原始数据目录(内含 LOG/CONFIG/DIAG/CMD 子目录,可带网元层;平铺单网元目录的网元名取目录名)
+- `output_dir`（可选）：输出目录。zip 默认=zip 同名目录(去掉 `.zip` 后缀);目录默认=`<目录>_csv`
 
 ## 输出目录结构
 
@@ -77,8 +78,8 @@ NEName, CmdName, OriginCmd, CmdResult
 
 ## 工作流程
 
-1. 向用户确认 ZIP 文件路径
-2. 执行 `python "skills/zip2csv/scripts/zip2csv.py" <zip_path> [output_dir]`
+1. 向用户确认 ZIP 文件/原始目录路径
+2. 执行 `python "skills/zip2csv/scripts/zip2csv.py" <zip或目录> [output_dir]`
 3. 检查输出结果，报告各步骤处理情况：
    - 解压了多少文件
    - LOG/CONFIG/DIAG 各转换了多少 txt 文件
@@ -87,7 +88,7 @@ NEName, CmdName, OriginCmd, CmdResult
 
 ## 异常处理
 
-- ZIP 文件不存在：提示用户检查路径
+- 输入路径(zip/目录)不存在：提示用户检查路径（目录输入时不产生 `extracted/`，原始文件就在输入目录里）
 - LOG/CONFIG/DIAG 目录不存在：对应步骤自动跳过，不影响其他步骤
 - txt 文件解析失败：跳过该文件，继续处理其他文件
 - 编码问题：脚本内部使用 `utf-8-sig` 编码，兼容 Excel 打开

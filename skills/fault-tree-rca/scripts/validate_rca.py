@@ -3,7 +3,8 @@
 
 只兜**结构底线 + 诚实**,不碰强度/排序/你怀疑什么(那是模型判断)。分档严格度不同:
 - **rca_result(确证根因)**:严。揪 ① 自相矛盾(判"成立"却又承认拿不到数据);
-  ② 假根因(路径含"数据不足/不成立"节点);③ 缺路径(没 evidence_path)。
+  ② 假根因(**叶子候选自身**带"数据不足/不成立/存疑"——祖先带伤不拦:数据不足=零信息、
+  不成立/冲突=树逻辑矛盾按叶子事实确证,finalize 已机械落 caveats 标出);③ 缺路径(没 evidence_path)。
 - **probable_causes(疑似)**:松——路径含"数据不足"**甚至"不成立"**节点都**放行**(那正是疑似该体现的泛化),
   只查 ④ 有没有把理由说清(`blocked_at`/`caveats` + `support`/`evidence`)。
 - **任何档**:⑤ 给"无事实/未覆盖"节点编一个"成立" = 伪造,揪(需传 rca_input.json 才能核对)。
@@ -409,7 +410,7 @@ def main() -> int:
         ev = _evidence(rc)
         if not ev:
             problems.append(f"[缺路径] 确证根因「{name}」没有 evidence_path——确证必须把根→叶整条路径、每节点的条件/实际值/判断摆出来")
-        for node in ev:
+        for i, node in enumerate(ev):
             if not isinstance(node, dict):
                 continue
             judg, actual, nname = str(node.get("judgment", "")), str(node.get("actual", "")), node.get("node", "?")
@@ -417,16 +418,19 @@ def main() -> int:
                 problems.append(f"[自相矛盾] 确证根因「{name}」/节点「{nname}」判'成立'却承认拿不到数据 → {judg!r}")
             tag = _tag(judg, NOT_PROVEN)
             if tag:
+                # 确证闸只看叶子候选自身(路径末位)——祖先带伤(数据不足/不成立/冲突/存疑)不拦:
+                # 与 finalize_rca 同口径(finalize 已把祖先带伤机械落 caveats 标出)。
+                if i < len(ev) - 1:
+                    continue
                 # 结构节点豁免:该节点在 rca_input 里是 pass_through / 无真条件(根·分组·汇总节点),
                 # 本就没有独立判据,谈不上"数据不足"破坏确证——弱模型常把它标成'数据不足'而不是契约
-                # 要求的'无独立条件',那是标签瑕疵、不是路径断了。以 rca_input 的机械事实为准,
-                # 不按层级/位置豁免(靠前的节点也可能真有判据,位置豁免会放走真的假确证)。
+                # 要求的'无独立条件',那是标签瑕疵、不是路径断了。以 rca_input 的机械事实为准。
                 if hold_map:
                     pt, _h, hc = hold_map.get(str(node.get("node_id", "")), (False, False, True))
                     if pt or not hc:
                         continue
                 problems.append(
-                    f"[假根因] 确证根因「{name}」路径含'{tag}'节点「{nname}」"
+                    f"[假根因] 确证根因「{name}」的叶子候选自身带'{tag}'(「{nname}」)"
                     f"→ 挪进 probable_causes 或 excluded,别凑路径、别造节点")
         _check_fabrication(rc, "确证根因", hold_map, problems)
         _check_path_chain(rc, "确证根因", parent_map, problems)
@@ -548,7 +552,8 @@ def main() -> int:
         print(f"不合格:发现 {len(problems)} 处问题:")
         for pr in problems:
             print("  - " + pr)
-        print("\n修法:确证根因要路径全成立 + 摆出 evidence_path;疑似可含'数据不足/不成立'节点,"
+        print("\n修法:确证根因要叶子候选自身成立 + 摆出 evidence_path(祖先带伤在 caveats 标出);"
+              "疑似可含'数据不足/不成立'节点,"
               "但要写清 blocked_at/caveats/support;任何'成立'都得有真事实。**别凑路径、别造节点、别给没数据的节点判成立。**")
         return 1
 
@@ -562,7 +567,7 @@ def main() -> int:
         return 0
     extra = (f";另:排除核对列出 {len(exh)} 个节点——排除是合法出口,但报告「已排除的候选」一节"
              f"必须逐条晾出理由(反证/绑定质量),无声排除=不合格交付" if exh else "")
-    print(f"通过:确证根因 {len(confirmed)} 条(路径全成立)、疑似 {len(probables)} 条(理由齐备){note}{extra}。")
+    print(f"通过:确证根因 {len(confirmed)} 条(叶子自身成立)、疑似 {len(probables)} 条(理由齐备){note}{extra}。")
     return 0
 
 
