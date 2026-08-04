@@ -153,17 +153,28 @@ def find_scripts(pkg: Path, script_arg: str | None):
     return fc, deps
 
 
+# 入口候选(优先级序)。fault_check 是 tester 规范的约定入口名(与文件名前缀同名),排最前——
+# 实测漏了它:脚本入口叫 fault_check 时名单撞上内部帮手 check_ne(吃 Path、返回 tuple),运行期必炸。
+_ENTRY_CANDIDATES = ("fault_check", "diagnose", "main", "check_ne", "diagnose_ne", "check")
+
+
+def _required_kwargs(fn) -> dict:
+    """首参之外的无默认值参数 → entry_kwargs 需求(常见如 judgment_conditions={};其余待人核)。"""
+    pos = [a.arg for a in fn.args.args]
+    required_extra = pos[1: len(pos) - len(fn.args.defaults)] if len(pos) > 1 else []
+    return {p: {} for p in required_extra}
+
+
 def detect_entry(script: Path):
-    """静态探测入口函数:diagnose > main > check_ne > diagnose_ne > check。
+    """静态探测入口函数(候选见 _ENTRY_CANDIDATES;选中后还要过 arbitrate_entry 的空目录烟测)。
     入口契约=至少接收 1 个位置参数(数据目录);0 参函数(从 sys.argv 自取路径的老脚本)一律跳过
     并记入 note——运行期转接头必传目录参数,选了 0 参入口就是必炸的 TypeError,在迁移时拦下。
-    单网元入口(check_ne/diagnose_ne)→ per_ne;首参之外的无默认值参数 → entry_kwargs 需求。
-    返回 (entry, per_ne, kwargs, 顶层函数清单, argc 表, note)。"""
+    单网元入口(check_ne/diagnose_ne)→ per_ne。返回 (entry, per_ne, kwargs, 顶层函数清单, argc 表, note)。"""
     tree = ast.parse(script.read_text(encoding="utf-8", errors="replace"))
     defs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
     argc = {n: len(f.args.args) for n, f in defs.items()}
     entry, skipped = None, []
-    for c in ("diagnose", "main", "check_ne", "diagnose_ne", "check"):
+    for c in _ENTRY_CANDIDATES:
         if c not in defs:
             continue
         if argc[c] < 1:
@@ -175,11 +186,107 @@ def detect_entry(script: Path):
             if skipped else "")
     if entry is None:
         return None, False, {}, sorted(defs), argc, note
-    fn = defs[entry]
-    pos = [a.arg for a in fn.args.args]
-    required_extra = pos[1: len(pos) - len(fn.args.defaults)] if len(pos) > 1 else []
-    kwargs = {p: {} for p in required_extra}             # 常见如 judgment_conditions={};其余待人核
-    return entry, entry in ("check_ne", "diagnose_ne"), kwargs, sorted(defs), argc, note
+    return entry, entry in ("check_ne", "diagnose_ne"), _required_kwargs(defs[entry]), sorted(defs), argc, note
+
+
+class _StrPathLite(str):
+    """烟测入参:与引擎 custom_lib._StrPath 同款的 str/Path 双兼容路径(str 子类,支持 / 拼接与
+    Path 方法)——烟测传参必须和运行期转接头同型,否则烟测放行的脚本运行期照炸(或反之)。"""
+    def __truediv__(self, other):
+        import os as _os
+        return _StrPathLite(_os.path.join(str(self), str(other)))
+
+    def __getattr__(self, name):
+        return getattr(Path(str(self)), name)
+
+
+def _shape_ok(r):
+    """返回值是否是转接头认识的形状(与 custom_lib._fc_normalize 同口径,只验形不验语义)。"""
+    if not isinstance(r, dict):
+        return False, f"返回 {type(r).__name__},不是 dict"
+    if "matched" in r or "error" in r or "status" in r:
+        return True, ""
+    det = r.get("details")
+    if isinstance(det, dict) and isinstance(det.get("devices"), dict):
+        return True, ""
+    inner = r.get("results")
+    if isinstance(inner, dict) and inner and all(
+            isinstance(v, dict) and ("matched" in v or "error" in v or "status" in v)
+            for v in inner.values()):
+        return True, ""
+    if r and all(isinstance(v, dict) and ("matched" in v or "error" in v or "status" in v)
+                 for v in r.values()):
+        return True, ""
+    return False, "是 dict 但既无 matched/error/status,也不是 {网元:{matched,…}} 映射"
+
+
+def _smoke_call(stage: Path, script_name: str, entry: str, kwargs: dict):
+    """空目录烟测:以库方式(argv 隔离/stdout 收走/异常拦截,与运行期转接头同款护现场)调一次
+    入口,验返回形状。空数据下合契约的脚本该返回 undetermined——至少得是个认得出的 dict。"""
+    import contextlib
+    import importlib.util
+    import io
+    script = stage / script_name
+    sdir = str(stage)
+    added = sdir not in sys.path
+    if added:
+        sys.path.insert(0, sdir)                         # 交付脚本 import search_* 同目录共享模块
+    sink = io.StringIO()
+    argv_bak, sys.argv = sys.argv, [str(script)]
+    try:
+        with tempfile.TemporaryDirectory(prefix="smoke_data_") as td, \
+                contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+            spec = importlib.util.spec_from_file_location(f"smoke_{abs(hash(str(script)))}", script)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            fn = getattr(mod, entry, None)
+            if not callable(fn):
+                return False, f"没有可调用的「{entry}」"
+            r = fn(_StrPathLite(td), **(kwargs or {}))
+    except SystemExit as e:
+        return False, f"调用了 sys.exit({e.code})——库调用不该退出进程"
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
+    finally:
+        sys.argv = argv_bak
+        if added:
+            sys.path.remove(sdir)
+    return _shape_ok(r)
+
+
+def arbitrate_entry(fc: Path, deps, entry: str, per_ne: bool, kwargs: dict, explicit: bool):
+    """入口烟测仲裁:选中的入口先真调一次;不合契约时——auto 模式按候选序换下一个(谁返回契约
+    形状谁当入口,机械裁决不猜名字),全不行硬停并逐个报原因;人工 --entry 指定的只警告不换(人>名单)。
+    返回 (entry, per_ne, kwargs, 仲裁说明)。"""
+    with tempfile.TemporaryDirectory(prefix="stage_") as sd:
+        stage = Path(sd)
+        for p in [fc] + list(deps):
+            shutil.copy2(p, stage / p.name)              # 依赖凑齐再测,和落地后 custom/ 同布局
+        ok, why = _smoke_call(stage, fc.name, entry, kwargs)
+        if ok:
+            return entry, per_ne, kwargs, ""
+        if explicit:
+            print(f"  ⚠ 烟测:--entry 指定的「{entry}」空目录调用不合契约({why})——按人工指定继续;"
+                  "运行期该节点若判不了,先查这里")
+            return entry, per_ne, kwargs, ""
+        tree = ast.parse(fc.read_text(encoding="utf-8", errors="replace"))
+        defs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+        tried = [(entry, why)]
+        for c in _ENTRY_CANDIDATES:
+            if c == entry or c not in defs or len(defs[c].args.args) < 1:
+                continue
+            k2 = _required_kwargs(defs[c])
+            ok2, why2 = _smoke_call(stage, fc.name, c, k2)
+            if ok2:
+                note = f"烟测仲裁:「{entry}」不合契约({why}),换用「{c}」(空目录调用返回契约形状)"
+                print(f"  {note}")
+                return c, c in ("check_ne", "diagnose_ne"), k2, note
+            tried.append((c, why2))
+        raise SystemExit("烟测:所有候选入口空目录调用都不合契约:\n  "
+                         + "\n  ".join(f"{n}(): {w}" for n, w in tried)
+                         + "\n——契约要求:入口吃数据根目录,返回 {matched,evidence,details}"
+                           "(空数据=undetermined)。确认真入口后用 --entry 指定强推(只警告不拦),"
+                           "或把问题反馈交付方按规范改脚本。")
 
 
 # ---------- 节点匹配 ----------
@@ -272,7 +379,8 @@ ENGINE_CAPS = {
     # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
-                      "_fc_tristate", "matched_items"), # 末两项=新契约三态识别 + 证据保真(命中原文/出处/理由)
+                      "_fc_tristate", "matched_items",
+                      "_StrPath"),                      # 末三项=新契约三态/证据保真/入参 str+Path 双兼容
     "import_tree_excel.py": ('{"P", "S"}',),             # S/P 放行 + cross 列支持同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
@@ -451,6 +559,13 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
             fails.append((label, why, f'--only "{label}" --node <节点号>'))
             continue
         nid = exact[0]
+        try:
+            entry, per_ne, kwargs, sm = arbitrate_entry(fc, deps, entry, per_ne, kwargs, explicit=False)
+        except SystemExit as e:
+            fails.append((label, str(e), f'--only "{label}" --node {nid} --entry <函数名>'))
+            continue
+        if sm:
+            note = (note + ";" if note else "") + sm
         if nid in seen_nid:
             fails.append((label, f"与子包「{seen_nid[nid]}」都对到 {nid}——同一节点两份交付包,人工定夺谁算数",
                           f'--only "{label}" --node {nid}'))
@@ -604,6 +719,8 @@ def main() -> None:
         if kwargs and not a.entry_kwargs:
             print(f"[warn] 入口 {entry} 有额外必填参数 {sorted(kwargs)},已按空 dict 传入;"
                   "不对就用 --entry-kwargs 显式指定")
+        entry, per_ne, kwargs, _sn = arbitrate_entry(fc, deps, entry, per_ne, kwargs,
+                                                     explicit=bool(a.entry))
 
         # 0. 引擎体检+补全(旧产物的内核/函数库/导入校验不认 S 类,先刷新再动手术)
         refresh_engine(product)
