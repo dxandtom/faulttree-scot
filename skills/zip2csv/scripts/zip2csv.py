@@ -48,7 +48,7 @@ def find_data_dirs(extract_dir):
     支持 ZIP 内有多层嵌套，如 Switch01/DIAG/ 或直接 DIAG/。
     返回 dict: {'LOG': [path1, ...], 'CONFIG': [path1, ...], 'DIAG': [path1, ...]}
     """
-    result = {'LOG': [], 'CONFIG': [], 'DIAG': []}
+    result = {'LOG': [], 'CONFIG': [], 'DIAG': [], 'CMD': []}   # 命名迁移:DIAG 更名 CMD(两名并存兼容:新包 CMD、老包 DIAG 都认,同款回显解析)
     for dirpath, dirnames, filenames in os.walk(extract_dir):
         dirname = os.path.basename(dirpath).upper()
         if dirname in result:
@@ -158,6 +158,34 @@ def process_diag_dirs(diag_dirs, csv_dir, extract_dir):
     return output_csvs
 
 
+def process_cmd_dirs(cmd_dirs, csv_dir, extract_dir):
+    """遍历所有 CMD/ 目录下 .txt 文件(DIAG 更名 CMD 后的命令回显,解析与 DIAG 同款),
+    调用 parse_diag_to_csv 转换,输出到 csv/<NE>/CMD/(列 NEName/CmdName/ObjContent;
+    下游内核认 ObjContent↔CmdResult 同义,直接当 cmd 表喂)。"""
+    if not cmd_dirs:
+        print("[5b/7] CMD/ 目录不存在,跳过")
+        return []
+
+    print(f"[5b/7] 处理 CMD/ 目录 (共 {len(cmd_dirs)} 个)")
+    output_csvs = []
+
+    for cmd_dir in cmd_dirs:
+        ne_name = get_ne_name(cmd_dir, extract_dir)
+        ne_output_dir = os.path.join(csv_dir, ne_name, 'CMD')
+        os.makedirs(ne_output_dir, exist_ok=True)
+
+        txt_files = sorted(glob.glob(os.path.join(cmd_dir, '*.txt')))
+        for txt_file in txt_files:
+            basename = os.path.splitext(os.path.basename(txt_file))[0]
+            csv_file = os.path.join(ne_output_dir, basename + '.csv')
+            print(f"  转换: {ne_name}/CMD/{os.path.basename(txt_file)} -> {basename}.csv")
+            diag_convert(txt_file, csv_file)
+            output_csvs.append(csv_file)
+
+    print(f"  共转换 {len(output_csvs)} 个 CMD 文件")
+    return output_csvs
+
+
 def generate_cmd_csv(diag_csvs, csv_dir):
     """
     基于 DIAG 输出的 CSV，在 CMD/ 目录下生成新 CSV（保留 NE 目录结构）。
@@ -254,7 +282,8 @@ def main():
 
     # Step 2: 自动扫描 LOG/CONFIG/DIAG 目录
     data_dirs = find_data_dirs(extract_dir)
-    print(f"[2/7] 扫描结果: LOG={len(data_dirs['LOG'])}, CONFIG={len(data_dirs['CONFIG'])}, DIAG={len(data_dirs['DIAG'])}")
+    print(f"[2/7] 扫描结果: LOG={len(data_dirs['LOG'])}, CONFIG={len(data_dirs['CONFIG'])}, "
+          f"DIAG={len(data_dirs['DIAG'])}, CMD={len(data_dirs['CMD'])}")
 
     # Step 3: 处理 LOG
     process_log_dirs(data_dirs['LOG'], csv_dir, extract_dir)
@@ -264,6 +293,9 @@ def main():
 
     # Step 5: 处理 DIAG，收集输出 CSV 路径
     diag_csvs = process_diag_dirs(data_dirs['DIAG'], csv_dir, extract_dir)
+
+    # Step 5b: 处理 CMD(DIAG 更名 CMD;老包的 DIAG 目录上面照旧处理,两名并存兼容)
+    process_cmd_dirs(data_dirs['CMD'], csv_dir, extract_dir)
 
     # Step 6: 生成 CMD CSV
     generate_cmd_csv(diag_csvs, csv_dir)

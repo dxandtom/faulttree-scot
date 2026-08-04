@@ -41,19 +41,32 @@ RAW_TAG = "判据:原文"
 
 
 # ---------- 交付包解析 ----------
+def _unzip(zp: Path, dst: Path) -> None:
+    try:
+        zf = zipfile.ZipFile(zp, metadata_encoding="gbk")        # Windows 打的包常见 GBK 文件名
+    except TypeError:                                            # 老 Python 无该参数
+        zf = zipfile.ZipFile(zp)
+    with zf:
+        zf.extractall(dst)
+
+
 def unpack(package: Path, tmp: Path) -> Path:
-    """zip → 解压到临时目录;目录 → 原样返回。"""
+    """zip → 解压到临时目录(**递归解嵌套 zip**:合集包里每节点一个 zip 的形态直接消化);
+    目录 → 原样返回。"""
     if package.is_dir():
         return package
     if package.suffix.lower() != ".zip":
         raise SystemExit(f"交付包应是目录或 .zip:{package}")
     dst = tmp / "package"
-    try:
-        zf = zipfile.ZipFile(package, metadata_encoding="gbk")   # Windows 打的包常见 GBK 文件名
-    except TypeError:                                            # 老 Python 无该参数
-        zf = zipfile.ZipFile(package)
-    with zf:
-        zf.extractall(dst)
+    _unzip(package, dst)
+    for _ in range(3):                                   # 嵌套逐层解,3 层封顶(防 zip 炸弹式无限套娃)
+        inner = sorted(dst.rglob("*.zip"))
+        if not inner:
+            break
+        for z in inner:
+            sub = z.with_suffix("")                      # 解到同名目录,解完删 zip(防重复解/误当交付物)
+            _unzip(z, sub)
+            z.unlink()
     inner = [d for d in dst.iterdir() if d.is_dir()]
     return inner[0] if len(inner) == 1 and not any(dst.glob("*.md")) else dst
 
@@ -66,6 +79,11 @@ def parse_method_md(pkg: Path):
     cands = [p for p in pkg.rglob("判断方法*.md") if "规范" not in p.name]
     if not cands:
         raise SystemExit(f"交付包里找不到 判断方法*.md(排除规范文件):{pkg}")
+    if len({p.parent for p in cands}) > 1:               # 不同子目录各有一份 = 多节点合集包:决不能闷头拿第一份
+        subs = sorted({str(p.parent) for p in cands})
+        raise SystemExit("这是**多节点合集包**(发现 {} 份判断方法.md,分居不同子目录)——本工具一次迁一个节点。\n"
+                         "逐个迁移:把下列子目录各自当交付包再跑一次:\n  ".format(len(cands))
+                         + "\n  ".join(subs))
     if len(cands) > 1:
         print(f"[warn] 交付包里有多份判断方法文档,用第一份:{[c.name for c in cands]}")
     text = cands[0].read_text(encoding="utf-8", errors="replace")
@@ -229,7 +247,7 @@ ENGINE_CAPS = {
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
                       "_fc_tristate"),                  # 末项=tester 新契约字符串三态/全局形态识别
     "import_tree_excel.py": ('{"P", "S"}',),             # S/P 放行 + cross 列支持同代
-    "export_tree_excel.py": ('!= "cross"',),             # cross 列进表 + 相对深度同代
+    "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
 RUNNER_CAP = "源名兼容"                                  # raw 通道 / diag↔cmd 互认同代
 
@@ -340,7 +358,11 @@ def main() -> None:
     a = ap.parse_args()
     product = Path(a.product).expanduser().resolve()
     if not (product / "tree").is_dir() or not (product / "scripts").is_dir():
-        raise SystemExit(f"--product 不像场景产物目录(缺 tree/ 或 scripts/):{product}")
+        if (product / "assets" / "tree").is_dir() and (product / "assets" / "scripts").is_dir():
+            product = product / "assets"                 # 给的是打包技能根目录:产物在 assets/,自动进
+            print(f"[info] --product 是打包技能目录,已自动定位到产物:{product}")
+        else:
+            raise SystemExit(f"--product 不像场景产物目录(缺 tree/ 或 scripts/):{product}")
 
     with tempfile.TemporaryDirectory(prefix="migrate_") as td:
         pkg = unpack(Path(a.package).expanduser().resolve(), Path(td))
@@ -408,7 +430,12 @@ def main() -> None:
                      if not p.name.startswith("~$"))
         if xls and tis and xls[0].stat().st_mtime > tis[0].stat().st_mtime:
             print("  [0/3] 调优表比 tree_index 新 → 先导入收编现有内容(有未导入的人工修改也不会丢)…")
-            run_step(product, "import_tree_excel.py", "预导入(收编现有调优表)")
+            try:
+                run_step(product, "import_tree_excel.py", "预导入(收编现有调优表)")
+            except SystemExit as e:
+                raise SystemExit(str(e) + "\n提示:预导入失败卡的是**存量调优表**,不是这次的交付包。"
+                                 "若这份调优表里没有【尚未导入】的手工修改,把 tree/ 下的 *.tuning.xlsx 删掉重跑迁移即可"
+                                 "(会用当前版导出器从产物重建;「多个顶层节点/层级列错位」这类结构病多为旧版导出器所产)。")
         print("  [1/3] 导出调优表…")
         run_step(product, "export_tree_excel.py", "导出调优表")
         binding = {"class": "S", "func": "fault_check",
@@ -436,7 +463,9 @@ def main() -> None:
         print(f"  判据 ← 判断方法.md 全文(含故障描述/判断条件/数据来源表等);绑定 ← S(fault_check → custom/{fc.name}:{entry})")
         print(f"  台账 → tree/migrations.json;调优表已同步,后续人工调优照常。")
         print("  执行提示:runner 加 --data raw=<zip2csv 的 extracted 目录> 可让脚本直读原始 txt"
-              "(不加也能跑,自动从三表重建);产物在打包技能里的话记得重新 package。")
+              "(不加也能跑,自动从三表重建)。")
+        print("  打包说明:迁移是**就地生效**——产物就是打包技能的 assets/ 时,技能已更新完毕,"
+              "**无需重新打包**;只有在独立产物目录上迁移、之后要发布成技能时才跑 package_scenario.py。")
 
 
 if __name__ == "__main__":
