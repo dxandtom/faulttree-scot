@@ -12,8 +12,10 @@ disable-model-invocation: false
 
 1. **解压 ZIP** 到本地目录
 2. **LOG/** — 遍历所有 `.txt` 文件，调用 `logbuffer2csv.convert_file()` 转换为 CSV
+   (命名迁移:原 DIAG→**CMD**、原 DBLG→**DIAG**——CMD 目录按命令回显解析,与原 DIAG 同款)
 3. **CONFIG/** — 遍历所有 `.txt` 文件，调用 `config2csv.parse_config_to_csv()` 转换为 CSV
 4. **DIAG/** — 遍历所有 `.txt` 文件，调用 `parse_diag_to_csv.parse_diag_to_csv()` 转换为 CSV
+5. **CMD/** — 同 DIAG 处理(parse_diag_to_csv),输出到 `csv/<网元>/CMD/`(列 NEName/CmdName/ObjContent,下游认 ObjContent↔CmdResult 同义)
 5. **cmd/** — 基于 DIAG 输出的 CSV，生成汇总 CSV
 
 ## 执行前检查
