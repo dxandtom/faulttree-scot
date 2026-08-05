@@ -25,7 +25,7 @@
     excel_to_tree_v2.py <xlsx> --list                          # 列出所有可输入的场景名(L2)+ 各自出处页签
     excel_to_tree_v2.py <xlsx> --start-node "NSA场景接入失败"   # 跨页签合并出该场景子树
     excel_to_tree_v2.py <xlsx> --start-node "NSA场景接入失败" --sheet "NSA NR"   # 只用某一页
-读 xlsx 需要 openpyxl。
+读 xlsx 走同目录 xlsx_reader.py(零三方依赖,不需要 openpyxl)。
 """
 from __future__ import annotations
 
@@ -166,18 +166,8 @@ def is_tree_sheet(header: List[str]) -> bool:
 
 def read_sheets(path: str):
     """读所有页签 → [(页签名, 表头, 行dict列表)]。"""
-    from openpyxl import load_workbook
-    wb = load_workbook(path, read_only=True, data_only=True)
-    out = []
-    for name in wb.sheetnames:
-        ws = wb[name]
-        it = ws.iter_rows(values_only=True)
-        header = [("" if h is None else str(h)).strip() for h in next(it, [])]
-        rows = [{header[i]: ("" if i >= len(r) or r[i] is None else str(r[i])) for i in range(len(header))}
-                for r in it]
-        out.append((name, header, rows))
-    wb.close()
-    return out
+    import xlsx_reader                                   # 同目录零依赖读取器(不需要 openpyxl)
+    return xlsx_reader.iter_sheets(path)
 
 
 def list_scenarios(tree_sheets, start_level: int) -> Dict[str, List[str]]:

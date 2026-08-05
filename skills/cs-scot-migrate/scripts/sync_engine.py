@@ -11,6 +11,7 @@ ENGINE = HERE.parent / "engine"
 SKILLS = HERE.parents[1]                                # …/skills
 SRC = {
     "condition_kernels.py": SKILLS / "cs-scot-generate" / "scripts",
+    "xlsx_reader.py": SKILLS / "cs-scot-generate" / "scripts",
     "custom_lib.py": SKILLS / "cs-scot-generate" / "scripts",
     "export_tree_excel.py": SKILLS / "cs-scot-generate" / "scripts",
     "import_tree_excel.py": SKILLS / "cs-scot-generate" / "scripts",

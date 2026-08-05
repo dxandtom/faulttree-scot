@@ -178,5 +178,5 @@ python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或打包技�
 
 ## 注意
 - 产物用**中文**;通用引擎 Python 3.11、自包含、精简忠实。
-- 数据 xlsx/csv 都支持(xlsx 需 `pip install openpyxl`)。
+- 数据 xlsx/csv 都支持(读 xlsx 零三方依赖,内置 xlsx_reader;只有调优表**导出/手术**写 xlsx 才需要 openpyxl)。
 - 路径有空格/括号/中文,命令里务必加引号。

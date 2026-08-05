@@ -16,7 +16,7 @@ Excel(调优的唯一事实源);改完用 import_tree_excel.py 机械编译回�
 - 覆盖保护:目标调优表已存在且比 tree_index 新(可能有没导入的人工修改)→ 先备份 .bak 再覆盖,响亮提示。
 
 用法:export_tree_excel.py --out <场景产物目录>
-依赖:openpyxl(读 xlsx 本就需要)。
+依赖:openpyxl(仅**写** xlsx 用;读表已零依赖走同目录 xlsx_reader.py)。
 """
 from __future__ import annotations
 
