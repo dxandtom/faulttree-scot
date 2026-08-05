@@ -164,6 +164,31 @@ def is_tree_sheet(header: List[str]) -> bool:
     return any(classify(h)[0] == "level" for h in header)
 
 
+def default_out(anchor: Path, stem: str, slug, scenario: str):
+    """默认落点:**直出打包技能形态**——scot技能/<短名>/(execute 骨架+SKILL 身份),产物=其 assets/,
+    流水线跑完技能即成品,免掉单独打包一步(调优/迁移本就支持在 assets 上就地做)。
+    直出的前提:有英文短名(云端技能名要英文)+ 本机有同门 cs-scot-execute / fault-tree-rca;
+    不满足 → 退回老的 scot产物/<场景名>/ 产物形态,响亮提示最后跑 package_scenario.py 补打包。
+    返回 (技能目录|None, 产物目录, 说明)。"""
+    skill_dir = anchor / "scot技能" / stem
+    if (skill_dir / "SKILL.md").exists() and (skill_dir / "assets").is_dir():
+        return skill_dir, skill_dir / "assets", "技能已存在,续用(重跑建树直接更新其 assets)"
+    here = Path(__file__).resolve().parent
+    exe, rca = here.parent.parent / "cs-scot-execute", here.parent.parent / "fault-tree-rca"
+    if not slug:
+        return None, scenario_out_dir(anchor, stem), \
+            "未取到英文短名(技能名需英文)——退回产物形态;加 --slug 重跑可直出技能,或最后跑 package_scenario.py"
+    if not (exe / "SKILL.md").exists() or not (rca / "SKILL.md").exists():
+        return None, scenario_out_dir(anchor, stem), \
+            "本机没有同门 cs-scot-execute / fault-tree-rca 技能——退回产物形态,最后跑 package_scenario.py"
+    if skill_dir.exists():
+        return None, scenario_out_dir(anchor, stem), \
+            f"{skill_dir} 已存在但不是完整技能(缺 SKILL.md 或 assets/)——不动它,退回产物形态;人工清理后重跑可直出"
+    import package_scenario
+    package_scenario.scaffold_skill(skill_dir, scenario, stem, exe, rca)
+    return skill_dir, skill_dir / "assets", "已搭好技能骨架(execute 骨架+rca 副本+zip2csv)"
+
+
 def read_sheets(path: str):
     """读所有页签 → [(页签名, 表头, 行dict列表)]。"""
     import xlsx_reader                                   # 同目录零依赖读取器(不需要 openpyxl)
@@ -364,10 +389,11 @@ def main() -> None:
         index["slug"] = slug
 
     output_path = args.output
-    out_dir = None
+    out_dir = skill_dir = None
+    skill_note = ""
     if not output_path:
         anchor = Path(args.out_base).expanduser() if args.out_base else Path(args.excel_path).expanduser().resolve().parent
-        out_dir = scenario_out_dir(anchor, stem)
+        skill_dir, out_dir, skill_note = default_out(anchor, stem, slug, args.start_node)
         output_path = str(out_dir / "tree" / f"{stem}.md")
     outp = Path(output_path)
     outp.parent.mkdir(parents=True, exist_ok=True)
@@ -400,6 +426,12 @@ def main() -> None:
               "——0 判据的树绑出来的只能是瞎猜。", file=sys.stderr)
     if out_dir is not None:
         print(f"本场景产物目录: {out_dir}")
+        if skill_dir is not None:
+            print(f"本场景技能目录: {skill_dir}({skill_note})")
+            print("  已是打包技能形态:后续步骤 --out 一律用上面的产物目录(=技能的 assets/),"
+                  "流水线跑完技能即成品,**无需再跑 package_scenario 打包**。")
+        else:
+            print(f"⚠ 未直出技能形态:{skill_note}", file=sys.stderr)
 
 
 if __name__ == "__main__":

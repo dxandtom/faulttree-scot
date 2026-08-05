@@ -447,7 +447,9 @@ def main() -> None:
         # 若只在"推导目录不存在"时才扫,旧中文名目录恰好存在就会被静默选中、归集出过期的树。
         # 按 tree_index 内容认领:恰一个 → 用它;多个 → 硬拦;零个 → 沿用推导目录(下游闸门给指引)。
         hits = []
-        for ti in sorted((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json")):
+        for ti in sorted(list((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json"))
+                         + list((Path(anchor) / "scot技能").glob("*/assets/tree/*.tree_index.json"))):
+            # 两个容器都扫:老形态 scot产物/<场景>/,新默认 scot技能/<短名>/assets/(步骤1直出技能)
             try:
                 d = json.loads(ti.read_text(encoding="utf-8"))
             except Exception:

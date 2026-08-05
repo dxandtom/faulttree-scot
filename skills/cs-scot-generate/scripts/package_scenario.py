@@ -13,6 +13,10 @@
 打包后的用法(云端):`/<slug> 数据在 <zip>,帮我诊断` —— 一句话执行,见 execute SKILL.md
 「场景打包形态(assets/)」一节的默认约定。
 
+注:步骤 1(excel_to_tree_v2)现已**默认直出技能形态**(scot技能/<短名>/,产物=其 assets/,
+借本脚本的 scaffold_skill 搭骨架)——直出成功时全流程**不需要**再跑本脚本;本脚本用于
+旧产物补打包、步骤 1 退化落产物形态(缺英文短名/缺同门技能)后的发布、以及异地克隆。
+
 用法:
     package_scenario.py --out <场景产物目录>
         [--dest <目标根目录,默认=产物目录的父目录>] [--name <技能名覆盖,英文小写连字符>]
@@ -43,6 +47,19 @@ def _ignore(_dirpath, names):
                 or n == "conditions_all.json" or ("_conditions" in n and n.endswith(".py"))):
             out.add(n)
     return out
+
+
+def scaffold_skill(dest: Path, scenario: str, name: str, exe: Path, rca: Path) -> None:
+    """搭"空"技能骨架:execute 骨架 + 身份改写 + assets/(rca 规则副本 + zip2csv 转换器)。
+    assets/ 其余内容由生成各步骤(建树/归集/绑定)直接往里写——步骤 1 默认直出技能形态靠它,
+    本脚本打包旧产物也复用它(随后把产物内容并进 assets/)。"""
+    shutil.copytree(exe, dest, ignore=_ignore)                       # 执行骨架
+    rewrite_skill_md(dest / "SKILL.md", name, scenario)              # 技能身份:名字+场景描述
+    (dest / "assets").mkdir(exist_ok=True)
+    shutil.copytree(rca, dest / "assets" / "fault-tree-rca", ignore=_ignore)   # 根因规则副本
+    z2c = Path(__file__).resolve().parents[2] / "zip2csv"            # 裸 txt→三表转换器:有就随包内置
+    if z2c.is_dir() and not (dest / "assets" / "zip2csv").exists():
+        shutil.copytree(z2c, dest / "assets" / "zip2csv", ignore=_ignore)
 
 
 def rewrite_skill_md(path: Path, name: str, scenario: str) -> None:
@@ -147,20 +164,15 @@ def main() -> None:
     except Exception as e:  # noqa: BLE001
         print(f"[package] ⚠ 调优表导出失败(不阻断打包): {e}", file=sys.stderr)
 
-    shutil.copytree(exe, dest, ignore=_ignore)                       # 执行骨架
-    rewrite_skill_md(dest / "SKILL.md", name, scenario)              # 技能身份:名字+场景描述
+    scaffold_skill(dest, scenario, name, exe, rca)                   # 骨架+身份+rca 副本+zip2csv
 
     def _ignore_out(d, names):                           # --out 若是"已打包技能的 assets/"(就地调优/迁移后再克隆),
-        ig = set(_ignore(d, names))                      # 里面已带上次打包放的 fault-tree-rca 副本——拷贝时剔除,
-        if Path(d).resolve() == out.resolve():           # 随后统一放新副本,免得同名目录相撞(实测炸在 copytree)
+        ig = set(_ignore(d, names))                      # 里面已带上次打包放的 fault-tree-rca 副本——拷贝时剔除
+        if Path(d).resolve() == out.resolve():           # (骨架已放新副本,同名目录相撞实测炸在 copytree)
             ig |= {n for n in names if n == "fault-tree-rca"}
         return ig
-    shutil.copytree(out, dest / "assets", ignore=_ignore_out)        # 诊断产物(排除临时物)
-    shutil.copytree(rca, dest / "assets" / "fault-tree-rca", ignore=_ignore)   # 根因规则副本
-    z2c = Path(__file__).resolve().parents[2] / "zip2csv"          # 裸 txt→三表转换器:有就随包内置
-    if z2c.is_dir() and not (dest / "assets" / "zip2csv").exists():  # (SKILL.md 数据入口按它指路;
-        shutil.copytree(z2c, dest / "assets" / "zip2csv", ignore=_ignore)      # 产物 assets 已自带则不重复)
-        print("  已内置 zip2csv 转换器 → assets/zip2csv/(裸 txt 数据现场直转三表)")
+    shutil.copytree(out, dest / "assets", ignore=_ignore_out,        # 诊断产物并进 assets(排除临时物;
+                    dirs_exist_ok=True)                              # 骨架已建 assets,允许合并)
 
     n_scripts = len(list((dest / "assets" / "scripts").glob("*_analyzer.py")))
     has_sol = (dest / "assets" / "tree" / "solutions.json").exists()
