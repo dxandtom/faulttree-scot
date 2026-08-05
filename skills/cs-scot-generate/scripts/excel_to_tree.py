@@ -18,7 +18,7 @@
 - 背景业务知识:场景节点通常在 **L2**,所以 `--start-level` 默认 2,`--start-node` 在该层选具体场景;
   万一不在 L2,会自动在其它层找到该场景名并以它为根截取(兜底)。
 - `--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`;传 `--exclude-pattern ""` 可保留全部。
-读 xlsx 需要 openpyxl(pip install openpyxl);csv 用标准库即可。
+读 xlsx 走同目录 xlsx_reader.py(零三方依赖,不需要 openpyxl);csv 用标准库即可。
 """
 from __future__ import annotations
 
@@ -56,20 +56,8 @@ def _read_table(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
     """读 xlsx/csv → (表头, 行dict列表);自动编码检测。自包含。"""
     p = Path(path)
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
-        try:
-            from openpyxl import load_workbook
-        except ImportError as e:
-            raise RuntimeError("读取 xlsx 需要 openpyxl,请先 pip install openpyxl") from e
-        wb = load_workbook(p, read_only=True, data_only=True)
-        ws = wb.active
-        it = ws.iter_rows(values_only=True)
-        header = [("" if h is None else str(h)).strip() for h in next(it, [])]
-        rows: List[Dict[str, str]] = []
-        for r in it:
-            rows.append({header[i]: ("" if i >= len(r) or r[i] is None else str(r[i]))
-                         for i in range(len(header))})
-        wb.close()
-        return header, rows
+        import xlsx_reader                               # 同目录零依赖读取器(不需要 openpyxl)
+        return xlsx_reader.read_xlsx(p)                  # 活动页,与原 wb.active 行为一致
     raw = p.read_bytes()
     text = None
     for enc in _ENCODINGS:

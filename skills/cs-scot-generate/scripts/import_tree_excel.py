@@ -17,7 +17,8 @@
 - **变更摘要**:节点增/删/改名/移动、判据/解决方案改动、各源绑定条数——每次导入可评审。
 
 用法:import_tree_excel.py --out <场景产物目录(或打包技能的 assets/)>
-本脚本自包含(不依赖 generate 技能的其它模块),会随产物一起分发。
+读 xlsx 走同目录 xlsx_reader.py(零三方依赖,与本脚本一起随产物分发);除它外不依赖 generate
+技能的其它模块。
 """
 from __future__ import annotations
 
@@ -132,19 +133,18 @@ def _parse_cell_json(raw, where, errors, warns):
         return None
 
 
-def _pick_sheet(wb):
-    """按表头找「node_id + 层级列」的那一页——绝不吃'活动页'的亏(复制页签留底是常态)。"""
-    hits = []
-    for ws in wb.worksheets:
-        head = [("" if c is None else str(c)).strip() for c in next(ws.iter_rows(values_only=True), [])]
-        if "node_id" in head and any(_LVL_RE.match(h) for h in head):
-            hits.append(ws)
+def _pick_sheet(path):
+    """按表头找「node_id + 层级列」的那一页(返回页签名)——绝不吃'活动页'的亏
+    (复制页签留底是常态)。"""
+    import xlsx_reader
+    hits = [b["name"] for b in xlsx_reader.sheet_briefs(path)
+            if "node_id" in b["columns"] and any(_LVL_RE.match(h) for h in b["columns"])]
     if len(hits) == 1:
         return hits[0]
     if not hits:
         raise SystemExit("没有任何页签的表头含 node_id + 层级列(L2(Chinese) 这种)——"
                          "别删表头行;若把表复制到了新页签,保留一页正式的即可")
-    raise SystemExit(f"有 {len(hits)} 个页签都像正式调优表({[w.title for w in hits]})——"
+    raise SystemExit(f"有 {len(hits)} 个页签都像正式调优表({hits})——"
                      "只保留一页,备份页请删掉或去掉它的表头行")
 
 
@@ -174,9 +174,9 @@ def main() -> None:
     if not existing_aps:
         raise SystemExit("产物 scripts/ 下没有任何 analyzer,无法落绑定(产物不完整)")
 
-    from openpyxl import load_workbook
-    ws = _pick_sheet(load_workbook(xls[0], data_only=True))
-    rows = [[("" if c is None else str(c)).strip() for c in r] for r in ws.iter_rows(values_only=True)]
+    import xlsx_reader                                   # 同目录零依赖读取器(公式取缓存值=原 data_only=True)
+    sheet = _pick_sheet(xls[0])
+    rows = [[str(c).strip() for c in r] for r in xlsx_reader.read_rows(xls[0], sheet)]
     header, body = rows[0], rows[1:]
 
     # ---- 表头解析(全角冒号/空格归一;重复列、非法源名硬拦)----

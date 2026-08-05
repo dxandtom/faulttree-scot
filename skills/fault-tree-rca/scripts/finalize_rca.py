@@ -4,7 +4,8 @@
 实测病根:draft 治了"忘候选",但模型仍要手打整份 rca.json(几百行,写半天还会抄错)。
 与绑定产线同配方——模型只交判定,机械字段代码填。诚实性从"事后校验"改成"结构上做不出假的":
 - 骨架里的候选**一条都不许漏裁决**(漏了响亮报错,候选想消失必须显式给 verdict+理由);
-- verdict=confirmed 的闸:**只看候选自身**——叶子必须成立(被改成 存疑/语义近似/不成立 → 拒收);
+- verdict=confirmed 的闸:**只看候选自身**——候选(叶子,或下级无一成立的中间节点)必须成立
+  (被改成 存疑/语义近似/不成立 → 拒收);中间节点确证的「叶子因待定」自动落 caveats;
   **祖先的 数据不足/不成立/冲突/存疑 一律不拦**(数据不足=零信息不冒充反证;不成立/冲突=树逻辑
   与叶子命中矛盾,按叶子事实确证、矛盾点名给人复核)——但全部机械写进该条 caveats 留痕,不许无痕;
 - 有成立事实的候选 verdict=undetermined → 拒收(有证据的不收待确认);
@@ -161,13 +162,20 @@ def main() -> int:
             if bad:
                 raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但候选自身不干净:"
                                  + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad[:3])
-                                 + " —— 确证要求:候选叶子自身成立(祖先带伤不拦,自动落 caveats);"
-                                   "对叶子自身有疑,改 probable(带 blocked_at/caveats)或 excluded(带 reason)")
+                                 + " —— 确证要求:候选自身成立(祖先带伤/叶子因待定不拦,自动落 caveats);"
+                                   "对候选自身有疑,改 probable(带 blocked_at/caveats)或 excluded(带 reason)")
             item = {"Root_cause": e.get("node"), "Fault_tree_path": path,
                     "node_id": nid,
                     "support": d.get("support") or e.get("support_hint") or "",
                     "evidence_path": ev}
-            cav = ";".join(x for x in ([str(d.get("caveats") or "").strip()] + _anc_notes(ev)) if x)
+            notes = _anc_notes(ev)
+            kids = e.get("children_status") or []
+            if e.get("leaf_pending") or kids:            # 中间节点确证:叶子因待定必须落痕,不许无痕
+                ks = "、".join(f"{k.get('node')}({k.get('node_id')}:{k.get('状态')})" for k in kids[:6])
+                notes.append("已定位到本层,叶子因待定(下级无一成立)"
+                             + (f";子节点:{ks}{'…' if len(kids) > 6 else ''}" if ks else "")
+                             + "——数据补齐后重跑可细化到叶子")
+            cav = ";".join(x for x in ([str(d.get("caveats") or "").strip()] + notes) if x)
             if cav:
                 item["caveats"] = cav
             rca_result.append(item)

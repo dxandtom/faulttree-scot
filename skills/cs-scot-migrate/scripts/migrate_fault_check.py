@@ -375,13 +375,15 @@ def run_step(product: Path, script_name: str, desc: str) -> None:
 # (自包含兜底;维护:引擎侧改动后跑 scripts/sync_engine.py 对齐)。
 ENGINE_CAPS = {
     "condition_kernels.py": ("def k_script", "def alias_sources", "【位置 ",
-                             "except SystemExit"),      # 末两项=S 异常带定位 + sys.exit 拦截
+                             "except SystemExit",
+                             "xlsx_reader"),            # 末项=读 xlsx 零依赖(走同目录 xlsx_reader)
+    "xlsx_reader.py": ("def read_rows",),                # 零依赖 xlsx 读取器(旧产物没有此文件→直接补)
     # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
                       "_fc_tristate", "matched_items",
                       "_StrPath"),                      # 末三项=新契约三态/证据保真/入参 str+Path 双兼容
-    "import_tree_excel.py": ('{"P", "S"}',),             # S/P 放行 + cross 列支持同代
+    "import_tree_excel.py": ('{"P", "S"}', "xlsx_reader"),   # S/P 放行 + cross 列 + 读表零依赖同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
 RUNNER_CAP = "源名兼容"                                  # raw 通道 / diag↔cmd 互认同代
@@ -442,6 +444,13 @@ def refresh_engine(product: Path) -> None:
                 shutil.copy2(run_dst, run_dst.with_suffix(".py.bak"))
                 shutil.copy2(run_src, run_dst)
                 print("  打包技能的 runner.py 已刷新(旧版不认 raw 通道/双代源名,备份 .py.bak)")
+        cd_dst = skill_root / "scripts" / "check_data.py"
+        if not cd_dst.exists():                          # 旧打包技能没有数据体检:一并补挂
+            cd_src = _engine_src("check_data.py", ("def main",),
+                                 Path(__file__).resolve().parents[2] / "cs-scot-execute" / "scripts")
+            if cd_src is not None:
+                shutil.copy2(cd_src, cd_dst)
+                print("  打包技能补挂 scripts/check_data.py(数据入口体检:诊断前先验目录结构/点名清单表)")
 
 
 def upgrade_cross_scaffold(product: Path) -> None:

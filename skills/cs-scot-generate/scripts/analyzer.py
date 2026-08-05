@@ -9,7 +9,7 @@
 按语义、显式可审地写进 CONDITIONS(见 condition_binding_schema.md),成立与否的最终裁决由 fault-tree-rca 做。
 本引擎只产**事实**,主要用途是给步骤 2.5 出概览(--lean/--sheet)让模型看清列再绑。
 
-自包含:除可选的 mo_config(仅当数据是 .txt/.cfg MO 配置文本时按需 import,缺失则降级当 csv)外,不 import 本仓自定义模块。读 xlsx 需 openpyxl;csv 用标准库。
+自包含:除可选的 mo_config(仅当数据是 .txt/.cfg MO 配置文本时按需 import,缺失则降级当 csv)外,不 import 本仓自定义模块。读 xlsx 走同目录 xlsx_reader.py(零三方依赖);csv 用标准库。
 用法:python analyzer.py <数据文件> -o <输出.json> [--indicator <标签>] [--fault-tree <故障树.md>]
 给了 --fault-tree(或脚本旁存在唯一的 ../tree/*.md)就尝试**只保留故障树提到的列**以压缩输出;
 但树常用英文/code 名、数据列常为中文,纯子串命中过稀时**保留全部列**,把字段↔列映射交给 RCA 语义完成。
@@ -58,11 +58,8 @@ def _sheets(path: str):
     """xlsx 页签名列表;MO 配置文本 → MO 类型清单(每类当一个'页签');csv → []。"""
     p = Path(path)
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
-        from openpyxl import load_workbook
-        wb = load_workbook(p, read_only=True, data_only=True)
-        names = list(wb.sheetnames)
-        wb.close()
-        return names
+        import xlsx_reader                               # 同目录零依赖读取器(不需要 openpyxl)
+        return xlsx_reader.list_sheets(p)
     if _is_mo_config(p):
         try:
             from mo_config import mo_sheets
@@ -86,16 +83,8 @@ def _multisheet_brief(path: str):
                         seen.add(k); cols.append(k)
             briefs.append({"name": motype, "total_records": len(instances), "columns": cols})
         return briefs
-    from openpyxl import load_workbook
-    wb = load_workbook(path, read_only=True, data_only=True)
-    briefs = []
-    for s in wb.sheetnames:
-        it = wb[s].iter_rows(values_only=True)
-        header = [("" if h is None else str(h)).strip() for h in next(it, [])]
-        n = sum(1 for _ in it)  # 只数行,不建 dict
-        briefs.append({"name": s, "total_records": n, "columns": header})
-    wb.close()
-    return briefs
+    import xlsx_reader
+    return xlsx_reader.sheet_briefs(path)                # 同款:逐页签 表头+行数,不建 dict
 
 
 def _load(path: str, sheet=None):
@@ -108,18 +97,9 @@ def _load(path: str, sheet=None):
         except Exception:
             pass            # 解析失败 → 落到 csv 兜底,不崩
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
-        try:
-            from openpyxl import load_workbook
-        except ImportError as e:
-            raise RuntimeError("读取 xlsx 需要 openpyxl,请先 pip install openpyxl") from e
-        wb = load_workbook(p, read_only=True, data_only=True)
-        ws = wb[sheet] if (sheet is not None and sheet in wb.sheetnames) else wb.active
-        it = ws.iter_rows(values_only=True)
-        header = [("" if h is None else str(h)).strip() for h in next(it, [])]
-        rows = [{header[i]: (("" if r[i] is None else str(r[i])) if i < len(r) else "")
-                 for i in range(len(header))} for r in it]
-        wb.close()
-        return header, rows
+        import xlsx_reader                               # 同目录零依赖读取器(不需要 openpyxl)
+        use = sheet if (sheet is not None and sheet in xlsx_reader.list_sheets(p)) else None
+        return xlsx_reader.read_xlsx(p, use)             # 页签不存在按原行为静默落回活动页
 
     text = _decode(p.read_bytes())
     reader = csv.DictReader(io.StringIO(text))

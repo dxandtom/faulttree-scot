@@ -447,7 +447,9 @@ def main() -> None:
         # 若只在"推导目录不存在"时才扫,旧中文名目录恰好存在就会被静默选中、归集出过期的树。
         # 按 tree_index 内容认领:恰一个 → 用它;多个 → 硬拦;零个 → 沿用推导目录(下游闸门给指引)。
         hits = []
-        for ti in sorted((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json")):
+        for ti in sorted(list((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json"))
+                         + list((Path(anchor) / "scot技能").glob("*/assets/tree/*.tree_index.json"))):
+            # 两个容器都扫:老形态 scot产物/<场景>/,新默认 scot技能/<短名>/assets/(步骤1直出技能)
             try:
                 d = json.loads(ti.read_text(encoding="utf-8"))
             except Exception:
@@ -527,6 +529,7 @@ def main() -> None:
     # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
     here = Path(__file__).parent
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # 类别模板库
+    copy_into(here / "xlsx_reader.py", out / "scripts" / "xlsx_reader.py")              # 零依赖 xlsx 读取器(内核/导入都靠它读表)
     copy_into(here / "custom_lib.py", out / "scripts" / "custom_lib.py")                # S 类预制函数库(人手调优用)
     copy_into(here / "mo_config.py", out / "scripts" / "mo_config.py")                  # 配置拓扑适配器:MO文本→表 + IP/追溯原语(.txt 配置 + custom 用)
     copy_into(here / "analyzer.py", out / "scripts" / "analyzer.py")                    # 概览辅助:模型先看列再填条件
