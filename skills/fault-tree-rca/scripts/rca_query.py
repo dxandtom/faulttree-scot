@@ -60,7 +60,7 @@ def _fact_brief(f: dict) -> str:
 
 
 def _leafmark(n: dict) -> str:
-    """叶子 / 中间节点 标注——确证根因只能落在叶子;中间节点成立但下有未覆盖因 → 别当确证。"""
+    """叶子 / 中间节点 标注——确证=最深成立节点:叶子最好;中间节点成立且下级无一成立也确证(叶子因待定落 caveats)。"""
     if n.get("is_leaf"):
         return "叶子"
     unc = n.get("uncovered_children") or []
@@ -90,8 +90,8 @@ def main() -> None:
     elif args.holding:
         hold = _holding(nodes)
         print(f"# {len(hold)} 个有'成立'事实的候选节点(逐个用 --node 看整条路径再判):")
-        print("# 确证根因必须落在【叶子】且整条路径成立;中间节点成立但下有未覆盖/数据不足子因")
-        print("#   → 只能判'已定位到该层、叶子因待定'(probable/undetermined),别当确证。")
+        print("# 确证根因=【最深成立节点】:叶子最好;中间节点成立且下级无一成立 → 也确证")
+        print("#   (叶子因待定由 finalize 自动落 caveats,子节点三态见骨架 children_status)。")
         for nid in hold:
             path = _path_to_root(nodes, nid)
             names = " → ".join(nodes.get(p, {}).get("name", "?") for p in reversed(path))

@@ -3,7 +3,7 @@
 
 只兜**结构底线 + 诚实**,不碰强度/排序/你怀疑什么(那是模型判断)。分档严格度不同:
 - **rca_result(确证根因)**:严。揪 ① 自相矛盾(判"成立"却又承认拿不到数据);
-  ② 假根因(**叶子候选自身**带"数据不足/不成立/存疑"——祖先带伤不拦:数据不足=零信息、
+  ② 假根因(**候选自身**(叶子或最深成立中间节点)带"数据不足/不成立/存疑"——祖先带伤不拦:数据不足=零信息、
   不成立/冲突=树逻辑矛盾按叶子事实确证,finalize 已机械落 caveats 标出);③ 缺路径(没 evidence_path)。
 - **probable_causes(疑似)**:松——路径含"数据不足"**甚至"不成立"**节点都**放行**(那正是疑似该体现的泛化),
   只查 ④ 有没有把理由说清(`blocked_at`/`caveats` + `support`/`evidence`)。
@@ -418,7 +418,7 @@ def main() -> int:
                 problems.append(f"[自相矛盾] 确证根因「{name}」/节点「{nname}」判'成立'却承认拿不到数据 → {judg!r}")
             tag = _tag(judg, NOT_PROVEN)
             if tag:
-                # 确证闸只看叶子候选自身(路径末位)——祖先带伤(数据不足/不成立/冲突/存疑)不拦:
+                # 确证闸只看候选自身(路径末位;叶子或最深成立中间节点)——祖先带伤不拦:
                 # 与 finalize_rca 同口径(finalize 已把祖先带伤机械落 caveats 标出)。
                 if i < len(ev) - 1:
                     continue
@@ -430,7 +430,7 @@ def main() -> int:
                     if pt or not hc:
                         continue
                 problems.append(
-                    f"[假根因] 确证根因「{name}」的叶子候选自身带'{tag}'(「{nname}」)"
+                    f"[假根因] 确证根因「{name}」的候选自身带'{tag}'(「{nname}」)"
                     f"→ 挪进 probable_causes 或 excluded,别凑路径、别造节点")
         _check_fabrication(rc, "确证根因", hold_map, problems)
         _check_path_chain(rc, "确证根因", parent_map, problems)
@@ -552,7 +552,7 @@ def main() -> int:
         print(f"不合格:发现 {len(problems)} 处问题:")
         for pr in problems:
             print("  - " + pr)
-        print("\n修法:确证根因要叶子候选自身成立 + 摆出 evidence_path(祖先带伤在 caveats 标出);"
+        print("\n修法:确证根因要候选自身成立 + 摆出 evidence_path(祖先带伤/叶子因待定在 caveats 标出);"
               "疑似可含'数据不足/不成立'节点,"
               "但要写清 blocked_at/caveats/support;任何'成立'都得有真事实。**别凑路径、别造节点、别给没数据的节点判成立。**")
         return 1
@@ -567,7 +567,7 @@ def main() -> int:
         return 0
     extra = (f";另:排除核对列出 {len(exh)} 个节点——排除是合法出口,但报告「已排除的候选」一节"
              f"必须逐条晾出理由(反证/绑定质量),无声排除=不合格交付" if exh else "")
-    print(f"通过:确证根因 {len(confirmed)} 条(叶子自身成立)、疑似 {len(probables)} 条(理由齐备){note}{extra}。")
+    print(f"通过:确证根因 {len(confirmed)} 条(候选自身成立)、疑似 {len(probables)} 条(理由齐备){note}{extra}。")
     return 0
 
 

@@ -22,9 +22,10 @@ _README = (
     "你的工作=逐条裁决,不是重新发现:①语义复核(mapping_reason 与判据是否真等,近似就降档并把该节点 "
     "judgment 改'语义近似/存疑');②定档:draft_tier 只是机械建议——confirmed_candidate 语义过硬才进 "
     "rca_result,否则降 probable_causes;**祖先的『数据不足/不成立/冲突』都不拦确证也不构成降档理由**"
-    "(确证闸只看叶子候选自身;祖先带伤见候选的 ancestor_insufficient/ancestor_refuted/ancestor_conflict "
-    "注记,finalize 自动落 caveats 标出留痕——冲突细节在 evidence 该条目的 conflict_actual/conflict_how 里);"
-    "probable_candidate 补 confidence/caveats/support;"
+    "(确证闸只看候选自身;祖先带伤见候选的 ancestor_insufficient/ancestor_refuted/ancestor_conflict "
+    "注记,finalize 自动落 caveats 标出留痕——冲突细节在 evidence 该条目的 conflict_actual/conflict_how 里;"
+    "**候选是中间节点且下级无一成立**也确证——按本层命中交付,叶子因待定见 leaf_pending/children_status "
+    "注记,同样自动落 caveats);probable_candidate 补 confidence/caveats/support;"
     "③冲突条目权衡后归档;④排除候选/待确认骨架照对应档写。**任何候选不许无声消失**:不采纳就写进"
     "excluded_note(点名+理由);降档写理由。数据是有的就不许写'数据不足/证据不足'——语义怀疑请写"
     "'语义近似/存疑'。裁决写成一份小 decisions.json(一个候选一条 verdict),"
@@ -190,14 +191,10 @@ def draft_pruned(data: dict) -> dict:
                 + "——不拦确证、不构成降档理由;冲突两边的实测值已摆在 evidence 该条目的 "
                   "conflict_actual/conflict_how,finalize 会自动写进 caveats,报告里把冲突点标出来")
         unc = n.get("uncovered_children") or []
-        if n.get("is_leaf") and not unc:
-            entry["draft_tier"] = ("confirmed_candidate(机械建议:叶子成立;祖先数据不足/不成立/冲突"
-                                   "均不拦,已各自注记;语义复核后定档)")
-            confirmed.append(entry)
-        else:
-            why = ["非叶子/有未覆盖子因,叶子因待定"]
-            # 直接子节点的三态一览:父成立而已知叶子全被反证 → 真因可能在未覆盖子因/叶子绑定假阴/父命中系背景,
-            # 摆在这让模型一眼看全,不用再逐个 rca_query
+        if not n.get("is_leaf") or unc:
+            # 中间节点候选:候选=最深成立(下面没有任何成立后代)。用户拍板:叶子没有一个成立时,
+            # 中间层命中就按本层确证——压疑似只会逼模型空转权衡"叶子因是谁"(它也没证据)。
+            # 叶子因待定机械注记落 caveats;直接子节点三态摆出来,数据补齐后重跑可细化到叶子。
             kids = []
             for cid, c in nodes.items():
                 if c.get("parent") != nid:
@@ -215,9 +212,11 @@ def draft_pruned(data: dict) -> dict:
                     kids.append({"node": nm, "node_id": uid, "状态": "未覆盖(没人绑/缺数据)"})
             if kids:
                 entry["children_status"] = kids
-            entry["draft_tier"] = "probable_candidate"
-            entry["blocked_at_hint"] = ";".join(why)
-            probable.append(entry)
+            entry["leaf_pending"] = ("非叶子/有未覆盖子因:叶子因待定(下级无一成立)——按本层命中确证,"
+                                     "finalize 自动落 caveats;子节点三态见 children_status,数据补齐后重跑可细化")
+        entry["draft_tier"] = ("confirmed_candidate(机械建议:最深成立节点;祖先带伤/叶子因待定"
+                               "均不拦,已各自注记;语义复核后定档)")
+        confirmed.append(entry)
 
     return {
         "_readme": _README,

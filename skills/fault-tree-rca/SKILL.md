@@ -50,9 +50,12 @@ description: 综合根因分析。输入故障子树 + 各指标解析结果 JSO
 2. **你的产出只有裁决单**(每候选一条 verdict+理由,十几行),**不是整份 rca.json**——实测手写几百行 JSON 又慢又抄错。裁决时要看某节点更多细节,用 `scripts/rca_query.py` 抽查(`--node nX` / `--outline` / `--holding`)。
 3. **`scripts/finalize_rca.py` 机械合成 rca.json**:evidence/路径逐字来自骨架,待确认骨架自动带出,解决方案自动点查;结构闸拒收违规裁决(见文件头)。
 **别把整个 rca_input 读进上下文**(会超长报错),也别自己写脚本硬算 RCA、别绕过合成器手写 rca.json。
+**禁止手写 `python -c` 去解析 rca_input/rca_draft/rca.json**——字段名靠猜(实测连猜三轮全落空)、
+Windows 上 `open()` 不带 encoding 直接 GBK 报错,一轮诊断白烧十分钟;裁决所需信息骨架里**已全部预填**,
+看细节只许用 `rca_query.py`(--outline / --node nX / --holding),看完直接写裁决单。
 
 ## 诚实性:靠合成器的结构闸,不靠事后校验
-诚实性检查已内建在 finalize_rca 的合成过程里(候选一条不许漏裁决、确证闸=**叶子候选自身成立**——祖先的「数据不足/不成立/冲突/存疑」一律不拦确证,但全部自动落 caveats 标出留痕(冲突的两边实测值在 evidence 该条目的 conflict_actual/conflict_how 里,报告要把矛盾点复述给人复核)、排除必须给 reason、有成立事实的候选不收待确认、evidence 逐字来自骨架改不了数字)——**合成成功即交付,不需要再跑 validate_rca**。(`scripts/validate_rca.py` 保留:辩论引擎路径与人工抽查仍可用。)
+诚实性检查已内建在 finalize_rca 的合成过程里(候选一条不许漏裁决、确证闸=**候选自身成立**——候选是**最深成立节点**:叶子最好,**中间节点且下级无一成立也确证**(叶子因待定+子节点三态自动落 caveats,数据补齐后重跑可细化);祖先的「数据不足/不成立/冲突/存疑」一律不拦确证,但全部自动落 caveats 标出留痕(冲突的两边实测值在 evidence 该条目的 conflict_actual/conflict_how 里,报告要把矛盾点复述给人复核)、排除必须给 reason、有成立事实的候选不收待确认、evidence 逐字来自骨架改不了数字)——**合成成功即交付,不需要再跑 validate_rca**。(`scripts/validate_rca.py` 保留:辩论引擎路径与人工抽查仍可用。)
 
 ## 输出契约
 ```json
