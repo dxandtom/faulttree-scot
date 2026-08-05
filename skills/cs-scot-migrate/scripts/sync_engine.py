@@ -17,6 +17,7 @@ SRC = {
     "import_tree_excel.py": SKILLS / "cs-scot-generate" / "scripts",
     "assemble_scenario.py": SKILLS / "cs-scot-generate" / "scripts",
     "runner.py": SKILLS / "cs-scot-execute" / "scripts",
+    "check_data.py": SKILLS / "cs-scot-execute" / "scripts",
 }
 
 def main() -> None:

@@ -444,6 +444,13 @@ def refresh_engine(product: Path) -> None:
                 shutil.copy2(run_dst, run_dst.with_suffix(".py.bak"))
                 shutil.copy2(run_src, run_dst)
                 print("  打包技能的 runner.py 已刷新(旧版不认 raw 通道/双代源名,备份 .py.bak)")
+        cd_dst = skill_root / "scripts" / "check_data.py"
+        if not cd_dst.exists():                          # 旧打包技能没有数据体检:一并补挂
+            cd_src = _engine_src("check_data.py", ("def main",),
+                                 Path(__file__).resolve().parents[2] / "cs-scot-execute" / "scripts")
+            if cd_src is not None:
+                shutil.copy2(cd_src, cd_dst)
+                print("  打包技能补挂 scripts/check_data.py(数据入口体检:诊断前先验目录结构/点名清单表)")
 
 
 def upgrade_cross_scaffold(product: Path) -> None:
