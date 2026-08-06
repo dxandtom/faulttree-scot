@@ -518,16 +518,33 @@ def refresh_engine(product: Path) -> None:
             if cd_src is not None:
                 shutil.copy2(cd_src, cd_dst)
                 print("  打包技能补挂 scripts/check_data.py(数据入口体检:诊断前先验目录结构/点名清单表)")
-        z2c_dst = product / "zip2csv"                    # 旧打包技能 assets/ 里没有 zip2csv:补挂
+        z2c_dst = product / "zip2csv"                    # 旧打包技能 assets/ 里没有/是旧版 zip2csv:补挂/刷新
+        z2c_src = Path(__file__).resolve().parents[2] / "zip2csv"
+        z2c_ok = (z2c_src / "scripts" / "zip2csv.py").exists()
         if not z2c_dst.is_dir():                         # (裸 txt 数据入口指引按它指路,没有它模型只能干瞪眼)
-            z2c_src = Path(__file__).resolve().parents[2] / "zip2csv"
-            if (z2c_src / "scripts" / "zip2csv.py").exists():
+            if z2c_ok:
                 shutil.copytree(z2c_src, z2c_dst,
                                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
                 print("  打包技能补挂 assets/zip2csv(裸 txt→三表转换器)")
             else:
                 print("  [warn] 打包技能缺 assets/zip2csv,且本机没有同门 zip2csv 技能可拷——"
                       "裸 txt 数据现场转不了三表,原有单源绑定会整体数据不足")
+        else:
+            main_py = z2c_dst / "scripts" / "zip2csv.py"
+            cur = main_py.read_text(encoding="utf-8", errors="replace") if main_py.exists() else ""
+            if "list_data_files" not in cur:             # 能力标记:旧版只认 .txt(log.log 整目录跳过)、
+                if z2c_ok:                               # 只吃 zip、GBK 乱码——按代刷新脚本,SKILL.md 一并带
+                    (z2c_dst / "scripts").mkdir(parents=True, exist_ok=True)
+                    if main_py.exists():
+                        shutil.copy2(main_py, main_py.with_suffix(".py.bak"))
+                    for p in sorted((z2c_src / "scripts").glob("*.py")):
+                        shutil.copy2(p, z2c_dst / "scripts" / p.name)
+                    if (z2c_src / "SKILL.md").exists():
+                        shutil.copy2(z2c_src / "SKILL.md", z2c_dst / "SKILL.md")
+                    print("  打包技能 assets/zip2csv 已刷新(旧版只认 .txt/只吃 zip;主脚本备份 .py.bak)")
+                else:
+                    print("  [warn] 打包技能的 assets/zip2csv 是旧版(只认 .txt/只吃 zip),"
+                          "且本机没有同门 zip2csv 技能可刷新——log.log 类数据会整目录跳过")
         sk = skill_root / "SKILL.md"
         sk_text = sk.read_text(encoding="utf-8", errors="replace")
         if "check_data" not in sk_text:                  # SKILL.md 正文过旧(没有数据体检/裸txt指引这一代):

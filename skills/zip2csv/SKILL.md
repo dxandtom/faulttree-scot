@@ -11,7 +11,7 @@ disable-model-invocation: false
 接收一个 ZIP 压缩包**或原始数据目录**（目录直接给，无需先压 zip），自动完成以下流水线：
 
 1. **解压 ZIP** 到本地目录（目录输入则跳过解压、就地扫描）
-2. **LOG/** — 遍历所有 `.txt` 文件，调用 `logbuffer2csv.convert_file()` 转换为 CSV
+2. **LOG/** — 遍历所有 `.txt`/`.log` 文件（现场常见 log.log,两种都认,大小写不敏),调用 `logbuffer2csv.convert_file()` 转换为 CSV
    (命名迁移:**DIAG 更名 CMD**——两名并存兼容,新包 CMD、老包 DIAG 都认,同款回显解析)
 3. **CONFIG/** — 遍历所有 `.txt` 文件，调用 `config2csv.parse_config_to_csv()` 转换为 CSV
 4. **DIAG/** — 遍历所有 `.txt` 文件，调用 `parse_diag_to_csv.parse_diag_to_csv()` 转换为 CSV

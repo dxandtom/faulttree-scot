@@ -49,7 +49,7 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
    **先辨数据形态,两种走法**:
    - **已解析的表**(csv/xlsx,表头带 NEName/CmdName/Summary/level1 这类列)→ 按第 2 条匹配指标直接喂;
    - **裸 txt 原始采集**(特征:网元目录下有 `CONFIG/`、`CMD/`(或 `DIAG/`)、`LOG/` 子目录,里面是 .txt
-     命令回显)→ **先转再喂**,按下面三步做,一步都不能省:
+     命令回显,**.txt/.log 扩展名都算**——log.log 也是原始文本)→ **先转再喂**,按下面三步做,一步都不能省:
      1. 用 assets 里内置的转换器转成三表:`python "<本目录>/assets/…/zip2csv.py" <zip或目录> -o <输出目录>`
         (在 assets/ 下找 zip2csv.py,常见位置 `assets/zip2csv/scripts/zip2csv.py`;zip、目录都直接吃,
         **目录不用先压 zip**;旧版只吃 zip 的才需要 `shutil.make_archive` 先打包)。转出的 csv 在
