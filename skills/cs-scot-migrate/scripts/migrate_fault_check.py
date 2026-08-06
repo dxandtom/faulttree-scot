@@ -330,7 +330,8 @@ def rank_nodes(index, pkg_name: str, pkg_cond: str, top=5):
 
 
 # ---------- 调优表手术 ----------
-def edit_tuning_excel(product: Path, nid: str, condition: str, binding: dict):
+def _open_tuning(product: Path):
+    """打开产物调优表(锁文件/唯一性/node_id 列检查),返回 (路径, wb, ws, header, id_col)。"""
     from openpyxl import load_workbook
     locks = sorted((product / "tree").glob("~$*.xlsx"))
     if locks:                                            # Excel 锁文件:表多半正被 Excel 打开,写盘会坏/被拒
@@ -345,16 +346,25 @@ def edit_tuning_excel(product: Path, nid: str, condition: str, binding: dict):
     header = [str(c.value or "").strip() for c in ws[1]]
     if "node_id" not in header:
         raise SystemExit("调优表第一行没有 node_id 列——不是本工具链导出的调优表?")
-    id_col = header.index("node_id") + 1
-    raw_col = (header.index(RAW_TAG) + 1) if RAW_TAG in header else None
-    if raw_col is None:                                  # 没有原文列就在最右补一列(导入按表头名识别,位置无关)
-        raw_col = len(header) + 1
-        ws.cell(row=1, column=raw_col, value=RAW_TAG)
+    return xls[0], wb, ws, header, header.index("node_id") + 1
+
+
+def _ensure_col(ws, header, title) -> int:
+    """表头找列;没有就在最右补一列(导入按表头名识别,位置无关)。返回 1 起列号。"""
+    if title in header:
+        return header.index(title) + 1
+    header.append(title)
+    ws.cell(row=1, column=len(header), value=title)
+    return len(header)
+
+
+def edit_tuning_excel(product: Path, nid: str, condition: str, binding: dict):
+    path, wb, ws, header, id_col = _open_tuning(product)
+    raw_col = _ensure_col(ws, header, RAW_TAG)
+    cross_col = _ensure_col(ws, header, "绑定:cross")
     tag_cols = [i + 1 for i, h in enumerate(header) if h.startswith("判据:") and h != RAW_TAG]
     bind_cols = {h[len("绑定:"):]: i + 1 for i, h in enumerate(header) if h.startswith("绑定:")}
-    if "cross" not in bind_cols:                         # 老表没有 cross 列:同样在最右补(导入放行)
-        bind_cols["cross"] = raw_col + 1 if raw_col > len(header) else len(header) + 1
-        ws.cell(row=1, column=bind_cols["cross"], value="绑定:cross")
+    bind_cols["cross"] = cross_col
     row = next((r for r in range(2, ws.max_row + 1)
                 if str(ws.cell(row=r, column=id_col).value or "").strip() == nid), None)
     if row is None:
@@ -366,8 +376,48 @@ def edit_tuning_excel(product: Path, nid: str, condition: str, binding: dict):
     for src, c in bind_cols.items():
         ws.cell(row=row, column=c).value = (json.dumps(binding, ensure_ascii=False)
                                             if src == "cross" else None)
-    wb.save(xls[0])
-    return xls[0]
+    wb.save(path)
+    return path
+
+
+def edit_tuning_add(product: Path, parent_nid: str, parent_chain, name: str,
+                    condition: str, binding: dict):
+    """调优表**新增行**(增节点):node_id 留空(import 自动分配 nN,历史 id 不复用),
+    祖先各层名字照抄、自己的名字落在父层+1 的层级列,判据进原文列、绑定只写 cross(S)。
+    插在父节点子树的最后一行之后——保持 DFS 连续,import 按"上级和上文对得上"重建父链才稳。"""
+    path, wb, ws, header, id_col = _open_tuning(product)
+    lvl_re = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
+    lvl_cols = {}
+    for i, h in enumerate(header):
+        m = lvl_re.match(h.replace("：", ":").strip())
+        if m:
+            lvl_cols[int(m.group(1))] = i + 1
+    child_depth = len(parent_chain) + 1                  # 相对深度:根=L1(与 export 同口径)
+    for d in range(1, child_depth + 1):
+        if d not in lvl_cols:                            # 树长深了一层:补层级列(导入按表头识别)
+            lvl_cols[d] = _ensure_col(ws, header, f"L{d}(Chinese)")
+    raw_col = _ensure_col(ws, header, RAW_TAG)
+    cross_col = _ensure_col(ws, header, "绑定:cross")
+    prow = next((r for r in range(2, ws.max_row + 1)
+                 if str(ws.cell(row=r, column=id_col).value or "").strip() == parent_nid), None)
+    if prow is None:
+        raise SystemExit(f"调优表里找不到父节点 {parent_nid} 的行——核对产物")
+    end = prow
+    for r in range(prow + 1, ws.max_row + 1):            # 父节点子树最后一行(比父深的连续行)
+        depth_r = max((l for l, c in lvl_cols.items()
+                       if str(ws.cell(row=r, column=c).value or "").strip()), default=0)
+        if depth_r <= len(parent_chain):
+            break
+        end = r
+    ws.insert_rows(end + 1)
+    new = end + 1
+    for d, nm in enumerate(parent_chain, start=1):
+        ws.cell(row=new, column=lvl_cols[d]).value = nm  # 祖先各层逐格照抄(导入按它挂父链)
+    ws.cell(row=new, column=lvl_cols[child_depth]).value = name
+    ws.cell(row=new, column=raw_col).value = condition
+    ws.cell(row=new, column=cross_col).value = json.dumps(binding, ensure_ascii=False)
+    wb.save(path)
+    return path
 
 
 def run_step(product: Path, script_name: str, desc: str) -> None:
@@ -515,9 +565,10 @@ def _copy_scripts(product: Path, fc: Path, deps) -> None:
         shutil.copy2(p, custom / p.name)
 
 
-def _surgery(product: Path, edits) -> None:
-    """edits=[(nid, condition, binding)…]:预导入收编(如需)→ 一次导出 → 改 N 行 → 一次导入 → 回导。
-    批量也只走一轮 export/import:落地是**原子**的——任一行编译不过,整批不生效,响亮报错。
+def _surgery(product: Path, edits, adds=()) -> None:
+    """edits=[(nid, condition, binding)…] 改既有行;adds=[(父nid, 父链名字, 节点名, condition, binding)…]
+    新增行(增节点,node_id 留空由 import 分配)。预导入收编(如需)→ 一次导出 → 改/增 N 行 →
+    一次导入 → 回导。批量也只走一轮 export/import:落地是**原子**的——任一行编译不过,整批不生效。
     表比 tree_index 新(可能有未导入的人工修改,也可能只是上次迁移的回导)→ 先导入收编,绝不覆盖。"""
     tis = sorted((product / "tree").glob("*.tree_index.json"))
     xls = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
@@ -534,7 +585,11 @@ def _surgery(product: Path, edits) -> None:
     run_step(product, "export_tree_excel.py", "导出调优表")
     for nid, cond, b in edits:
         edit_tuning_excel(product, nid, cond, b)
-    print(f"  [2/3] 已改调优表 {len(edits)} 行:判据→原文列,旧绑定清空,绑定:cross→S(fault_check)")
+    for pnid, pchain, name, cond, b in adds:
+        edit_tuning_add(product, pnid, pchain, name, cond, b)
+    print(f"  [2/3] 已改调优表 {len(edits)} 行"
+          + (f" + 新增 {len(adds)} 行(node_id 由导入自动分配)" if adds else "")
+          + ":判据→原文列,旧绑定清空,绑定:cross→S(fault_check)")
     print("  [3/3] 编译回产物…")
     run_step(product, "import_tree_excel.py", "导入编译")
     run_step(product, "export_tree_excel.py", "回导调优表(同步)")
@@ -544,9 +599,20 @@ def _fingerprint(sub: Path) -> str:
     """子包内容指纹(文件相对路径+字节,顺序稳定):全量交付时判"这包和上次迁的一样不一样"。
     按内容不按 zip 文件哈希——同内容重打的 zip(条目时间戳变了)不该被当成变化;
     共同的外层包裹目录剥掉再算——同一个包"合集里解出"与"单 zip 解出"嵌套深度差一层,
-    不归一会把没变的包误判成变化(白重迁一次)。"""
+    不归一会把没变的包误判成变化(白重迁一次);
+    **只算迁移真正消费的文件**:判断方法*.md(排除规范)+ 全部 .py(脚本与 search 依赖)——
+    执行记录.md 每次跑 tester 都变、测试数据也不进产物,算上它们会把"没改"误判成"改了"。"""
     import hashlib
-    files = [(p.relative_to(sub).parts, p) for p in sorted(sub.rglob("*")) if p.is_file()]
+
+    def _substantive(p: Path) -> bool:
+        if p.suffix.lower() == ".py":
+            return True
+        return p.suffix.lower() == ".md" and p.name.startswith("判断方法") and "规范" not in p.name
+
+    files = [(p.relative_to(sub).parts, p) for p in sorted(sub.rglob("*"))
+             if p.is_file() and _substantive(p)]
+    if not files:                                        # 防御:奇形包(没有实质文件)退回全量哈希
+        files = [(p.relative_to(sub).parts, p) for p in sorted(sub.rglob("*")) if p.is_file()]
     while files and all(len(parts) > 1 for parts, _p in files) \
             and len({parts[0] for parts, _p in files}) == 1:
         files = [(parts[1:], p) for parts, p in files]
@@ -673,6 +739,15 @@ def find_map_table(pkg: Path):
     return hits[0] if hits else None
 
 
+def _name_chain(nodes, nid):
+    """根→nid 的名字链(路径消歧与增节点的祖先层照抄共用)。"""
+    out, cur = [], nid
+    while cur and cur in nodes:
+        out.append(str(nodes[cur].get("name") or "").strip())
+        cur = nodes[cur].get("parent")
+    return list(reversed(out))
+
+
 def resolve_node_by_path(nodes, path_names):
     """按「名字路径」定位节点:目标=路径最深一格;同名节点用**祖先链 ⊂ 路径(有序子序列)**消歧
     (平台母表的高层可能比我们子树多——如 L1 大类在我们的树外——所以不逐层硬对齐,只要求
@@ -680,13 +755,7 @@ def resolve_node_by_path(nodes, path_names):
     target = path_names[-1]
     cands = [nid for nid, nd in nodes.items()
              if str(nd.get("name") or "").strip() == target]
-
-    def chain(nid):
-        out, cur = [], nid
-        while cur and cur in nodes:
-            out.append(str(nodes[cur].get("name") or "").strip())
-            cur = nodes[cur].get("parent")
-        return list(reversed(out))
+    chain = lambda nid: _name_chain(nodes, nid)  # noqa: E731
 
     def is_subseq(sub, full):
         it = iter(full)
@@ -745,7 +814,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     reg = build_zip_registry(pkg, tmp)
     roots = sorted({str(v) for v in reg.values()})
     print(f"对应表:{len(entries)} 行有 zip 对应;合集里可对号的子包 {len(roots)} 个")
-    oks, fails, skips = [], [], []
+    oks, adds, fails, skips = [], [], [], []
     seen_nid, seen_fc = {}, {}
     used_roots = set()
     for names, zname, rowno in entries:
@@ -757,13 +826,23 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                                  f"{'…' if len(avail) > 10 else ''}", None))
             continue
         nid, why, detail = resolve_node_by_path(nodes, names)
-        if nid is None:
+        add_parent = None
+        if nid is None and why.startswith("树上没有名为") and len(names) >= 2:
+            pnid, pwhy, _pd = resolve_node_by_path(nodes, names[:-1])
+            if pnid is not None:                         # 增节点分支:全树无同名 + 父路径能唯一定位
+                add_parent = pnid                        # (加法可回滚、有台账 → 自动做;删除仍只点名)
+            else:
+                fails.append((label, f"新增节点失败:全树无同名,但父路径也定位不了({pwhy})——"
+                                     "父节点若也是本次新增,先跑一遍落父、再跑一遍落子;否则核对路径", None))
+                continue
+        elif nid is None:
             fails.append((label, f"路径定位失败:{why}" + (f"\n       {detail}" if detail else ""),
                           f'--only "{names[-1]}" --node <节点号>(去掉 --map 手工补)'))
             continue
         used_roots.add(str(sub))
+        key = nid if nid else f"+{add_parent}/{names[-1]}"   # 新增行还没有 nid,用 父+名 当对账键
         fp = _fingerprint(sub)
-        if not a.force and ledger.get(nid, {}).get("fingerprint") == fp:
+        if nid and not a.force and ledger.get(nid, {}).get("fingerprint") == fp:
             skips.append((nid, label))                   # 全量交付里没变的包:跳过(此后的人工调优不被冲)
             seen_nid.setdefault(nid, label)
             continue
@@ -776,42 +855,64 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         entry, per_ne, kwargs, all_defs, argc, note = detect_entry(fc)
         if entry is None:
             fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})",
-                          f'--only "{method["name"]}" --node {nid} --entry <函数名>(去掉 --map)'))
+                          f'--only "{method["name"]}" --node {nid or "<节点号>"} --entry <函数名>(去掉 --map)'))
             continue
         try:
             entry, per_ne, kwargs, sm = arbitrate_entry(fc, deps, entry, per_ne, kwargs, explicit=False)
         except SystemExit as e:
-            fails.append((label, str(e), f'--only "{method["name"]}" --node {nid} --entry <函数名>(去掉 --map)'))
+            fails.append((label, str(e), f'--only "{method["name"]}" --node {nid or "<节点号>"} --entry <函数名>(去掉 --map)'))
             continue
         if sm:
             note = (note + ";" if note else "") + sm
-        if nid in seen_nid:
-            fails.append((label, f"与表中「{seen_nid[nid]}」都对到 {nid}——同一节点两行,核对对应表", None))
+        if key in seen_nid:
+            fails.append((label, f"与表中「{seen_nid[key]}」都对到 {key}——同一节点两行,核对对应表", None))
             continue
         prev = seen_fc.get(fc.name)
         if prev is not None and prev[1] != fc.read_bytes():
             fails.append((label, f"脚本文件名「{fc.name}」与「{prev[0]}」撞车且内容不同——让交付方改名", None))
             continue
-        seen_nid[nid], seen_fc[fc.name] = label, (label, fc.read_bytes())
+        seen_nid[key], seen_fc[fc.name] = label, (label, fc.read_bytes())
         if method["name"].strip() != names[-1]:
             note = (note + ";" if note else "") + f"包内节点名「{method['name']}」≠表中「{names[-1]}」,以对应表为准"
-        oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note, fp))
+        if add_parent is not None:
+            adds.append((sub, method, fc, deps, entry, per_ne, kwargs, add_parent, names[-1], note, fp))
+        else:
+            oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note, fp))
 
-    if oks:
+    added_report = []
+    if oks or adds:
         refresh_engine(product)
-        for _sub, _m, fc, deps, *_rest in oks:
+        for _sub, _m, fc, deps, *_rest in oks + adds:
             _copy_scripts(product, fc, deps)
-        _surgery(product, [(nid, m["condition"], _binding(fc.name, entry, per_ne, kwargs, m["name"]))
-                           for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, _fp in oks])
+        _surgery(product,
+                 [(nid, m["condition"], _binding(fc.name, entry, per_ne, kwargs, m["name"]))
+                  for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, _fp in oks],
+                 [(pnid, _name_chain(nodes, pnid), name, m["condition"],
+                   _binding(fc.name, entry, per_ne, kwargs, m["name"]))
+                  for _sub, m, fc, _deps, entry, per_ne, kwargs, pnid, name, _note, _fp in adds])
         upgrade_cross_scaffold(product)
-        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp)
-                          for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, fp in oks])
+        led = [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp)
+               for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, fp in oks]
+        if adds:                                         # 新行的 nN 由 import 刚分配:重读 index 认领进台账
+            new_nodes = load_index(product).get("nodes") or {}
+            for _sub, m, fc, _deps, entry, per_ne, kwargs, pnid, name, note, fp in adds:
+                new_nid = next((k for k, nd in new_nodes.items()
+                                if str(nd.get("name") or "").strip() == name
+                                and nd.get("parent") == pnid), None)
+                if new_nid:
+                    led.append((new_nid, m["name"], fc.name, entry, per_ne, kwargs, fp))
+                added_report.append((new_nid, name, pnid, fc.name, entry, note))
+        _ledger(product, led)
 
-    print(f"\n对应表批量迁移汇总:落地 {len(oks)}/{len(entries)} 行"
+    print(f"\n对应表批量迁移汇总:落地 {len(oks) + len(adds)}/{len(entries)} 行"
+          + (f"(其中新增节点 {len(adds)} 个)" if adds else "")
           + (f",跳过 {len(skips)} 行(内容与上次迁移一致;--force 强制重迁)" if skips else ""))
     for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, note, _fp in oks:
         print(f"  ✓ {nid}「{nodes[nid].get('name')}」 ← {fc.name}:{entry}"
               + ("/单网元" if per_ne else "") + (f"  ⚠ {note}" if note else ""))
+    for new_nid, name, pnid, fc_name, entry, note in added_report:
+        print(f"  + {new_nid or '?'}「{name}」 新增,挂在 {pnid}「{nodes[pnid].get('name')}」下 ← {fc_name}:{entry}"
+              + (f"  ⚠ {note}" if note else ""))
     for nid, label in skips:
         print(f"  = {nid}「{nodes[nid].get('name')}」 未变化,跳过(此前的人工调优不受影响)")
     if fails:
