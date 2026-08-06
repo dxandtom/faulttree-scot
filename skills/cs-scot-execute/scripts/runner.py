@@ -461,6 +461,10 @@ def main() -> None:
     if missing:
         print(f"[warn] 缺少数据源: {', '.join(missing)} —— 相应解析步骤将跳过,"
               "其判据本轮无事实(RCA 按「数据不足」对待);结尾有缺口汇总。")
+    if has_star and "raw" not in provided:                # 迁移的 S 脚本吃原始目录,忘传 raw 是高频事故
+        print("[warn] 未提供 --data raw=<原始数据目录>:迁移的脚本节点(S 类)只能从三表兜底重建,"
+              "数据不齐会整体「数据不足」——有原始采集目录就带上(层级给**网元层的父目录**,"
+              "拿不准先跑 scripts/check_data.py)。")
 
     # 工作记忆初始化(memory_init 里的引用也解析一遍)
     ctx: Dict[str, Any] = {"input": data_map, "memory": {}, "step": {}, "output": {}}

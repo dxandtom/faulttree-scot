@@ -241,23 +241,40 @@ def _fc_layout_from_raw(raw, tmp_root):
 
 
 def _fc_prepare_data(load, tmp_root):
-    """备出脚本要吃的数据根目录。返回 (根路径|None, 说明)。"""
+    """备出脚本要吃的数据根目录。返回 (根路径|None, 说明)。
+    失败时 reason 必须把 **raw 的下落**说清(未提供/路径不存在/错层)——实测:raw 没吃到时静默
+    滑进三表兜底,兜底再失败,报出来的只有兜底的错,操作者根本定位不到"其实是 raw 没传对"。"""
     raw = load("raw_dir")
     if isinstance(raw, str) and raw.strip() and Path(raw).is_dir():
         root = _fc_layout_from_raw(raw.strip(), tmp_root)
         if root is not None:
             return root, "原始数据目录直读"
+        raw_note = (f"raw 给了但不合布局({raw.strip()}):底下找不到 <网元>/CONFIG|CMD|LOG 结构"
+                    "——常见错:给了顶层目录,应给**网元层的父目录**(check_data.py 会告诉你正确的层)")
+    elif isinstance(raw, str) and raw.strip():
+        raw_note = f"raw 给了但路径不存在/不是目录:{raw.strip()}"
+    else:
+        raw_note = "raw 未提供(runner 没带 --data raw=<原始数据目录>)"
     tables = [load("config"), load("log"), load("cmd") or load("diag")]
     if not any(tables):
-        return None, "既无 --data raw=<原始数据目录>,也无 config/log/cmd 任何一张表"
+        return None, f"数据两路都不通:{raw_note};config/log/cmd 三表也一张都没有"
     root = tmp_root / "rebuilt"
     root.mkdir(parents=True, exist_ok=True)
     _fc_rebuild_config(tables[0], root)
     _fc_rebuild_log(tables[1], root)
     _fc_rebuild_cmd(tables[2], root)
     if not any(d.is_dir() for d in root.iterdir()):
-        return None, "三表兜底重建失败:表里没有 NEName/level/CmdName 等预期列,重建不出网元目录"
-    return root, "无原始目录,已从数据表兜底重建"
+        detail = []
+        for nm, t in (("config", tables[0]), ("log", tables[1]), ("cmd/diag", tables[2])):
+            if not t:
+                continue
+            header, rows = t
+            miss = "缺 NEName 列" if "NEName" not in (header or []) else ("0 行数据" if not rows else "列不合预期")
+            detail.append(f"{nm} 表 {len(rows)} 行({miss})")
+        return None, (f"数据两路都不通:{raw_note};三表兜底重建也失败"
+                      f"({';'.join(detail) or '表载入异常'}——缺 NEName 列常见于**裸日志文件被当表喂**,"
+                      "先用 zip2csv 转)")
+    return root, f"三表兜底重建({raw_note})"
 
 
 def _fc_tristate(v):
