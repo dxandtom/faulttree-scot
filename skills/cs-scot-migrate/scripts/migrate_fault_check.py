@@ -449,7 +449,7 @@ ENGINE_CAPS = {
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
                       "_fc_tristate", "matched_items", "_StrPath",
-                      "raw_note"),                      # 末项=数据失败时点破 raw 下落(未传/错层/裸表喂错)
+                      "raw_note", "_fc_no_judgment"),   # 末两项=raw 下落点破 + 单网元风格脚本逐网元重调
     "import_tree_excel.py": ('{"P", "S"}', "xlsx_reader"),   # S/P 放行 + cross 列 + 读表零依赖同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
@@ -1094,7 +1094,11 @@ def main() -> None:
     except Exception:
         pass
     ap = argparse.ArgumentParser(description="tester 交付包 → 场景产物迁移(判据替换+S 绑定换血)")
-    ap.add_argument("--package", required=True, help="交付包目录或 zip")
+    ap.add_argument("--package", help="交付包目录或 zip(--refresh-only 时可省)")
+    ap.add_argument("--refresh-only", action="store_true",
+                    help="不迁移任何包,只对产物/打包技能做引擎体检+全量翻新(custom_lib/内核/导入导出/"
+                         "runner/check_data/zip2csv/SKILL 正文,全部按能力标记只补缺不降级)——"
+                         "手头没有交付包、只想把旧技能刷到当前代时用")
     ap.add_argument("--product", required=True, help="场景产物目录(或打包技能的 assets/ 目录)")
     ap.add_argument("--node", help="目标节点号(如 n17);不给=只做匹配、列候选")
     ap.add_argument("--auto", action="store_true",
@@ -1120,6 +1124,16 @@ def main() -> None:
             print(f"[info] --product 是打包技能目录,已自动定位到产物:{product}")
         else:
             raise SystemExit(f"--product 不像场景产物目录(缺 tree/ 或 scripts/):{product}")
+
+    if a.refresh_only:                                   # 无包翻新:只走引擎体检+补全(含打包技能的
+        refresh_engine(product)                          # runner/check_data/zip2csv/SKILL 正文按代刷新)
+        upgrade_cross_scaffold(product)
+        print("\n翻新完成:引擎/内核/函数库(及打包技能的 runner/check_data/zip2csv/SKILL 正文)"
+              "已按能力标记补齐到当前代——齐全的文件一律没动(不降级),动过的都有 .bak/.md.bak 备份。")
+        return
+
+    if not a.package:
+        raise SystemExit("--package 必填(交付包目录或 zip);只想翻新旧技能不迁包,用 --refresh-only。")
 
     with tempfile.TemporaryDirectory(prefix="migrate_") as td:
         pkg = unpack(Path(a.package).expanduser().resolve(), Path(td))

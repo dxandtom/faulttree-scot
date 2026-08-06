@@ -277,6 +277,16 @@ def _fc_prepare_data(load, tmp_root):
     return root, f"三表兜底重建({raw_note})"
 
 
+def _fc_no_judgment(ne_map) -> bool:
+    """整张网元 map 一个能用的判定都没有(空/全 error/全 undetermined/形状怪)→ True。
+    用于识别"单网元风格脚本吃不了多网元根目录"的空转(实测:脚本没做规范要求的多网元探测,
+    直接在根目录下找 LOG/,找不到就整体 undetermined),识别到就换逐网元口径重调。"""
+    if not isinstance(ne_map, dict) or not ne_map:
+        return True
+    return not any(isinstance(r, dict) and _fc_tristate(r.get("matched")) is not None
+                   for r in ne_map.values())
+
+
 def _fc_tristate(v):
     """matched 值 → True / False / None(判不了)。tester 新契约是**字符串**三态
     ("true"/"false"/"undetermined"),旧契约是 bool——字符串 "false" 按真值判会极性反转
@@ -357,6 +367,7 @@ def fault_check(table, args, load):
         spec = importlib.util.spec_from_file_location(f"fc_{script.stem}", script)
         mod = importlib.util.module_from_spec(spec)
         sink = _io.StringIO()
+        convention_note = ""                             # 调用口径仲裁的注记(逐网元重调时落 explain)
         argv_bak, _sys.argv = _sys.argv, [str(script)]   # argv 隔离:CLI 型脚本库调用时常仍偷读 sys.argv,
         try:                                             # 会吃到 cross_analyzer 的 -o 临时路径当自己的参数
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):     # (实测:路径当正则炸 \U)
@@ -366,13 +377,23 @@ def fault_check(table, args, load):
                     cands = [n for n in dir(mod) if callable(getattr(mod, n)) and not n.startswith("_")]
                     return {"status": "insufficient_data",
                             "reason": f"脚本没有入口函数「{entry_name}」;文件顶层可调用:{cands[:8]}"}
-                if args.get("per_ne"):
-                    ne_map = {}
+                def _per_ne_map():
+                    m = {}
                     for ne_dir in sorted(p for p in root.iterdir() if p.is_dir()):
                         r = fn(_StrPath(ne_dir), **kwargs)
-                        ne_map[ne_dir.name] = r if isinstance(r, dict) else {"error": f"入口返回非 dict:{type(r).__name__}"}
+                        m[ne_dir.name] = r if isinstance(r, dict) else {"error": f"入口返回非 dict:{type(r).__name__}"}
+                    return m
+
+                if args.get("per_ne"):
+                    ne_map = _per_ne_map()
                 else:
                     ne_map = _fc_normalize(fn(_StrPath(root), **kwargs))
+                    if _fc_no_judgment(ne_map):          # 调用口径仲裁:单网元风格脚本(没做多网元探测)
+                        retry = _per_ne_map()            # 吃不了网元层根目录——逐网元重调一次,
+                        if not _fc_no_judgment(retry):   # 不改判断逻辑只换喂法;重调也空转就维持原判(数据不足)
+                            ne_map = retry
+                            convention_note = ("(调用口径:脚本不认多网元根目录,已按逐网元重调"
+                                               "——脚本未做规范要求的多网元探测,请交付方补)")
         finally:
             _sys.argv = argv_bak
 
@@ -435,7 +456,7 @@ def fault_check(table, args, load):
            "evidence": evidence[:8],
            "explain": (f"脚本判定:{len(hit)}/{len(hit) + len(miss)} 个网元命中"
                        f"({'、'.join(hit[:5])})" if sat
-                       else f"脚本判定:{len(hit) + len(miss)} 个网元均未命中") + note}
+                       else f"脚本判定:{len(hit) + len(miss)} 个网元均未命中") + note + convention_note}
     if hits_raw:
         out["hits"] = hits_raw                           # 命中原文 → draft_rca 的 actual 里"命中原文:「…」"
     return out
