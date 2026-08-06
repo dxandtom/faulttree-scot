@@ -4,9 +4,9 @@ ZIP 解压 + 自动转换流水线
 功能：
 1. 解压 zip 包到本地目录
 2. 递归扫描 LOG/CONFIG/DIAG 目录（支持嵌套如 Switch01/DIAG/）
-3. 遍历 LOG/ 目录下所有 .txt 文件，调用 logbuffer2csv.convert_file 转换为 CSV
-4. 遍历 CONFIG/ 目录下所有 .txt 文件，调用 config2csv.parse_config_to_csv 转换为 CSV
-5. 遍历 DIAG/ 目录下所有 .txt 文件，调用 parse_diag_to_csv.parse_diag_to_csv 转换为 CSV
+3. 遍历 LOG/ 目录下所有 .txt/.log 文件，调用 logbuffer2csv.convert_file 转换为 CSV
+4. 遍历 CONFIG/ 目录下所有 .txt/.log 文件，调用 config2csv.parse_config_to_csv 转换为 CSV
+5. 遍历 DIAG/ 目录下所有 .txt/.log 文件，调用 parse_diag_to_csv.parse_diag_to_csv 转换为 CSV
 6. 基于 DIAG 输出的 CSV，在 CMD/ 目录下生成新的 CSV：
    - NEName  = 原 NEName 列值
    - CmdName = 原 CmdName 列值
@@ -61,6 +61,14 @@ def find_data_dirs(extract_dir):
 DEFAULT_NE = 'NE'   # 平铺形态(数据类型目录直接在根下,没有网元层)的兜底网元名;目录输入时用目录名
 
 
+def list_data_files(dir_path):
+    """数据目录里的原始文本文件:**.txt/.log 都认**(现场采集常见 log.log/xxx.log,只认 .txt 会整目录
+    跳过、对应指标全体"数据不足"),大小写不敏(Linux 的 glob 区分大小写,.TXT 会漏)。"""
+    out = [os.path.join(dir_path, f) for f in os.listdir(dir_path)
+           if os.path.splitext(f)[1].lower() in ('.txt', '.log')]
+    return sorted(out)
+
+
 def get_ne_name(data_dir, extract_dir):
     """
     从数据目录路径中提取 NE 名称。
@@ -97,7 +105,7 @@ def process_log_dirs(log_dirs, csv_dir, extract_dir):
         ne_output_dir = os.path.join(csv_dir, ne_name, 'LOG')
         os.makedirs(ne_output_dir, exist_ok=True)
 
-        txt_files = sorted(glob.glob(os.path.join(log_dir, '*.txt')))
+        txt_files = list_data_files(log_dir)
         for txt_file in txt_files:
             basename = os.path.splitext(os.path.basename(txt_file))[0]
             csv_file = os.path.join(ne_output_dir, basename + '.csv')
@@ -122,7 +130,7 @@ def process_config_dirs(config_dirs, csv_dir, extract_dir):
         ne_output_dir = os.path.join(csv_dir, ne_name, 'CONFIG')
         os.makedirs(ne_output_dir, exist_ok=True)
 
-        txt_files = sorted(glob.glob(os.path.join(config_dir, '*.txt')))
+        txt_files = list_data_files(config_dir)
         for txt_file in txt_files:
             basename = os.path.splitext(os.path.basename(txt_file))[0]
             csv_file = os.path.join(ne_output_dir, basename + '.csv')
@@ -147,7 +155,7 @@ def process_diag_dirs(diag_dirs, csv_dir, extract_dir):
         ne_output_dir = os.path.join(csv_dir, ne_name, 'DIAG')
         os.makedirs(ne_output_dir, exist_ok=True)
 
-        txt_files = sorted(glob.glob(os.path.join(diag_dir, '*.txt')))
+        txt_files = list_data_files(diag_dir)
         for txt_file in txt_files:
             basename = os.path.splitext(os.path.basename(txt_file))[0]
             csv_file = os.path.join(ne_output_dir, basename + '.csv')
@@ -179,7 +187,7 @@ def process_cmd_dirs(cmd_dirs, csv_dir, extract_dir):
         ne_output_dir = os.path.join(csv_dir, ne_name, 'CMD')
         os.makedirs(ne_output_dir, exist_ok=True)
 
-        txt_files = sorted(glob.glob(os.path.join(cmd_dir, '*.txt')))
+        txt_files = list_data_files(cmd_dir)
         for txt_file in txt_files:
             basename = os.path.splitext(os.path.basename(txt_file))[0]
             csv_file = os.path.join(ne_output_dir, basename + '.csv')
