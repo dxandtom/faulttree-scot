@@ -540,12 +540,35 @@ def _surgery(product: Path, edits) -> None:
     run_step(product, "export_tree_excel.py", "回导调优表(同步)")
 
 
+def _fingerprint(sub: Path) -> str:
+    """子包内容指纹(文件相对路径+字节,顺序稳定):全量交付时判"这包和上次迁的一样不一样"。
+    按内容不按 zip 文件哈希——同内容重打的 zip(条目时间戳变了)不该被当成变化;
+    共同的外层包裹目录剥掉再算——同一个包"合集里解出"与"单 zip 解出"嵌套深度差一层,
+    不归一会把没变的包误判成变化(白重迁一次)。"""
+    import hashlib
+    files = [(p.relative_to(sub).parts, p) for p in sorted(sub.rglob("*")) if p.is_file()]
+    while files and all(len(parts) > 1 for parts, _p in files) \
+            and len({parts[0] for parts, _p in files}) == 1:
+        files = [(parts[1:], p) for parts, p in files]
+    h = hashlib.sha256()
+    for parts, p in files:
+        h.update("/".join(parts).encode("utf-8"))
+        h.update(b"\0")
+        h.update(p.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def _ledger_read(product: Path) -> dict:
+    mig_p = product / "tree" / "migrations.json"
+    return json.loads(mig_p.read_text(encoding="utf-8")) if mig_p.exists() else {}
+
+
 def _ledger(product: Path, entries) -> None:
     mig_p = product / "tree" / "migrations.json"
-    mig = json.loads(mig_p.read_text(encoding="utf-8")) if mig_p.exists() else {}
-    for nid, pkg_node, fc_name, entry, per_ne, kwargs in entries:
+    mig = _ledger_read(product)
+    for nid, pkg_node, fc_name, entry, per_ne, kwargs, fp in entries:
         mig[nid] = {"package_node": pkg_node, "script": f"custom/{fc_name}", "entry": entry,
-                    "per_ne": per_ne, "entry_kwargs": kwargs or {},
+                    "per_ne": per_ne, "entry_kwargs": kwargs or {}, "fingerprint": fp,
                     "migrated_at": datetime.datetime.now().isoformat(timespec="seconds")}
     mig_p.write_text(json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -614,18 +637,20 @@ def load_map_excel(path: Path):
     if lvls is None:
         raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名/带 (Chinese) 等后缀都认)"
                          f"+「zip」列,且不该有 node_id 列;实际表头:{header}")
-    out = []
+    out, zipless = [], []
     for i, r in enumerate(rows, start=2):
         z = str(r.get(zip_col) or "").strip()
-        if not z:
-            continue
         names = [v for v in (str(r.get(c) or "").strip() for _l, c in lvls) if v]
+        if not z:
+            if names:
+                zipless.append(names)                    # 结构行(节点在、没配包):全量对账时用来区分
+            continue                                     # "节点还在只是没包" vs "节点已从树里删除"
         if not names:
             raise SystemExit(f"对应表第 {i} 行填了 zip「{z}」但层级列全空——没有节点路径,对应不了")
         out.append((names, z, i))
     if not out:
         raise SystemExit("对应表里没有任何一行填了 zip 列——没有要迁移的对应关系")
-    return out
+    return out, zipless
 
 
 def find_map_table(pkg: Path):
@@ -710,14 +735,17 @@ def build_zip_registry(pkg: Path, tmp: Path):
 
 def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     """对应表驱动的全自动批量:每行 zip↔路径,路径定位节点(同名靠全路径消歧),zip 对号子包,
-    落地机器与 --auto 批量同一套(一轮手术原子落地);任一行对应不上→进失败清单,退出码 3。"""
-    entries = load_map_excel(map_path)
+    落地机器与 --auto 批量同一套(一轮手术原子落地);任一行对应不上→进失败清单,退出码 3。
+    **全量交付语义**:内容指纹与台账一致的包自动跳过(幂等;人工调优不被冲;--force 强制全重迁);
+    台账里有、表里已消失的迁移节点点名待人工确认(不自动删树)。"""
+    entries, zipless = load_map_excel(map_path)
     index = load_index(product)
     nodes = index.get("nodes") or {}
+    ledger = _ledger_read(product)
     reg = build_zip_registry(pkg, tmp)
     roots = sorted({str(v) for v in reg.values()})
     print(f"对应表:{len(entries)} 行有 zip 对应;合集里可对号的子包 {len(roots)} 个")
-    oks, fails = [], []
+    oks, fails, skips = [], [], []
     seen_nid, seen_fc = {}, {}
     used_roots = set()
     for names, zname, rowno in entries:
@@ -734,6 +762,11 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                           f'--only "{names[-1]}" --node <节点号>(去掉 --map 手工补)'))
             continue
         used_roots.add(str(sub))
+        fp = _fingerprint(sub)
+        if not a.force and ledger.get(nid, {}).get("fingerprint") == fp:
+            skips.append((nid, label))                   # 全量交付里没变的包:跳过(此后的人工调优不被冲)
+            seen_nid.setdefault(nid, label)
+            continue
         try:
             method = parse_method_md(sub)
             fc, deps = find_scripts(sub, None)
@@ -762,22 +795,25 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         seen_nid[nid], seen_fc[fc.name] = label, (label, fc.read_bytes())
         if method["name"].strip() != names[-1]:
             note = (note + ";" if note else "") + f"包内节点名「{method['name']}」≠表中「{names[-1]}」,以对应表为准"
-        oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note))
+        oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note, fp))
 
     if oks:
         refresh_engine(product)
         for _sub, _m, fc, deps, *_rest in oks:
             _copy_scripts(product, fc, deps)
         _surgery(product, [(nid, m["condition"], _binding(fc.name, entry, per_ne, kwargs, m["name"]))
-                           for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note in oks])
+                           for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, _fp in oks])
         upgrade_cross_scaffold(product)
-        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs)
-                          for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note in oks])
+        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp)
+                          for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, fp in oks])
 
-    print(f"\n对应表批量迁移汇总:落地 {len(oks)}/{len(entries)} 行")
-    for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, note in oks:
+    print(f"\n对应表批量迁移汇总:落地 {len(oks)}/{len(entries)} 行"
+          + (f",跳过 {len(skips)} 行(内容与上次迁移一致;--force 强制重迁)" if skips else ""))
+    for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, note, _fp in oks:
         print(f"  ✓ {nid}「{nodes[nid].get('name')}」 ← {fc.name}:{entry}"
               + ("/单网元" if per_ne else "") + (f"  ⚠ {note}" if note else ""))
+    for nid, label in skips:
+        print(f"  = {nid}「{nodes[nid].get('name')}」 未变化,跳过(此前的人工调优不受影响)")
     if fails:
         print(f"\n  未落地 {len(fails)} 行(对应不上决不赌):")
         for label, why, cmd in fails:
@@ -788,6 +824,28 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     if unused:
         print(f"\n  [info] 合集里有 {len(unused)} 个子包没被对应表引用(未迁移):{unused[:8]}"
               f"{'…' if len(unused) > 8 else ''}")
+
+    # 全量对账:台账里迁移过、这次对应表里却没有配 zip 的节点——上游删了节点?撤了优化包?
+    # 只点名不动手(删节点是结构手术,必须人确认;评估反思/删除指令能力接上后由那边闭环)。
+    zipless_nids = set()
+    for names in zipless:
+        znid, _w, _d = resolve_node_by_path(nodes, names)
+        if znid:
+            zipless_nids.add(znid)
+    covered = set(seen_nid)
+    gone, retracted = [], []
+    for nid in sorted(ledger, key=lambda x: int(x[1:]) if x[1:].isdigit() else 10 ** 9):
+        if nid in covered or nid not in nodes:
+            continue
+        (retracted if nid in zipless_nids else gone).append(nid)
+    if retracted:
+        print(f"\n  ⚠ 台账里迁移过、表里节点还在但**没配 zip** 的 {len(retracted)} 个(优化包撤了?):"
+              + "、".join(f"{n}「{nodes[n].get('name')}」" for n in retracted[:6])
+              + " ——保留现状,向交付方确认")
+    if gone:
+        print(f"\n  ⚠ 台账里迁移过、**对应表里已无该节点** 的 {len(gone)} 个(上游可能删了节点):"
+              + "、".join(f"{n}「{nodes[n].get('name')}」" for n in gone[:6])
+              + " ——树里仍保留,不自动删;确认后走调优表删行(删行→import 即生效)")
     if oks:
         print("\n  迁移就地生效(产物=打包技能 assets/ 时无需重新打包);台账 → tree/migrations.json。")
     sys.exit(3 if fails else 0)
@@ -801,8 +859,9 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
     subs = sorted(groups, key=lambda p: p.name)
     index = load_index(product)
     nodes = index.get("nodes") or {}
+    ledger = _ledger_read(product)
     print(f"合集包:{len(subs)} 个子包,逐个对号(精确同名唯一才自动落地,其余列候选)…")
-    oks, fails = [], []                                  # ok=(sub,method,fc,deps,entry,per_ne,kwargs,nid,note)
+    oks, fails, skips = [], [], []                       # ok=(sub,method,fc,deps,entry,per_ne,kwargs,nid,note,fp)
     seen_nid, seen_fc = {}, {}
     for sub in subs:
         label = sub.name
@@ -828,6 +887,11 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
             fails.append((label, why, f'--only "{label}" --node <节点号>'))
             continue
         nid = exact[0]
+        fp = _fingerprint(sub)
+        if not a.force and ledger.get(nid, {}).get("fingerprint") == fp:
+            skips.append((nid, label))                   # 全量交付里没变的包:跳过(此后的人工调优不被冲)
+            seen_nid.setdefault(nid, label)
+            continue
         try:
             entry, per_ne, kwargs, sm = arbitrate_entry(fc, deps, entry, per_ne, kwargs, explicit=False)
         except SystemExit as e:
@@ -845,25 +909,28 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
                                  "——让交付方改名后把该子包单独再迁", None))
             continue
         seen_nid[nid], seen_fc[fc.name] = label, (label, fc.read_bytes())
-        oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note))
+        oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note, fp))
 
     if oks:
         refresh_engine(product)
         for _sub, _m, fc, deps, *_rest in oks:
             _copy_scripts(product, fc, deps)
         _surgery(product, [(nid, m["condition"], _binding(fc.name, entry, per_ne, kwargs, m["name"]))
-                           for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note in oks])
+                           for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, _fp in oks])
         upgrade_cross_scaffold(product)
-        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs)
-                          for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note in oks])
+        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp)
+                          for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, fp in oks])
 
-    print(f"\n批量迁移汇总:落地 {len(oks)}/{len(subs)} 个")
-    for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, note in oks:
+    print(f"\n批量迁移汇总:落地 {len(oks)}/{len(subs)} 个"
+          + (f",跳过 {len(skips)} 个(内容与上次迁移一致;--force 强制重迁)" if skips else ""))
+    for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, note, _fp in oks:
         print(f"  ✓ {nid}「{nodes[nid].get('name')}」 ← 「{m['name']}」({fc.name}:{entry}"
               + ("/单网元" if per_ne else "") + ")" + (f"  ⚠ {note}" if note else ""))
         if kwargs:
             print(f"      ⚠ 入口有额外必填参数 {sorted(kwargs)},已按空 dict 传入;"
                   f"不对就 --only \"{m['name']}\" --node {nid} --entry-kwargs 重迁指定")
+    for nid, label in skips:
+        print(f"  = {nid}「{nodes[nid].get('name')}」 未变化,跳过(此前的人工调优不受影响)")
     if fails:
         print(f"\n  未落地 {len(fails)} 个(对不上号决不赌,逐个补对号):")
         for label, why, cmd in fails:
@@ -893,8 +960,11 @@ def main() -> None:
                          "多节点合集包 + --auto = 批量循环:能精确对号的全部落地,其余列候选")
     ap.add_argument("--only", help="多节点合集包里只处理指定「包节点名」的那个子包"
                                    "(批量没对上号的,逐个用它配合 --node/--entry 补对号)")
-    ap.add_argument("--map", help="对应表 xlsx(层级列 L1..Ln + zip 列,无 node_id):"
+    ap.add_argument("--map", help="对应表 xlsx/csv(层级列 L1..Ln + zip 列,无 node_id):"
                                   "zip 名↔树路径全自动批量对号,同名节点靠全路径消歧")
+    ap.add_argument("--force", action="store_true",
+                    help="内容指纹与台账一致的包默认跳过(全量交付幂等,人工调优不被冲)——"
+                         "加本参数强制全部重迁")
     ap.add_argument("--script", help="包里有多个 fault_check_*.py 时指定文件名")
     ap.add_argument("--entry", help="入口函数名(默认自动探测)")
     ap.add_argument("--per-ne", action="store_true", help="入口吃单网元目录(自动探测不准时手工指定)")
@@ -1008,6 +1078,12 @@ def main() -> None:
         entry, per_ne, kwargs, _sn = arbitrate_entry(fc, deps, entry, per_ne, kwargs,
                                                      explicit=bool(a.entry))
 
+        fp = _fingerprint(pkg)
+        if not a.force and _ledger_read(product).get(nid, {}).get("fingerprint") == fp:
+            print(f"\n跳过:{nid}「{nodes[nid].get('name')}」的交付包内容与上次迁移完全一致"
+                  "(全量交付幂等;此后的人工调优不受影响)。确要重迁加 --force。")
+            return
+
         # 0. 引擎体检+补全(旧产物的内核/函数库/导入校验不认 S 类,先刷新再动手术)
         refresh_engine(product)
 
@@ -1021,7 +1097,7 @@ def main() -> None:
 
         # 3. 骨架体检 + 台账
         upgrade_cross_scaffold(product)
-        _ledger(product, [(nid, method["name"], fc.name, entry, per_ne, kwargs)])
+        _ledger(product, [(nid, method["name"], fc.name, entry, per_ne, kwargs, fp)])
 
         print(f"\n迁移完成:{nid}「{nodes[nid].get('name')}」")
         print(f"  判据 ← 判断方法.md 全文(含故障描述/判断条件/数据来源表等);绑定 ← S(fault_check → custom/{fc.name}:{entry})")
