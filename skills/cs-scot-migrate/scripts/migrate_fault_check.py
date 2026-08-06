@@ -57,23 +57,36 @@ def _unzip(zp: Path, dst: Path) -> None:
         zf.extractall(dst)
 
 
-def unpack(package: Path, tmp: Path) -> Path:
-    """zip → 解压到临时目录(**递归解嵌套 zip**:合集包里每节点一个 zip 的形态直接消化);
-    目录 → 原样返回。"""
-    if package.is_dir():
-        return package
-    if package.suffix.lower() != ".zip":
-        raise SystemExit(f"交付包应是目录或 .zip:{package}")
-    dst = tmp / "package"
-    _unzip(package, dst)
-    for _ in range(3):                                   # 嵌套逐层解,3 层封顶(防 zip 炸弹式无限套娃)
+def _explode(dst: Path) -> None:
+    """就地递归解嵌套 zip,3 层封顶(防 zip 炸弹式无限套娃);解到同名目录,解完删 zip
+    (防重复解/误当交付物)。"""
+    for _ in range(3):
         inner = sorted(dst.rglob("*.zip"))
         if not inner:
             break
         for z in inner:
-            sub = z.with_suffix("")                      # 解到同名目录,解完删 zip(防重复解/误当交付物)
-            _unzip(z, sub)
+            _unzip(z, z.with_suffix(""))
             z.unlink()
+
+
+def unpack(package: Path, tmp: Path) -> Path:
+    """交付包统一消化成"全是目录"的形态:
+    - zip → 解压到临时目录 + 递归解嵌套 zip(合集包里每节点一个 zip 直接消化);
+    - 目录且里面**没有** zip → 原样返回(零拷贝);
+    - 目录且里面躺着 zip("一堆 zip 的合集目录",可混对应表/散子包)→ **拷到临时区**再解
+      (绝不动用户目录),对应表等非 zip 文件原样带上。"""
+    if package.is_dir():
+        if not any(package.rglob("*.zip")):
+            return package
+        dst = tmp / "package"
+        shutil.copytree(package, dst)
+        _explode(dst)
+        return dst
+    if package.suffix.lower() != ".zip":
+        raise SystemExit(f"交付包应是目录或 .zip:{package}")
+    dst = tmp / "package"
+    _unzip(package, dst)
+    _explode(dst)
     inner = [d for d in dst.iterdir() if d.is_dir()]
     return inner[0] if len(inner) == 1 and not any(dst.glob("*.md")) else dst
 
@@ -538,29 +551,69 @@ def _ledger(product: Path, entries) -> None:
 
 
 # ---------- 对应表模式(--map:zip 名 ↔ 树路径) ----------
-def load_map_excel(path: Path):
-    """同事的对应表:层级列(裸 L3 / L3(Chinese) 都认,调优表同款但**没有 node_id**)+ zip 列。
-    一行一节点、上级各层名字逐行照抄(调优表口径);zip 列空=纯结构行,跳过。
-    返回 [(路径名字列表, zip名, Excel行号)]。"""
-    for cand in (Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts",
-                 Path(__file__).resolve().parents[1] / "engine"):
-        if (cand / "xlsx_reader.py").exists() and str(cand) not in sys.path:
-            sys.path.insert(0, str(cand))                # 零依赖读取器:同门技能优先,内置 engine/ 兜底
-    import xlsx_reader
-    header, rows = xlsx_reader.read_xlsx(path)
-    lvl_re = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
-    lvls, zip_col = [], None
+# 层级列表头:格式没跟交付方钉死,能认的都认——裸 L1 / L1(Chinese) / L1(中文) / 全角括号/
+# 大小写/内部空格;唯独「L3 Code」这类编码列(无括号带后缀)不吃。
+_MAP_LVL_RE = re.compile(r"^L(\d+)(?:\([^)]*\))?$", re.IGNORECASE)
+
+
+def _parse_map_header(header):
+    """表头 → (层级列升序 [(层,原列名)…], zip 列名);不像对应表(缺层级列/缺 zip 列/带 node_id
+    ——那是我们的调优表)→ (None, None)。zip 列:先认整格就叫 zip 的,没有再认唯一含 zip 的列名。"""
+    lvls, zip_col, zipish = [], None, []
     for h in header:
-        hn = str(h).strip()
-        m = lvl_re.match(hn)
+        hn = str(h).strip().replace("（", "(").replace("）", ")").replace(" ", "")
+        if hn.lower() == "node_id":
+            return None, None                            # 有 node_id 的是调优表,不是对应表
+        m = _MAP_LVL_RE.match(hn)
         if m:
             lvls.append((int(m.group(1)), h))
         elif hn.lower() == "zip":
             zip_col = h
+        elif "zip" in hn.lower():
+            zipish.append(h)
+    if zip_col is None and len(zipish) == 1:
+        zip_col = zipish[0]
     if not lvls or zip_col is None:
-        raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名或带 (Chinese))+「zip」列;"
-                         f"实际表头:{header}")
-    lvls.sort()
+        return None, None
+    return sorted(lvls), zip_col
+
+
+def _read_table(path: Path):
+    """读对应表 → (header, rows[dict])。xlsx 走零依赖 xlsx_reader(同门/engine 两级取径);
+    csv 标准库+编码自测(同事给 csv 也认)。"""
+    if path.suffix.lower() == ".csv":
+        import csv as _csv
+        import io as _io
+        raw = path.read_bytes()
+        text = None
+        for enc in ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            text = raw.decode("utf-8", "ignore")
+        reader = _csv.DictReader(_io.StringIO(text))
+        header = list(reader.fieldnames or [])
+        return header, [{(k or ""): ("" if v is None else str(v)) for k, v in r.items()} for r in reader]
+    for cand in (Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts",
+                 Path(__file__).resolve().parents[1] / "engine"):
+        if (cand / "xlsx_reader.py").exists() and str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+    import xlsx_reader
+    return xlsx_reader.read_xlsx(path)
+
+
+def load_map_excel(path: Path):
+    """同事的对应表(xlsx/csv):层级列 + zip 列(表头兼容见 _MAP_LVL_RE;**没有 node_id**)。
+    一行一节点、上级各层名字逐行照抄(调优表口径);zip 列空=纯结构行,跳过。
+    返回 [(路径名字列表, zip名, 行号)]。"""
+    header, rows = _read_table(path)
+    lvls, zip_col = _parse_map_header(header)
+    if lvls is None:
+        raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名/带 (Chinese) 等后缀都认)"
+                         f"+「zip」列,且不该有 node_id 列;实际表头:{header}")
     out = []
     for i, r in enumerate(rows, start=2):
         z = str(r.get(zip_col) or "").strip()
@@ -573,6 +626,26 @@ def load_map_excel(path: Path):
     if not out:
         raise SystemExit("对应表里没有任何一行填了 zip 列——没有要迁移的对应关系")
     return out
+
+
+def find_map_table(pkg: Path):
+    """交付包里自动找对应表(同事把表和 zip 打在一个包里给,不用单独 --map 指):
+    扫 xlsx/xlsm/csv,表头像对应表(层级列+zip 列、无 node_id)的才算。
+    恰一张 → 返回;多张 → 硬停(不猜哪张算数);没有 → None。"""
+    hits = []
+    for p in sorted(pkg.rglob("*")):
+        if p.suffix.lower() not in (".xlsx", ".xlsm", ".csv") or p.name.startswith("~$"):
+            continue
+        try:
+            header, _rows = _read_table(p)
+        except Exception:
+            continue                                     # 读不动的(交付包里的测试数据表等)不算
+        if _parse_map_header(header)[0] is not None:
+            hits.append(p)
+    if len(hits) > 1:
+        raise SystemExit(f"交付包里有 {len(hits)} 张都像对应表(层级列+zip 列):"
+                         f"{[p.name for p in hits]}——留一张,或用 --map 明确指定哪张算数。")
+    return hits[0] if hits else None
 
 
 def resolve_node_by_path(nodes, path_names):
@@ -635,10 +708,10 @@ def build_zip_registry(pkg: Path, tmp: Path):
     return reg
 
 
-def migrate_map(a, pkg: Path, product: Path, tmp: Path) -> None:
+def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     """对应表驱动的全自动批量:每行 zip↔路径,路径定位节点(同名靠全路径消歧),zip 对号子包,
     落地机器与 --auto 批量同一套(一轮手术原子落地);任一行对应不上→进失败清单,退出码 3。"""
-    entries = load_map_excel(Path(a.map).expanduser().resolve())
+    entries = load_map_excel(map_path)
     index = load_index(product)
     nodes = index.get("nodes") or {}
     reg = build_zip_registry(pkg, tmp)
@@ -837,11 +910,20 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="migrate_") as td:
         pkg = unpack(Path(a.package).expanduser().resolve(), Path(td))
-        if a.map:                                        # 对应表模式:先于子包探测(目录形态的合集
-            if a.node or a.only or a.script or a.entry or a.per_ne or a.entry_kwargs:   # 顶层没有 md)
-                raise SystemExit("--map 是全自动批量对应:不能与 --node/--only/--script/--entry/"
+        # 处理方式按输入动态定:①有对应表(--map 显式,或表就打在交付包里→自动发现)→ 对应表批量;
+        # ②无表+合集包+--auto → 逐子包精确对号批量;③无表+单包 → 单节点流程。全在下面顺序分流。
+        manual = a.node or a.only or a.script or a.entry or a.per_ne or a.entry_kwargs
+        map_path = Path(a.map).expanduser().resolve() if a.map else None
+        if map_path is None and not manual:
+            map_path = find_map_table(pkg)               # 表和 zip 打在一个包里给:自动发现,不用记参数
+            if map_path is not None:
+                print(f"[info] 交付包里发现对应表「{map_path.name}」→ 按对应表批量对号"
+                      "(不想按表:把表移出包外,或用 --only 单挑)")
+        if map_path is not None:                         # 对应表模式:先于子包探测(目录形态的合集顶层没有 md)
+            if manual:
+                raise SystemExit("对应表是全自动批量对应:不能与 --node/--only/--script/--entry/"
                                  "--per-ne/--entry-kwargs 同用;个别包要手工处理,去掉 --map 用 --only 单挑。")
-            migrate_map(a, pkg, product, Path(td))
+            migrate_map(a, pkg, product, Path(td), map_path)
             return                                       # migrate_map 自带退出码,到不了这里
         groups = find_subpackages(pkg)
         if not groups:
