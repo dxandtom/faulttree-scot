@@ -453,7 +453,7 @@ ENGINE_CAPS = {
     "import_tree_excel.py": ('{"P", "S"}', "xlsx_reader"),   # S/P 放行 + cross 列 + 读表零依赖同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
-RUNNER_CAP = "源名兼容"                                  # raw 通道 / diag↔cmd 互认同代
+RUNNER_CAP = "只提供了 raw"                              # raw-only 放行 / raw 通道 / diag↔cmd 互认同代
 
 
 def _engine_src(name: str, caps, sibling: Path):
