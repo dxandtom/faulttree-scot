@@ -119,6 +119,17 @@ import 校验、runner 不认 S 类 → 从引擎源刷新并 .bak 备份——�
   不"顺手修"。
 - 脚本报错时把报错原样给用户,产物不会半截落地(手术在 import 校验全过后才生效)。
 
+## 无包翻新(--refresh-only)
+
+手头没有交付包、只想把旧产物/旧打包技能刷到当前代(custom_lib/内核/导入导出/runner/
+check_data/zip2csv/SKILL 正文)时:
+
+```bash
+python skills/cs-scot-migrate/scripts/migrate_fault_check.py --product <产物或技能目录> --refresh-only
+```
+
+全部按能力标记**只补缺不降级**,动过的文件都有 .bak 备份,技能名/描述等身份信息不动。
+
 ## 迁移后
 
 - 执行诊断时可加 `--data raw=<zip2csv 输出的 extracted 目录>`,让脚本直读原始 txt(最忠实);
