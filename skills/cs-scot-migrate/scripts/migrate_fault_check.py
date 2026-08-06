@@ -518,6 +518,31 @@ def refresh_engine(product: Path) -> None:
             if cd_src is not None:
                 shutil.copy2(cd_src, cd_dst)
                 print("  打包技能补挂 scripts/check_data.py(数据入口体检:诊断前先验目录结构/点名清单表)")
+        z2c_dst = product / "zip2csv"                    # 旧打包技能 assets/ 里没有 zip2csv:补挂
+        if not z2c_dst.is_dir():                         # (裸 txt 数据入口指引按它指路,没有它模型只能干瞪眼)
+            z2c_src = Path(__file__).resolve().parents[2] / "zip2csv"
+            if (z2c_src / "scripts" / "zip2csv.py").exists():
+                shutil.copytree(z2c_src, z2c_dst,
+                                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                print("  打包技能补挂 assets/zip2csv(裸 txt→三表转换器)")
+            else:
+                print("  [warn] 打包技能缺 assets/zip2csv,且本机没有同门 zip2csv 技能可拷——"
+                      "裸 txt 数据现场转不了三表,原有单源绑定会整体数据不足")
+        sk = skill_root / "SKILL.md"
+        sk_text = sk.read_text(encoding="utf-8", errors="replace")
+        if "check_data" not in sk_text:                  # SKILL.md 正文过旧(没有数据体检/裸txt指引这一代):
+            exe_sk = Path(__file__).resolve().parents[2] / "cs-scot-execute" / "SKILL.md"   # 换正文保身份
+            m_old = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", sk_text, re.S)
+            new_txt = exe_sk.read_text(encoding="utf-8", errors="replace") if exe_sk.exists() else ""
+            m_new = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", new_txt, re.S)
+            if m_old and m_new and "check_data" in new_txt:
+                shutil.copy2(sk, sk.with_suffix(".md.bak"))
+                sk.write_text(f"---\n{m_old.group(1)}\n---\n" + new_txt[m_new.end():], encoding="utf-8")
+                print("  打包技能 SKILL.md 正文已刷新到当前执行指引(数据入口/体检等;"
+                      "技能名与描述保留原样,旧文备份 SKILL.md.bak)")
+            else:
+                print("  [warn] 打包技能 SKILL.md 正文是旧版(缺数据入口/体检指引),但无法自动刷新"
+                      "(frontmatter 异常或本机缺同门 cs-scot-execute)——建议重新 package")
 
 
 def upgrade_cross_scaffold(product: Path) -> None:
