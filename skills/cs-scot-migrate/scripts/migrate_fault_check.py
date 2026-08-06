@@ -13,6 +13,10 @@ b. 把该节点旧绑定去掉,换成一条 S 绑定(func=fault_check 通用转�
   批量模式(多节点合集包 + --auto):逐子包循环,精确同名唯一的全部自动落地(一轮手术原子落地),
       对不上号的列候选决不赌;之后逐个 --only "<包节点名>" --node nX 补对号——
       python migrate_fault_check.py --package <合集包.zip> --product <…> --auto
+  对应表模式(--map <excel>):同事提供的对应表(调优表同款层级列 L1..Ln,**无 node_id**,
+      新增 zip 列=交付 zip 名)驱动全自动批量——按「名字路径」定位节点(同名节点靠全路径消歧,
+      不再要人指定),按 zip 列把合集里的包对号入座——
+      python migrate_fault_check.py --package <合集目录|zip> --product <…> --map <对应表.xlsx>
 
 落地动作(全走产物自带的调优表往返,复用其全部校验):
   1. 交付包脚本(fault_check_*.py + search_*.py 共享模块)拷进 产物/scripts/custom/;
@@ -533,6 +537,189 @@ def _ledger(product: Path, entries) -> None:
     mig_p.write_text(json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# ---------- 对应表模式(--map:zip 名 ↔ 树路径) ----------
+def load_map_excel(path: Path):
+    """同事的对应表:层级列(裸 L3 / L3(Chinese) 都认,调优表同款但**没有 node_id**)+ zip 列。
+    一行一节点、上级各层名字逐行照抄(调优表口径);zip 列空=纯结构行,跳过。
+    返回 [(路径名字列表, zip名, Excel行号)]。"""
+    for cand in (Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts",
+                 Path(__file__).resolve().parents[1] / "engine"):
+        if (cand / "xlsx_reader.py").exists() and str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))                # 零依赖读取器:同门技能优先,内置 engine/ 兜底
+    import xlsx_reader
+    header, rows = xlsx_reader.read_xlsx(path)
+    lvl_re = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
+    lvls, zip_col = [], None
+    for h in header:
+        hn = str(h).strip()
+        m = lvl_re.match(hn)
+        if m:
+            lvls.append((int(m.group(1)), h))
+        elif hn.lower() == "zip":
+            zip_col = h
+    if not lvls or zip_col is None:
+        raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名或带 (Chinese))+「zip」列;"
+                         f"实际表头:{header}")
+    lvls.sort()
+    out = []
+    for i, r in enumerate(rows, start=2):
+        z = str(r.get(zip_col) or "").strip()
+        if not z:
+            continue
+        names = [v for v in (str(r.get(c) or "").strip() for _l, c in lvls) if v]
+        if not names:
+            raise SystemExit(f"对应表第 {i} 行填了 zip「{z}」但层级列全空——没有节点路径,对应不了")
+        out.append((names, z, i))
+    if not out:
+        raise SystemExit("对应表里没有任何一行填了 zip 列——没有要迁移的对应关系")
+    return out
+
+
+def resolve_node_by_path(nodes, path_names):
+    """按「名字路径」定位节点:目标=路径最深一格;同名节点用**祖先链 ⊂ 路径(有序子序列)**消歧
+    (平台母表的高层可能比我们子树多——如 L1 大类在我们的树外——所以不逐层硬对齐,只要求
+    我们的根→节点名字链按顺序出现在表中路径里)。返回 (nid|None, 失败说明, 候选清单文本)。"""
+    target = path_names[-1]
+    cands = [nid for nid, nd in nodes.items()
+             if str(nd.get("name") or "").strip() == target]
+
+    def chain(nid):
+        out, cur = [], nid
+        while cur and cur in nodes:
+            out.append(str(nodes[cur].get("name") or "").strip())
+            cur = nodes[cur].get("parent")
+        return list(reversed(out))
+
+    def is_subseq(sub, full):
+        it = iter(full)
+        return all(any(s == f for f in it) for s in sub)
+
+    if not cands:
+        return None, f"树上没有名为「{target}」的节点", ""
+    if len(cands) == 1:
+        return cands[0], "", ""                          # 全树唯一同名:直接对号(路径只是佐证,少填上级不卡)
+    hits = [nid for nid in cands if is_subseq(chain(nid), path_names)]
+    detail = "; ".join(f"{nid}: {'/'.join(chain(nid))}" for nid in (hits or cands)[:4])
+    if len(hits) == 1:
+        return hits[0], "", ""
+    if not hits:
+        return None, ("树上有多个同名节点,而表中路径与它们的祖先链都对不上"
+                      "(把上级各层名字填全以消歧)"), detail
+    return None, "路径仍不唯一(树里存在全路径重名,先清树)", detail
+
+
+def build_zip_registry(pkg: Path, tmp: Path):
+    """合集里可对号的子包登记:①目录形态里躺着的 *.zip(逐个解到临时目录)②嵌套 zip 已被
+    unpack 解出的子目录。键=zip 名(带/不带 .zip 都注册)与子目录名;值=子包根目录。"""
+    reg = {}
+
+    def add(key, root):
+        k = str(key).strip()
+        if k:
+            reg.setdefault(k, root)
+
+    for z in sorted(pkg.rglob("*.zip")):
+        root = tmp / f"mapz_{z.stem}"
+        _unzip(z, root)
+        inner = [d for d in root.iterdir() if d.is_dir()]
+        sub = inner[0] if len(inner) == 1 and not any(root.glob("*.md")) else root
+        add(z.name, sub)
+        add(z.stem, sub)
+    try:
+        for sub in find_subpackages(pkg):
+            if sub != pkg:
+                add(sub.name, sub)
+                add(sub.name + ".zip", sub)
+    except SystemExit:
+        pass                                             # 奇形包(顶层+子目录都有 md):zip 登记照常,由行级失败点名
+    return reg
+
+
+def migrate_map(a, pkg: Path, product: Path, tmp: Path) -> None:
+    """对应表驱动的全自动批量:每行 zip↔路径,路径定位节点(同名靠全路径消歧),zip 对号子包,
+    落地机器与 --auto 批量同一套(一轮手术原子落地);任一行对应不上→进失败清单,退出码 3。"""
+    entries = load_map_excel(Path(a.map).expanduser().resolve())
+    index = load_index(product)
+    nodes = index.get("nodes") or {}
+    reg = build_zip_registry(pkg, tmp)
+    roots = sorted({str(v) for v in reg.values()})
+    print(f"对应表:{len(entries)} 行有 zip 对应;合集里可对号的子包 {len(roots)} 个")
+    oks, fails = [], []
+    seen_nid, seen_fc = {}, {}
+    used_roots = set()
+    for names, zname, rowno in entries:
+        label = f"「{names[-1]}」(表第{rowno}行, zip={zname})"
+        sub = reg.get(zname)
+        if sub is None:
+            avail = sorted({Path(r).name for r in roots})
+            fails.append((label, f"合集里找不到 zip「{zname}」;可对号的包:{avail[:10]}"
+                                 f"{'…' if len(avail) > 10 else ''}", None))
+            continue
+        nid, why, detail = resolve_node_by_path(nodes, names)
+        if nid is None:
+            fails.append((label, f"路径定位失败:{why}" + (f"\n       {detail}" if detail else ""),
+                          f'--only "{names[-1]}" --node <节点号>(去掉 --map 手工补)'))
+            continue
+        used_roots.add(str(sub))
+        try:
+            method = parse_method_md(sub)
+            fc, deps = find_scripts(sub, None)
+        except SystemExit as e:
+            fails.append((label, str(e), None))
+            continue
+        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(fc)
+        if entry is None:
+            fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})",
+                          f'--only "{method["name"]}" --node {nid} --entry <函数名>(去掉 --map)'))
+            continue
+        try:
+            entry, per_ne, kwargs, sm = arbitrate_entry(fc, deps, entry, per_ne, kwargs, explicit=False)
+        except SystemExit as e:
+            fails.append((label, str(e), f'--only "{method["name"]}" --node {nid} --entry <函数名>(去掉 --map)'))
+            continue
+        if sm:
+            note = (note + ";" if note else "") + sm
+        if nid in seen_nid:
+            fails.append((label, f"与表中「{seen_nid[nid]}」都对到 {nid}——同一节点两行,核对对应表", None))
+            continue
+        prev = seen_fc.get(fc.name)
+        if prev is not None and prev[1] != fc.read_bytes():
+            fails.append((label, f"脚本文件名「{fc.name}」与「{prev[0]}」撞车且内容不同——让交付方改名", None))
+            continue
+        seen_nid[nid], seen_fc[fc.name] = label, (label, fc.read_bytes())
+        if method["name"].strip() != names[-1]:
+            note = (note + ";" if note else "") + f"包内节点名「{method['name']}」≠表中「{names[-1]}」,以对应表为准"
+        oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note))
+
+    if oks:
+        refresh_engine(product)
+        for _sub, _m, fc, deps, *_rest in oks:
+            _copy_scripts(product, fc, deps)
+        _surgery(product, [(nid, m["condition"], _binding(fc.name, entry, per_ne, kwargs, m["name"]))
+                           for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note in oks])
+        upgrade_cross_scaffold(product)
+        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs)
+                          for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note in oks])
+
+    print(f"\n对应表批量迁移汇总:落地 {len(oks)}/{len(entries)} 行")
+    for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, note in oks:
+        print(f"  ✓ {nid}「{nodes[nid].get('name')}」 ← {fc.name}:{entry}"
+              + ("/单网元" if per_ne else "") + (f"  ⚠ {note}" if note else ""))
+    if fails:
+        print(f"\n  未落地 {len(fails)} 行(对应不上决不赌):")
+        for label, why, cmd in fails:
+            print(f"  ✗ {label}:{why}")
+            if cmd:
+                print(f"     → 确认后:--package \"{a.package}\" --product \"{a.product}\" {cmd}")
+    unused = sorted({Path(r).name for r in roots} - {Path(r).name for r in used_roots})
+    if unused:
+        print(f"\n  [info] 合集里有 {len(unused)} 个子包没被对应表引用(未迁移):{unused[:8]}"
+              f"{'…' if len(unused) > 8 else ''}")
+    if oks:
+        print("\n  迁移就地生效(产物=打包技能 assets/ 时无需重新打包);台账 → tree/migrations.json。")
+    sys.exit(3 if fails else 0)
+
+
 # ---------- 批量模式(多节点合集包 + --auto) ----------
 def migrate_batch(a, pkg: Path, product: Path) -> None:
     """逐子包全自动循环:精确同名唯一的直接落地(一轮手术原子落地);对不上号/探不到入口的
@@ -633,6 +820,8 @@ def main() -> None:
                          "多节点合集包 + --auto = 批量循环:能精确对号的全部落地,其余列候选")
     ap.add_argument("--only", help="多节点合集包里只处理指定「包节点名」的那个子包"
                                    "(批量没对上号的,逐个用它配合 --node/--entry 补对号)")
+    ap.add_argument("--map", help="对应表 xlsx(层级列 L1..Ln + zip 列,无 node_id):"
+                                  "zip 名↔树路径全自动批量对号,同名节点靠全路径消歧")
     ap.add_argument("--script", help="包里有多个 fault_check_*.py 时指定文件名")
     ap.add_argument("--entry", help="入口函数名(默认自动探测)")
     ap.add_argument("--per-ne", action="store_true", help="入口吃单网元目录(自动探测不准时手工指定)")
@@ -648,6 +837,12 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="migrate_") as td:
         pkg = unpack(Path(a.package).expanduser().resolve(), Path(td))
+        if a.map:                                        # 对应表模式:先于子包探测(目录形态的合集
+            if a.node or a.only or a.script or a.entry or a.per_ne or a.entry_kwargs:   # 顶层没有 md)
+                raise SystemExit("--map 是全自动批量对应:不能与 --node/--only/--script/--entry/"
+                                 "--per-ne/--entry-kwargs 同用;个别包要手工处理,去掉 --map 用 --only 单挑。")
+            migrate_map(a, pkg, product, Path(td))
+            return                                       # migrate_map 自带退出码,到不了这里
         groups = find_subpackages(pkg)
         if not groups:
             raise SystemExit(f"交付包里找不到 判断方法*.md(排除规范文件):{pkg}")
