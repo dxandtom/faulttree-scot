@@ -448,12 +448,12 @@ ENGINE_CAPS = {
     # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
-                      "_fc_tristate", "matched_items",
-                      "_StrPath"),                      # 末三项=新契约三态/证据保真/入参 str+Path 双兼容
+                      "_fc_tristate", "matched_items", "_StrPath",
+                      "raw_note"),                      # 末项=数据失败时点破 raw 下落(未传/错层/裸表喂错)
     "import_tree_excel.py": ('{"P", "S"}', "xlsx_reader"),   # S/P 放行 + cross 列 + 读表零依赖同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
-RUNNER_CAP = "源名兼容"                                  # raw 通道 / diag↔cmd 互认同代
+RUNNER_CAP = "只提供了 raw"                              # raw-only 放行 / raw 通道 / diag↔cmd 互认同代
 
 
 def _engine_src(name: str, caps, sibling: Path):

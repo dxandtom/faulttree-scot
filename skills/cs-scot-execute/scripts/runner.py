@@ -449,13 +449,22 @@ def main() -> None:
     elif unused:                                        # typo 防线:key 打错会变成"静默跳过",这里点破
         print(f"[warn] --data 里有 plan 用不到的数据源: {', '.join(unused)}"
               f"(plan 需要: {', '.join(required)})——key 是不是打错了?这些文件本轮不会被使用。")
-    if required and not set(required) & provided:       # 一个都没给:大概率用法错误,仍硬报错并给指引
-        print(f"没有绑定任何 plan 需要的数据源(需要: {', '.join(required)});"
-              f"用 --data <指标>=<文件> 提供,如 --data {next(iter(required))}=<文件>。", file=sys.stderr)
-        sys.exit(2)
+    if required and not set(required) & provided:       # 一个都没给:大概率用法错误,硬报错并给指引——
+        if "raw" in provided and has_star:               # 唯一例外:只喂 raw(裸数据转不出三表的兜底运行)
+            print("[warn] 只提供了 raw 原始目录:单源解析步骤全部跳过(相应判据本轮无事实,"
+                  "RCA 按「数据不足」对待);迁移的 S 脚本经跨源步骤直读 raw 照常出事实。"
+                  "能转出三表还是要转——原有绑定只有吃到表才有饭吃。")
+        else:
+            print(f"没有绑定任何 plan 需要的数据源(需要: {', '.join(required)});"
+                  f"用 --data <指标>=<文件> 提供,如 --data {next(iter(required))}=<文件>。", file=sys.stderr)
+            sys.exit(2)
     if missing:
         print(f"[warn] 缺少数据源: {', '.join(missing)} —— 相应解析步骤将跳过,"
               "其判据本轮无事实(RCA 按「数据不足」对待);结尾有缺口汇总。")
+    if has_star and "raw" not in provided:                # 迁移的 S 脚本吃原始目录,忘传 raw 是高频事故
+        print("[warn] 未提供 --data raw=<原始数据目录>:迁移的脚本节点(S 类)只能从三表兜底重建,"
+              "数据不齐会整体「数据不足」——有原始采集目录就带上(层级给**网元层的父目录**,"
+              "拿不准先跑 scripts/check_data.py)。")
 
     # 工作记忆初始化(memory_init 里的引用也解析一遍)
     ctx: Dict[str, Any] = {"input": data_map, "memory": {}, "step": {}, "output": {}}
