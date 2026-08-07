@@ -177,12 +177,19 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
         if id(node) in guarded or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         scan_nodes.extend(ast.walk(node))
+    argv_aliases = set()                                 # from sys import argv [as x] 的别名也要认
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "sys" and not node.level:
+            argv_aliases.update(al.asname or "argv" for al in node.names if al.name == "argv")
     hits = {"argv": 0, "print": 0, "exit": 0}
     for node in scan_nodes:
         if id(node) in guarded:
             continue
         if isinstance(node, ast.Attribute) and node.attr == "argv" and \
                 isinstance(node.value, ast.Name) and node.value.id == "sys":
+            hits["argv"] += 1
+        elif isinstance(node, ast.Name) and node.id in argv_aliases \
+                and isinstance(node.ctx, ast.Load):
             hits["argv"] += 1
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                 and node.func.id == "print":
@@ -243,8 +250,10 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
                 third.append(top)
     if third:
         items.append(_fail(
-            "S5", f"import 了第三方库:{sorted(set(third))}——运行平台严管三方件,落地即 ImportError",
-            "只许标准库+包内共享模块;解析需求用 re/csv/json/zipfile/xml.etree 等标准库实现(规范附录7)"))
+            "S5", f"import 了第三方库/包外模块:{sorted(set(third))}——三方件平台装不上,"
+                  "包外模块下游收不进,落地即 ImportError",
+            "只许标准库+包内共享模块;解析用 re/csv/json/zipfile/xml.etree 等标准库实现,"
+            "自写的帮手模块要么并进主脚本要么按 search_*.py 命名随包(规范附录7/8)"))
     else:
         items.append(_pass("S5", "依赖合规(只用标准库+包内模块)"))
     if missing_local:
@@ -317,14 +326,19 @@ def _import_script(script: Path, timeout):
 
 
 def _tri_of(result):
-    """把四形态结果压成一个三态字符串 + 形态标签(与转接头 _fc_normalize 同口径,只看不改)。"""
+    """把四形态结果压成一个三态字符串 + 形态标签(与转接头 _fc_normalize 同口径:
+    details.devices 包裹 → results 信封 → 全局 matched → 按网元字典;只看不改)。"""
     if not isinstance(result, dict):
         return None, "non-dict"
-    if "matched" in result:
-        vals, shape = [result.get("matched")], "global"
+    det = result.get("details")
+    if isinstance(det, dict) and isinstance(det.get("devices"), dict):
+        vals = [v.get("matched") for v in det["devices"].values() if isinstance(v, dict)]
+        shape = "devices"
     elif isinstance(result.get("results"), dict):
         vals = [v.get("matched") for v in result["results"].values() if isinstance(v, dict)]
         shape = "wrapped"
+    elif "matched" in result:
+        vals, shape = [result.get("matched")], "global"
     elif result and all(isinstance(v, dict) for v in result.values()):
         vals = [v.get("matched") for v in result.values()]
         shape = "per-ne"
@@ -359,8 +373,9 @@ def _shape_items(iid, result, expect_undetermined, label):
     if shape == "empty":
         return [_warn(iid, f"{label}:返回空 dict(没有 matched 键;转接头按无判定处理)",
                       '哪怕无数据也要返回 {"matched":"undetermined","details":{"reason":…}}(规范附录6)')]
-    if shape.startswith("per-ne"):
-        items.append(_warn(iid + "s", f"{label}:返回按网元字典(契约要求全局形态;转接头兜得住)",
+    if shape.startswith(("per-ne", "wrapped", "devices")):
+        kind = {"p": "按网元字典", "w": "results 信封", "d": "details.devices 包裹"}[shape[0]]
+        items.append(_warn(iid + "s", f"{label}:返回{kind}形态(契约要求全局形态;转接头兜得住)",
                            "顶层改成一个 matched+evidence,网元写进 evidence 的 type/id(规范附录6)"))
     if "+bool" in shape:
         items.append(_warn(iid + "b", f"{label}:matched 是布尔值(契约要求字符串三态;转接头兜得住)",

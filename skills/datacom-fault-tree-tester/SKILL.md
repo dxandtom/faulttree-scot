@@ -201,7 +201,7 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
    - `data.source_files`：原始证据块，包含文件路径、行号范围、完整内容
    - `data.matched_items`：命中的具体项，关键字段 + `_source_line` 指向原始位置
    - `details.reason`：当 `matched` 为 `"undetermined"` 时，必须说明原因
-4. **文件命名**：生成与验证阶段存放在 `scripts/` 目录下（与共享解析库同目录，`from search_xxx import …` 才通）；**打包交付后从 `scripts/` 移入交付包，技能目录不留生成产物**——`scripts/` 只常驻 4 个 `search_*.py` 共享库，历史节点脚本的正本在各自交付包里
+4. **文件命名**：生成与验证阶段存放在 `scripts/` 目录下（与共享解析库同目录，`from search_xxx import …` 才通）；**打包交付后从 `scripts/` 移入交付包，技能目录不留生成产物**——`scripts/` 只常驻 `search_*.py` 共享库和 `check_contract.py` 体检脚本，历史节点脚本的正本在各自交付包里
 5. **通用能力复用**：**必须**使用 `scripts/search_config.py` 中的 `parse_config_file()`, `find_config_item()`, `get_group_items()` 函数进行配置解析，**禁止**自行实现配置解析逻辑（详见 `判断方法_规范.md` 附录）
 6. **全局形态，不是按网元的字典**：顶层就是一个 `matched` + `evidence` 数组；**禁止**返回 `{"网元名": {...}}` 形式的字典——网元/接口/隧道等实体信息写进 `evidence` 条目的 `type`/`id`
 7. **缺数据必须 undetermined（禁止冒充结论）**：判定所需数据缺失（命令没采集、目录/文件缺失、解析失败）时，`matched` 必须为 `"undetermined"` 且 `details.reason` 写明缺什么；**禁止**用 `matched:"false"` + `details.error` 冒充"未检测到"，**禁止**解析失败后降级用其它方式硬判
