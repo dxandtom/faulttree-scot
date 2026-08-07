@@ -250,7 +250,8 @@ def _smoke_call(stage: Path, script_name: str, entry: str, kwargs: dict):
         sys.path.insert(0, sdir)                         # 交付脚本 import search_* 同目录共享模块
     sink = io.StringIO()
     argv_bak, sys.argv = sys.argv, [str(script)]
-    try:
+    mods_bak = set(sys.modules)                          # 交付脚本 import 的 search_* 会进模块缓存:
+    try:                                                 # 批量时不清会让后一个包用上前一个包的库
         with tempfile.TemporaryDirectory(prefix="smoke_data_") as td, \
                 contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
             spec = importlib.util.spec_from_file_location(f"smoke_{abs(hash(str(script)))}", script)
@@ -268,6 +269,9 @@ def _smoke_call(stage: Path, script_name: str, entry: str, kwargs: dict):
         sys.argv = argv_bak
         if added:
             sys.path.remove(sdir)
+        for m in set(sys.modules) - mods_bak:
+            if m.startswith(("search_", "smoke_")):
+                sys.modules.pop(m, None)
     return _shape_ok(r)
 
 
@@ -600,11 +604,237 @@ def _binding(fc_name: str, entry: str, per_ne: bool, kwargs: dict, pkg_node: str
                               "(经业务确认+样本数据验证);数据优先 --data raw= 原始目录直读,否则三表兜底重建"}
 
 
+def _missing_shared(fc: Path, deps):
+    """脚本(含共享模块)import 的 search_* 模块里,交付包没带的名单(违反自包含,规范附录8)。"""
+    have = {fc.stem} | {p.stem for p in deps}
+    missing = set()
+    for f in [fc] + list(deps):
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                mods = [al.name for al in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                mods = [node.module]
+            else:
+                continue
+            for m in mods:
+                top = m.split(".")[0]
+                if top.startswith("search_") and top not in have:
+                    missing.add(top)
+    return sorted(missing)
+
+
+def _shared_lib_src(fname: str):
+    """共享模块兜底取源:同门 tester 优先,内置 engine/ 兜底。"""
+    for d in (Path(__file__).resolve().parents[2] / "datacom-fault-tree-tester" / "scripts",
+              Path(__file__).resolve().parents[1] / "engine"):
+        if (d / fname).exists():
+            return d / fname
+    return None
+
+
+def _with_supplied(fc: Path, deps):
+    """包缺共享模块 → 兜底补齐名单:(supplied[(模块名,源路径)…], unsupplied[模块名…])。"""
+    supplied, unsupplied = [], []
+    for name in _missing_shared(fc, deps):
+        src = _shared_lib_src(name + ".py")
+        (supplied.append((name, src)) if src else unsupplied.append(name))
+    return supplied, unsupplied
+
+
+def _effective(product: Path, p: Path) -> Path:
+    """脚本的"生效版":custom/ 里同名副本带 .orig 基准、且基准==包里原件(包没变),
+    说明副本被修过管道 → 生效的是修复副本;否则就是包里原件。"""
+    dst = product / "scripts" / "custom" / p.name
+    orig = product / "scripts" / "custom" / (p.name + ".orig")
+    if dst.exists() and orig.exists() and orig.read_bytes() == p.read_bytes():
+        return dst
+    return p
+
+
 def _copy_scripts(product: Path, fc: Path, deps) -> None:
+    """脚本进场,两条附加规矩:
+    ①保修复:包没变而 custom/ 副本修过管道(.orig 基准==包里原件)→ 保留修复副本不覆盖;
+      包真变了 → 正常覆盖并清掉过期 .orig(新包重新过体检);
+    ②补库:脚本 import 的 search_*.py 包里没带 → 从同门 tester/engine 兜底拷入(不覆盖已有)。"""
     custom = product / "scripts" / "custom"
     custom.mkdir(parents=True, exist_ok=True)
+    preserved = []
     for p in [fc] + list(deps):
-        shutil.copy2(p, custom / p.name)
+        dst, orig = custom / p.name, custom / (p.name + ".orig")
+        if dst.exists() and orig.exists():
+            if orig.read_bytes() == p.read_bytes():
+                preserved.append(p.name)
+                continue
+            orig.unlink()                                # 包真变了:修复基准作废,正常覆盖
+        shutil.copy2(p, dst)
+    if preserved:
+        print(f"  [保修复] {', '.join(preserved)}:包未变且副本修过管道——保留修复副本(基准 .orig)")
+    supplied = []
+    for name, src in _with_supplied(fc, deps)[0]:
+        if not (custom / (name + ".py")).exists():
+            shutil.copy2(src, custom / (name + ".py"))
+            supplied.append(name + ".py")
+    if supplied:
+        print(f"  [补库] {', '.join(supplied)}:包里没带的共享模块已从引擎兜底拷入"
+              "(正本仍须自包含,反馈交付方)")
+
+
+# ---------- 收编体检(契约闸)+ 管道修复循环 ----------
+_CC_CACHE = []
+# 体检 FAIL 里转接头运行时兜得住的项(能走到这一步=烟测仲裁已确认驱动得动):
+#   S1 入口名/签名(仲裁选定入口+entry_kwargs 驱动)、D2x/D3x 调用崩(_StrPath/护现场/逐网元重调)
+# ——降为 WARN 放行记台账;其余 FAIL(如 S3 只认 .txt、D2 缺数据冒充结论)执行必受影响,拦。
+_ABSORBED = {"S1", "D2x", "D3x"}
+
+
+def _contract_mod():
+    """加载契约体检模块(同门 tester 优先,engine/ 兜底);都没有 → None(老环境,跳过体检)。"""
+    if not _CC_CACHE:
+        import importlib.util
+        p = _engine_src("check_contract.py", ("def check_script",),
+                        Path(__file__).resolve().parents[2] / "datacom-fault-tree-tester" / "scripts")
+        mod = None
+        if p is not None:
+            try:
+                spec = importlib.util.spec_from_file_location("cc_gate", p)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+            except Exception:                            # noqa: BLE001 体检组件坏了不拦迁移,响亮说
+                print(f"  [warn] 契约体检组件加载失败({p})——本次跳过体检")
+                mod = None
+        _CC_CACHE.append(mod)
+    return _CC_CACHE[0]
+
+
+def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
+                   entry=None, per_ne=False, kwargs=None, explicit=False):
+    """收编契约闸(两档处置)。返回 ("skip"|"ok"|"fail", info|修法文本):
+    - FAIL(兜不住)→ 不落绑定:把脚本连同 .orig 修复基准落进 scripts/custom/,返回修法清单
+      ——模型照单只修管道(副本),重跑同命令续迁(保修复规则保证副本不被包里原件冲掉);
+    - WARN(转接头兜得住/静态无法确证)→ 放行,记台账+返厂清单;
+    - 回归保险:包里带 测试数据/ 时体检自动记基线;修复后基线 matched 与修前不一致 → 拦
+      (管道修复不许改变判断结论)。"""
+    cc = _contract_mod()
+    if cc is None:
+        return "skip", None
+    custom = product / "scripts" / "custom"
+    data = next((p for p in sorted(sub.rglob("测试数据")) if p.is_dir()), None) if sub else None
+    mods_bak, path_bak = set(sys.modules), list(sys.path)
+    try:
+        with tempfile.TemporaryDirectory(prefix="gate_") as sd:
+            stage = Path(sd)
+            for p in [fc] + list(deps):
+                shutil.copy2(_effective(product, p), stage / p.name)
+            for name, src in supplied:
+                shutil.copy2(src, stage / (name + ".py"))
+            try:                                         # 体检按烟测仲裁的裁决口径跑(入口/单网元/kwargs)
+                rep = cc.check_script(stage / fc.name, data_dir=data, entry=entry,
+                                      per_ne=per_ne, entry_kwargs=kwargs)
+            except TypeError:                            # 旧版体检组件不认裁决参数:退回老签名
+                rep = cc.check_script(stage / fc.name, data_dir=data)
+    finally:                                             # 体检导入的脚本/共享库不许留缓存串包
+        for m in set(sys.modules) - mods_bak:
+            if m.startswith(("search_", "cc_")):
+                sys.modules.pop(m, None)
+        sys.path[:] = [p for p in sys.path if p in path_bak]
+    items = [i for s in rep["scripts"] for i in s["items"]]
+    fails, warns = [], []
+    for i in items:
+        if i["tier"] == "FAIL" and i["id"] in _ABSORBED:
+            warns.append(dict(i, tier="WARN",
+                              msg=i["msg"] + "(烟测仲裁已确认转接头驱动得动——兜得住,正本仍须按契约改)"))
+        elif i["tier"] == "FAIL":
+            fails.append(i)
+        elif i["tier"] == "WARN":
+            warns.append(i)
+    if supplied:
+        warns.append({"id": "S6+", "tier": "WARN", "fix": "把脚本 import 的每个 search_*.py 打进交付包",
+                      "msg": f"包缺共享模块 {[n for n, _s in supplied]}(收编已补库;正本必须自包含,规范附录8)"})
+    baseline = rep.get("baseline")
+    side = custom / f"{fc.stem}.contract.json"
+    prev = {}
+    if side.exists():
+        try:
+            prev = json.loads(side.read_text(encoding="utf-8"))
+        except Exception:                                # noqa: BLE001
+            prev = {}
+    dst, orig = custom / fc.name, custom / (fc.name + ".orig")
+    repaired = (dst.exists() and orig.exists() and orig.read_bytes() == fc.read_bytes()
+                and dst.read_bytes() != fc.read_bytes())
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+    if fails and explicit:                               # 人工 --entry 强推:人>名单,只警告不拦(与仲裁同款)
+        print(f"  ⚠ 契约体检 {len(fails)} 项 FAIL({','.join(i['id'] for i in fails)})"
+              "——按人工 --entry 指定放行;运行期该节点判不了先查这些项")
+        warns = warns + [dict(i, tier="WARN") for i in fails]
+        fails = []
+    if fails:
+        _copy_scripts(product, fc, deps)                 # 脚本先进场(绑定不落),给修复留工作面
+        for p in [fc] + list(deps):
+            ob = custom / (p.name + ".orig")
+            if not ob.exists():
+                shutil.copy2(p, ob)                      # 修复基准=包里原件(回归/保修复都对着它)
+        side.write_text(json.dumps(
+            {"status": "pending_repair", "fails": fails, "warns": warns,
+             "baseline": baseline, "at": now}, ensure_ascii=False, indent=1), encoding="utf-8")
+        lines = [f"契约体检不过({len(fails)} 项转接头兜不住,绑定不落地):"]
+        for i in fails:
+            lines.append(f"    [FAIL] {i['id']} {i['msg']}")
+            if i.get("fix"):
+                lines.append(f"           修法:{i['fix']}")
+        lines.append(f"  处置:脚本副本+修复基准已落 scripts/custom/({fc.name} 与 *.orig),"
+                     "照修法**只修管道**(判断逻辑一行不动,拿不准算不算逻辑就停下问人),"
+                     "改完重跑同一条迁移命令——包没变时修复副本不会被覆盖,体检绿了绑定才落地;"
+                     "正本问题按结尾返厂清单反馈交付方。")
+        return "fail", "\n".join(lines)
+    if repaired and prev.get("status") == "pending_repair" \
+            and (prev.get("baseline") or {}).get("matched") and baseline \
+            and prev["baseline"]["matched"] != baseline.get("matched"):
+        return "fail", (f"  回归不一致:修复前测试数据 matched={prev['baseline']['matched']},"
+                        f"修复后={baseline.get('matched')}——管道修复改变了判断结论,这就动到逻辑了。"
+                        f"对照 scripts/custom/{fc.name}.orig 回滚多余改动,或把差异交人定夺。")
+    repairs = [i["id"] for i in prev.get("fails", [])] \
+        if repaired and prev.get("status") == "pending_repair" else []
+    info = {"warns": [i["id"] for i in warns], "warn_items": warns,
+            "repairs": repairs, "baseline": baseline}
+    custom.mkdir(parents=True, exist_ok=True)
+    side.write_text(json.dumps(
+        {"status": "repaired" if repaired else "clean", "warns": info["warns"],
+         "repairs": repairs, "baseline": baseline, "at": now},
+        ensure_ascii=False, indent=1), encoding="utf-8")
+    return "ok", info
+
+
+def _gate_extra(info) -> dict:
+    """契约闸信息 → 台账附加字段(只落非空项)。"""
+    if not info:
+        return {}
+    out = {}
+    if info.get("warns"):
+        out["contract_warns"] = info["warns"]
+    if info.get("repairs"):
+        out["repairs"] = info["repairs"]
+    return out
+
+
+def _factory_report(rows):
+    """返厂清单:rows=[(标签, warn_items, repairs)…] 有料才打印。副本已兜/已修不影响本次执行,
+    但正本的窟窿必须回到交付方手里,否则每次全量交付都复活一遍。"""
+    rows = [(lb, wi, rp) for lb, wi, rp in rows if wi or rp]
+    if not rows:
+        return
+    print("\n  返厂清单(反馈交付方按规范改正本;副本已兜/已修,不影响本次执行):")
+    for label, warn_items, repairs in rows:
+        parts = []
+        if repairs:
+            parts.append(f"管道已修 {','.join(repairs)}(正本照 scripts/custom/ 副本翻新)")
+        parts += [f"{i['id']} {i['msg']}" for i in warn_items]
+        print(f"    「{label}」:")
+        for s in parts:
+            print(f"      - {s}")
 
 
 def _surgery(product: Path, edits, adds=()) -> None:
@@ -672,12 +902,15 @@ def _ledger_read(product: Path) -> dict:
 
 
 def _ledger(product: Path, entries) -> None:
+    """entries 每条 7 元组;可选第 8 元 dict(契约闸信息:contract_warns/repairs)直接并进记录。"""
     mig_p = product / "tree" / "migrations.json"
     mig = _ledger_read(product)
-    for nid, pkg_node, fc_name, entry, per_ne, kwargs, fp in entries:
+    for e in entries:
+        nid, pkg_node, fc_name, entry, per_ne, kwargs, fp = e[:7]
+        extra = e[7] if len(e) > 7 and e[7] else {}
         mig[nid] = {"package_node": pkg_node, "script": f"custom/{fc_name}", "entry": entry,
                     "per_ne": per_ne, "entry_kwargs": kwargs or {}, "fingerprint": fp,
-                    "migrated_at": datetime.datetime.now().isoformat(timespec="seconds")}
+                    "migrated_at": datetime.datetime.now().isoformat(timespec="seconds"), **extra}
     mig_p.write_text(json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -857,7 +1090,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     roots = sorted({str(v) for v in reg.values()})
     print(f"对应表:{len(entries)} 行有 zip 对应;合集里可对号的子包 {len(roots)} 个")
     oks, adds, fails, skips = [], [], [], []
-    seen_nid, seen_fc = {}, {}
+    seen_nid, seen_fc, gates = {}, {}, {}
     used_roots = set()
     for names, zname, rowno in entries:
         label = f"「{names[-1]}」(表第{rowno}行, zip={zname})"
@@ -894,13 +1127,20 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         except SystemExit as e:
             fails.append((label, str(e), None))
             continue
-        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(fc)
+        eff_fc = _effective(product, fc)                 # 修过管道的副本生效(重跑续迁不被原件卡死)
+        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(eff_fc)
         if entry is None:
             fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})",
                           f'--only "{method["name"]}" --node {nid or "<节点号>"} --entry <函数名>(去掉 --map)'))
             continue
+        supplied, unsupplied = _with_supplied(fc, deps)
+        if unsupplied:
+            fails.append((label, f"包缺共享模块 {unsupplied} 且引擎无兜底——让交付方补进包(规范附录8)", None))
+            continue
         try:
-            entry, per_ne, kwargs, sm = arbitrate_entry(fc, deps, entry, per_ne, kwargs, explicit=False)
+            entry, per_ne, kwargs, sm = arbitrate_entry(
+                eff_fc, [_effective(product, p) for p in deps] + [s for _n, s in supplied],
+                entry, per_ne, kwargs, explicit=False)
         except SystemExit as e:
             fails.append((label, str(e), f'--only "{method["name"]}" --node {nid or "<节点号>"} --entry <函数名>(去掉 --map)'))
             continue
@@ -916,6 +1156,17 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         seen_nid[key], seen_fc[fc.name] = label, (label, fc.read_bytes())
         if method["name"].strip() != names[-1]:
             note = (note + ";" if note else "") + f"包内节点名「{method['name']}」≠表中「{names[-1]}」,以对应表为准"
+        verdict, ginfo = _contract_gate(product, sub, fc, deps, supplied,
+                                        entry=entry, per_ne=per_ne, kwargs=kwargs)
+        if verdict == "fail":
+            fails.append((label, ginfo, None))
+            continue
+        if ginfo:
+            gates[key] = ginfo
+            if ginfo["repairs"]:
+                note = (note + ";" if note else "") + f"管道已修 {','.join(ginfo['repairs'])}"
+            if ginfo["warns"]:
+                note = (note + ";" if note else "") + f"契约WARN {','.join(ginfo['warns'])}(转接头兜,详见返厂清单)"
         if add_parent is not None:
             adds.append((sub, method, fc, deps, entry, per_ne, kwargs, add_parent, names[-1], note, fp))
         else:
@@ -933,7 +1184,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                    _binding(fc.name, entry, per_ne, kwargs, m["name"]))
                   for _sub, m, fc, _deps, entry, per_ne, kwargs, pnid, name, _note, _fp in adds])
         upgrade_cross_scaffold(product)
-        led = [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp)
+        led = [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp, _gate_extra(gates.get(nid)))
                for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, fp in oks]
         if adds:                                         # 新行的 nN 由 import 刚分配:重读 index 认领进台账
             new_nodes = load_index(product).get("nodes") or {}
@@ -942,7 +1193,8 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                                 if str(nd.get("name") or "").strip() == name
                                 and nd.get("parent") == pnid), None)
                 if new_nid:
-                    led.append((new_nid, m["name"], fc.name, entry, per_ne, kwargs, fp))
+                    led.append((new_nid, m["name"], fc.name, entry, per_ne, kwargs, fp,
+                                _gate_extra(gates.get(f"+{pnid}/{name}"))))
                 added_report.append((new_nid, name, pnid, fc.name, entry, note))
         _ledger(product, led)
 
@@ -989,6 +1241,8 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         print(f"\n  ⚠ 台账里迁移过、**对应表里已无该节点** 的 {len(gone)} 个(上游可能删了节点):"
               + "、".join(f"{n}「{nodes[n].get('name')}」" for n in gone[:6])
               + " ——树里仍保留,不自动删;确认后走调优表删行(删行→import 即生效)")
+    _factory_report([(seen_nid.get(k, str(k)), v["warn_items"], v["repairs"])
+                     for k, v in gates.items()])
     if oks:
         print("\n  迁移就地生效(产物=打包技能 assets/ 时无需重新打包);台账 → tree/migrations.json。")
     sys.exit(3 if fails else 0)
@@ -1005,7 +1259,7 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
     ledger = _ledger_read(product)
     print(f"合集包:{len(subs)} 个子包,逐个对号(精确同名唯一才自动落地,其余列候选)…")
     oks, fails, skips = [], [], []                       # ok=(sub,method,fc,deps,entry,per_ne,kwargs,nid,note,fp)
-    seen_nid, seen_fc = {}, {}
+    seen_nid, seen_fc, gates = {}, {}, {}
     for sub in subs:
         label = sub.name
         try:
@@ -1015,7 +1269,8 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
         except SystemExit as e:
             fails.append((label, str(e), None))
             continue
-        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(fc)
+        eff_fc = _effective(product, fc)                 # 修过管道的副本生效(重跑续迁不被原件卡死)
+        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(eff_fc)
         if entry is None:
             fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})",
                           f'--only "{label}" --node <节点号> --entry <吃目录参数的函数名>'))
@@ -1035,8 +1290,14 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
             skips.append((nid, label))                   # 全量交付里没变的包:跳过(此后的人工调优不被冲)
             seen_nid.setdefault(nid, label)
             continue
+        supplied, unsupplied = _with_supplied(fc, deps)
+        if unsupplied:
+            fails.append((label, f"包缺共享模块 {unsupplied} 且引擎无兜底——让交付方补进包(规范附录8)", None))
+            continue
         try:
-            entry, per_ne, kwargs, sm = arbitrate_entry(fc, deps, entry, per_ne, kwargs, explicit=False)
+            entry, per_ne, kwargs, sm = arbitrate_entry(
+                eff_fc, [_effective(product, p) for p in deps] + [s for _n, s in supplied],
+                entry, per_ne, kwargs, explicit=False)
         except SystemExit as e:
             fails.append((label, str(e), f'--only "{label}" --node {nid} --entry <函数名>'))
             continue
@@ -1052,6 +1313,17 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
                                  "——让交付方改名后把该子包单独再迁", None))
             continue
         seen_nid[nid], seen_fc[fc.name] = label, (label, fc.read_bytes())
+        verdict, ginfo = _contract_gate(product, sub, fc, deps, supplied,
+                                        entry=entry, per_ne=per_ne, kwargs=kwargs)
+        if verdict == "fail":
+            fails.append((label, ginfo, None))
+            continue
+        if ginfo:
+            gates[nid] = ginfo
+            if ginfo["repairs"]:
+                note = (note + ";" if note else "") + f"管道已修 {','.join(ginfo['repairs'])}"
+            if ginfo["warns"]:
+                note = (note + ";" if note else "") + f"契约WARN {','.join(ginfo['warns'])}(转接头兜,详见返厂清单)"
         oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note, fp))
 
     if oks:
@@ -1061,7 +1333,7 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
         _surgery(product, [(nid, m["condition"], _binding(fc.name, entry, per_ne, kwargs, m["name"]))
                            for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, _fp in oks])
         upgrade_cross_scaffold(product)
-        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp)
+        _ledger(product, [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp, _gate_extra(gates.get(nid)))
                           for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, fp in oks])
 
     print(f"\n批量迁移汇总:落地 {len(oks)}/{len(subs)} 个"
@@ -1080,6 +1352,8 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
             print(f"  ✗ 「{label}」:{why}")
             if cmd:
                 print(f"     → 确认后重跑:--package \"{a.package}\" --product \"{a.product}\" {cmd}")
+    _factory_report([(seen_nid.get(k, str(k)), v["warn_items"], v["repairs"])
+                     for k, v in gates.items()])
     if oks:
         print("\n  迁移就地生效(产物=打包技能 assets/ 时无需重新打包);台账 → tree/migrations.json;"
               "执行时 runner 加 --data raw=<原始目录> 最忠实。")
@@ -1188,7 +1462,8 @@ def main() -> None:
 
         method = parse_method_md(pkg)
         fc, deps = find_scripts(pkg, a.script)
-        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(fc)
+        eff_fc = _effective(product, fc)                 # 修过管道的副本生效(重跑续迁不被原件卡死)
+        entry, per_ne, kwargs, all_defs, argc, note = detect_entry(eff_fc)
         if a.entry:
             entry, per_ne = a.entry, a.per_ne
             if argc.get(entry, 1) < 1:                   # 手工指定也过同一道闸:0 参入口运行期必炸
@@ -1232,14 +1507,28 @@ def main() -> None:
         if kwargs and not a.entry_kwargs:
             print(f"[warn] 入口 {entry} 有额外必填参数 {sorted(kwargs)},已按空 dict 传入;"
                   "不对就用 --entry-kwargs 显式指定")
-        entry, per_ne, kwargs, _sn = arbitrate_entry(fc, deps, entry, per_ne, kwargs,
-                                                     explicit=bool(a.entry))
+        supplied, unsupplied = _with_supplied(fc, deps)
+        if unsupplied:
+            raise SystemExit(f"包缺共享模块 {unsupplied} 且引擎无兜底——让交付方补进包(规范附录8)")
+        entry, per_ne, kwargs, _sn = arbitrate_entry(
+            eff_fc, [_effective(product, p) for p in deps] + [s for _n, s in supplied],
+            entry, per_ne, kwargs, explicit=bool(a.entry))
 
         fp = _fingerprint(pkg)
         if not a.force and _ledger_read(product).get(nid, {}).get("fingerprint") == fp:
             print(f"\n跳过:{nid}「{nodes[nid].get('name')}」的交付包内容与上次迁移完全一致"
                   "(全量交付幂等;此后的人工调优不受影响)。确要重迁加 --force。")
             return
+
+        verdict, ginfo = _contract_gate(product, pkg, fc, deps, supplied,
+                                        entry=entry, per_ne=per_ne, kwargs=kwargs,
+                                        explicit=bool(a.entry))
+        if verdict == "fail":
+            raise SystemExit(ginfo)
+        if ginfo and ginfo["repairs"]:
+            print(f"  [管道已修] {','.join(ginfo['repairs'])}(修复副本生效,基准 .orig 保留)")
+        if ginfo and ginfo["warns"]:
+            print(f"  [契约WARN] {','.join(ginfo['warns'])}(转接头兜着跑;详见结尾返厂清单)")
 
         # 0. 引擎体检+补全(旧产物的内核/函数库/导入校验不认 S 类,先刷新再动手术)
         refresh_engine(product)
@@ -1254,7 +1543,8 @@ def main() -> None:
 
         # 3. 骨架体检 + 台账
         upgrade_cross_scaffold(product)
-        _ledger(product, [(nid, method["name"], fc.name, entry, per_ne, kwargs, fp)])
+        _ledger(product, [(nid, method["name"], fc.name, entry, per_ne, kwargs, fp,
+                           _gate_extra(ginfo))])
 
         print(f"\n迁移完成:{nid}「{nodes[nid].get('name')}」")
         print(f"  判据 ← 判断方法.md 全文(含故障描述/判断条件/数据来源表等);绑定 ← S(fault_check → custom/{fc.name}:{entry})")
@@ -1263,6 +1553,8 @@ def main() -> None:
               "(不加也能跑,自动从三表重建)。")
         print("  打包说明:迁移是**就地生效**——产物就是打包技能的 assets/ 时,技能已更新完毕,"
               "**无需重新打包**;只有在独立产物目录上迁移、之后要发布成技能时才跑 package_scenario.py。")
+        if ginfo:
+            _factory_report([(method["name"], ginfo["warn_items"], ginfo["repairs"])])
 
 
 if __name__ == "__main__":

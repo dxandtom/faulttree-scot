@@ -18,6 +18,12 @@ SRC = {
     "assemble_scenario.py": SKILLS / "cs-scot-generate" / "scripts",
     "runner.py": SKILLS / "cs-scot-execute" / "scripts",
     "check_data.py": SKILLS / "cs-scot-execute" / "scripts",
+    # tester 侧:契约体检(收编闸用)+ 共享解析库(交付包缺库时兜底补齐用)
+    "check_contract.py": SKILLS / "datacom-fault-tree-tester" / "scripts",
+    "search_config.py": SKILLS / "datacom-fault-tree-tester" / "scripts",
+    "search_log.py": SKILLS / "datacom-fault-tree-tester" / "scripts",
+    "search_cmd.py": SKILLS / "datacom-fault-tree-tester" / "scripts",
+    "search_diag_txt.py": SKILLS / "datacom-fault-tree-tester" / "scripts",
 }
 
 def main() -> None:
