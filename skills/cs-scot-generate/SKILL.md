@@ -167,7 +167,8 @@ python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根�
 
 ### 步骤 6(人工调优循环):调优表——树+绑定的人可编辑事实源
 打包时自动产出 `tree/<短名>.tuning.xlsx`(单页签,一行一节点:层级/判据/各源绑定 JSON/解决方案;
-业务同事的动手说明在 `tree/tuning-guide.md`)。人改完表后一条命令**机械编译回产物**(零模型参与):
+绑定列写法与类别模板见产物自带的 `scripts/condition_binding_schema.md`,机器契约人也读得懂,
+不另设第二份文档)。人改完表后一条命令**机械编译回产物**(零模型参与):
 ```bash
 python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或打包技能的 assets/>"
 ```

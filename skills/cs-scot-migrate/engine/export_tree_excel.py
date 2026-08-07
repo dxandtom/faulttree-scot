@@ -191,7 +191,7 @@ def export(out_dir: Path) -> Path:
     if n_cross:
         print(f"  跨源绑定已进「绑定:cross」列(涉及节点 {len(n_cross)} 个:{', '.join(n_cross[:8])}"
               f"{'…' if len(n_cross) > 8 else ''})——每条必须带 source=最终查询落点的真实源名;"
-              "写法见 tree/binding-handbook.md 第三节。")
+              "写法见 scripts/condition_binding_schema.md 的「参数化查询与跨源判据」节。")
     return dst
 
 
@@ -207,7 +207,7 @@ def main() -> None:
     dst = export(Path(a.out).expanduser().resolve())
     print(f"已导出调优表: {dst}")
     print("  一行一节点;新增节点 node_id 留空;改完跑 import_tree_excel.py 编译回产物。"
-          "动手说明见同目录 tuning-guide.md。")
+          "绑定列写法与类别模板见 scripts/condition_binding_schema.md。")
 
 
 if __name__ == "__main__":
