@@ -484,7 +484,10 @@ def check_package(pkg: Path, data_dir=None, timeout=120):
     fcs = sorted(set(pkg.rglob("fault_check_*.py")))
     other_py = [p for p in pkg.rglob("*.py")
                 if not p.name.startswith(("fault_check_", "search_", "verify_"))]
-    pkg_mods = {p.stem for p in pkg.rglob("*.py")}
+    # 可 import 的"包内模块"只认契约允许随包的两类(fault_check_*/search_*)——别的 .py
+    # (自写帮手/调试遗留/测试数据里的杂项)下游迁移不收,这里就得当包外模块拦,两端口径一致
+    pkg_mods = {p.stem for p in pkg.rglob("*.py")
+                if p.name.startswith(("fault_check_", "search_"))}
     mds = [p for p in sorted(pkg.rglob("判断方法*.md")) if "规范" not in p.name]
 
     if not mds:
@@ -533,7 +536,8 @@ def check_script(script: Path, data_dir=None, timeout=120, entry=None, per_ne=Fa
     entry/per_ne/entry_kwargs=下游烟测仲裁的裁决——给了就按裁决口径烟测(S1 命名仍照契约评)。"""
     report = {"target": str(script), "mode": "script", "scripts": [], "md": [],
               "notes": [], "baseline": None}
-    local = {p.stem for p in script.parent.glob("*.py")}
+    local = {p.stem for p in script.parent.glob("*.py")
+             if p.name.startswith(("fault_check_", "search_"))}
     items, smoke_entry = _static_check(script, local, pkg_files=None, entry_hint=entry)
     fatal_static = any(i.tier == "FAIL" and i.id in ("S0", "S5", "S6") for i in items)
     if smoke_entry and not fatal_static:
