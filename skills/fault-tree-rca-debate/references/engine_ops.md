@@ -13,10 +13,7 @@
 - **文本回声假阳**:引擎靠"判据文本 ∈ question"判匹配。壳的 question **只复述成立的判据**;
   被排除/数据不足的只报节点名。若引擎的 condition_matcher 是语义级(LLM)而非字面包含,
   这个策略依然安全(宁缺勿滥),但 full-match 率可能偏低——观察后可放宽。
-- **确证档(已补齐:事实闭环升档)**:一条路径若被证据引擎的确定性事实完整确认——每个带判据
-  节点实测成立、叶子为真叶且成立、无节点被证伪——自动升入 rca_result;**依据是 execute 的
-  事实,不是辩论得分**(与手工路径确证语义同源,validate_rca 机械检查天然通过)。任一节点
-  数据不足/被证伪/未覆盖或叶子被 L6 截断 → 留在 probable。回程事实感知其余部分:叶子实证
+- **确证档(升档口径=候选自身,与手工确证闸同口径)**:路径末端叶子(候选)被证据引擎实测「成立」且是带判据真叶 → 升 rca_result;祖先数据不足/不成立/未绑定**不拦**、机械落 caveats 逐类点名(全路径实测闭环单独注明为最强成色);候选证据冲突(成立与强反证并存)不升。**升档依据是 execute 的事实,不是辩论得分**。叶子非真叶(截断)/叶子非成立 → 留在 probable(截断与实测态落在 evidence 的 judgment 上,validate 认账)。回程事实感知其余部分:叶子实证
   成立托底 medium、被证伪封顶 low+⚠、blocked_at 指名数据不足节点、**弃权垫片**(全场景无
   成立事实→候选降入 undetermined,补上"排序器无弃权"的语义缺口)。
 - **成本**:每条判据 = 1 次匹配 LLM 调用;每个"零匹配兄弟组"再加(组员数辩护 + 评委数打分)次调用,
@@ -98,8 +95,9 @@ python skills/fault-tree-rca-debate/scripts/ab_test_mechanisms.py --engine real 
 数据集:原配的 `cs-scot-eval/suite_real` 30 个冻结场景已随 cs-scot-eval 技能从本仓移除,
 现需自备带标准答案的场景,用 `--suite/--trees` 显式传入(目录结构见脚本 docstring)。
 **指标口径(重要)**:机制对比用**档位无关的排名指标**(hit@1 / hit@3 / MRR / FP进榜)——
-四档打分(要求确证根因落在 `rca_result` 档)对本引擎不适用:它是纯排序器、适配层诚实全放
-probable 档,四档分数量的是"排序器 vs 事实闭环"的语义差,不是三种机制谁好。
+四档打分(要求确证根因落在 `rca_result` 档)对本引擎要谨慎读:引擎是纯排序器,升档凭
+execute 的事实(候选自身实测成立)——四档分数量的是"排序器+事实升档"的组合效果,与三种
+机制孰优是两个问题,别混在一张表里下结论。
 真值="不报根因"的场景(excluded/honest)排序器结构性做不到(无弃权),工具单列为
 「弃权能力缺口」——这是全盘替代要付的语义代价,与机制优劣分开看。
 成绩必须标注 `engine=debate`,与模型手工 RCA 的成绩分表呈现。
@@ -116,7 +114,7 @@ probable 档,四档分数量的是"排序器 vs 事实闭环"的语义差,不是
 | # | 假设 | 验证方法 | 不符时 |
 |---|---|---|---|
 | ① | `FaultTreeProcessor(EvaluationConfig)` / `load_fault_tree(path)→df` / `build_tree_structure(df)→tree` / `find_top_k_paths(tree, question, k)→(orig, softmax, ratio, debate_records)` | 直接跑一步冒烟 | 改 `_load_processor` 与调用三行 |
-| ② | loader 接受壳生成的 xlsx(列:`Ln Code / Ln / Ln(Chinese)` + `Judgment Condition(Chinese)`);**带条件的中间节点单独成行**且按 Code 合并、不会被当成叶子 | `tree_to_vendor_xlsx.py` 生成后让其 load,打印树规模对比 tree_index 节点数 | 缺列→`write_xlsx` 补常量列;中间行异常→`--leaf-only` |
+| ② | loader 接受壳生成的 xlsx(列:`Ln Code / Ln / Ln(Chinese)` + `Judgment Condition(Chinese)`);**带条件的中间节点单独成行**且按 Code 合并、不会被当成叶子 | `tree_to_vendor_xlsx.py` 生成后让其 load,打印树规模对比 tree_index 节点数 | 缺列→`write_xlsx` 补常量列;中间行异常→修 build_rows 的自带行布局(自带行是硬约束,没有"关掉"的逃生门——去掉会复活判据涂抹) |
 | ③ | 输出路径里节点带 `code`(=node_id)、`node_score`、`match_type`,路径尾巴带三个 `*_path_score` | 看 `rca_debate_full.json` | 改 `result_adapter._split_path/_judgment` 取键 |
 | ④ | 空 `judgment_conditions` 的节点(纯结构节点/根)不把路径得分打零 | 冒烟看 top 路径得分是否全 0 | 与上游确认空条件语义;必要时 xlsx 给结构节点填"无条件进入" |
 | ⑤ | config.yaml 能映射到 `EvaluationConfig`(壳自动递归展平嵌套;LLM 关键字段全缺会**硬报错**) | 冒烟即验(成功打印"已映射 N 个字段") | 按报错对照改 yaml 层级,或 bridge.py 自行构造 |

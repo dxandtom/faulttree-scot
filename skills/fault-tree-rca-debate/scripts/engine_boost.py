@@ -83,8 +83,10 @@ def _wrap_post_adaptive(eng, n: int):
     """把并发闸装在 vendor 模块的 requests.post 上(vendor 文件零改动):
     比包 chat 更贴近网关——能看见真实状态码(429 才降档,连接错误不降,那不是流控信号),
     且 vendor 内层重试的 sleep 间隙不占名额。"""
-    gate = _AdaptiveGate(n)
     orig_post = eng.requests.post
+    if getattr(orig_post, "_boost_adaptive", False):
+        return None                        # 已装过(同进程二次 apply):不叠闸
+    gate = _AdaptiveGate(n)
 
     def post(url, **kw):
         with gate:
@@ -96,6 +98,7 @@ def _wrap_post_adaptive(eng, n: int):
             gate.on_success()
         return resp
 
+    post._boost_adaptive = True
     eng.requests.post = post
     return gate
 
@@ -317,8 +320,8 @@ def _wrap_debate_memo(eng) -> bool:
         print("[boost] ⚠ vendor 无 DebateAgent.debate(引擎已升级为防御-攻击三段式?),"
               "辩护记忆化跳过——按 V2 结构重建记忆化是后续提速项")
         return False
-    if getattr(agent_cls.debate, "_boost_memo", False):
-        return True                       # 已包装过(同进程多次 apply),不叠加
+    if getattr(agent_cls.debate, "_boost_memo", False) or getattr(agent_cls.debate, "_boost_aq", False):
+        return True                       # 已处理过(记忆化已挂;或二次 apply 时它在角色卷宗包装内层)
     if _src_hash(agent_cls.debate) != _HASH_DEFENSE:
         print("[boost] ⚠ vendor.DebateAgent.debate 源码已变(引擎升级?),辩护记忆化跳过")
         return False
@@ -361,8 +364,8 @@ def _wrap_agent_questions(eng) -> list:
     零改动;机械匹配器不在此列,继续吃回声安全版 question(防误配红线不变)。
     kit 从 eng._boost_kit 现取(同进程重复 apply 只换 kit,不叠包装;kit=None 即回退原样);
     类/方法/签名对不上的逐项跳过——引擎再升级,安全退化为原 question。"""
-    wrapped = []
-
+    wrapped = []                                         # 报"生效角色"(新包/已包都算):
+                                                         # 同进程二次 apply 时包装已在,不能误报为失效
     def _kit():
         return getattr(eng, "_boost_kit", None)
 
@@ -379,6 +382,7 @@ def _wrap_agent_questions(eng) -> list:
 
         defend._boost_aq = True
         de.defend = defend
+    if de and getattr(getattr(de, "defend", None), "_boost_aq", False):
         wrapped.append("辩护")
     if de and _sig_ok(getattr(de, "respond", None), "self", "my_node", "question", "attack_content") \
             and not getattr(de.respond, "_boost_aq", False):
@@ -392,6 +396,7 @@ def _wrap_agent_questions(eng) -> list:
 
         respond._boost_aq = True
         de.respond = respond
+    if de and getattr(getattr(de, "respond", None), "_boost_aq", False):
         wrapped.append("回应")
     at = getattr(eng, "AttackAgent", None)
     if at and _sig_ok(getattr(at, "attack", None), "self", "target_node", "question", "defense_content") \
@@ -406,6 +411,7 @@ def _wrap_agent_questions(eng) -> list:
 
         attack._boost_aq = True
         at.attack = attack
+    if at and getattr(getattr(at, "attack", None), "_boost_aq", False):
         wrapped.append("攻击")
     cc = getattr(eng, "ConsistencyChecker", None)
     if cc and _sig_ok(getattr(cc, "check_consistency", None),
@@ -421,6 +427,7 @@ def _wrap_agent_questions(eng) -> list:
 
         check_consistency._boost_aq = True
         cc.check_consistency = check_consistency
+    if cc and getattr(getattr(cc, "check_consistency", None), "_boost_aq", False):
         wrapped.append("一致性")
     ju = getattr(eng, "JudgingAgent", None)
     if ju and _sig_ok(getattr(ju, "evaluate_nodes", None), "self", "nodes", "question") \
@@ -435,6 +442,7 @@ def _wrap_agent_questions(eng) -> list:
 
         evaluate_nodes._boost_aq = True
         ju.evaluate_nodes = evaluate_nodes
+    if ju and getattr(getattr(ju, "evaluate_nodes", None), "_boost_aq", False):
         wrapped.append("评委")
     v1 = getattr(eng, "DebateAgent", None)                # V1 引擎的辩护角色也认(同一卷宗)
     if v1 and _sig_ok(getattr(v1, "debate", None), "self", "my_node", "sibling_nodes", "question") \
@@ -449,12 +457,13 @@ def _wrap_agent_questions(eng) -> list:
 
         debate._boost_aq = True
         v1.debate = debate
+    if v1 and getattr(getattr(v1, "debate", None), "_boost_aq", False):
         wrapped.append("辩护(V1)")
     return wrapped
 
 
 def apply(proc, parallel: int = 1, match_cache: bool = True, debate_cache: bool = True,
-          agent_kit=None) -> None:
+          agent_kit=None) -> list:
     """给真引擎实例打加速补丁。形状不符(mock/bridge/新版结构变化)时逐项安全跳过。
     agent_kit=facts_to_question.DossierKit 实例 → 辩论侧各角色的 question 换分层卷宗;
     None=不换(或显式关闭,已包装过的类自动回退原 question)。"""
@@ -462,16 +471,16 @@ def apply(proc, parallel: int = 1, match_cache: bool = True, debate_cache: bool 
     matcher = getattr(ev, "condition_matcher", None)
     client = getattr(ev, "llm_client", None)
     if ev is None or matcher is None or client is None:
-        return  # mock/bridge:无此结构,整体跳过
+        return []  # mock/bridge:无此结构,整体跳过
 
     try:
         import fault_tree_evaluator_bfs_advanced as eng
     except ImportError:
-        return
+        return []
     # 严格同类才打补丁:bridge/子类可能覆写了这些方法,基类拷贝会把覆写静默顶掉
     if type(ev) is not eng.FaultTreeEvaluator or type(matcher) is not eng.ConditionMatcher:
         print("[boost] 引擎实例非原生类型(bridge/子类?),加速补丁整体跳过、保持原行为")
-        return
+        return []
 
     applied = []
     _wrap_chat_failcounter(client)   # 恒开:失败计数是缓存防污染与瞬时失败报告的地基
@@ -496,8 +505,12 @@ def apply(proc, parallel: int = 1, match_cache: bool = True, debate_cache: bool 
         w = _wrap_agent_questions(eng)
         if w:
             applied.append("角色卷宗(" + "+".join(w) + ")")
+        else:
+            print("[boost] ⚠ 角色卷宗一个角色都没接上(引擎类名/签名全对不上?)——辩论仍用原 question,"
+                  "审计字段会如实记 False")
     if parallel and parallel > 1:
         _wrap_post_adaptive(eng, parallel)   # HTTP 层自适应闸:429/503 减半,连续成功回升
         applied.append(f"自适应并发≤{parallel}(429 降档/恢复回升)")
     if applied:
         print(f"[boost] 加速补丁已生效:{' + '.join(applied)}(vendor 原件零改动,评分公式逐字保留)")
+    return applied

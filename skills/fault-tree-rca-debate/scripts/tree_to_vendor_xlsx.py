@@ -11,10 +11,10 @@
 层级**重定基**:树根记 L1(我们的 tree_index 根常在 L2 起,引擎按 L1 起读)。
 
 条件的挂法:每个叶子一行(条件=叶子的);**带条件的中间节点另出一行**(路径止于该节点,
-条件挂它)——若 vendor loader 对"短行"处理有异(把中间节点当叶子),用 --leaf-only 关掉,
+条件挂它)。每个保留节点的自带行是**硬约束**(没有它,引擎会把子孙行判据涂抹到上层),
 并见 references/engine_ops.md 升级核对项 ②。
 
-用法:tree_to_vendor_xlsx.py <tree_index.json> -o <out.xlsx> [--leaf-only]
+用法:tree_to_vendor_xlsx.py <tree_index.json> -o <out.xlsx>
 """
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ def enrich_conditions(index: dict, rca_input: dict | None = None,
     return {**index, "nodes": out_nodes}
 
 
-def build_rows(index: dict, leaf_only: bool = False, allowed: set | None = None):
+def build_rows(index: dict, allowed: set | None = None):
     """→ (max_depth, rows, dropped);row = [(nid, name), ...](根→端点), 端点条件文本(可为空)。
 
     allowed:只把这个集合里的带判据节点当种子(祖先照常补齐)——`--pruned-only` 用它把树缩到
@@ -167,9 +167,9 @@ def _est_cond_lines(cond: str) -> int:
     return n if n else 1
 
 
-def write_xlsx(index: dict, out_path: Path, leaf_only: bool = False, allowed: set | None = None) -> int:
+def write_xlsx(index: dict, out_path: Path, allowed: set | None = None) -> int:
     from openpyxl import Workbook
-    maxd, rows, dropped = build_rows(index, leaf_only, allowed)
+    maxd, rows, dropped = build_rows(index, allowed)
     if dropped:
         print(f"  [tree→xlsx] 已排除 {dropped} 个无判据/pass_through 叶子(空判据会被引擎白给满分、屠榜 Top-K)")
     n_cond_rows = sum(1 for _, c in rows if c)
@@ -205,10 +205,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="tree_index → vendor 故障树 xlsx")
     ap.add_argument("tree_index")
     ap.add_argument("-o", "--output", required=True)
-    ap.add_argument("--leaf-only", action="store_true", help="只出叶子行(中间节点条件不单独成行)")
     a = ap.parse_args()
     index = json.loads(Path(a.tree_index).read_text(encoding="utf-8"))
-    n = write_xlsx(index, Path(a.output), a.leaf_only)
+    n = write_xlsx(index, Path(a.output))
     print(f"已生成 vendor 格式故障树:{a.output}({n} 行;Code 列=node_id)")
     return 0
 

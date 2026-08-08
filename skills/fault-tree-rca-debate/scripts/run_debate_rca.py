@@ -82,6 +82,11 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
     # 而 EvaluationConfig 是扁平字段(llm_api_key/top_k/num_debate_agents/...)。
     # 递归下钻到叶子,按「路径后缀」从长到短试拼(llm.api_key→llm_api_key;evaluation.debate.
     # num_debate_agents→num_debate_agents),只走一层会把 debate 调参静默丢回默认值。
+    # 重命名类键靠后缀拼不出来(引擎 main() 做的是显式改名映射,如
+    # evaluation.debate.consistency_check.base_penalty → consistency_base_penalty):
+    # 照抄引擎 main() 的取数路径列成别名表,否则这些调参静默回默认值。
+    _alias = {"consistency_check_base_penalty": "consistency_base_penalty",
+              "consistency_check_penalty_scaling": "consistency_penalty_scaling"}
     flat, unmapped = {}, []
     def _walk(prefix: list, d: dict):
         for k, v in d.items():
@@ -89,8 +94,9 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
                 _walk(prefix + [str(k)], v)
                 continue
             parts = prefix + [str(k)]
-            cand = next(("_".join(parts[i:]) for i in range(len(parts))
-                         if "_".join(parts[i:]) in known), None)
+            sufs = ["_".join(parts[i:]) for i in range(len(parts))]
+            cand = next((s for s in sufs if s in known), None) \
+                or next((_alias[s] for s in sufs if s in _alias and _alias[s] in known), None)
             if cand:
                 flat.setdefault(cand, v)
             else:
@@ -157,12 +163,15 @@ def _shield_llm(proc, outer_retries: int = 3, base_delay: float = 2.0) -> bool:
     client = getattr(getattr(proc, "evaluator", None), "llm_client", None)
     if client is None or not callable(getattr(client, "chat", None)):
         return False
+    import copy as _copy
     import time as _time
     orig = client.chat
 
     def chat(messages, temperature=None):
         for i in range(outer_retries):
-            resp = orig(messages, temperature)
+            # vendor 的 chat 会**原地改** caller 的 messages(把 system 内容前插进 user 条目),
+            # 每次重试再插一遍——深拷贝隔离,防外层重试把 system 行叠加 N 份污染语义
+            resp = orig(_copy.deepcopy(messages), temperature)
             if resp:
                 client.connection_failed = False   # 成功即撤销"永久降级"标记
                 return resp
@@ -193,7 +202,6 @@ def main() -> int:
     ap.add_argument("--mock", action="store_true", help="用确定性假引擎跑通适配层(不调 LLM)")
     ap.add_argument("--vendor-dir", default=str(_HERE.parent / "vendor"))
     ap.add_argument("--config", help="vendor 配置(默认 <vendor-dir>/config.yaml)")
-    ap.add_argument("--leaf-only", action="store_true", help="生成 xlsx 时中间节点条件不单独成行")
     ap.add_argument("--pruned-only", action="store_true",
                     help="只喂 rca_input.fault_tree.pruned_nodes(有事实节点+祖先)的剪枝局部子树——"
                          "大树控 LLM 耗时/成本的主开关;rca_input 无 pruned_nodes 时自动回退全树")
@@ -292,14 +300,15 @@ def main() -> int:
             if _shield_llm(proc):
                 print("[llm加固] 已启用外层重试(×3,退避 2s/4s):瞬时 502/超时不再让引擎永久降级"
                       "关键词匹配;--no-llm-shield 可关闭")
+        boost_applied = []
         if not a.mock:
             from engine_boost import apply as _boost
             kit = None
             if not a.no_agent_question:
                 from facts_to_question import DossierKit
                 kit = DossierKit(rca_input, tree_index)
-            _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache,
-                   debate_cache=not a.no_debate_cache, agent_kit=kit)
+            boost_applied = _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache,
+                                   debate_cache=not a.no_debate_cache, agent_kit=kit) or []
 
         # 心跳:每次 LLM 调用完成刷新单行文件——长跑时用它区分"还在跑(单次调用就是慢)"
         # 与"真挂了"(心跳超过 ~20 分钟不动才值得怀疑,180s 超时×重试的最坏栈就这么长)。
@@ -327,7 +336,7 @@ def main() -> int:
         # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
         # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
         xlsx = out_dir / "vendor_fault_tree.xlsx"
-        n_rows = write_xlsx(tree_index, xlsx, a.leaf_only, allowed)
+        n_rows = write_xlsx(tree_index, xlsx, allowed)
         print(f"[2/4] vendor 格式故障树已生成({n_rows} 行 → {xlsx.name});引擎={desc}")
 
         # 进度可见化:长跑时另开终端 tail <out-dir>/debate_progress.txt 即知跑到哪了。
@@ -407,7 +416,9 @@ def main() -> int:
         recs.append(d)
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k, "llm_degraded": degraded,
-            "agent_question_dossier": bool(not a.mock and not a.no_agent_question),
+            # 落"实际生效"不落"意图":包装被守卫跳过时这里必须如实为 False(审计不许被骗)
+            "agent_question_dossier": any(s.startswith("角色卷宗") for s in boost_applied),
+            "boost_applied": boost_applied,
             "llm_call_failures": n_fail,
             "top_k_paths_original": top_orig, "top_k_paths_softmax": top_soft,
             "top_k_paths_ratio": top_ratio, "debate_records": recs}

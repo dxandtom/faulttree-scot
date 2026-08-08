@@ -89,6 +89,57 @@ def _classify(entries: list) -> tuple:
     return held, failed, insuf, obs
 
 
+def _weak_neg(f: dict) -> bool:
+    """存在类(C/G 非 absent)的 ok+不成立=**弱阴性**:只说明"这份数据里没找到",不构成反证
+    (与手工 draft_rca._weak_neg 同口径)。强反证=A 阈值/P 成对/absent 缺失类/D 组合的不成立。"""
+    return str(f.get("class") or "").upper() in ("C", "G") and not f.get("absent")
+
+
+def _tri4(entries: list) -> tuple:
+    """节点事实 → 机械四态(与手工 draft_rca._tri 同口径,**冲突不塌缩**):
+    ("held"|"conflict"|"refuted"|"insufficient"|None, 成立侧实测串列表)。
+    conflict=成立与强反证并存(两边都是硬话)——手工闸对这种候选拒收确证,这里同样不许洗白。"""
+    facts = [e.get("fact") or e for e in entries or []]
+    ok_t = [f for f in facts if f.get("status") == "ok" and f.get("predicate_satisfied") is True]
+    ok_f = [f for f in facts if f.get("status") == "ok" and f.get("predicate_satisfied") is False]
+    insuf = any(f.get("status") in ("insufficient_data", "manual") for f in facts)
+    obs = [_fmt_fact(f) for f in ok_t]
+    if ok_t and any(not _weak_neg(f) for f in ok_f):
+        return "conflict", obs
+    if ok_t:
+        return "held", obs
+    if ok_f:
+        return "refuted", []
+    if insuf:
+        return "insufficient", []
+    return None, []
+
+
+def facts_index(rca_input: dict) -> dict:
+    """rca_input → {node_id: {"st": 四态, "obs": 成立实测串, "fail": 反证摘要, "insuf": 缺数原因}}。
+    节点级先聚合再判态(同节点跨源的成立+强反证要判成 conflict,逐条判再合并会洗白冲突);
+    result_adapter 的回程事实感知与 DossierKit 的档案都从这张表读,口径一处定。"""
+    groups: dict = {}
+    ft = (rca_input or {}).get("fault_tree")
+    if isinstance(ft, dict) and ft.get("pruned_nodes"):
+        for nid, node in ft["pruned_nodes"].items():
+            if (node or {}).get("facts"):
+                groups.setdefault(nid, []).extend(node["facts"])
+    else:
+        for res in ((rca_input or {}).get("indicator_results") or {}).values():
+            for c in (res or {}).get("conditions", []) if isinstance(res, dict) else []:
+                if c.get("node_id"):
+                    groups.setdefault(c["node_id"], []).append(c)
+    out = {}
+    for nid, entries in groups.items():
+        st, obs = _tri4(entries)
+        if st is None:
+            continue
+        out[nid] = {"st": st, "obs": "; ".join(obs),
+                    "fail": _fmt_fail(entries), "insuf": _insuf_reason(entries)}
+    return out
+
+
 def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
     names = {}
     if tree_index:
@@ -104,32 +155,44 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
             if not facts:
                 continue
             name = node.get("name") or names.get(nid, nid)
-            held, failed, insuf, obs = _classify(facts)
+            st, obs = _tri4(facts)                       # 四态:冲突不塌缩(带⚠标进成立节,评委看得见两面)
             cond = str(node.get("condition") or "").strip()
-            if held:
+            if st in ("held", "conflict"):
                 cond_part = f"(判据:{cond})" if cond else ""
-                held_lines.append(f"- 「{name}」条件成立{cond_part};实测:{'; '.join(obs)}")
-            elif failed:                                                     # 只报名+安全计数,不回声判据
+                mark = "(⚠同节点另有强反证,证据冲突)" if st == "conflict" else ""
+                held_lines.append(f"- 「{name}」条件成立{cond_part}{mark};实测:{'; '.join(obs)}")
+            elif st == "refuted":                                            # 只报名+安全计数,不回声判据
                 d = _fmt_fail(facts)
                 excluded.append(f"{name}({d})" if d else name)
-            elif insuf:
+            elif st == "insufficient":
                 r = _insuf_reason(facts)
                 insufficient.append(f"{name}(缺:{r})" if r else name)
     else:                                                                     # 完整形态
         scenario = ""
+        by_node: dict = {}                               # 节点级先聚合再判态(跨源冲突逐条判会洗白)
         for ind, res in (rca_input.get("indicator_results") or {}).items():
             for c in (res or {}).get("conditions", []):
-                name = c.get("node") or names.get(c.get("node_id"), c.get("node_id") or "?")
-                held, failed, insuf, obs = _classify([c])
-                cond = str(c.get("condition_text") or "").strip()
-                if held:
-                    held_lines.append(f"- 「{name}」条件成立(判据:{cond});实测({ind}):{'; '.join(obs)}")
-                elif failed:
-                    d = _fmt_fail([c])
-                    excluded.append(f"{name}({d})" if d else name)
-                elif insuf:
-                    r = _insuf_reason([c])
-                    insufficient.append(f"{name}(缺:{r})" if r else name)
+                key = c.get("node_id") or f"?{c.get('node')}"
+                g = by_node.setdefault(key, {"name": c.get("node")
+                                             or names.get(c.get("node_id"), c.get("node_id") or "?"),
+                                             "inds": [], "entries": []})
+                g["entries"].append(c)
+                g["inds"].append(str(ind))
+        for g in by_node.values():
+            st, obs = _tri4(g["entries"])
+            name = g["name"]
+            if st in ("held", "conflict"):
+                cond = next((str(c.get("condition_text") or "").strip() for c in g["entries"]
+                             if (c.get("fact") or c).get("predicate_satisfied") is True), "")
+                mark = "(⚠同节点另有强反证,证据冲突)" if st == "conflict" else ""
+                held_lines.append(f"- 「{name}」条件成立(判据:{cond}){mark};"
+                                  f"实测({'/'.join(sorted(set(g['inds'])))}):{'; '.join(obs)}")
+            elif st == "refuted":
+                d = _fmt_fail(g["entries"])
+                excluded.append(f"{name}({d})" if d else name)
+            elif st == "insufficient":
+                r = _insuf_reason(g["entries"])
+                insufficient.append(f"{name}(缺:{r})" if r else name)
 
     parts = [f"故障场景:{scenario or (tree_index or {}).get('scenario', '')}。",
              "以下为各数据源**已由代码算好的确定性事实**(非人工主诉),请据此定位最可能的根因路径。"]
@@ -185,31 +248,10 @@ class DossierKit:
         self.names = {nid: (n.get("name") or nid) for nid, n in nodes.items()}
         self.conds = {nid: str(n.get("condition") or "").strip() for nid, n in nodes.items()}
         self.parents = {nid: n.get("parent") for nid, n in nodes.items()}
-        self.facts: dict = {}
-        rank = {"held": 2, "refuted": 1, "insufficient": 0}
-
-        def _put(nid, entries):
-            held, failed, insuf, obs = _classify(entries)
-            st = "held" if held else ("refuted" if failed else ("insufficient" if insuf else None))
-            if not nid or st is None:
-                return
-            prev = self.facts.get(nid)
-            if prev is not None and rank[prev["st"]] >= rank[st]:
-                return
-            self.facts[nid] = {"st": st, "obs": "; ".join(obs),
-                               "fail": _fmt_fail(entries), "insuf": _insuf_reason(entries)}
-
+        self.facts = facts_index(rca_input)              # 四态共享索引(与 result_adapter 同一口径)
         ft = (rca_input or {}).get("fault_tree")
-        if isinstance(ft, dict) and ft.get("pruned_nodes"):
-            self.scenario = ft.get("scenario") or (tree_index or {}).get("scenario") or ""
-            for nid, node in ft["pruned_nodes"].items():
-                if (node or {}).get("facts"):
-                    _put(nid, node["facts"])
-        else:
-            self.scenario = (tree_index or {}).get("scenario") or ""
-            for res in ((rca_input or {}).get("indicator_results") or {}).values():
-                for c in (res or {}).get("conditions", []) if isinstance(res, dict) else []:
-                    _put(c.get("node_id"), [c])
+        self.scenario = ((ft.get("scenario") if isinstance(ft, dict) else "")
+                         or (tree_index or {}).get("scenario") or "")
         self.rca_input = rca_input or {}
         self._global_text = None
         self._groups: dict = {}
@@ -233,6 +275,9 @@ class DossierKit:
             return "未绑定:判据从未被机器检查(既未证实也未证伪)"
         if f["st"] == "held":
             return "实测成立" + (f";实测:{f['obs']}" if f["obs"] else "")
+        if f["st"] == "conflict":
+            return (f"证据冲突:实测命中({f['obs'] or '见全局案情'})与强反证"
+                    f"({f['fail'] or '另一源硬性未命中'})并存——存疑,确证前须人审")
         if f["st"] == "refuted":
             return ("已被数据证伪" + (f"(反证:{f['fail']})" if f["fail"] else "")
                     + "——除非质疑数据本身,不可仅凭辩词翻案")
@@ -253,11 +298,13 @@ class DossierKit:
 
     def global_text(self) -> str:
         if self._global_text is None:
-            held, refuted, insuf = [], [], []
+            held, confl, refuted, insuf = [], [], [], []
             for nid, f in sorted(self.facts.items()):
                 line = f"- 「{self.names.get(nid, nid)}」判据:{self.conds.get(nid, '')}"
                 if f["st"] == "held":
                     held.append(line + (f";实测:{f['obs']}" if f["obs"] else ""))
+                elif f["st"] == "conflict":
+                    confl.append(line + f";命中:{f['obs'] or '?'};反证:{f['fail'] or '?'}")
                 elif f["st"] == "refuted":
                     refuted.append(line + (f";反证:{f['fail']}" if f["fail"] else ""))
                 else:
@@ -271,6 +318,7 @@ class DossierKit:
 
             parts = [f"场景:{self.scenario}。以下事实均由代码在数据上算出(非人工主诉、非模型判断)。",
                      cap(held, "实测成立的节点(判据+实测)"),
+                     cap(confl, "证据冲突的节点(成立与强反证并存——存疑,确证须人审)"),
                      cap(refuted, "已被数据证伪的节点(判据+反证;不可仅凭辩词翻案)"),
                      cap(insuf, "数据不足的节点(判据+缺口;既未证实也未证伪)")]
             mi = self.rca_input.get("missing_indicators") or {}
@@ -298,10 +346,15 @@ class DossierKit:
 
     # ----- 各角色:信息同一份,只有任务框架不同 -----
     def for_defense(self, my_node, sibling_nodes) -> str:
+        group, seen = [], set()                          # vendor 传的兄弟表常已含目标自身:按 code 去重,
+        for n in [my_node] + list(sibling_nodes or []):  # 否则目标在档案里出现两遍、组缓存按目标裂键
+            c = str(n.get("code"))
+            if c not in seen:
+                seen.add(c)
+                group.append(n)
         return self._compose(
             f"【你的任务】你为节点「{self._nm(my_node)}」辩护:基于下方档案论证它为什么可能是"
-            "本次故障的根因,并正面回应对它不利的证据(数据证伪/数据不足)。",
-            [my_node] + list(sibling_nodes or []))
+            "本次故障的根因,并正面回应对它不利的证据(数据证伪/数据不足)。", group)
 
     def for_respond(self, my_node) -> str:
         return self._compose(

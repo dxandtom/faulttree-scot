@@ -33,40 +33,21 @@ _MECH_KEY = {"original": "top_k_paths_original", "softmax": "top_k_paths_softmax
              "ratio": "top_k_paths_ratio"}
 _SCORE_KEY = {"original": "original_path_score", "softmax": "softmax_path_score",
               "ratio": "ratio_path_score"}
-_ST_CN = {"held": "成立", "refuted": "不成立", "insufficient": "数据不足"}
+_ST_CN = {"held": "成立", "refuted": "不成立", "insufficient": "数据不足",
+          "conflict": "冲突(成立与强反证并存)"}
+# judgment 里按实测态附加的字眼——与 validate_rca 的 NOT_PROVEN 疑虑词表对齐:
+# 疑似档的降档理由必须落在具体节点的 judgment 上,否则"全成立却居疑似"会被硬闸打回(实测)。
+_J_ST = {"held": ";证据引擎实测成立", "refuted": ";证据引擎实测不成立",
+         "insufficient": ";证据引擎实测数据不足",
+         "conflict": ";证据引擎实测冲突(成立与强反证并存,存疑)"}
 
 
 def _facts_index(rca_input: dict | None) -> dict:
-    """rca_input → {node_id: {"st": held|refuted|insufficient, "obs": 实测摘要}}。
-
-    与 facts_to_question 同一塌缩优先级(held>refuted>insufficient)。这是回程事实感知的
-    地基:证据引擎的确定性结论此前只用于渲染 question,产出侧全弃——confidence 校准、
-    证伪旗标、blocked_at 回填、弃权垫片都从这张表读。"""
-    from facts_to_question import _classify
-    idx: dict = {}
-    rank = {"held": 2, "refuted": 1, "insufficient": 0}
-
-    def _put(nid, held, failed, insuf, obs):
-        st = "held" if held else ("refuted" if failed else ("insufficient" if insuf else None))
-        if not nid or st is None:
-            return
-        prev = idx.get(nid)
-        if prev is None or rank[st] > rank[prev["st"]]:
-            idx[nid] = {"st": st, "obs": "; ".join(obs) if obs else ""}
-
-    ft = (rca_input or {}).get("fault_tree")
-    if isinstance(ft, dict) and ft.get("pruned_nodes"):
-        for nid, node in ft["pruned_nodes"].items():
-            facts = (node or {}).get("facts")
-            if facts:
-                held, failed, insuf, obs = _classify(facts)
-                _put(nid, held, failed, insuf, obs)
-    else:
-        for res in ((rca_input or {}).get("indicator_results") or {}).values():
-            for c in (res or {}).get("conditions", []) if isinstance(res, dict) else []:
-                held, failed, insuf, obs = _classify([c])
-                _put(c.get("node_id"), held, failed, insuf, obs)
-    return idx
+    """rca_input → {node_id: {"st": 四态, "obs", "fail", "insuf"}}。四态口径(含 conflict,
+    与手工 draft_rca._tri 同源)统一定义在 facts_to_question.facts_index——回程事实感知的
+    地基:confidence 校准、证伪/冲突旗标、blocked_at 回填、弃权垫片都从这张表读。"""
+    from facts_to_question import facts_index
+    return facts_index(rca_input or {})
 
 
 def _split_path(path: list) -> tuple:
@@ -84,16 +65,25 @@ def _confidence(orig_score) -> str:
     return "high" if s >= 0.6 else ("medium" if s >= 0.3 else "low")
 
 
-def _judgment(n: dict) -> str:
+def _judgment(n: dict, f: dict | None = None, unbound: bool = False) -> str:
+    """节点 judgment=引擎侧评语 + **实测态字眼**(有 fx 的节点)。实测态不是装饰:
+    validate 对疑似档的硬闸要求降档理由落在具体节点上(不成立/数据不足/未判定这类疑虑词),
+    只写中性词会被当"全成立却居疑似"误杀;有事实背书写实测态,既诚实又与手工口径同词。"""
     mt, sc = n.get("match_type"), n.get("node_score")
     sc_s = f"{float(sc):.2f}" if isinstance(sc, (int, float)) else "?"
     if mt == "full":
-        return f"条件匹配(full,得分{sc_s})"
-    if mt == "partial":
-        return f"部分匹配(得分{sc_s})"
-    if mt == "debate":
-        return f"辩论评分(得分{sc_s})"
-    return f"结构节点(得分{sc_s})"
+        base = f"条件匹配(full,得分{sc_s})"
+    elif mt == "partial":
+        base = f"部分匹配(得分{sc_s})"
+    elif mt == "debate":
+        base = f"辩论评分(得分{sc_s})"
+    else:
+        base = f"结构节点(得分{sc_s})"
+    if f:
+        return base + _J_ST[f["st"]]
+    if unbound:
+        return base + ";判据未绑定,未判定"
+    return base
 
 
 def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
@@ -105,7 +95,8 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
     fx = _facts_index(rca_input)          # 证据引擎的确定性结论(回程事实感知的地基)
     # 弃权垫片:全场景没有任何"成立"事实(excluded/honest 情形,正确答案="别报根因")时,
     # 排序候选降入 undetermined 而非硬吐 probable——补上评分制引擎的弃权能力缺口。
-    abstain = bool(fx) and not any(v["st"] == "held" for v in fx.values())
+    # 冲突=有成立侧证据,不算"零成立",不触发弃权。
+    abstain = bool(fx) and not any(v["st"] in ("held", "conflict") for v in fx.values())
 
     def _has_cond(ti_n: dict) -> bool:
         """与 validate_rca._holding_map 同口径:非空判据、且不是"无条件/无判断"占位。"""
@@ -138,12 +129,17 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
                     nm = ti_n.get("name") or nid
                     if st == "refuted":
                         anc_notes.append(f"⚠ 路径节点「{nm}」判据实测不成立(与候选确证冲突,树逻辑待人审)")
+                    elif st == "conflict":
+                        anc_notes.append(f"⚠ 路径节点「{nm}」证据冲突(成立与强反证并存,存疑)")
                     elif st == "insufficient":
                         anc_notes.append(f"路径节点「{nm}」数据不足(不拦确证;补数据可闭环)")
                     elif st is None:
                         anc_notes.append(f"路径节点「{nm}」未经检查(判据无绑定)")
-            if f:                              # actual 回填实测事实(老契约语义);判据词不进 judgment,防伪造检查误触
+            unbound = _has_cond(ti_n) and not ti_n.get("pass_through") and not f
+            if f:                              # actual 回填实测事实(老契约语义)
                 actual = f"证据引擎实测[{_ST_CN[f['st']]}]" + (f":{f['obs']}" if f["obs"] else "")
+                if f["st"] == "conflict" and f.get("fail"):
+                    actual += f";反证:{f['fail']}"
                 if f["st"] == "insufficient" and blocked_node is None:
                     blocked_node = ti_n.get("name") or nid
                 if f["st"] == "refuted":
@@ -154,7 +150,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
                        "node_id": nid,
                        "condition": str(ti_n.get("condition") or "").strip() or "(无独立判据)",
                        "actual": actual,
-                       "judgment": _judgment(n)})
+                       "judgment": _judgment(n, f, unbound)})
             if nid in dbg:
                 r = dbg[nid]
                 debate_caveats.append(
@@ -163,6 +159,14 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
 
         orig = tail.get("original_path_score")
         leaf_st = (fx.get(leaf.get("code")) or {}).get("st")
+        ti_leaf = nodes_idx.get(leaf.get("code")) or {}
+        # 路径末端非真叶/无独立判据(截断):引擎路径在此止步,整支其实没判完——把这一点
+        # 落到末端节点的 judgment 上(validate 认"未判定"疑虑词),否则全成立的截断路径会被
+        # "全成立却居疑似"的硬闸误杀
+        truncated = bool(ti_leaf.get("children")) or not _has_cond(ti_leaf) \
+            or bool(ti_leaf.get("pass_through"))
+        if truncated and ev:
+            ev[-1]["judgment"] += ";路径在此截断(下级未展开/无独立判据),整支未判定"
         # confidence 校准(修对抗审查实锤的失真):引擎给 debate 节点的分上限 0.5,连乘让
         # "叶子已实证成立、只是祖先数据不足"的路径掉到 low——叶子实证成立且路径无证伪时
         # 托底 medium;叶子被数据证伪则封顶 low(评分再高也不该高于被证伪的置信)。
@@ -174,6 +178,8 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
 
         conflict = ([f"⚠ 与证据引擎冲突:「{'、'.join(refuted_nodes)}」的判据实测不成立(已被数据排除),"
                      f"本条仅为评分排序结果"] if refuted_nodes else [])
+        if leaf_st == "conflict":
+            conflict.append("⚠ 候选自身证据冲突(成立与强反证并存)——不升确证,须人工裁决两面证据")
         entry = {
             "Root_cause": leaf_name,
             "Fault_tree_path": [e["node"] for e in ev],
@@ -197,10 +203,9 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
             "_engine": {"name": "fault-tree-rca-debate", "mechanism": mechanism},
         }
         # 升档(与手工确证闸同口径):候选=路径末端叶子,自身实测成立即确证;
-        # 祖先带伤不拦,anc_notes 落 caveats(依据是事实,不是辩论得分)
-        ti_leaf = nodes_idx.get(leaf.get("code")) or {}
-        if (not abstain and leaf_st == "held" and not (ti_leaf.get("children") or [])
-                and _has_cond(ti_leaf) and not ti_leaf.get("pass_through")):
+        # 祖先带伤不拦,anc_notes 落 caveats(依据是事实,不是辩论得分);
+        # conflict 候选不升(手工 finalize 对冲突候选同样拒收确证)
+        if not abstain and leaf_st == "held" and not truncated:
             ev2 = []
             for e in ev:
                 tn = nodes_idx.get(e["node_id"]) or {}
@@ -236,11 +241,11 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
             probable.append(entry)
 
     if abstain and undetermined:
-        print(f"  [弃权] 证据引擎无任何'成立'事实——{len(undetermined)} 条排序候选降入 undetermined"
-              f"(评分制引擎的弃权垫片,防止无据硬报根因)")
+        print(f"  [弃权|机制={mechanism}] 证据引擎无任何'成立'事实——{len(undetermined)} 条排序候选"
+              f"降入 undetermined(评分制引擎的弃权垫片,防止无据硬报根因)")
     if confirmed:
-        print(f"  [升档] {len(confirmed)} 条路径的候选经证据引擎实测成立(与手工确证闸同口径,"
-              f"祖先状态落 caveats)→ 进入确证档 rca_result")
+        print(f"  [升档|机制={mechanism}] {len(confirmed)} 条路径的候选经证据引擎实测成立"
+              f"(与手工确证闸同口径,祖先状态落 caveats)→ 进入确证档 rca_result")
 
     tree_issues = {}
     if rca_input:
