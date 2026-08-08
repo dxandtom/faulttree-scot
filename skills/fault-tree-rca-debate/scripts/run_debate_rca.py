@@ -210,6 +210,10 @@ def main() -> int:
                          "匹配层不再调 LLM 重新发现已知答案;实测与理想 LLM 匹配零分歧)")
     ap.add_argument("--no-debate-cache", action="store_true",
                     help="关闭辩护记忆化(默认开:同一辩论组里同(节点,组,question)的辩护只生成一次)")
+    ap.add_argument("--no-agent-question", action="store_true",
+                    help="关闭辩论侧角色卷宗(默认开:辩护/攻击/回应/一致性/评委收到的 question "
+                         "换成分层卷宗——判据原文全员必读(含被证伪/缺数节点)+实测与反证+按角色任务框架;"
+                         "机械匹配器不受影响,仍吃回声安全版防误配)")
     ap.add_argument("--no-match-cache", action="store_true",
                     help="关闭匹配记忆化缓存(默认开:同一节点判据只问一次 LLM,辩论里的重复兄弟检查全走缓存)")
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
@@ -290,8 +294,12 @@ def main() -> int:
                       "关键词匹配;--no-llm-shield 可关闭")
         if not a.mock:
             from engine_boost import apply as _boost
+            kit = None
+            if not a.no_agent_question:
+                from facts_to_question import DossierKit
+                kit = DossierKit(rca_input, tree_index)
             _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache,
-                   debate_cache=not a.no_debate_cache)
+                   debate_cache=not a.no_debate_cache, agent_kit=kit)
 
         # 心跳:每次 LLM 调用完成刷新单行文件——长跑时用它区分"还在跑(单次调用就是慢)"
         # 与"真挂了"(心跳超过 ~20 分钟不动才值得怀疑,180s 超时×重试的最坏栈就这么长)。
@@ -399,6 +407,7 @@ def main() -> int:
         recs.append(d)
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k, "llm_degraded": degraded,
+            "agent_question_dossier": bool(not a.mock and not a.no_agent_question),
             "llm_call_failures": n_fail,
             "top_k_paths_original": top_orig, "top_k_paths_softmax": top_soft,
             "top_k_paths_ratio": top_ratio, "debate_records": recs}

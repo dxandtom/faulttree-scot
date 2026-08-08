@@ -13,8 +13,9 @@ description: 辩论式多代理 RCA 技能:吃 cs-scot-execute 备好的 rca_inp
 ```
 runner 跑完 script 节点 → 本轮结果目录 result-<运行号>/rca_input.json
   ├─ 手工路径:用「fault-tree-rca」技能,模型逐节点判断 → rca.json(事实闭环,四档)
-  └─ 本技能  :跑下面这条命令,辩论引擎评分       → rca.json(评分排序;整条路径被证据引擎
-     实测成立的自动升确证档 rca_result,其余 probable——升档凭 execute 的事实,不凭辩论得分)
+  └─ 本技能  :跑下面这条命令,辩论引擎评分       → rca.json(评分排序;候选(路径末端叶子)
+     被证据引擎实测成立的升确证档 rca_result——与手工确证闸**同口径**:祖先数据不足/不成立
+     不拦、机械落 caveats;升档凭 execute 的事实,不凭辩论得分)
 ```
 ```bash
 python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_input.json" --mechanism all
@@ -34,7 +35,7 @@ python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_i
 ## 一次性配置(**只在首次使用/换机器/换 config 时做**;做过就跳过,别每次重复)
 1. 把含 API 密钥的 `config.yaml` 放进本技能 `vendor/`(gitignore 挡住不入库);
    **放好后再 install**(整目录拷贝,引擎+config 一起带走,之后固定用装好的路径)。
-2. `pip install pandas numpy pyyaml openpyxl requests`。
+2. `pip install pandas numpy scipy pyyaml openpyxl requests`(scipy 是引擎 V2 置信区间计算的硬依赖)。
 3. 验一次:`python scripts/probe_llm.py`(exit 0=通)→ `--mock` 冒烟 → 真引擎。
 
 ## 执行手册(跑本技能的 agent 按此操作;这些约束不需要用户在提示词里重复)
@@ -66,6 +67,11 @@ python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_i
 - 并行**默认开**(`--parallel 4`;`--parallel 1` 退回纯串行):匹配/辩护/评委等独立 LLM
   循环并发执行 + 匹配记忆化缓存(默认开,`--no-match-cache` 关)。评分公式逐字保留、
   实测结果与串行逐位一致,小样 4.4×提速。并发闸自适应:网关回 429/503 自动减半、恢复后逐档回升,不用手动降。
+- **角色卷宗**(默认开,`--no-agent-question` 关):辩论侧各角色(辩护/攻击/回应/一致性/评委)
+  收到的 question 换成分层卷宗——**判据原文全员必读**(含被证伪/缺数节点的,附实测与反证,
+  攻击者拿数据说话、评委按"实测优先于辩词"裁决),任务框架按角色、信息全员对称不裁剪;
+  **机械匹配器不受影响**,仍吃回声安全版 question(防误配红线不变)。引擎升级改了类名/签名
+  会逐项安全跳过退回原 question。
 - **匹配预播种**(默认开,`--no-seed-match` 关):execute 已判定的节点结论直接写进匹配
   缓存,匹配层不再调 LLM 重新发现已知答案(30 场景实测与理想 LLM 匹配零分歧,还消除
   采样随机性);**辩护记忆化**(默认开,`--no-debate-cache` 关):同(节点,组,question)

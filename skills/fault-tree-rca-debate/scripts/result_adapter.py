@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """辩论引擎输出(top_k×3 + debate_records)→ 本仓 rca.json 四档契约。
 
-诚实映射(v2:评分排序为体,事实闭环升档):
+诚实映射(v3:评分排序为体,候选自身事实升档——与手工 fault-tree-rca 确证闸同口径):
 - 辩论引擎产的是**评分排序的假设**,不是证明 → 默认进 `probable_causes`。
-- **事实闭环升档**:一条路径若被**证据引擎的确定性事实**完整确认——路径上每个带判据节点
-  都实测「成立」、叶子是真叶子且实测成立、无一节点被证伪——则进 `rca_result`(确证档)。
-  升档依据是 execute 算出的事实,**不是辩论得分**(得分只管排序):与手工 fault-tree-rca 的
-  确证语义同源,validate_rca 的"成立必须有事实/路径无不成立节点"机械检查天然通过。
-  任一带判据节点数据不足/被证伪/未覆盖,或叶子非真叶(如 L6 截断)→ 不升,留在 probable。
+- **升档凭事实,口径=候选自身**:路径末端的叶子(候选)被**证据引擎实测「成立」**、且是
+  带判据的真叶子 → 进 `rca_result`(确证档)。祖先数据不足/不成立/未绑定**不拦**——
+  与手工新闸一致(数据不足=零信息;不成立=树逻辑冲突,按叶子事实确证),但机械落
+  caveats 逐类点名;整条路径全实测成立的在 caveats 注明"全路径实测闭环"(最强成色)。
+  升档依据是 execute 算出的事实,**不是辩论得分**(得分只管排序);validate_rca 的
+  新口径(假根因只揪候选自身)天然同闸。叶子非真叶(如 L6 截断)/叶子非成立 → 留在
+  probable(叶子数据不足的路径由 blocked_at 指认卡点;"叶子待定确证中间节点"那半条
+  手工闸有、本适配层不做——诚实留疑似)。
 - `confidence` 一律按 **original 路径得分**分档(softmax/ratio 是连乘概率、数值天然极小,
   不适合做绝对阈值);--mechanism 只决定**取哪份 top-k 排序**。
 - evidence_path 的 judgment:升档条目的带判据节点写「成立(证据引擎实测)」(有事实背书,
@@ -121,16 +124,24 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         ev, debate_caveats = [], []
         blocked_node = None                    # 路径上第一个"数据不足"节点 = 最可指认的阻塞点
         refuted_nodes = []
-        held_cond_nodes, closure_break = 0, False   # 事实闭环核验:带判据节点是否全部实测成立
+        anc_notes = []                         # 祖先(非候选)事实状态:不拦确证,机械落 caveats
+        path_closed = True                     # 全部带判据节点实测成立=全路径闭环(最强成色)
         for n in nodes:
             nid = n.get("code")
             ti_n = nodes_idx.get(nid) or {}
             f = fx.get(nid)
             if _has_cond(ti_n) and not ti_n.get("pass_through"):
-                if f and f["st"] == "held":
-                    held_cond_nodes += 1
-                else:                          # 数据不足/被证伪/无事实,任一即破闭环
-                    closure_break = True
+                st = f["st"] if f else None
+                if st != "held":
+                    path_closed = False
+                if nid != leaf.get("code"):    # 候选自身另行判;祖先只记状态
+                    nm = ti_n.get("name") or nid
+                    if st == "refuted":
+                        anc_notes.append(f"⚠ 路径节点「{nm}」判据实测不成立(与候选确证冲突,树逻辑待人审)")
+                    elif st == "insufficient":
+                        anc_notes.append(f"路径节点「{nm}」数据不足(不拦确证;补数据可闭环)")
+                    elif st is None:
+                        anc_notes.append(f"路径节点「{nm}」未经检查(判据无绑定)")
             if f:                              # actual 回填实测事实(老契约语义);判据词不进 judgment,防伪造检查误触
                 actual = f"证据引擎实测[{_ST_CN[f['st']]}]" + (f":{f['obs']}" if f["obs"] else "")
                 if f["st"] == "insufficient" and blocked_node is None:
@@ -185,24 +196,28 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
             "evidence_path": ev,
             "_engine": {"name": "fault-tree-rca-debate", "mechanism": mechanism},
         }
-        # 事实闭环升档:整条路径被证据引擎实测确认 → 确证档(依据是事实,不是辩论得分)
+        # 升档(与手工确证闸同口径):候选=路径末端叶子,自身实测成立即确证;
+        # 祖先带伤不拦,anc_notes 落 caveats(依据是事实,不是辩论得分)
         ti_leaf = nodes_idx.get(leaf.get("code")) or {}
-        if (not abstain and not closure_break and held_cond_nodes > 0
-                and leaf_st == "held" and not (ti_leaf.get("children") or [])
+        if (not abstain and leaf_st == "held" and not (ti_leaf.get("children") or [])
                 and _has_cond(ti_leaf) and not ti_leaf.get("pass_through")):
             ev2 = []
             for e in ev:
                 tn = nodes_idx.get(e["node_id"]) or {}
                 e2 = dict(e)
-                if _has_cond(tn) and not tn.get("pass_through"):
-                    e2["judgment"] = "成立(证据引擎实测)"   # 有事实背书,合法使用保留字
+                if _has_cond(tn) and not tn.get("pass_through") \
+                        and (fx.get(e["node_id"]) or {}).get("st") == "held":
+                    e2["judgment"] = "成立(证据引擎实测)"   # 只有实测成立的节点配用保留字
                 ev2.append(e2)
+            closure = ("事实闭环:路径上所有带判据节点均经证据引擎实测成立" if path_closed
+                       else "候选自身经证据引擎实测成立(与手工 RCA 确证闸同口径,祖先状态见 caveats)")
             confirmed.append({
                 "Root_cause": leaf_name,
                 "Fault_tree_path": entry["Fault_tree_path"],
-                "support": "事实闭环:路径上所有带判据节点均经证据引擎实测成立(确定性代码判定,"
-                           f"非模型/辩论打分);辩论引擎仅提供排序(机制={mechanism},"
+                "support": f"{closure}(确定性代码判定,非模型/辩论打分);"
+                           f"辩论引擎仅提供排序(机制={mechanism},"
                            f"路径得分 {tail.get(_SCORE_KEY[mechanism])},详见 rca_debate_full.json)",
+                "caveats": "; ".join(anc_notes) if anc_notes else "全路径实测闭环(无带伤节点)",
                 "evidence_path": ev2,
                 "_engine": entry["_engine"],
             })
@@ -224,8 +239,8 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         print(f"  [弃权] 证据引擎无任何'成立'事实——{len(undetermined)} 条排序候选降入 undetermined"
               f"(评分制引擎的弃权垫片,防止无据硬报根因)")
     if confirmed:
-        print(f"  [升档] {len(confirmed)} 条路径经证据引擎事实闭环核验(带判据节点全部实测成立)"
-              f"→ 进入确证档 rca_result")
+        print(f"  [升档] {len(confirmed)} 条路径的候选经证据引擎实测成立(与手工确证闸同口径,"
+              f"祖先状态落 caveats)→ 进入确证档 rca_result")
 
     tree_issues = {}
     if rca_input:
