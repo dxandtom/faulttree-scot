@@ -67,10 +67,10 @@
 |---|---|
 | `condition_binding_schema.md` | **绑定契约(最重要的参考)**:A–J 每类的参数、`filter`/EAV 窄表/空表语义、"一个节点多条判据用 D 类"、代理禁忌等。步骤2.5 的规则书。 |
 | `datacom_log_adapter.md` | 数通"诊断文件包"场景(路由器 cmd/diag/config/dblg/log 等一包 CSV + 混血格式树)的接入手册:7 类文件对号表、EAV 绑法、回显计数器红线。 |
-| `nsa_config_adapter.md` | 接入类配置拓扑场景(NSA 的 S1/X2 链路等 MO 配置文本)的适配手册:4 个可照抄的 custom 例子。 |
 | `plan_schema.md` | SCoT `plan.json` 的格式契约(与 execute 侧同一份)。 |
-| `meta_prompt.md` | 生成侧的元提示词/背景说明。 |
-| `kernel_backlog.md` | 内核能力的待办台账(哪些判据类型还没内核、缺口清单)。 |
+
+> 口径:references/ 只放**模型执行时要读的契约文档**;"给人看的"补充手册不进技能
+> (机器契约懂技术的人同样读得懂,不设第二份,免双份维护漂移)。
 
 ---
 

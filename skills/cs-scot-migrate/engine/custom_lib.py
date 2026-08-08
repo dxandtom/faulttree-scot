@@ -27,7 +27,7 @@ def register(name):
 
 def pick_values(table, spec):
     """工具:按取值子句 {filter?, column, extract?} 从表抽出值列表(复用内核的 filter/extract 语义;
-    抽不到返回 [])。spec 与绑定手册第二节的取值子句同形。"""
+    抽不到返回 [])。spec 与 condition_binding_schema.md 的取值子句(extract/filter)同形。"""
     import condition_kernels as _k
     if not table:
         return []                                        # 没声明 source(table=None)/该源没喂:抽不到

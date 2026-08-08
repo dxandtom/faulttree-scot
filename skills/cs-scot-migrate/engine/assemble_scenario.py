@@ -537,10 +537,6 @@ def main() -> None:
               out / "scripts" / "condition_binding_schema.md")                          # 绑定契约
     copy_into(here / "export_tree_excel.py", out / "scripts" / "export_tree_excel.py")  # 调优表:产物→Excel
     copy_into(here / "import_tree_excel.py", out / "scripts" / "import_tree_excel.py")  # 调优表:Excel→产物(自包含)
-    copy_into(here.parent / "references" / "tuning_excel_guide.md",
-              out / "tree" / "tuning-guide.md")                                         # 调优表动手说明(业务读者)
-    copy_into(here.parent / "references" / "binding_handbook.md",
-              out / "tree" / "binding-handbook.md")                                     # 绑定手册(人手改绑定 JSON 时带例子查)
     kn = out / "tree" / "knowledge.md"                   # 外挂知识:人手写的"去哪查/怎么查/什么算正常"
     if not kn.exists():                                  # 手写文件——重跑**永不覆盖**(现场增补不丢)
         skill_kn = here.parent / "knowledge.md"          # 技能级出厂知识库(与 SKILL.md 平级,生成前预置)
