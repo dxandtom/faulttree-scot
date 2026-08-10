@@ -179,6 +179,19 @@ def run_script_node(node: dict, ctx: Dict[str, Any], base: Path) -> Any:
     return result
 
 
+def _record_step_status(result_dir: Path, step_id: str, entry: dict) -> None:
+    """逐节点执行状态落盘 run.json 的 execution_status 字段(评估反思的脚本/管道类归因信号)。
+    每步结束(成功/失败/跳过)立即写——半途崩时,已跑步骤的状态也已在账上;
+    失败仍照旧抛错终止(fail-fast 语义不变),这里只记账不改行为。"""
+    p = result_dir / "run.json"
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:                                    # noqa: BLE001 铭牌坏了也不挡执行,状态记内存新档
+        doc = {}
+    doc.setdefault("execution_status", {})[step_id] = entry
+    p.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _gen_run_id() -> str:
     """生成「时间戳 + 随机后缀」的运行号:可排序、且并发/重跑都不撞。"""
     import datetime, os
@@ -510,10 +523,23 @@ def main() -> None:
                     if isinstance(t, str) and t.startswith("$memory."):
                         skipped_memory[t[len("$memory."):]] = mk
                 result = {"_skipped_missing_input": mk}  # 只进 $step 占位;不写 $memory,下游解析为 None
+                _record_step_status(result_dir, cur, {"skipped": f"数据源 {mk} 未提供"})
             else:
-                result = run_script_node(node, ctx, base)
+                try:
+                    result = run_script_node(node, ctx, base)
+                except BaseException as e:
+                    _record_step_status(result_dir, cur,
+                                        {"ok": False, "error": str(e)[-600:]})
+                    raise                                # fail-fast 语义不变:记完账照旧终止
+                _record_step_status(result_dir, cur, {"ok": True})
         elif kind == "agent_skill":
-            result = run_agent_skill_node(node, ctx, base, result_subdir, result_base)
+            try:
+                result = run_agent_skill_node(node, ctx, base, result_subdir, result_base)
+            except BaseException as e:
+                _record_step_status(result_dir, cur, {"ok": False, "error": str(e)[-600:]})
+                raise
+            _record_step_status(result_dir, cur,
+                                {"ok": True, "note": "rca_input 已备好;RCA 结论由对应技能产出"})
         else:
             raise ValueError(f"节点 {cur} 的 kind={kind} 暂不支持(当前实现 script / agent_skill)")
         ctx["step"][cur] = result
