@@ -26,12 +26,17 @@ from pathlib import Path
 
 def _fmt_fact(f: dict) -> str:
     """一条 fact → 简短实测描述(只挑有意义的量)。
-    D 类组合等瘦身后无数值字段的事实 → 回退成"判定为真(class X)",别渲染出空的「实测:」。"""
+    D 类组合等瘦身后无数值字段的事实 → 回退成"判定为真(class X)",别渲染出空的「实测:」。
+    S 类脚本事实的金证据是 hits(命中的数据原文片段,代码抓的)——必须带上:评委和最终
+    报告的证据栏都靠它;命中原文是数据现场不是判据文本,成立节点上渲染不破回声策略。"""
     bits = []
     for k in ("resolved_column", "value", "matched", "total", "ratio",
               "count_satisfied", "local", "peer", "op", "threshold"):
         if f.get(k) is not None:
             bits.append(f"{k}={f[k]}")
+    hits = [str(h).strip() for h in (f.get("hits") or [])[:2] if str(h).strip()]
+    if hits:
+        bits.append("命中原文:" + " / ".join(f"『{h[:80]}』" for h in hits))
     if not bits:
         return f"判定为真(class {f.get('class', '?')},组合/无数值型判据)"
     return ", ".join(bits)
@@ -84,6 +89,57 @@ def _classify(entries: list) -> tuple:
     return held, failed, insuf, obs
 
 
+def _weak_neg(f: dict) -> bool:
+    """存在类(C/G 非 absent)的 ok+不成立=**弱阴性**:只说明"这份数据里没找到",不构成反证
+    (与手工 draft_rca._weak_neg 同口径)。强反证=A 阈值/P 成对/absent 缺失类/D 组合的不成立。"""
+    return str(f.get("class") or "").upper() in ("C", "G") and not f.get("absent")
+
+
+def _tri4(entries: list) -> tuple:
+    """节点事实 → 机械四态(与手工 draft_rca._tri 同口径,**冲突不塌缩**):
+    ("held"|"conflict"|"refuted"|"insufficient"|None, 成立侧实测串列表)。
+    conflict=成立与强反证并存(两边都是硬话)——手工闸对这种候选拒收确证,这里同样不许洗白。"""
+    facts = [e.get("fact") or e for e in entries or []]
+    ok_t = [f for f in facts if f.get("status") == "ok" and f.get("predicate_satisfied") is True]
+    ok_f = [f for f in facts if f.get("status") == "ok" and f.get("predicate_satisfied") is False]
+    insuf = any(f.get("status") in ("insufficient_data", "manual") for f in facts)
+    obs = [_fmt_fact(f) for f in ok_t]
+    if ok_t and any(not _weak_neg(f) for f in ok_f):
+        return "conflict", obs
+    if ok_t:
+        return "held", obs
+    if ok_f:
+        return "refuted", []
+    if insuf:
+        return "insufficient", []
+    return None, []
+
+
+def facts_index(rca_input: dict) -> dict:
+    """rca_input → {node_id: {"st": 四态, "obs": 成立实测串, "fail": 反证摘要, "insuf": 缺数原因}}。
+    节点级先聚合再判态(同节点跨源的成立+强反证要判成 conflict,逐条判再合并会洗白冲突);
+    result_adapter 的回程事实感知与 DossierKit 的档案都从这张表读,口径一处定。"""
+    groups: dict = {}
+    ft = (rca_input or {}).get("fault_tree")
+    if isinstance(ft, dict) and ft.get("pruned_nodes"):
+        for nid, node in ft["pruned_nodes"].items():
+            if (node or {}).get("facts"):
+                groups.setdefault(nid, []).extend(node["facts"])
+    else:
+        for res in ((rca_input or {}).get("indicator_results") or {}).values():
+            for c in (res or {}).get("conditions", []) if isinstance(res, dict) else []:
+                if c.get("node_id"):
+                    groups.setdefault(c["node_id"], []).append(c)
+    out = {}
+    for nid, entries in groups.items():
+        st, obs = _tri4(entries)
+        if st is None:
+            continue
+        out[nid] = {"st": st, "obs": "; ".join(obs),
+                    "fail": _fmt_fail(entries), "insuf": _insuf_reason(entries)}
+    return out
+
+
 def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
     names = {}
     if tree_index:
@@ -99,32 +155,44 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
             if not facts:
                 continue
             name = node.get("name") or names.get(nid, nid)
-            held, failed, insuf, obs = _classify(facts)
+            st, obs = _tri4(facts)                       # 四态:冲突不塌缩(带⚠标进成立节,评委看得见两面)
             cond = str(node.get("condition") or "").strip()
-            if held:
+            if st in ("held", "conflict"):
                 cond_part = f"(判据:{cond})" if cond else ""
-                held_lines.append(f"- 「{name}」条件成立{cond_part};实测:{'; '.join(obs)}")
-            elif failed:                                                     # 只报名+安全计数,不回声判据
+                mark = "(⚠同节点另有强反证,证据冲突)" if st == "conflict" else ""
+                held_lines.append(f"- 「{name}」条件成立{cond_part}{mark};实测:{'; '.join(obs)}")
+            elif st == "refuted":                                            # 只报名+安全计数,不回声判据
                 d = _fmt_fail(facts)
                 excluded.append(f"{name}({d})" if d else name)
-            elif insuf:
+            elif st == "insufficient":
                 r = _insuf_reason(facts)
                 insufficient.append(f"{name}(缺:{r})" if r else name)
     else:                                                                     # 完整形态
         scenario = ""
+        by_node: dict = {}                               # 节点级先聚合再判态(跨源冲突逐条判会洗白)
         for ind, res in (rca_input.get("indicator_results") or {}).items():
             for c in (res or {}).get("conditions", []):
-                name = c.get("node") or names.get(c.get("node_id"), c.get("node_id") or "?")
-                held, failed, insuf, obs = _classify([c])
-                cond = str(c.get("condition_text") or "").strip()
-                if held:
-                    held_lines.append(f"- 「{name}」条件成立(判据:{cond});实测({ind}):{'; '.join(obs)}")
-                elif failed:
-                    d = _fmt_fail([c])
-                    excluded.append(f"{name}({d})" if d else name)
-                elif insuf:
-                    r = _insuf_reason([c])
-                    insufficient.append(f"{name}(缺:{r})" if r else name)
+                key = c.get("node_id") or f"?{c.get('node')}"
+                g = by_node.setdefault(key, {"name": c.get("node")
+                                             or names.get(c.get("node_id"), c.get("node_id") or "?"),
+                                             "inds": [], "entries": []})
+                g["entries"].append(c)
+                g["inds"].append(str(ind))
+        for g in by_node.values():
+            st, obs = _tri4(g["entries"])
+            name = g["name"]
+            if st in ("held", "conflict"):
+                cond = next((str(c.get("condition_text") or "").strip() for c in g["entries"]
+                             if (c.get("fact") or c).get("predicate_satisfied") is True), "")
+                mark = "(⚠同节点另有强反证,证据冲突)" if st == "conflict" else ""
+                held_lines.append(f"- 「{name}」条件成立(判据:{cond}){mark};"
+                                  f"实测({'/'.join(sorted(set(g['inds'])))}):{'; '.join(obs)}")
+            elif st == "refuted":
+                d = _fmt_fail(g["entries"])
+                excluded.append(f"{name}({d})" if d else name)
+            elif st == "insufficient":
+                r = _insuf_reason(g["entries"])
+                insufficient.append(f"{name}(缺:{r})" if r else name)
 
     parts = [f"故障场景:{scenario or (tree_index or {}).get('scenario', '')}。",
              "以下为各数据源**已由代码算好的确定性事实**(非人工主诉),请据此定位最可能的根因路径。"]
@@ -159,6 +227,153 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
                  for col, miss in unc.items()]
         parts.append("\n【数据里出现、但未被任何判据认领的取值(可能指向漏诊分支)】\n" + "\n".join(lines))
     return "\n".join(parts)
+
+
+# ---------------- 辩论侧分层卷宗(信息全员对称,任务各自专属) ----------------
+# 上面的 build_question 是给**机械文本匹配器**的回声安全版(不成立/缺数只报名,防误配)。
+# 辩论角色(辩护/攻击/回应/一致性/评委)是推理者,不做文本匹配——给它们完整档案:
+# **判据原文全员必读**(含被证伪/缺数节点的),附实测事实与反证:攻击者才能拿数据说话,
+# 评委才能"实测优先于辩词"。分层:角色任务框架(唯一按角色不同的部分)+ 本组节点档案
+# (组局部细节,控 token)+ 全局案情(共享)。信息不裁剪、不做信息不对称。
+# engine_boost._wrap_agent_questions 在各 agent 门口把 question 换成这里出的卷宗。
+
+_CAP = 40                                                # 全局清单每节最多带判据全文的节点数
+
+
+class DossierKit:
+    """rca_input + tree_index → 预组装分层卷宗(全局层惰性构建一次,组层按组缓存)。"""
+
+    def __init__(self, rca_input: dict, tree_index: dict):
+        nodes = (tree_index or {}).get("nodes") or {}
+        self.names = {nid: (n.get("name") or nid) for nid, n in nodes.items()}
+        self.conds = {nid: str(n.get("condition") or "").strip() for nid, n in nodes.items()}
+        self.parents = {nid: n.get("parent") for nid, n in nodes.items()}
+        self.facts = facts_index(rca_input)              # 四态共享索引(与 result_adapter 同一口径)
+        ft = (rca_input or {}).get("fault_tree")
+        self.scenario = ((ft.get("scenario") if isinstance(ft, dict) else "")
+                         or (tree_index or {}).get("scenario") or "")
+        self.rca_input = rca_input or {}
+        self._global_text = None
+        self._groups: dict = {}
+
+    # ----- 素材 -----
+    def _nm(self, vnode: dict) -> str:
+        nid = vnode.get("code")
+        return self.names.get(nid) or vnode.get("chinese_name") or vnode.get("name") or str(nid)
+
+    def _path(self, nid) -> str:
+        chain, cur, seen = [], nid, set()
+        while cur and cur not in seen and len(chain) < 12:
+            seen.add(cur)
+            chain.append(self.names.get(cur, str(cur)))
+            cur = self.parents.get(cur)
+        return " > ".join(reversed(chain))
+
+    def _fact_line(self, nid) -> str:
+        f = self.facts.get(nid)
+        if f is None:
+            return "未绑定:判据从未被机器检查(既未证实也未证伪)"
+        if f["st"] == "held":
+            return "实测成立" + (f";实测:{f['obs']}" if f["obs"] else "")
+        if f["st"] == "conflict":
+            return (f"证据冲突:实测命中({f['obs'] or '见全局案情'})与强反证"
+                    f"({f['fail'] or '另一源硬性未命中'})并存——存疑,确证前须人审")
+        if f["st"] == "refuted":
+            return ("已被数据证伪" + (f"(反证:{f['fail']})" if f["fail"] else "")
+                    + "——除非质疑数据本身,不可仅凭辩词翻案")
+        return "数据不足" + (f"(缺:{f['insuf']})" if f["insuf"] else "") + ",既未证实也未证伪"
+
+    def group_text(self, vnodes) -> str:
+        key = tuple(sorted(str(n.get("code")) for n in vnodes))
+        if key not in self._groups:
+            lines = []
+            for n in vnodes:
+                nid = n.get("code")
+                cond = self.conds.get(nid) or "\n    ".join(n.get("judgment_conditions") or []) \
+                    or "(无独立判据)"
+                lines.append(f"- 「{self._nm(n)}」(路径:{self._path(nid)})\n"
+                             f"  判据:{cond}\n  事实:{self._fact_line(nid)}")
+            self._groups[key] = "\n".join(lines)
+        return self._groups[key]
+
+    def global_text(self) -> str:
+        if self._global_text is None:
+            held, confl, refuted, insuf = [], [], [], []
+            for nid, f in sorted(self.facts.items()):
+                line = f"- 「{self.names.get(nid, nid)}」判据:{self.conds.get(nid, '')}"
+                if f["st"] == "held":
+                    held.append(line + (f";实测:{f['obs']}" if f["obs"] else ""))
+                elif f["st"] == "conflict":
+                    confl.append(line + f";命中:{f['obs'] or '?'};反证:{f['fail'] or '?'}")
+                elif f["st"] == "refuted":
+                    refuted.append(line + (f";反证:{f['fail']}" if f["fail"] else ""))
+                else:
+                    insuf.append(line + (f";缺:{f['insuf']}" if f["insuf"] else ""))
+
+            def cap(lst, label):
+                if not lst:
+                    return ""
+                extra = f"\n  …等共 {len(lst)} 个(其余略)" if len(lst) > _CAP else ""
+                return f"\n【{label}】\n" + "\n".join(lst[:_CAP]) + extra
+
+            parts = [f"场景:{self.scenario}。以下事实均由代码在数据上算出(非人工主诉、非模型判断)。",
+                     cap(held, "实测成立的节点(判据+实测)"),
+                     cap(confl, "证据冲突的节点(成立与强反证并存——存疑,确证须人审)"),
+                     cap(refuted, "已被数据证伪的节点(判据+反证;不可仅凭辩词翻案)"),
+                     cap(insuf, "数据不足的节点(判据+缺口;既未证实也未证伪)")]
+            mi = self.rca_input.get("missing_indicators") or {}
+            if mi:
+                parts.append("\n【本轮未提供的数据源(其判据既未证实也未证伪,勿当已排除)】\n"
+                             + "\n".join(f"- {k}: {v}" for k, v in mi.items()))
+            unc_nodes = ((self.rca_input.get("tree_issues") or {}).get("uncovered_condition_nodes")) or []
+            unames = [(u.get("name") or u.get("id")) if isinstance(u, dict)
+                      else self.names.get(u, str(u)) for u in unc_nodes]
+            unames = [x for x in unames if x]
+            if unames:
+                parts.append("\n【从未被检查的分支(有判据但无绑定,可能藏漏诊)】\n- "
+                             + "、".join(unames[:_CAP]))
+            unc = self.rca_input.get("uncovered_values") or {}
+            if unc:
+                parts.append("\n【数据里出现、但未被任何判据认领的取值】\n" + "\n".join(
+                    f"- {col}: " + ", ".join(f"{m['value']}(×{m['count']})" for m in miss)
+                    for col, miss in unc.items()))
+            self._global_text = "\n".join(p for p in parts if p)
+        return self._global_text
+
+    def _compose(self, header: str, vnodes) -> str:
+        return (header + "\n\n【本组节点档案(判据原文+实测事实;信息全员一致)】\n"
+                + self.group_text(vnodes) + "\n\n【全局案情】\n" + self.global_text())
+
+    # ----- 各角色:信息同一份,只有任务框架不同 -----
+    def for_defense(self, my_node, sibling_nodes) -> str:
+        group, seen = [], set()                          # vendor 传的兄弟表常已含目标自身:按 code 去重,
+        for n in [my_node] + list(sibling_nodes or []):  # 否则目标在档案里出现两遍、组缓存按目标裂键
+            c = str(n.get("code"))
+            if c not in seen:
+                seen.add(c)
+                group.append(n)
+        return self._compose(
+            f"【你的任务】你为节点「{self._nm(my_node)}」辩护:基于下方档案论证它为什么可能是"
+            "本次故障的根因,并正面回应对它不利的证据(数据证伪/数据不足)。", group)
+
+    def for_respond(self, my_node) -> str:
+        return self._compose(
+            f"【你的任务】你为节点「{self._nm(my_node)}」回应质疑:针对攻击内容逐点回应,"
+            "以档案中的数据实测为准,不得与实测矛盾。", [my_node])
+
+    def for_attack(self, target_node) -> str:
+        return self._compose(
+            f"【你的任务】你质疑节点「{self._nm(target_node)}」作为根因的主张:优先引用档案中的"
+            "数据实测反证与数据缺口,其次才是机制层面的质疑。", [target_node])
+
+    def for_consistency(self) -> str:
+        return ("【你的任务】检查辩护词与判据、与已算出的数据事实是否自洽:"
+                "与实测矛盾的辩护主张要点名。\n\n【全局案情】\n" + self.global_text())
+
+    def for_judge(self, vnodes) -> str:
+        return self._compose(
+            "【裁决准则】数据实测优先于任何辩词;判据已被数据证伪的节点不得高分;"
+            "数据不足的节点按机制合理性排序;你的评分只用于排序,不构成确证。", vnodes)
 
 
 def main() -> int:
