@@ -54,7 +54,7 @@ description: 业务脚本收编:故障树平台上每个节点已有验证过的
    合并为 `<OUT>/tree/script_digests.json`;脚本里的 solution 文本并进 `tree/solutions.json`
    (已有不覆盖);对齐了脚本却没交纪要的点名。
 
-完成后**回 cs-scot-generate 步骤 3**(make_dispatch 派绑定):简报会把纪要逐条附在对应判据下
+完成后**回 cs-scot-generate 步骤 2.5**(make_dispatch 派绑定):简报会把纪要逐条附在对应判据下
 (◆【脚本纪要】,并声明"规格以纪要为准"),批次按字符预算自动变小,不用手调 batch-size。
 **两条注入纪律**(实测教训):空壳纪要(unusable)只留档、不注入——零规格不配权威帽子;
 「依赖」(平台入参链)只随**跨源补绑简报**下发(param_from 的字段名原料),单源简报不带它

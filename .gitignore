@@ -4,3 +4,5 @@ __pycache__/
 *.pyo
 # 运行时产物(场景 skill 执行时生成)
 examples/*/result/
+# 发行打包产物(package_skill.py 生成,随用随打)
+dist/
