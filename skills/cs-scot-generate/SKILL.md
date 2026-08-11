@@ -32,6 +32,20 @@ description: 把故障树(Excel)+ 若干指标数据编译成场景诊断产物:
 - 场景名(作 `--start-node` 截子树、给产物命名)。
 - 每种指标一份数据(真实或样例皆可;用于跑验证)。
 
+> **数据是裸 txt 原始采集时(触发转换,别硬喂)**:特征=zip 包或「网元/CONFIG/CMD(或 DIAG)/LOG」
+> 目录、里面是 `.txt`/`.log` 命令回显。概览与绑定只吃**带表头的表**(csv/xlsx)——txt 不是表,
+> 直接当数据喂会全体判据"找不到列"。先用 zip2csv 转三表再进流水线:
+> ```bash
+> python "<zip2csv.py 路径>" <zip或目录> -o <输出目录>
+> ```
+> **zip2csv 的查找次序**:①先在**本技能目录内**找(与 SKILL.md/scripts/ 同层的
+> `zip2csv/scripts/zip2csv.py`,部署时可能内嵌);②没有再用同门独立技能
+> `skills/zip2csv/scripts/zip2csv.py`。zip、裸目录都直接吃,LOG 下 `.txt/.log` 双认。
+> 转出 `csv/<网元>/LOG|CONFIG|DIAG|CMD/*.csv`,按子目录名对应指标(log / config / cmd;
+> DIAG=cmd 两代名);多网元同类 csv 合并成一张再当该指标的数据(同表头首行保留、其余逐文件追加)。
+> 四类目录之外的自由格式 txt 转不了表——归 S 脚本(迁移收编)或 custom 解析路线。
+> 原始目录本身留着:执行时还要 `--data raw=<原始目录>` 喂给 runner(S 类脚本直读)。
+
 ## 产物目录(统一、固定,别到处存)
 所有中间过程 + 最终产物都写进**同一个目录** `<OUT>`,默认就在**故障树 xlsx 旁边**:
 ```
