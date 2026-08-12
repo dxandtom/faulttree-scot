@@ -248,6 +248,10 @@ def generate_cmd_csv(diag_csvs, csv_dir):
 
         basename = os.path.splitext(os.path.basename(diag_csv_path))[0]
         cmd_csv_path = os.path.join(cmd_output_dir, basename + '.csv')
+        if os.path.exists(cmd_csv_path):                 # 混代输入(DIAG+CMD 并存):真 CMD 转换优先,
+            print(f"  跳过: {ne_name}/CMD/{basename}.csv 已有真实 CMD 转换,"
+                  f"不用 DIAG 派生视图覆盖")             # 派生视图让位(覆盖会连列形状一起换掉)
+            continue
 
         rows_written = 0
         with open(diag_csv_path, 'r', encoding='utf-8-sig', newline='') as fin, \
