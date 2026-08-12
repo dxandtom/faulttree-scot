@@ -150,7 +150,8 @@ import 校验、runner 不认 S 类 → 从引擎源刷新并 .bak 备份——�
 ## 无包翻新(--refresh-only)
 
 手头没有交付包、只想把旧产物/旧打包技能刷到当前代(custom_lib/内核/导入导出/runner/
-check_data/zip2csv/SKILL 正文)时:
+check_data/zip2csv/**fault-tree-rca 规则副本**〔自动定档+机械报告这一代,整目录刷新,
+旧副本备份 fault-tree-rca.bak〕/SKILL 正文〔含机械渲染报告指引〕)时:
 
 ```bash
 python skills/cs-scot-migrate/scripts/migrate_fault_check.py --product <产物或技能目录> --refresh-only

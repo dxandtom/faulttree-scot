@@ -69,9 +69,11 @@ def render(doc: dict) -> str:
         L += ["## 确证根因", "", "| # | 根因 | 关键证据(摘要,全文见下) | 推荐解决方案 |",
               "|---|---|---|---|"]
         for i, c in enumerate(conf, 1):
-            cand = (c.get("evidence_path") or [{}])[-1]
+            ev = c.get("evidence_path") or []
+            cand = (ev or [{}])[-1]
+            mark = " ⚠有卡点" if any(_sym(str(e.get("judgment") or "")) in "✗⚠" for e in ev[:-1]) else ""
             brief = _one(cand.get("actual") or cand.get("how") or c.get("support"), 120)
-            L.append(f"| {i} | {c.get('Root_cause')} | {brief} | {_one(c.get('recommend_solution'), 90) or '—'} |")
+            L.append(f"| {i} | {c.get('Root_cause')}{mark} | {brief} | {_one(c.get('recommend_solution'), 90) or '—'} |")
         L.append("")
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
@@ -82,6 +84,11 @@ def render(doc: dict) -> str:
                 L += _ev_block(ev[-1], "    ")
             if c.get("caveats"):
                 L.append(f"- 注意:{_one(c['caveats'], 500)}")
+            # 层级矛盾的上级(实测不成立/冲突)显著晾出——确证不拦档,但豁免不隐身
+            bad = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) in "✗⚠"]
+            for b in bad[:3]:
+                L.append(f"- ⚠ 矛盾上级「{b.get('node')}」(请人复核:上级绑定假阴?候选命中系背景?):")
+                L += _ev_block(b, "    ")
             if c.get("recommend_solution"):
                 L.append(f"- 建议方案:{_one(c['recommend_solution'], 400)}")
             L.append("")

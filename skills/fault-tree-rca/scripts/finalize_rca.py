@@ -6,9 +6,10 @@
 - 骨架里的候选**一条都不许漏裁决**(漏了响亮报错,候选想消失必须显式给 verdict+理由);
 - verdict=confirmed 的闸:**只看候选自身**——候选(叶子,或下级无一成立的中间节点)必须成立
   (被改成 存疑/语义近似/不成立 → 拒收);中间节点确证的「叶子因待定」自动落 caveats;
-  **祖先口径 v2**:「数据不足/存疑」不拦确证(零信息不冒充反证),机械落 caveats;
-  「不成立/冲突」=层级矛盾 → **确证拒收**,只收 probable(blocked_at=该祖先,note 写清矛盾)——
-  骨架的 auto_verdict 已按此预填,带 auto_verdict 的候选不给裁决也自动收,给了相反裁决则响亮拒收;
+  **祖先口径 v3:一律不拦档**——「数据不足/存疑」零信息不冒充反证;「不成立/冲突」=层级矛盾,
+  照样确证(现场父节点绑定常未优化,不成立多为假阴——用户拍板),但 hierarchy_hint/⚠注记
+  必须落 caveats 显著晾出(豁免不隐身);带 auto_verdict 的候选不给裁决自动收,
+  给了相反裁决则响亮拒收;
 - 有成立事实的候选 verdict=undetermined → 拒收(有证据的不收待确认);
 - verdict=excluded 必须给 reason(排除无理由拒收);
 - evidence_path/Fault_tree_path 逐字来自骨架(代码抓的原文),模型改不了数字。
@@ -182,20 +183,16 @@ def main() -> int:
             if bad:
                 raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但候选自身不干净:"
                                  + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad[:3])
-                                 + " —— 确证要求:候选自身成立(祖先数据不足/叶子因待定不拦,自动落 caveats);"
+                                 + " —— 确证要求:候选自身成立(祖先带伤/叶子因待定不拦,自动落 caveats);"
                                    "对候选自身有疑,改 probable(带 blocked_at/caveats)或 excluded(带 reason)")
-            bad_anc = [x for x in ev[:-1]
-                       if "不成立" in str(x.get("judgment") or "") or "冲突" in str(x.get("judgment") or "")]
-            if bad_anc:
-                raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但路径上级 "
-                                 + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad_anc[:3])
-                                 + " —— 口径 v2:层级矛盾(候选成立+上级不成立/冲突)只收 probable"
-                                   "(blocked_at=该上级,note 写清矛盾),确证拒收")
             item = {"Root_cause": e.get("node"), "Fault_tree_path": path,
                     "node_id": nid,
                     "support": d.get("support") or e.get("support_hint") or "",
                     "evidence_path": ev}
-            notes = _anc_notes(ev)
+            hint = e.get("hierarchy_hint")
+            notes = ([hint] if hint else []) + [
+                n for n in _anc_notes(ev)
+                if not (hint and ("判定不成立" in n or "证据冲突" in n))]   # hint 已含矛盾详情,免重复
             kids = e.get("children_status") or []
             if e.get("leaf_pending") or kids:            # 中间节点确证:叶子因待定必须落痕,不许无痕
                 ks = "、".join(f"{k.get('node')}({k.get('node_id')}:{k.get('状态')})" for k in kids[:6])
