@@ -71,9 +71,8 @@ def render(doc: dict) -> str:
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
             cand = (ev or [{}])[-1]
-            mark = " ⚠有卡点" if any(_sym(str(e.get("judgment") or "")) in "✗⚠" for e in ev[:-1]) else ""
             brief = _one(cand.get("actual") or cand.get("how") or c.get("support"), 120)
-            L.append(f"| {i} | {c.get('Root_cause')}{mark} | {brief} | {_one(c.get('recommend_solution'), 90) or '—'} |")
+            L.append(f"| {i} | {c.get('Root_cause')} | {brief} | {_one(c.get('recommend_solution'), 90) or '—'} |")
         L.append("")
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
@@ -82,13 +81,14 @@ def render(doc: dict) -> str:
             if ev:
                 L.append("- 候选证据:")
                 L += _ev_block(ev[-1], "    ")
+            # 未验证的上级(无绑定/数据不足)提示出来:默认放行≠验证过,此处没有做判断
+            unv = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) == "?"]
+            if unv:
+                L.append("- ℹ 未验证上级(无绑定/数据不足,默认放行——此处没有做判断):"
+                         + "、".join(f"「{u.get('node')}」" for u in unv[:5])
+                         + ("…" if len(unv) > 5 else ""))
             if c.get("caveats"):
                 L.append(f"- 注意:{_one(c['caveats'], 500)}")
-            # 层级矛盾的上级(实测不成立/冲突)显著晾出——确证不拦档,但豁免不隐身
-            bad = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) in "✗⚠"]
-            for b in bad[:3]:
-                L.append(f"- ⚠ 矛盾上级「{b.get('node')}」(请人复核:上级绑定假阴?候选命中系背景?):")
-                L += _ev_block(b, "    ")
             if c.get("recommend_solution"):
                 L.append(f"- 建议方案:{_one(c['recommend_solution'], 400)}")
             L.append("")

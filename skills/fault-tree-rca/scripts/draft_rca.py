@@ -6,10 +6,12 @@
 本脚本从 rca_input.json 机械枚举:所有成立节点→候选(根→叶路径+证据全预填),
 不成立→排除候选,数据不足→待确认骨架,成立+不成立并存→冲突条目。
 
-**自动定档(树形态,口径 v3)**:定档条件全是机械可判的,代码直接写 auto_verdict,模型不参与——
-- 候选自身成立 → auto_verdict=confirmed。**祖先状态一律不拦档**:「数据不足」=零信息落 caveats;
-  「不成立/冲突」=层级矛盾,同样确证(现场父节点绑定常未优化,不成立多为假阴——用户拍板),
-  但 hierarchy_hint 预填卡点、finalize 落 ⚠caveats、报告显著晾出矛盾上级给人复核(豁免不隐身);
+**自动定档(树形态,口径 v4)**:定档条件全是机械可判的,代码直接写 auto_verdict,模型不参与——
+- 候选自身成立 + 路径上**有判定的**节点无「不成立/冲突」→ auto_verdict=confirmed
+  (**未绑定/数据不足的上级=默认放行**:零信息不冒充反证,落 caveats、报告提示"此处无判断";
+  判断方法写错的中间节点走调优表**清绑定**即归此类,停验放行);
+- 候选自身成立 + 某上级实测「不成立/冲突」→ auto_verdict=probable(**层级矛盾降疑似**:
+  留着绑定又实测不成立=有效反证,blocked_at/note 预填卡点与实际值给人复核);
 - 冲突条目(候选自身成立+强反证并存)→ **唯一交模型权衡的**,骨架不定档。
 **模型的工作收窄为:只裁冲突条目**(md 形态无路径信息,退回逐条裁决)。
 
@@ -24,10 +26,10 @@ from pathlib import Path
 
 _README = (
     "本骨架由代码从 rca_input 机械枚举:候选=有'成立'事实的节点(路径+证据已预填,how 逐字来自 explain)。"
-    "**带 auto_verdict 的条目已由代码机械定档,不需要也不许改写**(finalize 自动收;确证=候选自身成立,"
-    "祖先数据不足/不成立/冲突一律不拦档、全部落 caveats,层级矛盾另带 hierarchy_hint 显著晾出;"
-    "**候选是中间节点且下级无一成立**同样机械确证——叶子因待定见 leaf_pending/children_status 注记,"
-    "自动落 caveats)。**你的工作只剩:①裁决 conflict_nodes**(候选自身成立+强反证并存,权衡两面证据"
+    "**带 auto_verdict 的条目已由代码机械定档,不需要也不许改写**(finalize 自动收;确证=候选自身成立"
+    "且有判定的上级无不成立/冲突——未绑定/数据不足上级默认放行落 caveats;层级矛盾=机械降 probable,"
+    "blocked_at/note 已预填;**候选是中间节点且下级无一成立**同样机械确证——叶子因待定见 "
+    "leaf_pending/children_status 注记,自动落 caveats)。**你的工作只剩:①裁决 conflict_nodes**(候选自身成立+强反证并存,权衡两面证据"
     "定档并写 caveat——冲突细节在该条目的 conflict_actual/conflict_how);②(仅 md 形态,无路径信息)"
     "逐条裁决 holding_candidates。语义复核仍是你的责任:发现 mapping_reason 与判据不真等,"
     "在报告补充说明里点名请人复核——不改机械档。**任何候选不许无声消失**:冲突条目不采纳就 "
@@ -164,11 +166,11 @@ def draft_pruned(data: dict) -> dict:
     for nid in sorted(deepest, key=lambda x: int(x[1:]) if x[1:].isdigit() else 10 ** 9):
         n = nodes[nid]
         ev = [_ev(p, nodes[p]) for p in _path(nid, nodes)]
-        # 定档口径 v3(机械,模型不参与):候选自身成立即确证,祖先一律不拦档——
-        # ①「数据不足」=零信息,查不了不冒充反证,落 caveats;
-        # ②「不成立/冲突」=层级矛盾:现场父节点绑定常未优化,不成立多为假阴(用户拍板:
-        #   压疑似会让确证档全空)——按叶子事实确证,但卡点必须显著晾出:hierarchy_hint 预填、
-        #   finalize 落 ⚠caveats、render_report 在确证条目里带「矛盾上级」详情块,豁免不隐身。
+        # 定档口径 v4(机械,模型不参与):
+        # ①未绑定/数据不足的上级=默认放行(零信息不冒充反证)落 caveats,报告提示"此处无判断"
+        #   ——判断方法写错的中间节点,正路是调优表清绑定停验,归到这类;
+        # ②上级实测「不成立/冲突」=层级矛盾 → 机械降疑似:留着绑定又实测不成立就是有效反证,
+        #   blocked_at/note 预填卡点与实际值,人复核(上级绑定假阴?候选命中系背景?)前不升确证。
         anc_insuf = [e for e in ev[:-1] if e["judgment"] == "数据不足"]
         gaps = [e for e in ev[:-1] if e["judgment"] == "冲突"]
         refutes = [e for e in ev[:-1] if e["judgment"] == "不成立"]
@@ -180,21 +182,22 @@ def draft_pruned(data: dict) -> dict:
             entry["support_hint"] = _actual(f)
         if anc_insuf:
             entry["ancestor_insufficient"] = (
-                "祖先大类自身判据未独立验证(数据不足):"
+                "祖先节点未验证(无绑定/数据不足):"
                 + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in anc_insuf[:5])
-                + "——由本节点成立事实自下而上蕴含,不拦确证、不构成降档理由;finalize 会自动写进 caveats")
+                + "——默认放行(零信息不冒充反证),由本节点成立事实自下而上蕴含;"
+                  "finalize 落 caveats,报告提示'此处无判断'")
         if refutes:
             entry["ancestor_refuted"] = (
                 "祖先节点判定不成立:"
                 + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in refutes[:5])
-                + "——层级矛盾,不拦确证(不成立多为父节点绑定假阴);finalize 落 ⚠caveats,"
-                  "报告显著晾出矛盾上级给人复核")
+                + "——层级矛盾,已机械降 probable(blocked_at/note 已预填);复核该上级绑定(可能假阴)"
+                  "或叶子命中(可能背景)")
         if gaps:
             entry["ancestor_conflict"] = (
                 "祖先节点证据冲突(成立与强反证并存):"
                 + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in gaps[:5])
-                + "——层级矛盾,不拦确证;冲突两边的实测值在 evidence 该条目的 "
-                  "conflict_actual/conflict_how,finalize 落 ⚠caveats、报告晾出冲突点")
+                + "——层级矛盾,已机械降 probable;冲突两边的实测值在 evidence 该条目的 "
+                  "conflict_actual/conflict_how,报告里把冲突点标出来")
         unc = n.get("uncovered_children") or []
         if not n.get("is_leaf") or unc:
             # 中间节点候选:候选=最深成立(下面没有任何成立后代)。用户拍板:叶子没有一个成立时,
@@ -220,19 +223,23 @@ def draft_pruned(data: dict) -> dict:
             entry["leaf_pending"] = ("非叶子/有未覆盖子因:叶子因待定(下级无一成立)——按本层命中确证,"
                                      "finalize 自动落 caveats;子节点三态见 children_status,数据补齐后重跑可细化")
         if refutes or gaps:
-            # 层级矛盾:确证不拦,但卡点预填、显著晾出(报告用)
+            # 层级矛盾 → 机械降疑似:卡点=离候选最近的带反证上级(最可指认)
             worst = (refutes or gaps)[-1]
             kind = "实测不成立" if refutes else "证据冲突(成立与强反证并存)"
-            entry["hierarchy_hint"] = (
-                f"⚠卡点:上级「{worst['node']}」({worst['node_id']}){kind}"
+            entry["auto_verdict"] = "probable"
+            entry["blocked_at_hint"] = f"上级「{worst['node']}」({worst['node_id']}){kind}"
+            entry["note"] = (
+                f"层级矛盾:候选「{n.get('name')}」实测成立,但上级「{worst['node']}」{kind}"
                 + (f"(实际值:{str(worst.get('actual'))[:120]})" if worst.get("actual") else "")
-                + "——与候选命中矛盾;可能该上级绑定假阴(父节点绑定未优化?),"
-                  "或候选命中系背景,请人复核")
-        entry["auto_verdict"] = "confirmed"
-        entry["draft_tier"] = ("confirmed_auto(机械定档:最深成立节点即确证;祖先数据不足/"
-                               "不成立/冲突/叶子因待定均不拦档,finalize 自动落 caveats,"
-                               "层级矛盾另带 hierarchy_hint 显著晾出)")
-        confirmed.append(entry)
+                + "——可能该上级绑定假阴,或候选命中系背景;人复核前不升确证"
+                  "(该上级判断方法确认写错的,走调优表清其绑定→未绑定默认放行,下轮即确证)")
+            entry["draft_tier"] = "probable_auto(机械降档:候选成立+上级实测不成立/冲突=层级矛盾)"
+            probable.append(entry)
+        else:
+            entry["auto_verdict"] = "confirmed"
+            entry["draft_tier"] = ("confirmed_auto(机械定档:候选自身成立+有判定的上级全成立;"
+                                   "未绑定/数据不足上级默认放行落 caveats,报告提示未验证)")
+            confirmed.append(entry)
 
     return {
         "_readme": _README,

@@ -567,8 +567,8 @@ def refresh_engine(product: Path) -> None:
         else:
             cur_draft = rca_dst / "scripts" / "draft_rca.py"
             cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
-            if "auto_verdict" not in cur \
-                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档+机械报告
+            if "blocked_at_hint" not in cur \
+                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档(v4 层级矛盾降疑似)+机械报告
                 if rca_ok:
                     bak = rca_dst.with_name("fault-tree-rca.bak")
                     if bak.exists():
