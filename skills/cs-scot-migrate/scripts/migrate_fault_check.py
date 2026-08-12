@@ -537,8 +537,8 @@ def refresh_engine(product: Path) -> None:
         else:
             main_py = z2c_dst / "scripts" / "zip2csv.py"
             cur = main_py.read_text(encoding="utf-8", errors="replace") if main_py.exists() else ""
-            if "list_data_files" not in cur:             # 能力标记:旧版只认 .txt(log.log 整目录跳过)、
-                if z2c_ok:                               # 只吃 zip、GBK 乱码——按代刷新脚本,SKILL.md 一并带
+            if "collect_data_files" not in cur:          # 能力标记:递归收子目录+同名防覆盖这一代
+                if z2c_ok:                               # (更早代还只认 .txt/只吃 zip)——按代刷新,SKILL.md 一并带
                     (z2c_dst / "scripts").mkdir(parents=True, exist_ok=True)
                     if main_py.exists():
                         shutil.copy2(main_py, main_py.with_suffix(".py.bak"))

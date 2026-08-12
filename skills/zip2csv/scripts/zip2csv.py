@@ -61,12 +61,41 @@ def find_data_dirs(extract_dir):
 DEFAULT_NE = 'NE'   # 平铺形态(数据类型目录直接在根下,没有网元层)的兜底网元名;目录输入时用目录名
 
 
-def list_data_files(dir_path):
-    """数据目录里的原始文本文件:**.txt/.log 都认**(现场采集常见 log.log/xxx.log,只认 .txt 会整目录
-    跳过、对应指标全体"数据不足"),大小写不敏(Linux 的 glob 区分大小写,.TXT 会漏)。"""
-    out = [os.path.join(dir_path, f) for f in os.listdir(dir_path)
-           if os.path.splitext(f)[1].lower() in ('.txt', '.log')]
+_CATEGORY_NAMES = {'LOG', 'CONFIG', 'DIAG', 'CMD'}
+
+
+def collect_data_files(dir_path):
+    """数据目录里的原始文本文件:**递归收**(现场常按日期子目录存放,只扫一层会整批静默漏掉,
+    实测事故),.txt/.log 都认、大小写不敏(Linux 的 glob 区分大小写,.TXT 会漏)。
+    返回 [(绝对路径, 输出基名)]:子目录文件的基名带子路径前缀(2026-08-11/x.log → 2026-08-11_x),
+    防不同子目录同名文件互相覆盖;不下钻同名类别子目录(LOG 里再套 CMD 属另一类别,
+    由 find_data_dirs 单独发现,这里收了会双算)。"""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(dir_path):
+        dirnames[:] = sorted(d for d in dirnames if d.upper() not in _CATEGORY_NAMES)
+        for f in filenames:
+            if os.path.splitext(f)[1].lower() not in ('.txt', '.log'):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, f), dir_path)
+            parts = rel.replace('\\', '/').split('/')
+            base = '_'.join(parts[:-1] + [os.path.splitext(parts[-1])[0]])
+            out.append((os.path.join(dirpath, f), base))
     return sorted(out)
+
+
+def uniq_csv(ne_output_dir, base, used, label):
+    """输出 csv 落点:同名已占则 _2/_3 顺延并响亮播报(多外层同名网元时,静默覆盖=丢整台设备
+    的数据,实测事故)。used 为本次运行内已占路径集合(跨源目录共享);重跑覆盖旧产物照旧。"""
+    csv_file = os.path.join(ne_output_dir, base + '.csv')
+    n = 2
+    while csv_file in used:
+        csv_file = os.path.join(ne_output_dir, f"{base}_{n}.csv")
+        n += 1
+    if n > 2:
+        print(f"  ⚠ 同名防覆盖: {label}/{base}.csv 已被占用(多外层同名网元?)"
+              f" -> 改存 {os.path.basename(csv_file)}")
+    used.add(csv_file)
+    return csv_file
 
 
 def get_ne_name(data_dir, extract_dir):
@@ -99,17 +128,16 @@ def process_log_dirs(log_dirs, csv_dir, extract_dir):
 
     print(f"[3/7] 处理 LOG/ 目录 (共 {len(log_dirs)} 个)")
     total = 0
+    used = set()
 
     for log_dir in log_dirs:
         ne_name = get_ne_name(log_dir, extract_dir)
         ne_output_dir = os.path.join(csv_dir, ne_name, 'LOG')
         os.makedirs(ne_output_dir, exist_ok=True)
 
-        txt_files = list_data_files(log_dir)
-        for txt_file in txt_files:
-            basename = os.path.splitext(os.path.basename(txt_file))[0]
-            csv_file = os.path.join(ne_output_dir, basename + '.csv')
-            print(f"  转换: {ne_name}/LOG/{os.path.basename(txt_file)} -> {basename}.csv")
+        for txt_file, base in collect_data_files(log_dir):
+            csv_file = uniq_csv(ne_output_dir, base, used, f"{ne_name}/LOG")
+            print(f"  转换: {ne_name}/LOG/{os.path.basename(txt_file)} -> {os.path.basename(csv_file)}")
             logbuffer_convert(txt_file, csv_file)
             total += 1
 
@@ -124,17 +152,16 @@ def process_config_dirs(config_dirs, csv_dir, extract_dir):
 
     print(f"[4/7] 处理 CONFIG/ 目录 (共 {len(config_dirs)} 个)")
     total = 0
+    used = set()
 
     for config_dir in config_dirs:
         ne_name = get_ne_name(config_dir, extract_dir)
         ne_output_dir = os.path.join(csv_dir, ne_name, 'CONFIG')
         os.makedirs(ne_output_dir, exist_ok=True)
 
-        txt_files = list_data_files(config_dir)
-        for txt_file in txt_files:
-            basename = os.path.splitext(os.path.basename(txt_file))[0]
-            csv_file = os.path.join(ne_output_dir, basename + '.csv')
-            print(f"  转换: {ne_name}/CONFIG/{os.path.basename(txt_file)} -> {basename}.csv")
+        for txt_file, base in collect_data_files(config_dir):
+            csv_file = uniq_csv(ne_output_dir, base, used, f"{ne_name}/CONFIG")
+            print(f"  转换: {ne_name}/CONFIG/{os.path.basename(txt_file)} -> {os.path.basename(csv_file)}")
             config_convert(txt_file, csv_file)
             total += 1
 
@@ -149,17 +176,16 @@ def process_diag_dirs(diag_dirs, csv_dir, extract_dir):
 
     print(f"[5/7] 处理 DIAG/ 目录 (共 {len(diag_dirs)} 个)")
     output_csvs = []
+    used = set()
 
     for diag_dir in diag_dirs:
         ne_name = get_ne_name(diag_dir, extract_dir)
         ne_output_dir = os.path.join(csv_dir, ne_name, 'DIAG')
         os.makedirs(ne_output_dir, exist_ok=True)
 
-        txt_files = list_data_files(diag_dir)
-        for txt_file in txt_files:
-            basename = os.path.splitext(os.path.basename(txt_file))[0]
-            csv_file = os.path.join(ne_output_dir, basename + '.csv')
-            print(f"  转换: {ne_name}/DIAG/{os.path.basename(txt_file)} -> {basename}.csv")
+        for txt_file, base in collect_data_files(diag_dir):
+            csv_file = uniq_csv(ne_output_dir, base, used, f"{ne_name}/DIAG")
+            print(f"  转换: {ne_name}/DIAG/{os.path.basename(txt_file)} -> {os.path.basename(csv_file)}")
             diag_convert(txt_file, csv_file)
             output_csvs.append(csv_file)
 
@@ -181,17 +207,16 @@ def process_cmd_dirs(cmd_dirs, csv_dir, extract_dir):
 
     print(f"[5b/7] 处理 CMD/ 目录 (共 {len(cmd_dirs)} 个)")
     output_csvs = []
+    used = set()
 
     for cmd_dir in cmd_dirs:
         ne_name = get_ne_name(cmd_dir, extract_dir)
         ne_output_dir = os.path.join(csv_dir, ne_name, 'CMD')
         os.makedirs(ne_output_dir, exist_ok=True)
 
-        txt_files = list_data_files(cmd_dir)
-        for txt_file in txt_files:
-            basename = os.path.splitext(os.path.basename(txt_file))[0]
-            csv_file = os.path.join(ne_output_dir, basename + '.csv')
-            print(f"  转换: {ne_name}/CMD/{os.path.basename(txt_file)} -> {basename}.csv")
+        for txt_file, base in collect_data_files(cmd_dir):
+            csv_file = uniq_csv(ne_output_dir, base, used, f"{ne_name}/CMD")
+            print(f"  转换: {ne_name}/CMD/{os.path.basename(txt_file)} -> {os.path.basename(csv_file)}")
             diag_convert(txt_file, csv_file)
             output_csvs.append(csv_file)
 
