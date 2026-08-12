@@ -3,9 +3,11 @@
 
 诚实映射(v3:评分排序为体,候选自身事实升档——与手工 fault-tree-rca 确证闸同口径):
 - 辩论引擎产的是**评分排序的假设**,不是证明 → 默认进 `probable_causes`。
-- **升档凭事实,口径=候选自身**:路径末端的叶子(候选)被**证据引擎实测「成立」**、且是
-  带判据的真叶子 → 进 `rca_result`(确证档)。祖先数据不足/不成立/未绑定**不拦**——
-  与手工新闸一致(数据不足=零信息;不成立=树逻辑冲突,按叶子事实确证),但机械落
+- **升档凭事实,口径=候选自身(口径 v2,与手工闸同步)**:路径末端的叶子(候选)被
+  **证据引擎实测「成立」**、且是带判据的真叶子、**且路径上无「实测不成立/冲突」的祖先**
+  → 进 `rca_result`(确证档)。祖先数据不足/未绑定**不拦**(零信息不冒充反证);
+  祖先实测不成立/冲突=**层级矛盾 → 降疑似**,blocked_at 指认该祖先、caveats 写清矛盾
+  (可能祖先绑定假阴、或候选命中系背景,人裁),机械落
   caveats 逐类点名;整条路径全实测成立的在 caveats 注明"全路径实测闭环"(最强成色)。
   升档依据是 execute 算出的事实,**不是辩论得分**(得分只管排序);validate_rca 的
   新口径(假根因只揪候选自身)天然同闸。叶子非真叶(如 L6 截断)/叶子非成立 → 留在
@@ -115,7 +117,8 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         ev, debate_caveats = [], []
         blocked_node = None                    # 路径上第一个"数据不足"节点 = 最可指认的阻塞点
         refuted_nodes = []
-        anc_notes = []                         # 祖先(非候选)事实状态:不拦确证,机械落 caveats
+        conflict_anc = []                      # 实测「冲突」的祖先(口径 v2:与不成立同为层级矛盾,拦升档)
+        anc_notes = []                         # 祖先(非候选)事实状态:机械落 caveats
         path_closed = True                     # 全部带判据节点实测成立=全路径闭环(最强成色)
         for n in nodes:
             nid = n.get("code")
@@ -128,9 +131,10 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
                 if nid != leaf.get("code"):    # 候选自身另行判;祖先只记状态
                     nm = ti_n.get("name") or nid
                     if st == "refuted":
-                        anc_notes.append(f"⚠ 路径节点「{nm}」判据实测不成立(与候选确证冲突,树逻辑待人审)")
+                        anc_notes.append(f"⚠ 路径节点「{nm}」判据实测不成立(层级矛盾,拦升档待人审)")
                     elif st == "conflict":
-                        anc_notes.append(f"⚠ 路径节点「{nm}」证据冲突(成立与强反证并存,存疑)")
+                        anc_notes.append(f"⚠ 路径节点「{nm}」证据冲突(成立与强反证并存,拦升档存疑)")
+                        conflict_anc.append(nm)
                     elif st == "insufficient":
                         anc_notes.append(f"路径节点「{nm}」数据不足(不拦确证;补数据可闭环)")
                     elif st is None:
@@ -176,15 +180,25 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         elif leaf_st == "held" and not refuted_nodes and conf == "low":
             conf = "medium"
 
+        hier = None                            # 层级矛盾:候选实测成立、上级实测不成立/冲突(口径 v2 拦升档)
+        if leaf_st == "held" and (refuted_nodes or conflict_anc):
+            worst = (refuted_nodes or conflict_anc)[-1]
+            kind = "实测不成立" if refuted_nodes else "证据冲突(成立与强反证并存)"
+            hier = (f"⚠ 层级矛盾:候选自身实测成立,但上级「{worst}」{kind}——可能该上级绑定假阴,"
+                    "或候选命中系背景;与手工闸同口径不升确证,需人工复核")
         conflict = ([f"⚠ 与证据引擎冲突:「{'、'.join(refuted_nodes)}」的判据实测不成立(已被数据排除),"
-                     f"本条仅为评分排序结果"] if refuted_nodes else [])
+                     f"本条仅为评分排序结果"] if refuted_nodes and leaf_st != "held" else [])
+        if hier:
+            conflict.append(hier)
         if leaf_st == "conflict":
             conflict.append("⚠ 候选自身证据冲突(成立与强反证并存)——不升确证,须人工裁决两面证据")
         entry = {
             "Root_cause": leaf_name,
             "Fault_tree_path": [e["node"] for e in ev],
             "confidence": conf,
-            "blocked_at": (f"受阻于「{blocked_node}」(数据不足,判据未验证);评分式引擎输出,未做逐节点事实闭环"
+            "blocked_at": (f"受阻于上级「{(refuted_nodes or conflict_anc)[-1] if hier else ''}」"
+                           "(实测与候选命中矛盾,层级矛盾待人裁)" if hier else
+                           f"受阻于「{blocked_node}」(数据不足,判据未验证);评分式引擎输出,未做逐节点事实闭环"
                            if blocked_node else
                            "评分式引擎输出:节点由文本匹配/辩论打分,未做逐节点事实闭环验证"),
             "caveats": "; ".join(
@@ -202,10 +216,12 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
             "evidence_path": ev,
             "_engine": {"name": "fault-tree-rca-debate", "mechanism": mechanism},
         }
-        # 升档(与手工确证闸同口径):候选=路径末端叶子,自身实测成立即确证;
-        # 祖先带伤不拦,anc_notes 落 caveats(依据是事实,不是辩论得分);
+        # 升档(与手工确证闸同口径,口径 v2):候选=路径末端叶子,自身实测成立、
+        # 且路径无「实测不成立/冲突」祖先(层级矛盾降疑似,hier 已写清卡点);
+        # 祖先数据不足/未绑定不拦,anc_notes 落 caveats(依据是事实,不是辩论得分);
         # conflict 候选不升(手工 finalize 对冲突候选同样拒收确证)
-        if not abstain and leaf_st == "held" and not truncated:
+        if not abstain and leaf_st == "held" and not truncated \
+                and not refuted_nodes and not conflict_anc:
             ev2 = []
             for e in ev:
                 tn = nodes_idx.get(e["node_id"]) or {}

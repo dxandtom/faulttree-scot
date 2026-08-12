@@ -14,8 +14,9 @@ description: 辩论式多代理 RCA 技能:吃 cs-scot-execute 备好的 rca_inp
 runner 跑完 script 节点 → 本轮结果目录 result-<运行号>/rca_input.json
   ├─ 手工路径:用「fault-tree-rca」技能,模型逐节点判断 → rca.json(事实闭环,四档)
   └─ 本技能  :跑下面这条命令,辩论引擎评分       → rca.json(评分排序;候选(路径末端叶子)
-     被证据引擎实测成立的升确证档 rca_result——与手工确证闸**同口径**:祖先数据不足/不成立
-     不拦、机械落 caveats;升档凭 execute 的事实,不凭辩论得分)
+     被证据引擎实测成立且路径无「实测不成立/冲突」祖先的升确证档 rca_result——与手工确证闸
+     **同口径 v2**:祖先数据不足不拦、落 caveats;祖先不成立/冲突=层级矛盾降疑似带卡点;
+     升档凭 execute 的事实,不凭辩论得分)
 ```
 ```bash
 python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_input.json" --mechanism all
@@ -96,7 +97,7 @@ vendor/README.md);`scripts/` 是本技能的 I/O 层:
 |---|---|
 | `scripts/facts_to_question.py` | 证据→文本桥:把 rca_input 的确定性事实渲染成引擎的 question。**回声策略**:只有"成立"的判据原文复述(让文本匹配命中),"不成立/数据不足"只报节点名(防误匹配假阳)。 |
 | `scripts/tree_to_vendor_xlsx.py` | tree_index → 引擎格式 xlsx;`Ln Code` 列=我们的 node_id(nN),让输出天然带主键;带 L6 深度守卫与成本预估。 |
-| `scripts/result_adapter.py` | 引擎 top_k×3 → 四档 rca.json。默认进 probable_causes;**事实闭环升档**:路径上带判据节点全部被证据引擎实测成立且叶子为真叶 → 进 rca_result(升档凭事实、不凭得分)。未升档条目 judgment 用中性词,不冒用「成立/数据不足」保留字。 |
+| `scripts/result_adapter.py` | 引擎 top_k×3 → 四档 rca.json。默认进 probable_causes;**事实升档(口径 v2)**:候选(路径末端真叶)被证据引擎实测成立、且路径无「实测不成立/冲突」祖先 → 进 rca_result(升档凭事实、不凭得分);层级矛盾降疑似带卡点。未升档条目 judgment 用中性词,不冒用「成立/数据不足」保留字。 |
 | `scripts/run_debate_rca.py` | 编排 + 引擎装载(`_load_processor` 是唯一接口耦合点)+ 配置展平/--set 覆盖 + LLM 加固 + 降级检测。 |
 | `scripts/mock_vendor.py` | 引擎的确定性假实现(形状对、算法不复刻),支撑无 LLM 自测。 |
 | `scripts/probe_llm.py` | LLM 连通性探针(脱敏输出)。 |
