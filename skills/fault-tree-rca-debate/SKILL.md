@@ -24,6 +24,14 @@ python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_i
 参数名精确是 `--rca-input`(`--input` 也认);标准产物布局下 `--tree-index`(自动在
 `<OUT>/tree/` 找唯一的 `*.tree_index.json`)和 `--out-dir`(默认=rca_input 所在目录)
 **不用传**;评测场景等非标准布局才需要显式给这两个参数。
+
+- **事实短路筛(默认开,`--no-screen` 关)**:跑引擎前先借同门 draft_rca 机械分类——
+  ①**全部候选干净**(自身成立+路径无实测不成立/冲突)→ 引擎**整场跳过**(0 次 LLM 调用),
+  finalize 直接机械合成 rca.json,**不写 rca_debate_full.json**(评估侧靠它分引擎,机械结果
+  不冒充辩论结果),审计落 `debate_screen.json`;②**有争议候选**(自身冲突/层级矛盾)→
+  引擎**只辩争议候选所在分支**(祖先链+子树,与 --pruned-only 求交),干净候选由代码机械
+  确证、辩后并进 rca_result(support 注明"未经辩论引擎");③无成立候选/md 形态/同门缺失
+  → 自动退回全树辩论。这就是"1 根因 vs 100 节点"的解:100 节点里通常只剩几个真要辩。
 - 产物:`rca.json`(默认=original 机制)+ `rca.original/softmax/ratio.json` 三份 +
   `rca_debate_full.json`(引擎原始输出,含辩论记录,审计用)。每份含 Top-K 条根因路径,
   `--k` 调(默认 10;纯切片零成本,config 的 top_k 与引擎默认均被它覆盖)。

@@ -78,6 +78,22 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
    rca.json 也写进该轮目录——**一切以 runner 打印的「结果目录」路径为准**。
    并行诊断多份数据时,建议每次执行加 `--result-suffix <数据标识>`(如站点名/数据文件夹名)
    ——不是为了隔离(本来就隔离),是让目录名好认;汇报时写清各份数据对应的结果目录。
+
+   **RCA 引擎选择(机械开关 `SCOT_DEBATE` 环境变量;产物永不带辩论引擎)**:
+   - **未设置或 `off`(默认)**:一律手工 fault-tree-rca(即下面第 4 条的流程),
+     **汇报里一个字都不提 debate**——交付出去的场景技能永远处于这个形态,
+     没收到指令就不存在辩论这回事;
+   - **`auto`(平台勾选"辩论复核"时由平台传入)**:draft_rca 骨架分类出**争议候选**
+     (conflict_nodes 非空,或 probable 里有层级矛盾)时,找辩论引擎——按序找
+     **同门 `skills/fault-tree-rca-debate/`**(平台工具链环境)或 `assets/fault-tree-rca-debate/`
+     (历史带副本的包),再验两件:依赖(`python -c "import scipy, pandas"`)与密钥
+     (其 `vendor/config.yaml`)。**引擎在且两件齐** → 跑其 `scripts/run_debate_rca.py
+     --rca-input "<结果目录>/rca_input.json"`(事实短路筛自动只辩争议分支、干净候选机械并入),
+     以其产出为最终 rca.json;**找不到引擎或缺依赖/密钥** → 播报「已请求辩论复核,但引擎
+     不可用(缺什么写明),本轮走手工 RCA」——**请求了才需要交代,不许静默装作辩过**;
+     **无争议候选** → 手工出结果,汇报注一句「无争议候选,辩论复核未触发」;
+   - **`force`(演示/验收用)**:直接跑 `run_debate_rca --no-screen` 全树辩论
+     (保证有辩论记录,哪怕全干净);引擎不可用同样明说。
 4. **【输出汇报】(与 rca.json 严格口径一致)**:
    - **诊断结论一律机械渲染,禁止手写**:
      `python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json"` 产出

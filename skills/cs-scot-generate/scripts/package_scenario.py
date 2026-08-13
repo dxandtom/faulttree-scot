@@ -90,6 +90,9 @@ def main() -> None:
     ap.add_argument("--name", help="技能名覆盖(英文小写连字符);默认用产物的英文短名(slug)")
     ap.add_argument("--execute-skill", default=str(here.parent.parent / "cs-scot-execute"))
     ap.add_argument("--rca-skill", default=str(here.parent.parent / "fault-tree-rca"))
+    # 注意:没有、也不会有 --with-debate——**产物(场景技能)永不带辩论引擎**(用户拍板)。
+    # 辩论复核是平台工具链层的能力(同门 fault-tree-rca-debate),由执行侧 SCOT_DEBATE 开关
+    # 按指令启用;交付出去的技能永远只有手工 RCA。
     ap.add_argument("--force", action="store_true", help="目标技能目录已存在时先删再建")
     args = ap.parse_args()
 
@@ -169,8 +172,8 @@ def main() -> None:
     def _ignore_out(d, names):                           # --out 若是"已打包技能的 assets/"(就地调优/迁移后再克隆),
         ig = set(_ignore(d, names))                      # 里面已带上次打包放的 fault-tree-rca 副本——拷贝时剔除
         if Path(d).resolve() == out.resolve():           # (骨架已放新副本,同名目录相撞实测炸在 copytree)
-            ig |= {n for n in names if n == "fault-tree-rca"}
-        return ig
+            ig |= {n for n in names if n in ("fault-tree-rca", "fault-tree-rca-debate")}
+        return ig                                        # debate 名留在剔除表:历史上带过副本的包克隆时清干净
     shutil.copytree(out, dest / "assets", ignore=_ignore_out,        # 诊断产物并进 assets(排除临时物;
                     dirs_exist_ok=True)                              # 骨架已建 assets,允许合并)
 
