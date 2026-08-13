@@ -594,12 +594,12 @@ def refresh_engine(product: Path) -> None:
                           "且本机没有同门 fault-tree-rca 技能可刷新——RCA 仍走旧口径手工裁决")
         sk = skill_root / "SKILL.md"
         sk_text = sk.read_text(encoding="utf-8", errors="replace")
-        if "render_report" not in sk_text:               # SKILL.md 正文过旧(没有机械渲染报告这一代;
+        if "第一个动作就是跑其 draft_rca" not in sk_text:   # SKILL.md 正文过旧(没有 rca 交接禁区这一代;
             exe_sk = Path(__file__).resolve().parents[2] / "cs-scot-execute" / "SKILL.md"   # 换正文保身份
             m_old = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", sk_text, re.S)
             new_txt = exe_sk.read_text(encoding="utf-8", errors="replace") if exe_sk.exists() else ""
             m_new = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", new_txt, re.S)
-            if m_old and m_new and "render_report" in new_txt:
+            if m_old and m_new and "第一个动作就是跑其 draft_rca" in new_txt:
                 shutil.copy2(sk, sk.with_suffix(".md.bak"))
                 sk.write_text(f"---\n{m_old.group(1)}\n---\n" + new_txt[m_new.end():], encoding="utf-8")
                 print("  打包技能 SKILL.md 正文已刷新到当前执行指引(数据入口/体检/机械渲染报告等;"
