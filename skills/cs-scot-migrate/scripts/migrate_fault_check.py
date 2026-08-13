@@ -537,8 +537,8 @@ def refresh_engine(product: Path) -> None:
         else:
             main_py = z2c_dst / "scripts" / "zip2csv.py"
             cur = main_py.read_text(encoding="utf-8", errors="replace") if main_py.exists() else ""
-            if "list_data_files" not in cur:             # 能力标记:旧版只认 .txt(log.log 整目录跳过)、
-                if z2c_ok:                               # 只吃 zip、GBK 乱码——按代刷新脚本,SKILL.md 一并带
+            if "collect_data_files" not in cur:          # 能力标记:递归收子目录+同名防覆盖这一代
+                if z2c_ok:                               # (更早代还只认 .txt/只吃 zip)——按代刷新,SKILL.md 一并带
                     (z2c_dst / "scripts").mkdir(parents=True, exist_ok=True)
                     if main_py.exists():
                         shutil.copy2(main_py, main_py.with_suffix(".py.bak"))
@@ -550,21 +550,51 @@ def refresh_engine(product: Path) -> None:
                 else:
                     print("  [warn] 打包技能的 assets/zip2csv 是旧版(只认 .txt/只吃 zip),"
                           "且本机没有同门 zip2csv 技能可刷新——log.log 类数据会整目录跳过")
+        # 根因规则副本(package_scenario 放在 assets/fault-tree-rca):缺→补挂;旧→整目录刷新
+        rca_dst = product / "fault-tree-rca"
+        rca_src = Path(__file__).resolve().parents[2] / "fault-tree-rca"
+        rca_src_draft = rca_src / "scripts" / "draft_rca.py"
+        rca_ok = rca_src_draft.exists() and \
+            "auto_verdict" in rca_src_draft.read_text(encoding="utf-8", errors="replace")
+        _rca_ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.py.bak", "runs", "result*")
+        if not rca_dst.is_dir():
+            if rca_ok:
+                shutil.copytree(rca_src, rca_dst, ignore=_rca_ignore)
+                print("  打包技能补挂 assets/fault-tree-rca(根因规则副本:自动定档+机械报告这一代)")
+            else:
+                print("  [warn] 打包技能缺 assets/fault-tree-rca,且本机没有同门 fault-tree-rca 可拷——"
+                      "RCA 步骤没有规则手册与骨架/合成脚本,诊断走不到根因")
+        else:
+            cur_draft = rca_dst / "scripts" / "draft_rca.py"
+            cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
+            if "blocked_at_hint" not in cur \
+                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档(v4 层级矛盾降疑似)+机械报告
+                if rca_ok:
+                    bak = rca_dst.with_name("fault-tree-rca.bak")
+                    if bak.exists():
+                        shutil.rmtree(bak)
+                    rca_dst.rename(bak)
+                    shutil.copytree(rca_src, rca_dst, ignore=_rca_ignore)
+                    print("  打包技能 assets/fault-tree-rca 已刷新(旧版无自动定档/机械报告;"
+                          "旧副本整目录备份 fault-tree-rca.bak)")
+                else:
+                    print("  [warn] 打包技能的 assets/fault-tree-rca 是旧版(无自动定档/机械报告),"
+                          "且本机没有同门 fault-tree-rca 技能可刷新——RCA 仍走旧口径手工裁决")
         sk = skill_root / "SKILL.md"
         sk_text = sk.read_text(encoding="utf-8", errors="replace")
-        if "check_data" not in sk_text:                  # SKILL.md 正文过旧(没有数据体检/裸txt指引这一代):
+        if "render_report" not in sk_text:               # SKILL.md 正文过旧(没有机械渲染报告这一代;
             exe_sk = Path(__file__).resolve().parents[2] / "cs-scot-execute" / "SKILL.md"   # 换正文保身份
             m_old = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", sk_text, re.S)
             new_txt = exe_sk.read_text(encoding="utf-8", errors="replace") if exe_sk.exists() else ""
             m_new = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", new_txt, re.S)
-            if m_old and m_new and "check_data" in new_txt:
+            if m_old and m_new and "render_report" in new_txt:
                 shutil.copy2(sk, sk.with_suffix(".md.bak"))
                 sk.write_text(f"---\n{m_old.group(1)}\n---\n" + new_txt[m_new.end():], encoding="utf-8")
-                print("  打包技能 SKILL.md 正文已刷新到当前执行指引(数据入口/体检等;"
+                print("  打包技能 SKILL.md 正文已刷新到当前执行指引(数据入口/体检/机械渲染报告等;"
                       "技能名与描述保留原样,旧文备份 SKILL.md.bak)")
             else:
-                print("  [warn] 打包技能 SKILL.md 正文是旧版(缺数据入口/体检指引),但无法自动刷新"
-                      "(frontmatter 异常或本机缺同门 cs-scot-execute)——建议重新 package")
+                print("  [warn] 打包技能 SKILL.md 正文是旧版(缺机械渲染报告指引),但无法自动刷新"
+                      "(frontmatter 异常或本机同门 cs-scot-execute 版本不够新)——建议重新 package")
 
 
 def upgrade_cross_scaffold(product: Path) -> None:
