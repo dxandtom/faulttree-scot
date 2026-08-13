@@ -271,8 +271,9 @@ def load_knowledge(out: Path, name_pool: str):
 
 
 def load_digests(out: Path) -> dict:
-    """<OUT>/tree/script_digests.json(cs-scot-adopt 收编的平台脚本纪要)→ {node_id: rec};
-    没有/坏了 → 空 dict(纪要是增益,不因它坏主流程,但坏文件要响亮提示)。"""
+    """<OUT>/tree/script_digests.json(历史 adopt 流程收编的平台脚本纪要;该流程已删,
+    存量纪要继续生效)→ {node_id: rec};没有/坏了 → 空 dict(纪要是增益,不因它坏主流程,
+    但坏文件要响亮提示)。"""
     p = out / "tree" / "script_digests.json"
     if not p.exists():
         return {}

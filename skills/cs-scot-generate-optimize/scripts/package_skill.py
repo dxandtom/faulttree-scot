@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""发行打包:把生成/优化前门 + 三条线(generate/migrate/adopt)+ zip2csv 合成一个自包含包。
+"""发行打包:把生成/优化前门 + 两条线(generate/migrate)+ zip2csv 合成一个自包含包。
 
 用法(在仓库任意位置):
     python skills/cs-scot-generate-optimize/scripts/package_skill.py
@@ -32,7 +32,6 @@ LAYOUT = {
     "cs-scot-generate-optimize": ["."],
     "cs-scot-generate": ["generate"],
     "cs-scot-migrate": ["migrate"],
-    "cs-scot-adopt": ["adopt"],
     "zip2csv": ["generate/zip2csv", "zip2csv"],
 }
 
@@ -56,7 +55,6 @@ REQUIRED = (
         "SKILL.md",
         "generate/SKILL.md", "generate/knowledge.md",
         "migrate/SKILL.md", "migrate/scripts/migrate_fault_check.py", "migrate/scripts/sync_engine.py",
-        "adopt/SKILL.md", "adopt/scripts/align_scripts.py", "adopt/scripts/merge_digests.py",
     ]
     + [f"generate/scripts/{n}" for n in _GEN_SCRIPTS]
     + [f"generate/references/{n}" for n in _GEN_REFS]
