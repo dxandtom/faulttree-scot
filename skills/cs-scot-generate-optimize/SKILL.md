@@ -87,14 +87,15 @@ description: 生成/优化技能总门面:按输入形态机械路由——故�
 
 **包内形态的路径换算(唯一一条改写规则)**:子手册命令里的 `skills/cs-scot-generate/`、
 `skills/cs-scot-migrate/` 前缀,一律换算成 `<本目录>/generate/`、
-`<本目录>/migrate/`(用绝对路径);`skills/zip2csv/` 换算成
-`<本目录>/generate/zip2csv/`。除此之外照手册逐字执行,不增不减。
+`<本目录>/migrate/`(用绝对路径);`skills/zip2csv/` 等素材前缀换算成
+`<本目录>/zip2csv/`(素材平铺包根)。除此之外照手册逐字执行,不增不减。
 
-**包内素材(发行包自足,生成线直出完整技能)**:打包素材 `cs-scot-execute/`、
-`fault-tree-rca/`、`zip2csv/` 内嵌在 `generate/` 下(generate 的素材查找次序①即命中)——
+**包内素材(发行包自足,生成线直出完整技能)**:公共素材 `cs-scot-execute/`、
+`fault-tree-rca/`、`zip2csv/` 与线目录**平铺在包根**(包根=同门容器,扮演仓库 `skills/`
+的角色:generate 的素材查找次序②"同门"命中,migrate 找同门也命中,谁不伸手进谁)——
 包内形态生成线照样**直出完整可执行的场景技能**,没有"止于产物形态"的边界。
-素材目录只是生成线的打包原料:**前门判定表不因此多线**,执行诊断的入口仍在生成出的
-场景技能里(或 cs-scot-execute 技能),不在本前门。
+素材目录只是打包原料:**前门判定表不因此多线**,执行诊断的入口仍在生成出的
+场景技能里,不在本前门。
 
 ## 混合输入:按依赖序执行,不并行不跳步
 
@@ -147,9 +148,9 @@ needs_criteria_review, needs_adjudication, needs_reconciliation}
 python "<本目录>/scripts/package_skill.py"
 ```
 
-把前门+两线+打包素材合成 `dist/cs-scot-generate-optimize/` 并打同名 zip:
-generate/migrate 成为子目录、素材(cs-scot-execute/fault-tree-rca/zip2csv)**内嵌进
-generate/**(生成线素材查找次序①即命中;migrate 的查找自带 generate/ 后备)、
+把前门+两线+公共素材合成 `dist/cs-scot-generate-optimize/` 并打同名 zip:
+generate/migrate 与素材(cs-scot-execute/fault-tree-rca/zip2csv)**平铺包根**
+(包根=同门容器,两线各自按"找同门"命中素材)、
 关键文件逐一核验**缺一即响亮失败并清残局**、
 `MANIFEST.txt` 记全部文件与来源提交(工作区有未提交改动标 `+dirty`)、zip 可复现
 (同一提交两次打包 sha256 一致)。打包是纯复制,不改写任何源文件;输出目录与任何
