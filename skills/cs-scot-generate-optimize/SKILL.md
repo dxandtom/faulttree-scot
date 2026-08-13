@@ -90,15 +90,11 @@ description: 生成/优化技能总门面:按输入形态机械路由——故�
 `<本目录>/migrate/`(用绝对路径);`skills/zip2csv/` 换算成
 `<本目录>/generate/zip2csv/`。除此之外照手册逐字执行,不增不减。
 
-**包内形态能力边界(发行包不含执行器,别硬闯)**:发行包只带生成/优化两线,
-**不含 cs-scot-execute 与 fault-tree-rca**(执行属另一技能节点)。因此包内形态:
-
-- 生成线步骤 1 会自动"退回产物形态"——这是预期行为不是故障;交付止点=产物目录,
-  **别跑步骤 5(package_scenario,会因找不到 execute 硬停)**;
-- 子手册里凡引用 `<cs-scot-execute 目录>` / fault-tree-rca 的段落(直出技能形态、执行诊断),
-  包内形态一律停下向用户明说:需仓库开发态,或本机另装 cs-scot-execute 与 fault-tree-rca;
-- migrate 翻新老打包技能的 runner/check_data/zip2csv 补挂**不受影响**
-  (engine/ 内置副本与包根 zip2csv 都随包带)。
+**包内素材(发行包自足,生成线直出完整技能)**:打包素材 `cs-scot-execute/`、
+`fault-tree-rca/`、`zip2csv/` 内嵌在 `generate/` 下(generate 的素材查找次序①即命中)——
+包内形态生成线照样**直出完整可执行的场景技能**,没有"止于产物形态"的边界。
+素材目录只是生成线的打包原料:**前门判定表不因此多线**,执行诊断的入口仍在生成出的
+场景技能里(或 cs-scot-execute 技能),不在本前门。
 
 ## 混合输入:按依赖序执行,不并行不跳步
 
@@ -151,9 +147,10 @@ needs_criteria_review, needs_adjudication, needs_reconciliation}
 python "<本目录>/scripts/package_skill.py"
 ```
 
-把前门+两线+zip2csv 合成 `dist/cs-scot-generate-optimize/` 并打同名 zip:
-generate/migrate 成为子目录、zip2csv **双落位**(内嵌 generate/ 供生成线查找次序①,
-再置包根供 migrate 补挂查找)、关键文件逐一核验**缺一即响亮失败并清残局**、
+把前门+两线+打包素材合成 `dist/cs-scot-generate-optimize/` 并打同名 zip:
+generate/migrate 成为子目录、素材(cs-scot-execute/fault-tree-rca/zip2csv)**内嵌进
+generate/**(生成线素材查找次序①即命中;migrate 的查找自带 generate/ 后备)、
+关键文件逐一核验**缺一即响亮失败并清残局**、
 `MANIFEST.txt` 记全部文件与来源提交(工作区有未提交改动标 `+dirty`)、zip 可复现
 (同一提交两次打包 sha256 一致)。打包是纯复制,不改写任何源文件;输出目录与任何
 源目录重叠会**拒绝执行**。本脚本仅仓库开发态可用,发行包内不含它;包的能力边界见上节。

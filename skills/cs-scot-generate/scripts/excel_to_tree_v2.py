@@ -174,13 +174,16 @@ def default_out(anchor: Path, stem: str, slug, scenario: str):
     if (skill_dir / "SKILL.md").exists() and (skill_dir / "assets").is_dir():
         return skill_dir, skill_dir / "assets", "技能已存在,续用(重跑建树直接更新其 assets)"
     here = Path(__file__).resolve().parent
-    exe, rca = here.parent.parent / "cs-scot-execute", here.parent.parent / "fault-tree-rca"
+    import package_scenario
+    exe = package_scenario.find_material("cs-scot-execute")          # ①技能内嵌 ②同门 skills/
+    rca = package_scenario.find_material("fault-tree-rca")
     if not slug:
         return None, scenario_out_dir(anchor, stem), \
             "未取到英文短名(技能名需英文)——退回产物形态;加 --slug 重跑可直出技能,或最后跑 package_scenario.py"
     if not (exe / "SKILL.md").exists() or not (rca / "SKILL.md").exists():
         return None, scenario_out_dir(anchor, stem), \
-            "本机没有同门 cs-scot-execute / fault-tree-rca 技能——退回产物形态,最后跑 package_scenario.py"
+            ("找不到打包素材 cs-scot-execute / fault-tree-rca(技能内嵌与同门 skills/ 都没有)"
+             "——退回产物形态,最后跑 package_scenario.py")
     if skill_dir.exists():
         return None, scenario_out_dir(anchor, stem), \
             f"{skill_dir} 已存在但不是完整技能(缺 SKILL.md 或 assets/)——不动它,退回产物形态;人工清理后重跑可直出"

@@ -461,6 +461,18 @@ RUNNER_CAP = "execution_status"                          # 逐节点执行状态
                                                          # 兼含前代:raw-only 放行 / diag↔cmd 互认
 
 
+def _mat(name: str) -> Path:
+    """素材/同门目录查找:①同门 skills/<name>(仓库开发态)②发行包形态——素材收进生成线
+    目录下(generate/<name>;cs-scot-generate 本身在发行包里就叫 generate)。都没有返回同门路径。"""
+    base = Path(__file__).resolve().parents[2]
+    cands = (base / name, base / "generate") if name == "cs-scot-generate" \
+        else (base / name, base / "generate" / name)
+    for c in cands:
+        if c.is_dir():
+            return c
+    return base / name
+
+
 def _engine_src(name: str, caps, sibling: Path):
     """引擎文件取源:同门技能优先,内置 engine/ 兜底;两处都必须带齐能力标记才可信。"""
     for d in (sibling, Path(__file__).resolve().parents[1] / "engine"):
@@ -478,7 +490,7 @@ def refresh_engine(product: Path) -> None:
     产物在打包技能里(assets/ 形态)时,顺带体检技能根下的 runner.py。
     某文件缺能力又找不到可信引擎源 → 硬停(迁过去也是全线'未知类别')。"""
     sdir = product / "scripts"
-    gen = Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts"
+    gen = _mat("cs-scot-generate") / "scripts"
     changed, extra_regs = [], set()
     for name, caps in ENGINE_CAPS.items():
         dst = sdir / name
@@ -508,7 +520,7 @@ def refresh_engine(product: Path) -> None:
     if run_dst.exists() and (skill_root / "SKILL.md").exists():
         if RUNNER_CAP not in run_dst.read_text(encoding="utf-8", errors="replace"):
             run_src = _engine_src("runner.py", (RUNNER_CAP,),
-                                  Path(__file__).resolve().parents[2] / "cs-scot-execute" / "scripts")
+                                  _mat("cs-scot-execute") / "scripts")
             if run_src is None:
                 print("  [warn] 打包技能的 runner.py 是旧版且无处取新版——不影响 S 判定,"
                       "但 --data 里 diag/cmd 两代源名不互认,喂数据时按 plan 要的名字写")
@@ -519,12 +531,12 @@ def refresh_engine(product: Path) -> None:
         cd_dst = skill_root / "scripts" / "check_data.py"
         if not cd_dst.exists():                          # 旧打包技能没有数据体检:一并补挂
             cd_src = _engine_src("check_data.py", ("def main",),
-                                 Path(__file__).resolve().parents[2] / "cs-scot-execute" / "scripts")
+                                 _mat("cs-scot-execute") / "scripts")
             if cd_src is not None:
                 shutil.copy2(cd_src, cd_dst)
                 print("  打包技能补挂 scripts/check_data.py(数据入口体检:诊断前先验目录结构/点名清单表)")
         z2c_dst = product / "zip2csv"                    # 旧打包技能 assets/ 里没有/是旧版 zip2csv:补挂/刷新
-        z2c_src = Path(__file__).resolve().parents[2] / "zip2csv"
+        z2c_src = _mat("zip2csv")
         z2c_ok = (z2c_src / "scripts" / "zip2csv.py").exists()
         if not z2c_dst.is_dir():                         # (裸 txt 数据入口指引按它指路,没有它模型只能干瞪眼)
             if z2c_ok:
@@ -552,7 +564,7 @@ def refresh_engine(product: Path) -> None:
                           "且本机没有同门 zip2csv 技能可刷新——log.log 类数据会整目录跳过")
         # 根因规则副本(package_scenario 放在 assets/fault-tree-rca):缺→补挂;旧→整目录刷新
         rca_dst = product / "fault-tree-rca"
-        rca_src = Path(__file__).resolve().parents[2] / "fault-tree-rca"
+        rca_src = _mat("fault-tree-rca")
         rca_src_draft = rca_src / "scripts" / "draft_rca.py"
         rca_ok = rca_src_draft.exists() and \
             "auto_verdict" in rca_src_draft.read_text(encoding="utf-8", errors="replace")
