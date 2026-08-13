@@ -174,7 +174,7 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 ```bash
 python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根目录>/scot技能/<slug>/ 技能目录(与 scot产物 平级;--dest 可改)
 ```
-产出 = execute 执行骨架(SKILL.md 自动改名+按场景写 description)+ `assets/`(本产物 + fault-tree-rca 规则副本),自动排除 overview/dispatch/各轮 result-*/index.jsonl/__pycache__ 等临时物。**要求 debate 落地的平台环境加 `--with-debate`**:辩论引擎副本一并入包(密钥 config.yaml 绝不随包,目标环境自配依赖与密钥;默认不带——引擎有 scipy/pandas 三方件,大多数交付环境用不上)。上传后用户一句 `/<slug> 数据在 <zip>,帮我诊断` 即可跑全程(默认约定见 execute SKILL.md「场景打包形态」)。产物没有英文短名时用 `--name` 指定。
+产出 = execute 执行骨架(SKILL.md 自动改名+按场景写 description)+ `assets/`(本产物 + fault-tree-rca 规则副本),自动排除 overview/dispatch/各轮 result-*/index.jsonl/__pycache__ 等临时物。**产物永不带辩论引擎**:辩论复核是平台工具链层的能力(同门 fault-tree-rca-debate + 执行侧 SCOT_DEBATE 开关),交付出去的场景技能只有手工 RCA。上传后用户一句 `/<slug> 数据在 <zip>,帮我诊断` 即可跑全程(默认约定见 execute SKILL.md「场景打包形态」)。产物没有英文短名时用 `--name` 指定。
 **最终汇报必带**:技能目录完整路径 + 一句"上传该目录即可用 `/<slug>` 一句话诊断"。
 **汇报数字必须现查文件,禁止凭记忆填表**——长流程跑完记忆是错的(实测:纪要 13 条被汇报成"26 对合并成功",
 裁决理由张冠李戴)。对齐数=数 `adopt/adoption_map.json`(总数 + `auto:false` 数),纪要数=数
