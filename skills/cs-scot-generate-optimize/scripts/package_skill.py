@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""发行打包:把生成/优化前门 + 两条线(generate/migrate)+ 打包素材(execute/rca/zip2csv,
-内嵌 generate/ 下)合成一个自包含包。
+"""发行打包:把生成/优化前门 + 两条线(generate/migrate)+ 公共素材(execute/rca/zip2csv,
+与线平铺包根)合成一个自包含包。
 
 用法(在仓库任意位置):
     python skills/cs-scot-generate-optimize/scripts/package_skill.py
@@ -14,7 +14,7 @@
 
 原则:纯复制,不改写任何源文件;输出目录与任何源目录重叠即拒绝执行;
 关键文件逐一核验,缺一响亮失败并清掉残局(不留半个包)。
-打包素材(cs-scot-execute / fault-tree-rca / zip2csv)内嵌在 generate/ 下——
+公共素材(cs-scot-execute / fault-tree-rca / zip2csv)与线目录平铺在包根(包根=同门容器)——
 装了这个包,生成线直出的场景技能就是完整可执行成品,不再有"止于产物形态"的边界。
 """
 import argparse
@@ -27,17 +27,34 @@ from pathlib import Path
 
 PKG_NAME = "cs-scot-generate-optimize"
 
-# 收进包的源目录 → 包内位置。打包素材(execute/rca/zip2csv)统一内嵌进 generate/ 下
-# (对齐 generate 的素材查找次序①"技能内嵌";migrate 的 _mat 查找也带 generate/ 后备,
-#  不再需要包根重复放一份)——装了这个包,生成线直出的场景技能就是完整可执行成品。
+# 收进包的源目录 → 包内位置。**包根=同门容器**(扮演仓库 skills/ 的角色):
+# 线目录(generate/migrate)与公共素材(execute/rca/zip2csv)平铺其下——
+# generate 走素材查找次序②"同门"命中,migrate 的 _mat 第一候选"同门"命中,
+# 谁也不伸手进谁的目录;素材各只有一份。
+# ("素材内嵌进 generate"的形态留给**单交付 generate** 场景:没有包根可放时,
+#  素材拷进技能内与 SKILL.md 同层,查找次序①管它。)
 LAYOUT = {
     "cs-scot-generate-optimize": ["."],
     "cs-scot-generate": ["generate"],
     "cs-scot-migrate": ["migrate"],
-    "zip2csv": ["generate/zip2csv"],
-    "cs-scot-execute": ["generate/cs-scot-execute"],
-    "fault-tree-rca": ["generate/fault-tree-rca"],
+    "zip2csv": ["zip2csv"],
+    "cs-scot-execute": ["cs-scot-execute"],
+    "fault-tree-rca": ["fault-tree-rca"],
 }
+MATERIALS = ("cs-scot-execute", "fault-tree-rca", "zip2csv")
+
+
+def _resolve_src(skills_dir: Path, name: str):
+    """素材源两级解析:①skills/<name>(仓库/完整部署)②skills/cs-scot-generate/<name>
+    (单交付内嵌形态——本地只装了带内嵌素材的 generate 时也能打包)。找不到返回 None。"""
+    p = skills_dir / name
+    if p.is_dir():
+        return p
+    if name in MATERIALS:
+        q = skills_dir / "cs-scot-generate" / name
+        if q.is_dir():
+            return q
+    return None
 
 # 打包后必须存在的关键文件(相对包根)——各线手册点名必用件全收,防"半个 checkout"打出静默残包
 _GEN_SCRIPTS = [
@@ -63,10 +80,10 @@ REQUIRED = (
     + [f"generate/scripts/{n}" for n in _GEN_SCRIPTS]
     + [f"generate/references/{n}" for n in _GEN_REFS]
     + [f"migrate/engine/{n}" for n in _MIG_ENGINE]
-    + [f"generate/zip2csv/{s}" for s in ["SKILL.md"] + [f"scripts/{n}" for n in _Z2C]]
-    + [f"generate/cs-scot-execute/{s}" for s in
+    + [f"zip2csv/{s}" for s in ["SKILL.md"] + [f"scripts/{n}" for n in _Z2C]]
+    + [f"cs-scot-execute/{s}" for s in
        ("SKILL.md", "scripts/runner.py", "scripts/check_data.py")]
-    + [f"generate/fault-tree-rca/{s}" for s in
+    + [f"fault-tree-rca/{s}" for s in
        ("SKILL.md", "references/rca_rules.md",
         "scripts/draft_rca.py", "scripts/finalize_rca.py", "scripts/render_report.py",
         "scripts/validate_rca.py", "scripts/rca_query.py")]
@@ -137,6 +154,10 @@ def _zip_datetime(repo: Path):
 
 
 def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")         # Windows GBK 控制台打 ✓/✗ 不再炸编码
+    except Exception:
+        pass
     ap = argparse.ArgumentParser(description="生成/优化前门发行打包")
     ap.add_argument("--out", default=None, help="输出根目录(默认 <仓库>/dist)")
     ap.add_argument("--no-zip", action="store_true", help="只出目录,不打 zip")
@@ -148,16 +169,17 @@ def main() -> int:
     out_root = Path(args.out).resolve() if args.out else repo / "dist"
     pkg_dir = out_root / PKG_NAME
 
-    # 0a. 源目录齐备检查
-    missing_src = [name for name in LAYOUT if not (skills_dir / name).is_dir()]
+    # 0a. 源目录齐备检查(素材认两级:skills 层 / generate 内嵌)
+    sources = {name: _resolve_src(skills_dir, name) for name in LAYOUT}
+    missing_src = [name for name, p in sources.items() if p is None]
     if missing_src:
-        print(f"✗ 缺源技能目录:{', '.join(missing_src)}(应在 {skills_dir} 下)")
+        print(f"✗ 缺源技能目录:{', '.join(missing_src)}(应在 {skills_dir} 下,"
+              f"素材也可内嵌在 cs-scot-generate/ 内)")
         return 1
 
     # 0b. 重叠防护:输出目录与任何源目录相同/互为父子 → 拒绝(rmtree 会毁源文件)
-    for name in LAYOUT:
-        src = (skills_dir / name).resolve()
-        if _overlaps(pkg_dir.resolve(), src):
+    for src in sources.values():
+        if _overlaps(pkg_dir.resolve(), src.resolve()):
             print(f"✗ 输出目录与源目录重叠:{pkg_dir} ↔ {src}——拒绝执行(会毁源文件),换个 --out")
             return 2
 
@@ -168,10 +190,13 @@ def main() -> int:
             return 2
         shutil.rmtree(pkg_dir)
     pkg_dir.mkdir(parents=True)
+    # 先落 MANIFEST 占位:万一中途崩掉留下半个包,重跑能认出是自己的残骸并自动清理
+    (pkg_dir / "MANIFEST.txt").write_text(
+        "(打包进行中——看到本行说明上次构建中断,重跑会自动清理重建)\n", encoding="utf-8")
 
     # 2. 纯复制
     for src_name, dests in LAYOUT.items():
-        src = skills_dir / src_name
+        src = sources[src_name]
         for rel in dests:
             dst = pkg_dir if rel == "." else pkg_dir / rel
             if rel == ".":
@@ -189,7 +214,18 @@ def main() -> int:
                 if sdir.is_dir() and not any(sdir.iterdir()):
                     sdir.rmdir()
             else:
-                shutil.copytree(src, dst, ignore=_ignore(src, rel))
+                ig = _ignore(src, rel)
+                if src_name == "cs-scot-generate":
+                    # 源 generate 若是"单交付内嵌"形态(素材长在技能内),拷贝时剔除其顶层素材目录:
+                    # 包内素材统一放包根一份,不重复、也不会与后续素材复制相撞(Windows 实测事故)
+                    base_ig = ig
+
+                    def ig(dirpath, names, _src=src, _base=base_ig):   # noqa: PLW0642
+                        skip = set(_base(dirpath, names))
+                        if Path(dirpath).resolve() == _src.resolve():
+                            skip |= {n for n in names if n in MATERIALS}
+                        return skip
+                shutil.copytree(src, dst, ignore=ig)
 
     # 3. 关键文件核验——缺一即失败,并清掉残局(不完整目录 + 旧 zip),不留半个包
     missing = [r for r in REQUIRED if not (pkg_dir / r).is_file()]
@@ -239,7 +275,7 @@ def main() -> int:
     if zip_path:
         print(f"✓ zip: {zip_path}  (sha256 前16位 {digest};同一提交重打可复现)")
     print("  交付平台:给整个包目录,或给 zip(平台认哪种给哪种)。")
-    print("  素材(execute/fault-tree-rca/zip2csv)已内嵌 generate/——生成线直出的技能即完整可执行成品。")
+    print("  公共素材(execute/fault-tree-rca/zip2csv)平铺包根(同门容器)——生成线直出的技能即完整可执行成品。")
     return 0
 
 
