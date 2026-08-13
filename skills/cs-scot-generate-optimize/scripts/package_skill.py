@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""发行打包:把生成/优化前门 + 两条线(generate/migrate)+ zip2csv 合成一个自包含包。
+"""发行打包:把生成/优化前门 + 两条线(generate/migrate)+ 打包素材(execute/rca/zip2csv,
+内嵌 generate/ 下)合成一个自包含包。
 
 用法(在仓库任意位置):
     python skills/cs-scot-generate-optimize/scripts/package_skill.py
@@ -13,8 +14,8 @@
 
 原则:纯复制,不改写任何源文件;输出目录与任何源目录重叠即拒绝执行;
 关键文件逐一核验,缺一响亮失败并清掉残局(不留半个包)。
-注意:发行包不含 cs-scot-execute / fault-tree-rca(执行属另一技能节点),
-包内生成线交付止于产物形态——边界详见前门 SKILL.md「包内形态能力边界」。
+打包素材(cs-scot-execute / fault-tree-rca / zip2csv)内嵌在 generate/ 下——
+装了这个包,生成线直出的场景技能就是完整可执行成品,不再有"止于产物形态"的边界。
 """
 import argparse
 import hashlib
@@ -26,13 +27,16 @@ from pathlib import Path
 
 PKG_NAME = "cs-scot-generate-optimize"
 
-# 收进包的源目录 → 包内位置(可多落位):
-# zip2csv 双落位——generate/zip2csv 供生成线查找次序①,包根 zip2csv 供 migrate 补挂查找
+# 收进包的源目录 → 包内位置。打包素材(execute/rca/zip2csv)统一内嵌进 generate/ 下
+# (对齐 generate 的素材查找次序①"技能内嵌";migrate 的 _mat 查找也带 generate/ 后备,
+#  不再需要包根重复放一份)——装了这个包,生成线直出的场景技能就是完整可执行成品。
 LAYOUT = {
     "cs-scot-generate-optimize": ["."],
     "cs-scot-generate": ["generate"],
     "cs-scot-migrate": ["migrate"],
-    "zip2csv": ["generate/zip2csv", "zip2csv"],
+    "zip2csv": ["generate/zip2csv"],
+    "cs-scot-execute": ["generate/cs-scot-execute"],
+    "fault-tree-rca": ["generate/fault-tree-rca"],
 }
 
 # 打包后必须存在的关键文件(相对包根)——各线手册点名必用件全收,防"半个 checkout"打出静默残包
@@ -59,8 +63,13 @@ REQUIRED = (
     + [f"generate/scripts/{n}" for n in _GEN_SCRIPTS]
     + [f"generate/references/{n}" for n in _GEN_REFS]
     + [f"migrate/engine/{n}" for n in _MIG_ENGINE]
-    + [f"{root}/{s}" for root in ("generate/zip2csv", "zip2csv")
-       for s in ["SKILL.md"] + [f"scripts/{n}" for n in _Z2C]]
+    + [f"generate/zip2csv/{s}" for s in ["SKILL.md"] + [f"scripts/{n}" for n in _Z2C]]
+    + [f"generate/cs-scot-execute/{s}" for s in
+       ("SKILL.md", "scripts/runner.py", "scripts/check_data.py")]
+    + [f"generate/fault-tree-rca/{s}" for s in
+       ("SKILL.md", "references/rca_rules.md",
+        "scripts/draft_rca.py", "scripts/finalize_rca.py", "scripts/render_report.py",
+        "scripts/validate_rca.py", "scripts/rca_query.py")]
 )
 
 # 复制时排除(缓存/系统噪音/打包器自身产物)
@@ -230,8 +239,7 @@ def main() -> int:
     if zip_path:
         print(f"✓ zip: {zip_path}  (sha256 前16位 {digest};同一提交重打可复现)")
     print("  交付平台:给整个包目录,或给 zip(平台认哪种给哪种)。")
-    print("  注:包不含 cs-scot-execute / fault-tree-rca(执行属另一节点),")
-    print("      包内生成线交付止于产物形态——见前门 SKILL.md「包内形态能力边界」。")
+    print("  素材(execute/fault-tree-rca/zip2csv)已内嵌 generate/——生成线直出的技能即完整可执行成品。")
     return 0
 
 

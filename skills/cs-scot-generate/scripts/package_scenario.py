@@ -49,6 +49,17 @@ def _ignore(_dirpath, names):
     return out
 
 
+def find_material(name: str) -> Path:
+    """打包素材(cs-scot-execute / fault-tree-rca / zip2csv)查找次序,与 zip2csv 内嵌同款:
+    ①本技能内嵌(与 SKILL.md 同层——交付形态把素材收进 generate 目录下,单技能即可直出);
+    ②同门 skills/<name>(仓库开发态)。都没有返回同门路径,由调用方决定怎么报。"""
+    here = Path(__file__).resolve().parent               # .../cs-scot-generate/scripts
+    for cand in (here.parent / name, here.parent.parent / name):
+        if (cand / "SKILL.md").exists():
+            return cand
+    return here.parent.parent / name
+
+
 def scaffold_skill(dest: Path, scenario: str, name: str, exe: Path, rca: Path) -> None:
     """搭"空"技能骨架:execute 骨架 + 身份改写 + assets/(rca 规则副本 + zip2csv 转换器)。
     assets/ 其余内容由生成各步骤(建树/归集/绑定)直接往里写——步骤 1 默认直出技能形态靠它,
@@ -57,7 +68,7 @@ def scaffold_skill(dest: Path, scenario: str, name: str, exe: Path, rca: Path) -
     rewrite_skill_md(dest / "SKILL.md", name, scenario)              # 技能身份:名字+场景描述
     (dest / "assets").mkdir(exist_ok=True)
     shutil.copytree(rca, dest / "assets" / "fault-tree-rca", ignore=_ignore)   # 根因规则副本
-    z2c = Path(__file__).resolve().parents[2] / "zip2csv"            # 裸 txt→三表转换器:有就随包内置
+    z2c = find_material("zip2csv")                       # 裸 txt→三表转换器:有就随包内置
     if z2c.is_dir() and not (dest / "assets" / "zip2csv").exists():
         shutil.copytree(z2c, dest / "assets" / "zip2csv", ignore=_ignore)
 
@@ -88,8 +99,8 @@ def main() -> None:
     ap.add_argument("--out", required=True, help="场景产物目录(assemble 归集过、且已跑完绑定的那个)")
     ap.add_argument("--dest", help="技能放到哪个目录下;默认=产物目录的父目录")
     ap.add_argument("--name", help="技能名覆盖(英文小写连字符);默认用产物的英文短名(slug)")
-    ap.add_argument("--execute-skill", default=str(here.parent.parent / "cs-scot-execute"))
-    ap.add_argument("--rca-skill", default=str(here.parent.parent / "fault-tree-rca"))
+    ap.add_argument("--execute-skill", default=str(find_material("cs-scot-execute")))
+    ap.add_argument("--rca-skill", default=str(find_material("fault-tree-rca")))
     # 注意:没有、也不会有 --with-debate——**产物(场景技能)永不带辩论引擎**(用户拍板)。
     # 辩论复核是平台工具链层的能力(同门 fault-tree-rca-debate),由执行侧 SCOT_DEBATE 开关
     # 按指令启用;交付出去的技能永远只有手工 RCA。
