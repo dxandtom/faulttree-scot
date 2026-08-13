@@ -225,6 +225,16 @@ def main() -> int:
                         if Path(dirpath).resolve() == _src.resolve():
                             skip |= {n for n in names if n in MATERIALS}
                         return skip
+                if dst.exists():
+                    # 正确代码到不了这里(每轮都是清空重建)。真撞上=脚本被改过/新旧混装。
+                    # 响亮自解释,不留裸 traceback——traceback 会诱导弱模型拿 dirs_exist_ok
+                    # 之类的静默合并去"修"(实测发生过),那会把两份来源的文件混进包里。
+                    raise SystemExit(
+                        f"✗ 包内目标已存在:{dst}(复制 {src_name} 时撞车)。\n"
+                        "  这不该发生——说明本脚本被改动过或本地版本新旧混装。处置:\n"
+                        "  1) 用仓库最新的 package_skill.py 整文件覆盖本脚本(勿手改);\n"
+                        "  2) 删掉输出目录 dist/ 后重跑。\n"
+                        "  禁止用 dirs_exist_ok=True 之类静默合并来绕过:两份来源的文件会悄悄混进包里。")
                 shutil.copytree(src, dst, ignore=ig)
 
     # 3. 关键文件核验——缺一即失败,并清掉残局(不完整目录 + 旧 zip),不留半个包
