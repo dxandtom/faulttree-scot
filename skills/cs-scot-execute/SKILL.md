@@ -76,6 +76,10 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
    `layer-3-service-issues-result/`);每次运行在其下自动新建独立的 `result-<运行号>/`
    (多人/多份数据同时跑互不覆盖),rca 步骤按 `assets/fault-tree-rca/` 的规则做,
    rca.json 也写进该轮目录——**一切以 runner 打印的「结果目录」路径为准**。
+   **进 rca 步骤的第一个动作就是跑其 draft_rca.py**(骨架机械枚举+自动定档),不是
+   "先读 rca_input 把握全局"——rca_input **禁止整读进上下文**(超长必炸)、**禁止
+   python -c 解析任何产物 JSON**(Windows 反斜杠路径进字符串=转义炸,中文输出=乱码,
+   实测连环翻车);要看节点细节只许用其 rca_query.py。
    并行诊断多份数据时,建议每次执行加 `--result-suffix <数据标识>`(如站点名/数据文件夹名)
    ——不是为了隔离(本来就隔离),是让目录名好认;汇报时写清各份数据对应的结果目录。
 
