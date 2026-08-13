@@ -90,6 +90,11 @@ def main() -> None:
     ap.add_argument("--name", help="技能名覆盖(英文小写连字符);默认用产物的英文短名(slug)")
     ap.add_argument("--execute-skill", default=str(here.parent.parent / "cs-scot-execute"))
     ap.add_argument("--rca-skill", default=str(here.parent.parent / "fault-tree-rca"))
+    ap.add_argument("--with-debate", action="store_true",
+                    help="把辩论引擎技能副本(fault-tree-rca-debate)一并打进 assets/。"
+                         "默认不带(引擎依赖 scipy/pandas 等三方件,且需环境自配 LLM 密钥——"
+                         "vendor/config.yaml 绝不随包);给要求 debate 落地的平台环境用")
+    ap.add_argument("--debate-skill", default=str(here.parent.parent / "fault-tree-rca-debate"))
     ap.add_argument("--force", action="store_true", help="目标技能目录已存在时先删再建")
     args = ap.parse_args()
 
@@ -166,10 +171,26 @@ def main() -> None:
 
     scaffold_skill(dest, scenario, name, exe, rca)                   # 骨架+身份+rca 副本+zip2csv
 
+    if args.with_debate:
+        deb = Path(args.debate_skill).expanduser().resolve()
+        if not (deb / "SKILL.md").exists():
+            print(f"--with-debate:找不到辩论引擎技能({deb} 下无 SKILL.md)——用 --debate-skill 指路。",
+                  file=sys.stderr)
+            sys.exit(2)
+
+        def _ignore_debate(d, names):                    # 密钥红线:config.yaml 绝不随包;运行痕迹也不带
+            ig = set(_ignore(d, names))
+            ig |= {n for n in names if n in ("config.yaml", "debate_runs", "runs", "result")
+                   or n.startswith("config.") and n != "config.example.yaml"}
+            return ig
+        shutil.copytree(deb, dest / "assets" / "fault-tree-rca-debate", ignore=_ignore_debate)
+        print("  [with-debate] 辩论引擎副本已入包(vendor 配置/密钥未随包——目标环境需自配 "
+              "config.yaml 并安装 scipy/pandas 等依赖;缺任一项时执行侧会诚实降级走手工 RCA)")
+
     def _ignore_out(d, names):                           # --out 若是"已打包技能的 assets/"(就地调优/迁移后再克隆),
         ig = set(_ignore(d, names))                      # 里面已带上次打包放的 fault-tree-rca 副本——拷贝时剔除
         if Path(d).resolve() == out.resolve():           # (骨架已放新副本,同名目录相撞实测炸在 copytree)
-            ig |= {n for n in names if n == "fault-tree-rca"}
+            ig |= {n for n in names if n in ("fault-tree-rca", "fault-tree-rca-debate")}
         return ig
     shutil.copytree(out, dest / "assets", ignore=_ignore_out,        # 诊断产物并进 assets(排除临时物;
                     dirs_exist_ok=True)                              # 骨架已建 assets,允许合并)
