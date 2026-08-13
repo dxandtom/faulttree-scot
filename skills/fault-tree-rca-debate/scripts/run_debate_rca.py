@@ -5,7 +5,8 @@
     runner 备好本轮结果目录的 rca_input.json 后,原来"请用 fault-tree-rca 技能手工产出",
     现在跑本脚本即可(它自己调 LLM,不需要 harness 模型)。
 
-流程:facts_to_question 渲染证据文本 → tree_to_vendor_xlsx 生成引擎格式故障树 →
+流程:事实短路筛(draft_rca 机械分类:全干净→引擎整场跳过;有争议→只辩争议分支,--no-screen 关)
+      → facts_to_question 渲染证据文本 → tree_to_vendor_xlsx 生成引擎格式故障树 →
       调 vendor 引擎(--mock 用假引擎,真引擎见 vendor/README.md)→
       result_adapter 出 rca.json(--mechanism all 时三份都出,便于 A/B/C 评测)→
       原始引擎输出落 rca_debate_full.json(排查/审计用)。
@@ -31,6 +32,119 @@ sys.path.insert(0, str(_HERE))
 from facts_to_question import build_question                    # noqa: E402
 from result_adapter import to_rca_json, _MECH_KEY, _facts_index  # noqa: E402
 from tree_to_vendor_xlsx import enrich_conditions, write_xlsx   # noqa: E402
+
+
+def _rca_scripts() -> Path:
+    """同门 fault-tree-rca 的 scripts 目录(事实短路筛借它的 draft/finalize)。"""
+    return _HERE.parent.parent / "fault-tree-rca" / "scripts"
+
+
+def _fact_screen(rca_input_path: Path, out_dir: Path):
+    """事实短路筛(1根因 vs 100节点):跑同门 draft_rca 机械分类,划分干净/争议候选。
+    干净候选(自身成立+路径无实测不成立/冲突)代码机械确证,不需要辩论;
+    争议候选(自身冲突/层级矛盾)才值得开辩论庭。同门缺失/md 形态 → None(退回全树辩论)。"""
+    import subprocess
+    draft_py = _rca_scripts() / "draft_rca.py"
+    if not draft_py.exists():
+        print("[筛] 未找到同门 fault-tree-rca/draft_rca.py,跳过事实短路筛(全树辩论)")
+        return None
+    draft_path = out_dir / "rca_draft.screen.json"       # 别叫 rca_draft.json:手工路径用那个名字
+    r = subprocess.run([sys.executable, str(draft_py), str(rca_input_path), "-o", str(draft_path)],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0 or not draft_path.exists():
+        print(f"[筛] draft_rca 失败(exit {r.returncode}),跳过事实短路筛:"
+              f"{(r.stderr or r.stdout or '')[-200:]}")
+        return None
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    if draft.get("holding_candidates"):
+        print("[筛] rca_input 为完整 md 形态(无剪枝树),跳过事实短路筛(全树辩论)")
+        return None
+    clean = [str(e["node_id"]) for e in draft.get("confirmed_candidates") or []
+             if str(e.get("auto_verdict")) == "confirmed"]
+    contested = [str(e["node_id"]) for e in draft.get("conflict_nodes") or []]
+    contested += [str(e["node_id"]) for e in draft.get("probable_candidates") or []
+                  if e.get("auto_verdict")]              # 层级矛盾:两面证据值得辩给人看
+    return {"clean_confirmed": clean, "contested": contested,
+            "draft_path": str(draft_path), "draft": draft}
+
+
+def _contested_scope(tree_index: dict, contested_ids) -> set:
+    """争议节点所在分支 = 每个争议节点的祖先链(含自身)∪ 以其为根的子树。"""
+    nodes = tree_index.get("nodes") or {}
+    kids: dict = {}
+    for nid, n in nodes.items():
+        kids.setdefault(str(n.get("parent")), []).append(nid)
+    keep: set = set()
+    for cid in contested_ids:
+        cur, seen = cid, set()
+        while cur and cur in nodes and cur not in seen:
+            seen.add(cur)
+            keep.add(cur)
+            cur = str(nodes[cur].get("parent")) if nodes[cur].get("parent") else None
+        stack = [cid]
+        while stack:
+            for k in kids.get(stack.pop(), []):
+                if k not in keep:
+                    keep.add(k)
+                    stack.append(k)
+    return keep
+
+
+def _short_circuit(screen: dict, rca_input_path: Path, out_dir: Path) -> int:
+    """全部候选机械闭环:finalize 直接合成 rca.json,辩论引擎整场不跑(0 次 LLM 调用)。
+    诚实注记:**不写 rca_debate_full.json**(评估侧靠它分引擎,机械结果不冒充辩论结果);
+    审计落 debate_screen.json。"""
+    import subprocess
+    cmd = [sys.executable, str(_rca_scripts() / "finalize_rca.py"), screen["draft_path"],
+           "-o", str(out_dir / "rca.json"), "--rca-input", str(rca_input_path)]
+    sol = rca_input_path.parent.parent / "tree" / "solutions.json"
+    if sol.exists():
+        cmd += ["--solutions", str(sol)]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    print((r.stdout or "").strip())
+    if r.returncode != 0:
+        print(f"[短路] finalize 失败(exit {r.returncode}):{(r.stderr or '')[-300:]}"
+              "——修数据或加 --no-screen 退回全树辩论")
+        return r.returncode
+    (out_dir / "debate_screen.json").write_text(json.dumps({
+        "mode": "fact_short_circuit",
+        "clean_confirmed": screen["clean_confirmed"], "contested": [],
+        "note": "全部候选自身成立且路径无实测不成立/冲突——代码机械确证,辩论引擎跳过"
+                "(0 次 LLM 调用),结果与手工 RCA 引擎同口径;强制全树辩论:--no-screen"},
+        ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[短路] 事实短路生效:{len(screen['clean_confirmed'])} 条候选全部机械闭环,"
+          f"辩论引擎跳过(0 次 LLM 调用)→ {out_dir / 'rca.json'};审计 → debate_screen.json")
+    return 0
+
+
+def _finalize_clean(screen: dict, rca_input_path: Path, out_dir: Path) -> list:
+    """干净候选单独机械合成,取其 rca_result 供辩后合并(争议候选走引擎,两不相扰)。"""
+    import subprocess
+    draft = screen["draft"]
+    slim = {"_readme": "事实短路筛拆分:仅干净候选(机械确证);争议候选走辩论引擎,辩后合并",
+            "confirmed_candidates": [e for e in draft.get("confirmed_candidates") or []
+                                     if str(e.get("auto_verdict")) == "confirmed"],
+            "probable_candidates": [], "conflict_nodes": [],
+            "excluded_candidates": draft.get("excluded_candidates") or [],
+            "undetermined_skeleton": []}
+    p = out_dir / "rca_draft_clean.json"
+    p.write_text(json.dumps(slim, ensure_ascii=False), encoding="utf-8")
+    outp = out_dir / "rca_manual_clean.json"
+    cmd = [sys.executable, str(_rca_scripts() / "finalize_rca.py"), str(p), "-o", str(outp),
+           "--rca-input", str(rca_input_path)]
+    sol = rca_input_path.parent.parent / "tree" / "solutions.json"
+    if sol.exists():
+        cmd += ["--solutions", str(sol)]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        print(f"[筛] 干净候选机械合成失败,放弃合并(引擎结果原样交付):"
+              f"{(r.stderr or r.stdout or '')[-200:]}")
+        return []
+    entries = json.loads(outp.read_text(encoding="utf-8")).get("rca_result") or []
+    for e in entries:
+        e["support"] = ("确定性代码判定(事实短路筛:候选自身成立且路径无实测不成立/冲突,"
+                        "未经辩论引擎);" + str(e.get("support") or ""))
+    return entries
 
 
 def _coerce(s: str):
@@ -225,6 +339,9 @@ def main() -> int:
     ap.add_argument("--no-match-cache", action="store_true",
                     help="关闭匹配记忆化缓存(默认开:同一节点判据只问一次 LLM,辩论里的重复兄弟检查全走缓存)")
     ap.add_argument("--no-validate", action="store_true", help="跳过产出后的 validate_rca 自检")
+    ap.add_argument("--no-screen", action="store_true",
+                    help="关闭事实短路筛(默认开:干净候选机械确证不辩论,全干净时引擎整场跳过;"
+                         "争议候选只辩其所在分支)")
     a = ap.parse_args()
 
     # 全部路径先转绝对:真引擎运行时我们会把工作目录切到 vendor/(见下),相对路径会失效
@@ -257,7 +374,9 @@ def main() -> int:
     # 版本管理:out-dir 里永远只有**当前轮** debate 产物。
     # 重跑前把上一轮整体归档到 debate_runs/<时间戳>/——否则新旧 rca.json 混在一起,
     # agent 会把上一轮结果误当本轮汇报(本地真跑实锤过)。
-    products = ["rca.json", "rca_debate_full.json", "vendor_fault_tree.xlsx"] \
+    products = ["rca.json", "rca_debate_full.json", "vendor_fault_tree.xlsx",
+                "debate_screen.json", "rca_draft.screen.json",
+                "rca_draft_clean.json", "rca_manual_clean.json"] \
         + [f"rca.{m}.json" for m in _MECH_KEY]
     stale = [p for p in products if (out_dir / p).exists()]
     if stale:
@@ -266,6 +385,21 @@ def main() -> int:
         for p in stale:
             (out_dir / p).rename(arch / p)
         print(f"[归档] 上一轮 debate 产物 {len(stale)} 个 → {arch}(out-dir 只保留当前轮)")
+
+    # ---------- 事实短路筛(1根因 vs 100节点) ----------
+    screen = None if a.no_screen else _fact_screen(ri_path, out_dir)
+    if screen and not screen["contested"]:
+        if screen["clean_confirmed"]:
+            return _short_circuit(screen, ri_path, out_dir)   # 全干净:引擎整场跳过
+        print("[筛] 无成立候选(引擎将按弃权垫片工作),照常全树辩论供排序参考")
+        screen = None
+    allowed_contested = None
+    if screen:
+        allowed_contested = _contested_scope(tree_index, screen["contested"])
+        print(f"[筛] 争议候选 {len(screen['contested'])} 个"
+              f"({'、'.join(screen['contested'][:6])}{'…' if len(screen['contested']) > 6 else ''})"
+              f",引擎只辩其所在分支:{len(allowed_contested)}/{len(tree_index.get('nodes') or {})}"
+              f" 节点;干净候选 {len(screen['clean_confirmed'])} 个由代码机械确证,辩后合并")
 
     question = build_question(rca_input, tree_index)
     print(f"[1/4] 证据 question 已渲染({len(question)} 字符)")
@@ -279,6 +413,8 @@ def main() -> int:
         if not allowed:
             print("[pruned-only] rca_input 没有 pruned_nodes(完整形态?),回退喂全树")
             allowed = None
+    if allowed_contested is not None:                    # 事实短路筛的争议分支,与 pruned-only 求交
+        allowed = allowed_contested if allowed is None else (allowed & allowed_contested)
 
     # 真引擎:把工作目录切到 vendor/,**复刻"右键直跑"的运行环境**——引擎内部若有相对路径操作
     # (自行读 config.yaml、写结果目录等),都按 vendor/ 解析;否则在仓库根下运行会静默读不到而降级。
@@ -427,9 +563,26 @@ def main() -> int:
     print(f"[3/4] 引擎原始输出 → {out_dir / 'rca_debate_full.json'}"
           f"(路径 {len(top_orig)}/{len(top_soft)}/{len(top_ratio)},辩论 {len(debate_records)} 节点)")
 
+    # 事实短路筛的干净候选:机械合成后并进每个机制的确证档(引擎只辩了争议分支,两不相扰)
+    manual_entries = []
+    if screen and screen["clean_confirmed"]:
+        manual_entries = _finalize_clean(screen, ri_path, out_dir)
+        if manual_entries:
+            (out_dir / "debate_screen.json").write_text(json.dumps({
+                "mode": "contested_only",
+                "clean_confirmed": screen["clean_confirmed"],
+                "contested": screen["contested"],
+                "note": "干净候选由代码机械确证并入 rca_result(support 已注明未经辩论);"
+                        "引擎只辩争议候选所在分支"}, ensure_ascii=False, indent=2), encoding="utf-8")
+
     mechs = list(_MECH_KEY) if a.mechanism == "all" else [a.mechanism]
     for m in mechs:
         doc = to_rca_json(full, m, tree_index, rca_input)
+        if manual_entries:
+            have = {(e.get("evidence_path") or [{}])[-1].get("node_id")
+                    for e in doc.get("rca_result") or []}
+            doc["rca_result"] = [e for e in manual_entries if e.get("node_id") not in have] \
+                + (doc.get("rca_result") or [])
         (out_dir / f"rca.{m}.json").write_text(json.dumps(doc, ensure_ascii=False, indent=2),
                                                encoding="utf-8")
     chosen = "original" if a.mechanism == "all" else a.mechanism
