@@ -81,14 +81,16 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
 
    **RCA 引擎选择(机械判定,争议驱动,不许凭喜好挑)**:
    - **默认走手工 fault-tree-rca**(零三方件、快、结果同口径),即下面第 4 条的流程;
-   - draft_rca 骨架分类出**争议候选**(conflict_nodes 非空,或 probable 里有层级矛盾)时,
-     依次查三件:①`assets/fault-tree-rca-debate/` 副本在不在;②依赖装了没
-     (`python -c "import scipy, pandas"` 通不通);③密钥配了没(副本 `vendor/config.yaml`
-     在不在)。**三件全齐** → 用辩论引擎复核:跑其 `scripts/run_debate_rca.py --rca-input
-     "<结果目录>/rca_input.json"`(它的事实短路筛会自动只辩争议分支、干净候选机械并入),
-     以其产出为最终 rca.json;
-   - **任一件不齐** → 播报一句「debate 不可用(缺副本/缺依赖/缺密钥,写明是哪个),本轮走
-     手工 RCA」,冲突条目按手工规则模型权衡——**降级必须明说,不许静默装作辩过**;
+   - **先看 `assets/fault-tree-rca-debate/` 在不在**:**不在 = 本技能没有辩论引擎这回事**,
+     一律手工,**汇报里一个字都不提 debate**(不带引擎的交付包,用户不该看见一个没装的
+     东西被点名"不可用");
+   - 副本**在**、且 draft_rca 骨架分类出**争议候选**(conflict_nodes 非空,或 probable 里有
+     层级矛盾)时,再查两件:①依赖装了没(`python -c "import scipy, pandas"` 通不通);
+     ②密钥配了没(副本 `vendor/config.yaml` 在不在)。**两件齐** → 用辩论引擎复核:跑其
+     `scripts/run_debate_rca.py --rca-input "<结果目录>/rca_input.json"`(它的事实短路筛会
+     自动只辩争议分支、干净候选机械并入),以其产出为最终 rca.json;**缺任一件** → 播报一句
+     「debate 副本在但不可用(缺依赖/缺密钥,写明是哪个),本轮走手工 RCA」——带了引擎却
+     跑不了才需要明说,**不许静默装作辩过**;
    - 没有争议候选时**不要**起辩论引擎(纯浪费,机械结果与它同口径)。
 4. **【输出汇报】(与 rca.json 严格口径一致)**:
    - **诊断结论一律机械渲染,禁止手写**:
