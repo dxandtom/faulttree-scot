@@ -10,13 +10,19 @@
                        [--reconcile <reconcile.json>]
                        [--out <output.json>]
 
+触发门（与 SKILL.md 决策树一致）：
+    只有对账存在 MISSED 或 FALSE_CONFIRM 时才逐类查错；全命中直接返回"未分类"（PASS 路径），
+    数据缺口由 verdict 层按 PASS_WITH_GAPS 处理，不在这里定错。
+    （未提供 --reconcile 时无从判断，保守地照旧全查。）
+
 错误分类（按序命中即停）:
     0: ENV_FAILURE - execution_status.*.ok == false 或 run.json不存在
-    1: INPUT_GAP - missing_inputs非空
-    2: BINDING_GAP - 有判据但无绑定
+    1: INPUT_GAP - missing_inputs非空 且 有期望根因 MISSED
+    2: BINDING_GAP - 有判据但无绑定，且该节点与漏判相关（是漏判期望根因自身或其路径祖先）。
+       全树其余未绑定节点不定错——"清空绑定让节点默认放行"是执行链的合规调优通道，不追杀。
     3: KNOWLEDGE_GAP - tree_index不存在该节点
     4: CRITERIA_GAP - predicate vs expected_facts不相等
-    5: VERDICT_GAP - 裁决≠期望 或 orphan非空
+    5: VERDICT_GAP - 裁决≠期望（含阴性用例假阳） 或 orphan非空
 """
 from __future__ import annotations
 
@@ -24,7 +30,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 
 # 错误类别定义
@@ -55,6 +61,54 @@ def load_json(path: Path) -> Dict[str, Any]:
     except (json.JSONDecodeError, OSError) as e:
         print(f"[warn] 无法读取 {path}: {e}", file=sys.stderr)
         return {}
+
+
+def ancestor_chain(tree_index_data: Dict[str, Any], node_id: str) -> Set[str]:
+    """从 tree_index 沿 parent 指针上溯，返回 node_id 的祖先集合（不含自身）。
+
+    执行链的 tree_index：nodes 是字典，node_id 就是 key，节点体带 parent 字段。
+    """
+    nodes = tree_index_data.get("nodes", {})
+    if isinstance(nodes, list):  # 列表形态兜底：转成 {node_id: node}
+        nodes = {n.get("node_id") or n.get("id"): n for n in nodes
+                 if n.get("node_id") or n.get("id")}
+    chain: Set[str] = set()
+    cur = node_id
+    while cur in nodes:
+        parent = nodes[cur].get("parent")
+        if not parent or parent in chain:
+            break
+        chain.add(parent)
+        cur = parent
+    return chain
+
+
+def extract_actual_facts(rca_input_data: Dict[str, Any]) -> Dict[str, bool]:
+    """从 rca_input 提取各节点的 predicate_satisfied（多事实取"或"：任一成立即成立）。
+
+    兼容两种形态：
+    - 剪枝形态（真实场景常态）：fault_tree.pruned_nodes[<node_id>].facts[]，
+      fact 条目可能是瘦身后的扁平结构（字段在顶层）或未瘦身的嵌套 {"fact": {...}}；
+    - 退化形态（树很小、剪枝不划算时）：indicator_results.<源>.conditions[]。
+    """
+    facts: Dict[str, bool] = {}
+
+    def _merge(nid: Optional[str], ps: Any) -> None:
+        if nid and ps is not None:
+            facts[nid] = facts.get(nid, False) or bool(ps)
+
+    pruned = (rca_input_data.get("fault_tree") or {}).get("pruned_nodes") or {}
+    for nid, node in pruned.items():
+        for f in node.get("facts", []):
+            inner = f.get("fact")
+            ff = inner if isinstance(inner, dict) else f
+            _merge(nid, ff.get("predicate_satisfied"))
+
+    for source, result in (rca_input_data.get("indicator_results") or {}).items():
+        for cond in result.get("conditions", []):
+            _merge(cond.get("node_id"), cond.get("predicate_satisfied"))
+
+    return facts
 
 
 def check_env_failure(run_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -93,44 +147,58 @@ def check_env_failure(run_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def check_input_gap(run_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def check_input_gap(run_data: Dict[str, Any], missed_count: int) -> Optional[Dict[str, Any]]:
     """类1: INPUT_GAP 检测
 
-    条件: missing_inputs非空
+    条件: missing_inputs非空 且 有期望根因 MISSED（缺数据但全命中不算错，由 verdict 层
+    按 PASS_WITH_GAPS 处理；阴性用例假阳与缺数据无因果，也不在这里拦）
     """
     missing = run_data.get("missing_inputs", [])
-    if missing:
+    if missing and missed_count > 0:
         return {
             "class": 1,
             "error_category": "INPUT_GAP",
             "verdict": "needs_data",
-            "reason": f"缺失数据源: {missing}",
+            "reason": f"缺失数据源: {missing}，且有期望根因漏判",
             "missing_inputs": missing
         }
     return None
 
 
-def check_binding_gap(binding_check: Dict[str, Any], missed_nodes: List[str]) -> Optional[Dict[str, Any]]:
+def check_binding_gap(
+    binding_check: Dict[str, Any],
+    missed_nodes: List[str],
+    tree_index_data: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
     """类2: BINDING_GAP 检测
 
-    条件: 有判据但无绑定（静态查tree_index）
+    条件: 有判据但无绑定（静态查tree_index），且该节点与本用例的漏判相关——
+    未绑定节点是某个漏判期望根因自身，或位于其祖先链上。
+    全树其余未绑定节点（含故意清空绑定走"默认放行"通道的）不定错。
     """
-    if not binding_check:
+    if not binding_check or not missed_nodes:
         return None
 
     unbound = binding_check.get("unbound", [])
-    if unbound:
-        # 取第一个未绑定节点作为代表
-        first = unbound[0]
-        return {
-            "class": 2,
-            "error_category": "BINDING_GAP",
-            "verdict": "needs_binding",
-            "node_id": first.get("node_id"),
-            "node_name": first.get("name", ""),
-            "reason": f"节点{first.get('node_id')}有判据但无任何绑定",
-            "evidence": ["tree_index.json#" + first.get("node_id", "")]
-        }
+    if not unbound:
+        return None
+
+    unbound_by_id = {u.get("node_id"): u for u in unbound if u.get("node_id")}
+    for mid in missed_nodes:
+        relevant_ids = {mid} | ancestor_chain(tree_index_data, mid)
+        for rid in relevant_ids:
+            if rid in unbound_by_id:
+                hit = unbound_by_id[rid]
+                where = "自身" if rid == mid else f"路径上级（期望根因 {mid} 的祖先）"
+                return {
+                    "class": 2,
+                    "error_category": "BINDING_GAP",
+                    "verdict": "needs_binding",
+                    "node_id": rid,
+                    "node_name": hit.get("name", ""),
+                    "reason": f"节点{rid}有判据但无任何绑定（漏判期望根因的{where}）",
+                    "evidence": ["tree_index.json#" + rid]
+                }
     return None
 
 
@@ -162,34 +230,22 @@ def check_criteria_gap(
     """类4: CRITERIA_GAP 检测
 
     条件: predicate_satisfied vs expected_facts不相等
+    （事实提取兼容剪枝/退化两种 rca_input 形态，见 extract_actual_facts）
     """
     expected_facts = expected_data.get("expected_facts", {})
     if not expected_facts:
         return None
 
-    # 从 rca_input 中提取各节点的 predicate_satisfied
-    indicator_results = rca_input_data.get("indicator_results", {})
-    actual_facts = {}
-
-    for source, result in indicator_results.items():
-        conditions = result.get("conditions", [])
-        for cond in conditions:
-            nid = cond.get("node_id")
-            if nid:
-                actual_facts[nid] = {
-                    "predicate_satisfied": cond.get("predicate_satisfied"),
-                    "source": source
-                }
+    actual_facts = extract_actual_facts(rca_input_data)
 
     # 比对
     for node_id, expected_fact in expected_facts.items():
         expected_satisfied = expected_fact.get("predicate_satisfied")
-        actual_fact = actual_facts.get(node_id)
-        if actual_fact is None:
+        if expected_satisfied is None or node_id not in actual_facts:
             continue
 
-        actual_satisfied = actual_fact.get("predicate_satisfied")
-        if expected_satisfied != actual_satisfied:
+        actual_satisfied = actual_facts[node_id]
+        if bool(expected_satisfied) != actual_satisfied:
             return {
                 "class": 4,
                 "error_category": "CRITERIA_GAP",
@@ -210,7 +266,7 @@ def check_verdict_gap(
 ) -> Optional[Dict[str, Any]]:
     """类5: VERDICT_GAP 检测
 
-    条件: 裁决≠期望 或 orphan非空
+    条件: 裁决≠期望（漏判/阴性用例假阳） 或 orphan非空
     """
     # 检查孤儿节点
     tree_issues = rca_data.get("tree_issues", {})
@@ -225,14 +281,28 @@ def check_verdict_gap(
             "orphan_nodes": orphan_nodes
         }
 
-    # 检查漏判
-    reconciliation = reconcile_data.get("reconciliation", {})
-    missed = reconciliation.get("missed", 0)
+    reconciliation = reconcile_data.get("reconciliation", {}) if reconcile_data else {}
 
-    if missed > 0:
-        # 找出漏判的节点
+    # 阴性用例假阳
+    if reconciliation.get("false_confirm", 0) > 0:
         details = reconcile_data.get("details", [])
-        missed_details = [d for d in details if d.get("result") == "MISSED"]
+        fc = [d for d in details if d.get("recon") == "FALSE_CONFIRM"]
+        first = fc[0] if fc else {}
+        return {
+            "class": 5,
+            "error_category": "VERDICT_GAP",
+            "verdict": "needs_adjudication",
+            "node_id": first.get("node_id"),
+            "node_name": first.get("node_name", ""),
+            "reason": f"阴性用例出现确证根因（假阳）: {first.get('node_id')}",
+            "expected_in": "none",
+            "actual_in": "rca_result"
+        }
+
+    # 检查漏判
+    if reconciliation.get("missed", 0) > 0:
+        details = reconcile_data.get("details", [])
+        missed_details = [d for d in details if d.get("recon") == "MISSED"]
         if missed_details:
             first = missed_details[0]
             return {
@@ -261,13 +331,30 @@ def classify(
 ) -> Dict[str, Any]:
     """执行完整分类流程
 
-    按 0→5 顺序查错，命中即停。
+    触发门：对账无 MISSED 且无 FALSE_CONFIRM → 不查错直接返回未分类（PASS 路径）。
+    否则按 0→5 顺序查错，命中即停。
     """
+    not_classified = {
+        "classified": False,
+        "error_class": None,
+        "error_category": None,
+        "details": None
+    }
+
+    reconciliation = (reconcile_data or {}).get("reconciliation", {})
+    missed_count = reconciliation.get("missed", 0)
+    false_confirm = reconciliation.get("false_confirm", 0)
+
+    # 触发门：给了对账且全命中 → 不查错（数据缺口交给 verdict 层的 PASS_WITH_GAPS）
+    if reconcile_data and missed_count == 0 and false_confirm == 0:
+        return not_classified
+
     # 提取漏判节点列表（用于 BINDING_GAP 和 VERDICT_GAP 定位）
     missed_nodes = []
     if reconcile_data:
         details = reconcile_data.get("details", [])
-        missed_nodes = [d.get("node_id") for d in details if d.get("result") == "MISSED"]
+        missed_nodes = [d.get("node_id") for d in details
+                        if d.get("recon") == "MISSED" and d.get("node_id")]
 
     # 提取期望根因节点列表
     expected_roots = expected_data.get("expected_root_causes", [])
@@ -275,8 +362,8 @@ def classify(
     # 按顺序检测各类错误
     checks = [
         ("ENV_FAILURE", lambda: check_env_failure(run_data)),
-        ("INPUT_GAP", lambda: check_input_gap(run_data)),
-        ("BINDING_GAP", lambda: check_binding_gap(binding_check, missed_nodes)),
+        ("INPUT_GAP", lambda: check_input_gap(run_data, missed_count)),
+        ("BINDING_GAP", lambda: check_binding_gap(binding_check, missed_nodes, tree_index_data)),
         ("KNOWLEDGE_GAP", lambda: check_knowledge_gap(tree_check, expected_roots)),
         ("CRITERIA_GAP", lambda: check_criteria_gap(rca_input_data, expected_data)),
         ("VERDICT_GAP", lambda: check_verdict_gap(rca_data, reconcile_data, missed_nodes))
@@ -295,12 +382,7 @@ def classify(
             }
 
     # 全部通过
-    return {
-        "classified": False,
-        "error_class": None,
-        "error_category": None,
-        "details": None
-    }
+    return not_classified
 
 
 def main() -> None:

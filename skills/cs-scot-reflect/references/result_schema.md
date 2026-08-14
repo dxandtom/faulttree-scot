@@ -55,7 +55,38 @@
 
 **用途**：RCA步骤的输入，包含逐条件的机械判断结果（事实表）。
 
-### 结构
+**有两种形态，评估读取端两种都要认**：
+
+### 形态A：剪枝形态（真实场景的常态）
+
+树大时执行链会做局部子树压缩，事实挂在剪枝节点上：
+
+```json
+{
+  "fault_tree": {
+    "scenario": "…",
+    "root": "n1",
+    "outline": { "n1": "…", "n2": "…" },   // 全树 id→粗状态
+    "pruned_nodes": {                        // node_id 是字典的 key
+      "n6": {
+        "name": "接口DOWN", "parent": "n3", "is_leaf": true,
+        "facts": [
+          // fact 条目两种写法都存在：
+          { "id": "…", "indicator": "log",              // 瘦身后的扁平结构（字段在顶层）
+            "status": "ok", "predicate_satisfied": true, "matched": 80, "total": 100 },
+          { "id": "…", "indicator": "log",
+            "fact": { "status": "ok", "predicate_satisfied": true } }   // 未瘦身的嵌套结构
+        ]
+      }
+    }
+  },
+  "missing_indicators": { "chr": "数据源 'chr' 未通过 --data 提供" }
+}
+```
+
+节点 predicate 判定：该节点任一 fact 的 `predicate_satisfied == true` 即成立（多事实取"或"）。
+
+### 形态B：退化形态（树很小、剪枝不划算时才出现）
 
 ```json
 {
@@ -81,7 +112,7 @@
 }
 ```
 
-### conditions[] 字段说明
+### conditions[] 字段说明（形态B）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -104,9 +135,10 @@
   "rca_result": [                         // 【必须】确证根因
     {
       "Root_cause": "接口DOWN",
-      "Fault_tree_path": ["n1", "n3", "n6"],
+      "Fault_tree_path": ["MPLS问题", "LDP会话down", "接口DOWN"],  // 注意：是节点【名字】不是 id
+      "node_id": "n6",                    // 候选自身的 node_id（对账用这个）
       "support": "高",
-      "evidence_path": [
+      "evidence_path": [                  // 根→叶逐节点，最后一个=候选自身；每个都带 node_id
         {
           "node": "接口DOWN",
           "node_id": "n6",

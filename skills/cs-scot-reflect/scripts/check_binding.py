@@ -91,27 +91,28 @@ def check_binding_gaps(tree_index: Dict[str, Any], bound_nodes: Set[str]) -> Dic
     """
     nodes = tree_index.get("nodes", {})
     if isinstance(nodes, dict):
-        node_list = list(nodes.values())
+        # 执行链的 tree_index:nodes 是字典,node_id 就是字典的 key(节点体内没有 node_id 字段)
+        node_items = [(node.get("node_id") or node.get("id") or nid, node)
+                      for nid, node in nodes.items()]
     elif isinstance(nodes, list):
-        node_list = nodes
+        node_items = [(node.get("node_id") or node.get("id"), node) for node in nodes]
     else:
-        node_list = []
+        node_items = []
 
     condition_nodes = []
-    for node in node_list:
+    for node_id, node in node_items:
         # 跳过 pass_through 节点
         if node.get("pass_through"):
             continue
         # 检查是否有判据
         cond = node.get("condition") or node.get("criteria")
         if cond:
-            condition_nodes.append(node)
+            condition_nodes.append((node_id, node))
 
     fully_bound = []
     unbound = []
 
-    for node in condition_nodes:
-        node_id = node.get("node_id") or node.get("id")
+    for node_id, node in condition_nodes:
         if not node_id:
             continue
 
