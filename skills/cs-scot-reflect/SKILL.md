@@ -1,11 +1,16 @@
 ---
 name: cs-scot-reflect
-description: 评估反思skill。对generate→execute的执行结果与期望进行比对，区分机械性错误与模型性错误，输出反馈供generate下一轮改进。当用户说"评估结果"、"对账"、"检查诊断是否正确"、"反思"、"运行评估"时触发。本skill独立于执行链，只读取cases/目录下的expected.json（不传generate/execute），确保防泄题。
+description: 评估反思skill。对generate→execute的执行结果与期望进行比对，区分机械性错误与模型性错误，输出反馈供generate下一轮改进。当用户说"评估结果"、"对账"、"检查诊断是否正确"、"反思"、"运行评估"、"生成用例库"、"更新用例库"时触发。本skill独立于执行链，只读取cases/目录下的expected.json（不传generate/execute），确保防泄题。
 ---
 
 # cs-scot-reflect —— 评估反思
 
 **本文件已加载，不要再次加载或调用本技能；"加载"≠"完成"，真正产出评估报告才算完成。**
+
+**执行纪律（硬约束）**：本技能的全部动作 = 跑 `scripts/` 下的脚本 + 读脚本产出的文件。
+**禁止用 python -c 解析任何 JSON/CSV**（Windows 中文路径经 shell 必乱码、字段靠猜必错）；
+**禁止手册外预检**（用例在不在、结果目录对不对——脚本自己会检查并报清楚，直接跑，按退出码办事）；
+汇报以脚本打印和产出文件**原文**为准，禁止自行做任何诊断分析、禁止重新组织结论。
 
 评估反思独立运行于 generate → execute 流程之后，对执行结果与期望进行比对，区分**机械性错误**与**模型性错误**，输出反馈供 generate 下一轮改进。
 
@@ -24,6 +29,19 @@ Step 4: 输出评估报告
 ```
 
 ## 用法
+
+### 生成/刷新用例库（评估的前置；用户丢来交付包或说"生成/更新用例库"时，本技能直接代跑）
+
+```bash
+python "<本目录>/scripts/case_gen.py" \
+  --product <产物或打包技能目录> \
+  --packages <交付包根目录或zip> \
+  --cases-out <cases目录>
+```
+
+从 migrate 迁移台账 + 包内测试数据**机械生成** expected.json，零人工（参数细节与包形态
+见"输入说明 §1"）；故障树结构调整后重跑即全库刷新。跑完把"生成 N 个 / 跳过 M 个 /
+未能生成清单"**原样**汇报给用户。
 
 ### 主入口（推荐）
 
@@ -61,9 +79,11 @@ python "<本目录>/scripts/eval_run.py" \
 | `--out` | 评估输出目录 | 默认 `<result-dir 父目录>/<scenario>-eval/` |
 | `--prev-evaluation` | 上一轮 evaluation_report.json 文件或评估输出目录（可选） | 用于追踪 loop 轮次 |
 
-> **批量对应约定**：批量评估时每个 case 要对到**它自己**的执行结果。执行时用 runner 的
-> `--result-suffix <case_id>` 把用例号打进结果目录名，评估侧按"目录名含 case_id"匹配；
-> 匹配不到时该用例响亮报错，绝不拿别的用例的结果顶数。
+> **批量对应约定**：批量评估时每个 case 要对到**它自己**的执行结果，对号阶梯：
+> ①结果目录名含 case_id（执行时 `--result-suffix` 显式标注的优先认）→
+> ②**run.json 记录的输入数据路径落在本用例数据目录内**（runner 每轮自动写"出生证明"，
+> 执行侧零配合——主力通道，前提是执行时跑的就是本用例自己的数据）→
+> ③唯一候选用之+警告 → ④都对不上响亮报错，绝不拿别的用例的结果顶数。
 
 实际路径：
 - `expected.json` = `<cases-dir>/<case_id>/expected.json`
@@ -134,10 +154,10 @@ python "<本目录>/scripts/case_gen.py" \
 |---|------|---------|--------|
 | 0 | ENV_FAILURE（执行失败） | `execution_status.*.ok == false` 或 run.json不存在 | 人工修环境 |
 | 1 | INPUT_GAP（缺数据） | `missing_inputs`非空 **且** 有期望根因 MISSED | 使用方补数据 |
-| 2 | BINDING_GAP（没绑上） | 静态查tree_index：节点有判据但无绑定，**且该节点与漏判相关**（是漏判期望根因自身或其路径祖先）。全树其余未绑定节点不定错——"清空绑定让节点默认放行"是执行链的合规调优通道，不追杀 | generate补绑定 |
+| 2 | BINDING_GAP（绑定层毛病） | ①**孤儿绑定**：产出了事实但树上无此节点（典型=删节点没清绑定）；②有判据无绑定**且与漏判相关**（是漏判期望根因自身或其路径祖先）。全树其余未绑定节点不定错——"清空绑定让节点默认放行"是执行链的合规调优通道，不追杀 | 清残留绑定/补绑定 |
 | 3 | KNOWLEDGE_GAP（不认识） | tree_index不存在该节点 | tester增节点 |
 | 4 | CRITERIA_GAP（判不对） | predicate vs expected_facts不相等 | 人拍板→调优表 |
-| 5 | VERDICT_GAP（裁不对） | 裁决≠期望（含阴性用例假阳） 或 orphan非空 | 人裁决→调规则 |
+| 5 | VERDICT_GAP（裁不对） | 裁决≠期望（含阴性用例假阳）——纯裁决层：事实全对还归错档才是它 | 人裁决→调规则 |
 
 ### 决策树
 
@@ -157,10 +177,10 @@ Step 1: 对账（逐期望根因，与确证候选**自身** node_id 比对，�
 Step 2: 按0→5顺序查错（仅在有 MISSED 或 FALSE_CONFIRM 时触发；全命中不查错）
   ├─ 0: execution_status.*.ok == false？ → 类0 ENV_FAILURE
   ├─ 1: missing_inputs非空 + 有MISSED？ → 类1 INPUT_GAP
-  ├─ 2: 有判据但无绑定 + 该节点是漏判期望根因自身或其路径祖先？ → 类2 BINDING_GAP
+  ├─ 2: 孤儿绑定(orphan) 或 有判据无绑定+该节点与漏判相关？ → 类2 BINDING_GAP
   ├─ 3: tree_index不存在该节点？ → 类3 KNOWLEDGE_GAP
   ├─ 4: predicate vs expected_facts不相等？ → 类4 CRITERIA_GAP
-  ├─ 5: 裁决≠期望（含阴性假阳） 或 orphan非空？ → 类5 VERDICT_GAP
+  ├─ 5: 裁决≠期望（含阴性假阳）？ → 类5 VERDICT_GAP
         ↓
 Step 3: 综合裁定 verdict
   ├─ 所有期望根因均 HIT_CONFIRMED/HIT_ANCESTOR/HIT_DEGRADED（且无假阳）：
@@ -178,7 +198,7 @@ Step 3: 综合裁定 verdict
 |------|------|
 | 类0 / 类1 | 必须中断，人工修复 |
 | 类2 / 类3 / 类4 / 类5 | 自动回流generate，可继续loop |
-| 同节点同类连改2轮不过 | 熔断，标记人深查 |
+| 同节点同类连改3轮不过 | 熔断，标记人深查 |
 
 ## 输出结构
 

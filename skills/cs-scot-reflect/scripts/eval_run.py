@@ -155,14 +155,40 @@ def detect_result_mode(result_dir: Path) -> Tuple[str, Optional[Path]]:
     return ("empty", None)
 
 
-def find_case_result_dir(result_dir: Path, case_id: str) -> Optional[Path]:
+def _norm_path(p: str) -> str:
+    """路径归一化成可比对的字符串：统一斜杠、去尾分隔符、casefold（Windows 大小写不敏感）。"""
+    return str(p or "").replace("\\", "/").rstrip("/").casefold()
+
+
+def _run_inputs_match(result_subdir: Path, data_anchors: List[str]) -> bool:
+    """查这轮运行的"出生证明"：run.json 的 inputs 里记着本轮吃的是哪些数据路径（runner
+    每轮都写）。任一记录路径与用例的数据目录互为前缀（同一目录/上下级）即认定归属。"""
+    run_p = result_subdir / "run.json"
+    if not run_p.exists() or not data_anchors:
+        return False
+    inputs = load_json(run_p).get("inputs", {})
+    anchors = [_norm_path(a) for a in data_anchors if a]
+    for info in inputs.values():
+        rec = _norm_path(info.get("path", "") if isinstance(info, dict) else "")
+        if not rec:
+            continue
+        for a in anchors:
+            if rec == a or rec.startswith(a + "/") or a.startswith(rec + "/"):
+                return True
+    return False
+
+
+def find_case_result_dir(result_dir: Path, case_id: str,
+                         data_anchors: Optional[List[str]] = None) -> Optional[Path]:
     """为指定 case 查找对应的 result 子目录
 
     single 模式（用户直接指到结果目录）原样采用。
-    multi 模式按目录名匹配 case_id：执行时用 runner 的 --result-suffix 把 case_id
-    打进结果目录名，这里名字含 case_id 的才算该用例的结果（多个取最新）。
-    名字全不含 case_id 时：只有一个候选 → 用它并警告；多个候选 → 拒绝猜测返回 None
-    （拿别的用例的结果对账会把漏判/假阳全部张冠李戴）。
+    multi 模式按阶梯对号（多个命中取最新）:
+    ① 目录名含 case_id（执行时用 --result-suffix 显式标注的，仍然优先认）；
+    ② run.json 记录的输入数据路径落在本用例数据目录内（runner 每轮都写"出生证明"，
+       执行侧零配合——这是批量对号的主力通道）；
+    ③ 只有一个候选 → 用它并警告；
+    ④ 都对不上 → 拒绝猜测返回 None（拿别的用例的结果对账会把漏判/假阳全部张冠李戴）。
 
     Returns:
         result 子目录路径，或 None
@@ -181,14 +207,20 @@ def find_case_result_dir(result_dir: Path, case_id: str) -> Optional[Path]:
     if named:
         return named[0]
 
+    by_inputs = [d for d in with_rca if _run_inputs_match(d, data_anchors or [])]
+    if by_inputs:
+        print(f"[info] {case_id}: 按 run.json 记录的输入数据路径对号 → {by_inputs[0].name}")
+        return by_inputs[0]
+
     if len(with_rca) == 1:
-        print(f"[warn] {case_id}: result 目录名不含 case_id，但只有这一个候选，采用 "
-              f"{with_rca[0].name}（批量评估请在执行时用 --result-suffix 带上 case_id）")
+        print(f"[warn] {case_id}: 目录名/数据路径都对不上，但只有这一个候选，采用 "
+              f"{with_rca[0].name}")
         return with_rca[0]
 
-    print(f"[error] {case_id}: {len(with_rca)} 个 result 目录的名字都不含该 case_id，"
-          f"无法确定哪个是本用例的结果，拒绝猜测。执行时用 runner 的 "
-          f"--result-suffix {case_id} 把用例号打进目录名后重跑。候选: "
+    print(f"[error] {case_id}: {len(with_rca)} 个 result 目录既不含该 case_id、run.json 记录的"
+          f"数据路径也不在本用例数据目录内，无法确定归属，拒绝猜测。"
+          f"最稳的修法：执行诊断时直接跑本用例自己的数据目录（run.json 会自动记下），"
+          f"或用 runner --result-suffix {case_id} 显式标注。候选: "
           + ", ".join(d.name for d in with_rca[:5]))
     return None
 
@@ -323,15 +355,15 @@ def _update_fuse_history(
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
-    # 熔断判断：算上本轮 ≥ 2 轮
-    if len(prior) >= 1:
+    # 熔断判断：算上本轮 ≥ 3 轮（自动迭代 3 轮不过 → 转人工深查）
+    if len(prior) >= 2:
         fuse_history.append({
             "fused": True,
             "case_id": case_id,
             "node_id": node_id,
             "error_class": error_class,
             "error_category": error_category,
-            "fuse_reason": "同节点同类连改2轮不过",
+            "fuse_reason": "同节点同类连改3轮不过",
             "rounds": len(prior) + 1
         })
         details["fused"] = True    # 供 _generate_suggestion 带【熔断警告】
@@ -372,8 +404,11 @@ def process_case(
     expected_data = load_json(expected_path)
     print(f"[{case_id}] expected.json 加载成功: {expected_path}")
 
-    # Step 2: 定位 result 目录
-    case_result_dir = find_case_result_dir(result_dir, case_id)
+    # Step 2: 定位 result 目录（对号锚=本用例的数据目录：expected 记录的 data_source
+    # 与 cases/<id>/data，run.json 的输入路径落在其中即认定归属）
+    data_anchors = [expected_data.get("data_source", ""),
+                    str(cases_dir / case_id / "data")]
+    case_result_dir = find_case_result_dir(result_dir, case_id, data_anchors)
     if not case_result_dir:
         print(f"[warn] {case_id}: 未找到 result 子目录，跳过")
         update_progress(progress_file, f"{task_prefix}:result_locate", "failed", "未找到 result 目录")
