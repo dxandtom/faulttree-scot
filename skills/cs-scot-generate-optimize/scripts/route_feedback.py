@@ -5,7 +5,9 @@
 - 判断交代码:六类错误的真因分支全部机械判定(台账反查/名字对时/orphan 定位/证据拼装);
 - 执行交既有通道:票上只写"该走哪条通道+命令/草稿",真正动手的是 migrate、调优表+import、
   tester、人工——本脚本不改任何资产;
-- 确认门:全部票默认待人过目;模型拿到票后照票办事,禁止越票发挥。
+- 两档执行:自动迭代档(auto)在优化循环内**直接照票执行**,同节点同类 3 轮不过由熔断
+  自动转人工;人工兜底档(fallback)=自动化本来就无能为力的情况(环境故障/缺数据/
+  绑定清除冲突/缺节点/结论争议/熔断),汇总交人。模型照票办事,禁止越票发挥。
 
 用法:
     分拣开票:
@@ -114,7 +116,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
             "case_id": issue.get("case_id", ""),
             "error_category": cat,
             "branch": branch,
-            "level": level,              # auto=可代办 / semi=草稿待点头 / manual=纯人工
+            "level": level,              # auto=自动迭代(循环内直接执行) / fallback=人工兜底
             "channel": channel,
             "node_id": issue.get("node_id") or issue.get("expected_node") or "",
             "reason": issue.get("reason", ""),
@@ -130,7 +132,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
 
         # 熔断一票否决:自动迭代到此为止
         if "熔断" in blob or int(issue.get("previous_attempts") or 0) >= 3:
-            add(cat, "熔断", "manual", "人工深查",
+            add(cat, "熔断", "fallback", "人工兜底(迭代上限)",
                 "该节点同类错误已连续3轮未修复,停止自动迭代。深查方向:①判据描述是否充足"
                 "(不足→转 KNOWLEDGE_GAP 退 tester 重写判断方法)②期望是否标错(退用例库)"
                 "③裁决口径是否需调(出争议单)", issue)
@@ -143,13 +145,13 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
                 owner = next((k for k, v in ledger.items()
                               if v.get("script", "") and Path(v["script"]).name in txt), "")
                 pkg = ledger.get(owner, {}).get("package_node", "")
-                add(cat, "判据脚本崩", "semi", "migrate(管道修复/重迁)",
+                add(cat, "脚本运行崩溃", "auto", "migrate(重迁+限定范围修复)",
                     (f"重迁该节点交付包(体检+有界管道修复随迁自动跑):migrate --only \"{pkg}\""
                      f" --node {owner}" if owner else
                      "按 traceback 定位 custom/ 脚本,重迁其交付包(管道修复随迁);清单外的实现"
                      "问题记返厂单退 tester"), issue)
             else:
-                add(cat, "环境崩", "manual", "人工",
+                add(cat, "环境故障", "fallback", "人工兜底",
                     "环境级失败(依赖/权限/数据损坏),修复后重跑 execute;报错原文见 reason", issue)
             continue
 
@@ -159,7 +161,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
             for m in missing:
                 impact[m] = sum(1 for n in nodes.values()
                                 if m in str(n.get("data_source") or ""))
-            add(cat, "缺数据", "manual", "使用方补数据",
+            add(cat, "数据缺失", "fallback", "人工兜底(使用方补数据)",
                 "补齐后重跑 execute,不动任何资产。缺口影响(按 tree_index data_source 统计):"
                 + ", ".join(f"{m}(约{c}个节点)" for m, c in impact.items()), issue)
             continue
@@ -168,17 +170,17 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
             orphans = issue.get("orphan_nodes") or []
             if orphans or "孤儿绑定" in blob or "孤立节点" in blob:
                 locs = {o: grep_binding_files(product, o) for o in orphans}
-                add(cat, "孤儿绑定", "semi", "调优表+import(产物自带)",
+                add(cat, "孤儿绑定", "auto", "调优表+import(产物自带)",
                     "清残留绑定:导出调优表→删这些幽灵节点的绑定引用→import 编译回产物。"
                     f"绑定所在脚本:{json.dumps(locs, ensure_ascii=False)}", issue)
             elif nid in ledger:
                 pkg = ledger[nid].get("package_node", "")
-                add(cat, "清绑定冲突", "manual", "人裁(二选一,无默认)",
+                add(cat, "绑定清除冲突", "fallback", "人工兜底(二选一,无默认)",
                     f"该节点曾由包「{pkg}」迁入(台账有记录),现在绑定为空=人清过;而用例期望它是"
                     f"根因。二选一:①恢复绑定:migrate --only \"{pkg}\" --node {nid} 重迁;"
                     "②改用例期望(该节点确实该跳过)", issue)
             else:
-                add(cat, "缺绑定", "semi", "migrate 或 调优表+import",
+                add(cat, "绑定缺失", "auto", "migrate 或 调优表+import",
                     f"节点 {nid}「{node.get('name', '')}」从未绑定过(台账无记录)。有交付包→"
                     f"migrate 迁入;没有→调优表补绑定行(绑定语法见 generate 导入导出手册,"
                     "草稿待人审)→import;或给 tester 出脚本需求单", issue)
@@ -188,33 +190,33 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
             name = issue.get("node_name", "")
             by_name = [k for k, n in nodes.items() if name and n.get("name") == name]
             if by_name:
-                add(cat, "用例库过期", "auto", "case_gen 重跑",
+                add(cat, "用例库过期", "auto", "case_gen 重新生成",
                     f"节点「{name}」在树上(现 node_id={by_name[0]},用例记的 {nid} 已过期"
                     "——结构调整后 id 重排)。重跑 case_gen 全库刷新即可,别惊动 tester", issue)
             else:
-                add(cat, "真缺节点/缺知识", "manual", "tester 需求单",
+                add(cat, "故障树缺节点", "fallback", "人工兜底(tester 需求单)",
                     f"树上确实没有「{name or nid}」。给 tester 出增节点需求单(节点名/建议父路径/"
                     "来源用例/期望证据),产出判断方法后走优化线收编或结构手术线增节点", issue)
             continue
 
         if cat == "CRITERIA_GAP":
-            add(cat, "对质单", "manual", "人拍板→三选一执行",
+            add(cat, "判定偏差修复", "auto", "调优表 或 migrate(按证据自动修复)",
                 f"节点 {nid}「{node.get('name', '')}」期望 predicate="
                 f"{issue.get('expected_predicate')} vs 实测={issue.get('actual_predicate')}。"
-                f"判据原文:{str(node.get('condition') or '')[:160]}。人对照测试数据拍板:"
-                "①绑定/列映射抄错→调优表改行→import;②脚本实现偏离判断方法文档→"
-                "migrate 有界修复先试,清单外返厂 tester 按规范重产(判定标准一个字不许动);"
-                "③期望标错(数据不含该特征)→修用例并退 tester(测试数据质量问题)", issue)
+                f"判据原文:{str(node.get('condition') or '')[:160]}。自动修复范围="
+                "使实现与判断方法文档一致:①绑定/列映射错→调优表改行→import;"
+                "②脚本实现偏离文档→migrate 限定范围修复,清单外记返厂。判定标准本身不许改;"
+                "若疑为用例期望标错,票面备注留证——连续修不过由熔断转人工复核", issue)
             continue
 
         if cat == "VERDICT_GAP":
-            add(cat, "裁决争议", "manual", "人裁(+SCOT_DEBATE=auto 可拉辩论卷宗)",
+            add(cat, "结论归档争议", "fallback", "人工兜底(+辩论引擎可选)",
                 "0~4 全排除仍漏判/假阳=纯裁决口径争议。出争议单交人;绝不自动改 RCA 引擎口径"
                 "(两引擎同步的核心资产)。SCOT_DEBATE=auto 时可对争议候选跑辩论引擎出对抗卷宗"
                 "辅助裁决", issue)
             continue
 
-        add(cat or "UNKNOWN", "未识别", "manual", "人工",
+        add(cat or "UNKNOWN", "未识别", "fallback", "人工兜底",
             f"未识别的错误类别,原样转人工。原始条目:{blob[:300]}", issue)
 
     return tickets
@@ -285,15 +287,18 @@ def main() -> None:
          "feedback_file": str(fb_path), "product": str(product), "tickets": tickets},
         ensure_ascii=False, indent=2), encoding="utf-8")
 
-    by_level = {"auto": "可代办", "semi": "草稿待点头", "manual": "纯人工"}
+    by_level = {"auto": "自动迭代", "fallback": "人工兜底"}
     print(f"[route_feedback] 开出 {len(tickets)} 张处置票 → {out_p}\n")
     for t in tickets:
         print(f"  [{t['id']}] 类{t['error_category']}·{t['branch']}"
               f"({by_level.get(t['level'], t['level'])}) → {t['channel']}")
         print(f"      节点:{t['node_id'] or '-'}  用例:{t['case_id'] or '-'}")
         print(f"      动作:{t['action']}\n")
-    print("确认门:人过目后对可执行的票逐张/照单执行;执行完记账:"
-          f"\n  python {Path(__file__).name} --record \"{out_p}\" --done all --product \"{product}\"")
+    n_auto = sum(1 for t_ in tickets if t_["level"] == "auto")
+    n_fb = len(tickets) - n_auto
+    print(f"自动迭代档 {n_auto} 张:循环内直接照单执行(同节点同类 3 轮不过自动熔断转人工);"
+          f"人工兜底档 {n_fb} 张:汇总交人处理。执行完记账:"
+          f"\n  python {Path(__file__).name} --record \"{out_p}\" --done <票号|all> --product \"{product}\"")
 
 
 if __name__ == "__main__":
