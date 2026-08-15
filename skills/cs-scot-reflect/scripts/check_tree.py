@@ -36,8 +36,9 @@ def collect_tree_node_ids(tree_index: Dict[str, Any]) -> Set[str]:
     nodes = tree_index.get("nodes", {})
 
     if isinstance(nodes, dict):
-        for node in nodes.values():
-            nid = node.get("node_id") or node.get("id")
+        # 执行链的 tree_index:nodes 是字典,node_id 就是字典的 key(节点体内没有 node_id 字段)
+        for key, node in nodes.items():
+            nid = node.get("node_id") or node.get("id") or key
             if nid:
                 node_ids.add(nid)
     elif isinstance(nodes, list):

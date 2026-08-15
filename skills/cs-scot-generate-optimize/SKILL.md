@@ -29,7 +29,7 @@ description: 生成/优化技能总门面:按输入形态机械路由——故�
 | 生成线 | 母表 xlsx | 有层级列 ∧ **无** zip 列 ∧ **无** node_id 列 |
 | 优化线 | ①交付包 / ②合集包 / ③对应表 | ①有 `判断方法*.md`(文件名不含"规范")/ ②多个子目录各有一份判断方法.md / ③有层级列 ∧ 有 zip 列 |
 | 结构手术线 | 用户明说增删 | 用户明说增/删节点 ∧ 没有交付包 |
-| 回流线 | 失败签名 JSON | 条目有 `mechanical` 栏 ∧ verdict 在八枚举内 |
+| 回流线 | 评估报告/反馈 JSON | 有 `meta.verdict` + `reconciliation`(评估报告)∨ 条目含 `error_class` ∈ 六类名(feedback/失败签名) |
 
 > **招牌内部为什么必须 AND**:母表那三条是**互斥性设计**——只有"有层级列 + 无 zip 列 +
 > 无 node_id 列"同时成立,才能与对应表(有 zip 列)、调优表(有 node_id 列)分开。
@@ -50,7 +50,7 @@ description: 生成/优化技能总门面:按输入形态机械路由——故�
 | **故障树母表 xlsx**(层级列;无 zip 列、无 node_id 列。新格式多页签与老格式单页签〔`L1(Chinese)` 表头〕皆算,两格式分辨见 generate 手册) | **生成线**:建树→归集→绑定→校验,直出场景技能 | ① 母表 xlsx【必需】② **场景名**(截子树+命名,`--start-node`)【必需】③ 每种指标一份数据(csv/xlsx;裸采集 txt/zip 先转三表)【必需】④ 产物落点 `--out-base`【可选,默认母表旁 `scot技能/<短名>/`】。**唯一不要既有产物的线**——它就是产生产物的 | generate |
 | **交付包**(zip/目录,内含 `判断方法*.md`——**这一样就是招牌**,排除文件名带"规范"的)/ 多节点**合集包** / **对应表**(层级列 + zip 列) | **优化线**:判据替换+绑定换血,批量/单包/翻新 | ① 交付包/合集/目录【必需】② **场景产物目录**(`--product`:产物目录,技能形态给它的 `assets/`)【必需,装到哪去】③ `fault_check_*.py`【**包里有则判据+脚本一起迁;没有则只迁判据**,由人改调优表,不是错误】④ 对应表 `--map`【批量模式用;包里自带一张也自动发现】⑤ `--auto` 批量循环【合集包用】 | migrate |
 | 用户明说**增/删节点**,且没有交付包 | **结构手术线** | ① **产物目录**(技能形态给 `assets/`)【必需】② 增:父路径 + 节点名 + 判据原文(+绑定)【必需】/ 删:节点名或 node_id + **用户明确确认**【必需】 | 本文件 §结构手术线 |
-| **评估反思失败签名/处置清单 JSON**(条目含 `mechanical` 栏 + verdict 枚举) | **回流线(预留)** | ① 失败签名 JSON【必需】② **产物目录**【必需】——目前只认不分发,见 §回流线 | 本文件 §回流线 |
+| **评估反思(cs-scot-reflect)的评估报告/反馈 JSON**(`evaluation_report.json` 有 `meta.verdict`+`reconciliation`;`feedback_to_generate.json`/`failure_signatures.json` 条目含 `error_class` ∈ 六类名) | **回流线(预留)** | ① 评估报告或反馈 JSON【必需】② **产物目录**【必需】——目前只认不分发,见 §回流线 | 本文件 §回流线 |
 
 > **一句话记牢:除生成线外,三条线都必须有"既有产物目录"这一样**——它们都是在已有的树上动土,
 > 没有它无处落地。用户只丢来一个交付包却没说装到哪,**问他要产物目录**,
@@ -76,7 +76,7 @@ description: 生成/优化技能总门面:按输入形态机械路由——故�
 | "帮我把这批包 `合集.zip` 按 `对应表.xlsx` 全量收编到 `scot技能/ldp/assets/`" | 优化线批量 | 齐了 → 按 migrate 对应表批量模式跑 |
 | "给接口层加个'光模块异常'节点" | 结构手术线(增) | 缺产物目录/父路径/判据原文 → 一次性问齐再动 |
 | "把 n17 删了" | 结构手术线(删) | **先复述确认**:"将删除节点 n17 及其绑定,不可自动恢复,确认?" 得到明确确认才动手 |
-| "这是评估反思的失败签名,按它优化" | 回流线 | 明说"自动分发未接入",按 §回流线的表把每条指到人工通道 |
+| "这是评估反思的报告/反馈,按它优化" | 回流线 | 明说"自动分发未接入",按 §回流线的表把每条 issue 指到人工通道 |
 
 ## 手册查找次序(仓库态/发行包态通用)
 
@@ -119,28 +119,32 @@ description: 生成/优化技能总门面:按输入形态机械路由——故�
   为止,人点头才执行。
 - 改判据/改绑定不叫手术:量大走优化线(交付包),单行小改直接调优表改行 → import。
 
-## 回流线(预留口子,等评估反思 skill 落地后接入)
+## 回流线(预留口子,契约=同门 cs-scot-reflect 的实际输出)
 
-**认**:失败签名/处置清单 JSON,机械特征=条目含 `mechanical.class / verdict / route` 字段,且
-verdict ∈ {run_invalid, needs_data, needs_repair, needs_binding, needs_knowledge,
-needs_criteria_review, needs_adjudication, needs_reconciliation}
-(契约=《评估反思飞轮设计与搭建指南》v2 的双栏失败签名)。
+**认**(评估反思 skill 的三种产物都认,机械特征):
 
-**做**:目前**只认不分发**——向用户明说"回流自动分发尚未接入",并按下表把每条 finding 指到
+- `evaluation_report.json`:有 `meta.verdict`(PASS/PASS_WITH_GAPS/PARTIAL_PASS/FAIL/EVAL_ERROR)
+  + `reconciliation` 对账块;要处置的条目在 `failure_signatures` / `verdict_detail`;
+- `feedback_to_generate.json` / `failure_signatures.json`:条目含 `error_class`(或
+  `error_category`)∈ {ENV_FAILURE, INPUT_GAP, BINDING_GAP, KNOWLEDGE_GAP,
+  CRITERIA_GAP, VERDICT_GAP}。
+
+**做**:目前**只认不分发**——向用户明说"回流自动分发尚未接入",并按下表把每条 issue 指到
 人工通道;**绝不猜格式、不擅自改资产**:
 
-| verdict | 人工通道(即本门各线) |
+| 错误类(error_class) | 人工通道(即本门各线) |
 |---|---|
-| needs_data | 补数据清单交使用方(不动本门任何资产) |
-| needs_repair | 优化线:migrate 修复循环 / 返厂清单(交付脚本正本刷新在 tester 侧「批量翻新」;产物侧引擎债另有 `--refresh-only`) |
-| needs_binding | 生成线 2.5 补绑 |
-| needs_knowledge | tester 产判断方法 → 优化线增节点收编 |
-| needs_criteria_review | 人拍板假设单后:调优表改行 → import |
-| needs_adjudication / needs_reconciliation | 只点名给人,不自动处置(删减必人确认) |
-| run_invalid | 重跑,不改任何资产 |
+| ENV_FAILURE | 修执行环境后重跑 execute,不改任何资产 |
+| INPUT_GAP | 补数据清单交使用方(不动本门任何资产) |
+| BINDING_GAP | 单节点:调优表补绑定列 → import;成批:优化线交付包重迁/生成线 2.5 补绑 |
+| KNOWLEDGE_GAP | tester 产判断方法 → 优化线增节点收编(或结构手术线增节点) |
+| CRITERIA_GAP | 人拍板后:调优表改判据行 → import(或交付包重迁) |
+| VERDICT_GAP | 只点名给人裁决,不自动处置(删减必人确认) |
 
-接入时只需两件(等评估反思契约定稿):①把"认"的特征收紧成 schema 校验;
-②把上表右列换成命令级自动分发(默认 auto=false,逐条人过目)。
+verdict=PASS / PASS_WITH_GAPS → 无事可做;EVAL_ERROR → 是评估自身失败,修评估输入重评,
+与产物无关。报告里的 `case_quality`(期望粒度偏粗提示)转给用例库维护方,不动本门资产。
+
+接入自动分发时只需一件:把上表右列换成命令级自动分发(默认 auto=false,逐条人过目)。
 
 ## 发行打包(交付平台=一个自包含包)
 
