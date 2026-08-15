@@ -76,15 +76,19 @@ Step 3: 输出分类结果
 
 ---
 
-## 类2：BINDING_GAP（没绑上）
+## 类2：BINDING_GAP（绑定层毛病）
 
-**定义**：静态检查 tree_index 发现节点有判据但没有任何绑定，**且该节点与本用例的漏判相关**。
+**定义**：绑定层的一切不一致——孤儿绑定（产出事实但树上无此节点），或节点有判据却没有
+任何绑定**且该节点与本用例的漏判相关**。
 
 **Verdict**: `needs_binding`
 
-### 检测条件
+### 检测条件（两条任一命中）
 
-静态查 `tree_index.json`：
+**条件A·孤儿绑定**：`rca.json` 的 `tree_issues.orphan_node_ids` 非空——执行产出了某节点的
+事实但树上没有这个节点（典型：删节点没清绑定）。绑定/树不一致，修法=清残留绑定。
+
+**条件B·缺绑定**，静态查 `tree_index.json`：
 1. 节点存在
 2. 节点有 `condition`（判据）
 3. 节点在所有 analyzer 脚本中都没有任何绑定
@@ -121,7 +125,7 @@ for each missed_expected_node:
 
 - **可继续 loop**
 - 自动回流 generate 补绑定
-- 熔断：同节点同类连改 2 轮不过 → 标记人深查
+- 熔断：同节点同类连改 3 轮不过 → 标记人深查
 
 ---
 
@@ -150,7 +154,7 @@ for each missed_expected_node:
 
 - **可继续 loop**
 - 回流 tester 增节点 → migrate 更新树
-- 熔断：同节点同类连改 2 轮不过 → 标记人深查
+- 熔断：同节点同类连改 3 轮不过 → 标记人深查
 
 ---
 
@@ -182,24 +186,22 @@ for each missed_expected_node:
 
 - **可继续 loop**
 - 人拍板 → 调优表修正
-- 熔断：同节点同类连改 2 轮不过 → 标记人深查
+- 熔断：同节点同类连改 3 轮不过 → 标记人深查
 
 ---
 
 ## 类5：VERDICT_GAP（裁不对）
 
-**定义**：RCA 裁决结论与期望不符，或存在孤立节点。
+**定义**：RCA 裁决结论与期望不符——纯裁决层错误：0~4 全排除、每个节点的事实都对，
+结论还归错档，才轮到它（孤儿绑定归类2）。
 
 **Verdict**: `needs_adjudication`
 
-### 检测条件（满足任一即命中）
+### 检测条件
 
-1. **裁决不符期望**：
+**裁决不符期望**：
    - 期望根因不在 `rca_result` 中（且不在 `probable_causes` 中）
    - 阴性用例却有 `rca_result` 非空（假阳）
-
-2. **孤立节点**：
-   - `tree_issues.orphan_node_ids` 非空数组
 
 ### 证据字段
 
@@ -219,7 +221,7 @@ for each missed_expected_node:
 
 - **可继续 loop**
 - 人裁决 → 调规则
-- 熔断：同节点同类连改 2 轮不过 → 标记人深查
+- 熔断：同节点同类连改 3 轮不过 → 标记人深查
 
 ---
 
@@ -245,7 +247,7 @@ for each missed_expected_node:
 
 ### 触发条件
 
-**同 case 同节点同类**错误连续 2 轮未修复（按 case_id + node_id + error_class 跨轮计数）
+**同 case 同节点同类**错误连续 3 轮未修复（按 case_id + node_id + error_class 跨轮计数；自动迭代 3 轮不过才转人工）
 
 ### 处理
 
@@ -260,7 +262,7 @@ for each missed_expected_node:
   "fused": true,
   "node_id": "n4",
   "error_class": "BINDING_GAP",
-  "fuse_reason": "同节点同类连改2轮不过",
+  "fuse_reason": "同节点同类连改3轮不过",
   "rounds": ["round1_id", "round2_id"]
 }
 ```

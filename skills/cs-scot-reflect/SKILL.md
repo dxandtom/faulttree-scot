@@ -154,10 +154,10 @@ python "<本目录>/scripts/case_gen.py" \
 |---|------|---------|--------|
 | 0 | ENV_FAILURE（执行失败） | `execution_status.*.ok == false` 或 run.json不存在 | 人工修环境 |
 | 1 | INPUT_GAP（缺数据） | `missing_inputs`非空 **且** 有期望根因 MISSED | 使用方补数据 |
-| 2 | BINDING_GAP（没绑上） | 静态查tree_index：节点有判据但无绑定，**且该节点与漏判相关**（是漏判期望根因自身或其路径祖先）。全树其余未绑定节点不定错——"清空绑定让节点默认放行"是执行链的合规调优通道，不追杀 | generate补绑定 |
+| 2 | BINDING_GAP（绑定层毛病） | ①**孤儿绑定**：产出了事实但树上无此节点（典型=删节点没清绑定）；②有判据无绑定**且与漏判相关**（是漏判期望根因自身或其路径祖先）。全树其余未绑定节点不定错——"清空绑定让节点默认放行"是执行链的合规调优通道，不追杀 | 清残留绑定/补绑定 |
 | 3 | KNOWLEDGE_GAP（不认识） | tree_index不存在该节点 | tester增节点 |
 | 4 | CRITERIA_GAP（判不对） | predicate vs expected_facts不相等 | 人拍板→调优表 |
-| 5 | VERDICT_GAP（裁不对） | 裁决≠期望（含阴性用例假阳） 或 orphan非空 | 人裁决→调规则 |
+| 5 | VERDICT_GAP（裁不对） | 裁决≠期望（含阴性用例假阳）——纯裁决层：事实全对还归错档才是它 | 人裁决→调规则 |
 
 ### 决策树
 
@@ -177,10 +177,10 @@ Step 1: 对账（逐期望根因，与确证候选**自身** node_id 比对，�
 Step 2: 按0→5顺序查错（仅在有 MISSED 或 FALSE_CONFIRM 时触发；全命中不查错）
   ├─ 0: execution_status.*.ok == false？ → 类0 ENV_FAILURE
   ├─ 1: missing_inputs非空 + 有MISSED？ → 类1 INPUT_GAP
-  ├─ 2: 有判据但无绑定 + 该节点是漏判期望根因自身或其路径祖先？ → 类2 BINDING_GAP
+  ├─ 2: 孤儿绑定(orphan) 或 有判据无绑定+该节点与漏判相关？ → 类2 BINDING_GAP
   ├─ 3: tree_index不存在该节点？ → 类3 KNOWLEDGE_GAP
   ├─ 4: predicate vs expected_facts不相等？ → 类4 CRITERIA_GAP
-  ├─ 5: 裁决≠期望（含阴性假阳） 或 orphan非空？ → 类5 VERDICT_GAP
+  ├─ 5: 裁决≠期望（含阴性假阳）？ → 类5 VERDICT_GAP
         ↓
 Step 3: 综合裁定 verdict
   ├─ 所有期望根因均 HIT_CONFIRMED/HIT_ANCESTOR/HIT_DEGRADED（且无假阳）：
@@ -198,7 +198,7 @@ Step 3: 综合裁定 verdict
 |------|------|
 | 类0 / 类1 | 必须中断，人工修复 |
 | 类2 / 类3 / 类4 / 类5 | 自动回流generate，可继续loop |
-| 同节点同类连改2轮不过 | 熔断，标记人深查 |
+| 同节点同类连改3轮不过 | 熔断，标记人深查 |
 
 ## 输出结构
 

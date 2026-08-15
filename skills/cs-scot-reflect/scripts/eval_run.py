@@ -355,15 +355,15 @@ def _update_fuse_history(
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
-    # 熔断判断：算上本轮 ≥ 2 轮
-    if len(prior) >= 1:
+    # 熔断判断：算上本轮 ≥ 3 轮（自动迭代 3 轮不过 → 转人工深查）
+    if len(prior) >= 2:
         fuse_history.append({
             "fused": True,
             "case_id": case_id,
             "node_id": node_id,
             "error_class": error_class,
             "error_category": error_category,
-            "fuse_reason": "同节点同类连改2轮不过",
+            "fuse_reason": "同节点同类连改3轮不过",
             "rounds": len(prior) + 1
         })
         details["fused"] = True    # 供 _generate_suggestion 带【熔断警告】

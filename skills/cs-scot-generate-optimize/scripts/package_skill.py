@@ -40,6 +40,9 @@ LAYOUT = {
     "zip2csv": ["zip2csv"],
     "cs-scot-execute": ["cs-scot-execute"],
     "fault-tree-rca": ["fault-tree-rca"],
+    # tester 随包:回流线的类3(缺知识)/类4(实现偏离判据)处置票要路由到它重产
+    # 判断方法/fault_check——不带它,评估反思的返厂通道在交付环境里就是断头路
+    "datacom-fault-tree-tester": ["datacom-fault-tree-tester"],
 }
 MATERIALS = ("cs-scot-execute", "fault-tree-rca", "zip2csv")
 
@@ -87,6 +90,10 @@ REQUIRED = (
        ("SKILL.md", "references/rca_rules.md",
         "scripts/draft_rca.py", "scripts/finalize_rca.py", "scripts/render_report.py",
         "scripts/validate_rca.py", "scripts/rca_query.py")]
+    + [f"datacom-fault-tree-tester/{s}" for s in
+       ("SKILL.md", "判断方法_规范.md", "scripts/check_contract.py",
+        "scripts/search_cmd.py", "scripts/search_config.py",
+        "scripts/search_diag_txt.py", "scripts/search_log.py")]
 )
 
 # 复制时排除(缓存/系统噪音/打包器自身产物)

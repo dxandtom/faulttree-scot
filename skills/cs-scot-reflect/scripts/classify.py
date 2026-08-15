@@ -18,11 +18,12 @@
 错误分类（按序命中即停）:
     0: ENV_FAILURE - execution_status.*.ok == false 或 run.json不存在
     1: INPUT_GAP - missing_inputs非空 且 有期望根因 MISSED
-    2: BINDING_GAP - 有判据但无绑定，且该节点与漏判相关（是漏判期望根因自身或其路径祖先）。
+    2: BINDING_GAP - 绑定层的一切毛病：孤儿绑定（orphan：产出事实但树上无此节点，
+       典型=删节点没清绑定）；或 有判据无绑定且与漏判相关（漏判期望根因自身/其祖先）。
        全树其余未绑定节点不定错——"清空绑定让节点默认放行"是执行链的合规调优通道，不追杀。
     3: KNOWLEDGE_GAP - tree_index不存在该节点
     4: CRITERIA_GAP - predicate vs expected_facts不相等
-    5: VERDICT_GAP - 裁决≠期望（含阴性用例假阳） 或 orphan非空
+    5: VERDICT_GAP - 裁决≠期望（含阴性用例假阳）——纯裁决层，事实全对还归错档才是它
 """
 from __future__ import annotations
 
@@ -168,14 +169,29 @@ def check_input_gap(run_data: Dict[str, Any], missed_count: int) -> Optional[Dic
 def check_binding_gap(
     binding_check: Dict[str, Any],
     missed_nodes: List[str],
-    tree_index_data: Dict[str, Any]
+    tree_index_data: Dict[str, Any],
+    rca_data: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
-    """类2: BINDING_GAP 检测
+    """类2: BINDING_GAP 检测（绑定层的一切毛病）
 
-    条件: 有判据但无绑定（静态查tree_index），且该节点与本用例的漏判相关——
+    条件一（孤儿绑定）: rca.json 的 tree_issues.orphan_node_ids 非空——执行产出了某节点
+    的事实但树上没有这个节点（典型：删节点没清绑定），是绑定/树不一致，修法=清残留绑定。
+    条件二（缺绑定）: 有判据但无绑定（静态查tree_index），且该节点与本用例的漏判相关——
     未绑定节点是某个漏判期望根因自身，或位于其祖先链上。
     全树其余未绑定节点（含故意清空绑定走"默认放行"通道的）不定错。
     """
+    # 孤儿绑定：绑定指到树上不存在的节点——硬性不一致，先于缺绑定报
+    orphan_nodes = ((rca_data or {}).get("tree_issues") or {}).get("orphan_node_ids", [])
+    if orphan_nodes:
+        return {
+            "class": 2,
+            "error_category": "BINDING_GAP",
+            "verdict": "needs_binding",
+            "reason": f"存在孤儿绑定: 产出了事实但树上没有这些节点 {orphan_nodes}"
+                      f"（典型：删节点没清绑定）——清掉残留绑定",
+            "orphan_nodes": orphan_nodes
+        }
+
     if not binding_check or not missed_nodes:
         return None
 
@@ -266,21 +282,9 @@ def check_verdict_gap(
 ) -> Optional[Dict[str, Any]]:
     """类5: VERDICT_GAP 检测
 
-    条件: 裁决≠期望（漏判/阴性用例假阳） 或 orphan非空
+    条件: 裁决≠期望（漏判/阴性用例假阳）。
+    只查裁决层——事实全对还归错档才轮到它（orphan 属绑定/树不一致，归类2）。
     """
-    # 检查孤儿节点
-    tree_issues = rca_data.get("tree_issues", {})
-    orphan_nodes = tree_issues.get("orphan_node_ids", [])
-
-    if orphan_nodes:
-        return {
-            "class": 5,
-            "error_category": "VERDICT_GAP",
-            "verdict": "needs_adjudication",
-            "reason": f"存在孤立节点: {orphan_nodes}",
-            "orphan_nodes": orphan_nodes
-        }
-
     reconciliation = reconcile_data.get("reconciliation", {}) if reconcile_data else {}
 
     # 阴性用例假阳
@@ -363,7 +367,8 @@ def classify(
     checks = [
         ("ENV_FAILURE", lambda: check_env_failure(run_data)),
         ("INPUT_GAP", lambda: check_input_gap(run_data, missed_count)),
-        ("BINDING_GAP", lambda: check_binding_gap(binding_check, missed_nodes, tree_index_data)),
+        ("BINDING_GAP", lambda: check_binding_gap(binding_check, missed_nodes,
+                                                  tree_index_data, rca_data)),
         ("KNOWLEDGE_GAP", lambda: check_knowledge_gap(tree_check, expected_roots)),
         ("CRITERIA_GAP", lambda: check_criteria_gap(rca_input_data, expected_data)),
         ("VERDICT_GAP", lambda: check_verdict_gap(rca_data, reconcile_data, missed_nodes))
