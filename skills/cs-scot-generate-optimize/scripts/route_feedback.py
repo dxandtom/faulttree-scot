@@ -133,9 +133,11 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
         # 熔断一票否决:自动迭代到此为止
         if "熔断" in blob or int(issue.get("previous_attempts") or 0) >= 3:
             add(cat, "熔断", "fallback", "人工兜底(迭代上限)",
-                "该节点同类错误已连续3轮未修复,停止自动迭代。深查方向:①判据描述是否充足"
-                "(不足→转 KNOWLEDGE_GAP 退 tester 重写判断方法)②期望是否标错(退用例库)"
-                "③裁决口径是否需调(出争议单)", issue)
+                "该节点同类错误已连续3轮未修复,停止自动迭代。**第一步由模型定性**(对照判断"
+                "方法文档原文与三轮修复记录,这是机械分类测不出、必须模型判断的环节):"
+                "①判据描述不充足,脚本怎么写都判不对→转 KNOWLEDGE_GAP,给 tester 出重写"
+                "判断方法的需求单;②判据没问题但用例期望可疑→修用例并反馈测试数据质量;"
+                "③都不是→结论归档规则争议,出争议单交人", issue)
             continue
 
         if cat == "ENV_FAILURE":
@@ -182,8 +184,9 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
             else:
                 add(cat, "绑定缺失", "auto", "migrate 或 调优表+import",
                     f"节点 {nid}「{node.get('name', '')}」从未绑定过(台账无记录)。有交付包→"
-                    f"migrate 迁入;没有→调优表补绑定行(绑定语法见 generate 导入导出手册,"
-                    "草稿待人审)→import;或给 tester 出脚本需求单", issue)
+                    f"migrate 迁入(判据+脚本+绑定一体到位);没有→在调优表该节点的绑定列按"
+                    "判据文档起草机械匹配规则(简单判据不需要脚本;语法见 generate 导入导出"
+                    "手册)→import。判据复杂到写不出绑定的,3 轮内熔断转 tester 脚本需求单", issue)
             continue
 
         if cat == "KNOWLEDGE_GAP":
