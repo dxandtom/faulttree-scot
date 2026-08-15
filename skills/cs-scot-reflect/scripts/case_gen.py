@@ -117,29 +117,109 @@ def prepare_packages_root(packages: Path, tmp: Path) -> Tuple[Path, bool]:
     return dst, True
 
 
-def find_package_dir(packages_root: Path, package_node: str) -> Optional[Path]:
-    """在交付包根目录下按包节点名找子包目录。
+_FW = str.maketrans({"（": "(", "）": ")", "【": "[", "】": "]", "：": ":",
+                     "－": "-", "—": "-", "　": " ", "，": ",", "、": ","})
 
-    优先目录名精确等于包节点名；其次目录名包含包节点名（唯一时才认）。
-    packages_root 本身就是该包（单包形态）也认。
-    """
-    if packages_root.name == package_node:
-        return packages_root
-    exact = [d for d in packages_root.rglob(package_node) if d.is_dir()]
-    if exact:
-        return sorted(exact)[0]
-    fuzzy = [d for d in packages_root.iterdir()
-             if d.is_dir() and package_node in d.name] if packages_root.is_dir() else []
-    if len(fuzzy) == 1:
-        return fuzzy[0]
-    return None
+
+def _norm(s: str) -> str:
+    """名字归一化：全角转半角、ASCII 小写、去空白/下划线/连字符/点——
+    「未迭代到LDP LSP」「未迭代到ldp_lsp」「未迭代到ldp lsp」都归成一个。"""
+    s = str(s or "").translate(_FW).lower()
+    return re.sub(r"[\s_\-–·.]+", "", s)
+
+
+def _md_name(md: Path) -> Optional[str]:
+    """从 判断方法*.md 提包节点名——与 migrate 同口径：
+    标题行「# 判断方法: <名字>」优先，退文件名 stem 去「判断方法」前缀。"""
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "gbk", "gb18030"):
+        try:
+            text = md.read_text(encoding=enc)
+            break
+        except (UnicodeDecodeError, OSError):
+            continue
+    if text:
+        m = re.search(r"^#\s*判断方法[::]\s*(\S.*?)\s*$", text, re.M)
+        if m:
+            return m.group(1)
+    stem = re.sub(r"^判断方法[\s_\-::]*", "", md.stem)
+    return stem or None
 
 
 def find_test_data(pkg_dir: Path) -> Optional[Path]:
-    """包内测试数据目录：tester 规范名「测试数据」（任意深度，取最浅一个）。"""
-    cands = sorted((p for p in pkg_dir.rglob("测试数据") if p.is_dir()),
+    """包内测试数据目录：目录名含「测试数据」（测试数据/测试数据集/测试数据(新) 都认，
+    任意深度取最浅）；退而认平台导出名 formated_result / formatted_result。"""
+    cands = sorted((p for p in pkg_dir.rglob("*") if p.is_dir() and "测试数据" in p.name),
+                   key=lambda p: len(p.parts))
+    if cands:
+        return cands[0]
+    cands = sorted((p for p in pkg_dir.rglob("*") if p.is_dir()
+                    and p.name.lower() in ("formated_result", "formatted_result")),
                    key=lambda p: len(p.parts))
     return cands[0] if cands else None
+
+
+def index_packages(root: Path) -> List[Dict[str, Any]]:
+    """全根扫一遍，建候选包索引：[{dir, aliases(归一化名集合), data}]。
+
+    包身份**优先取包内 判断方法*.md**（台账包名的同源出处，目录叫什么都不影响对号）：
+    md 标题名 + md 文件名名 + 所在目录名 + 各级到 root 的中间目录名都记为别名。
+    没有 md、但自己带测试数据目录的目录（散数据包）也收，以目录名为别名。
+    """
+    pkgs: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    def _add(pdir: Path, names) -> None:
+        if pdir in seen:
+            for p in pkgs:
+                if p["dir"] == pdir:
+                    p["aliases"].update(_norm(n) for n in names if n)
+            return
+        seen.add(pdir)
+        aliases = {_norm(n) for n in names if n}
+        aliases.discard("")
+        pkgs.append({"dir": pdir, "aliases": aliases, "data": find_test_data(pdir)})
+
+    for md in sorted(root.rglob("判断方法*.md")):
+        if "规范" in md.name:
+            continue
+        pdir = md.parent
+        names = [_md_name(md), re.sub(r"^判断方法[\s_\-::]*", "", md.stem), pdir.name]
+        if pdir != root:                                  # 中间层目录名也算别名(多套一层的形态)
+            names += [p.name for p in pdir.parents if p != root and root in p.parents]
+        _add(pdir, names)
+
+    # 没被 md 覆盖的"散数据包"：自身直下有测试数据目录的目录
+    for d in sorted(p for p in root.rglob("*") if p.is_dir()):
+        if d in seen or "测试数据" in d.name:
+            continue
+        if any(c.is_dir() and "测试数据" in c.name for c in d.iterdir()):
+            _add(d, [d.name])
+    if root not in seen and find_test_data(root):          # 根目录本身就是单包
+        _add(root, [root.name])
+    return pkgs
+
+
+def match_package(pkgs: List[Dict[str, Any]], package_node: str):
+    """按归一化阶梯对号：①别名精确相等 ②别名包含包名 ③包名包含别名(别名≥4字防碰瓷)。
+
+    返回 (包, None) 或 (None, 问题说明)。同级多个命中=歧义，点名候选交人，不瞎猜。
+    """
+    key = _norm(package_node)
+    if not key:
+        return None, "包名为空"
+    tiers = (
+        [p for p in pkgs if key in p["aliases"]],
+        [p for p in pkgs if any(key in a for a in p["aliases"])],
+        [p for p in pkgs if any(a and len(a) >= 4 and a in key for a in p["aliases"])],
+    )
+    for tier in tiers:
+        if len(tier) == 1:
+            return tier[0], None
+        if len(tier) > 1:
+            names = ", ".join(str(p["dir"].name) for p in tier[:4])
+            return None, f"多个候选包都对得上（{names}…）——歧义不瞎猜，把包目录名改唯一或人工指认"
+    return None, "找不到能对上的包（目录名/判断方法md标题都不匹配）"
 
 
 def sanitize(name: str) -> str:
@@ -209,6 +289,10 @@ def main() -> None:
 
     nodes, scenario = load_tree(product)
 
+    pkg_index = index_packages(packages_root)
+    print(f"[case_gen] 在 {packages_root} 下扫到 {len(pkg_index)} 个候选包"
+          f"（身份以包内 判断方法*.md 为准，目录名只是别名之一）")
+
     made, skipped, problems = [], [], []
     for nid, entry in sorted(ledger.items()):
         package_node = entry.get("package_node", "")
@@ -219,14 +303,14 @@ def main() -> None:
             continue
         node_name = node.get("name", package_node)
 
-        pkg_dir = find_package_dir(packages_root, package_node)
-        if pkg_dir is None:
-            problems.append(f"{nid}「{package_node}」：在 {packages_root} 下找不到同名包目录——跳过")
+        pkg, why = match_package(pkg_index, package_node)
+        if pkg is None:
+            problems.append(f"{nid}「{package_node}」：{why}——跳过")
             continue
-        data_dir = find_test_data(pkg_dir)
+        data_dir = pkg["data"]
         if data_dir is None:
-            problems.append(f"{nid}「{package_node}」：包里没有 测试数据/ 目录——跳过"
-                            f"（无数据的包生成不了可执行用例）")
+            problems.append(f"{nid}「{package_node}」：对上了包 {pkg['dir'].name}，但里面没有"
+                            f"测试数据目录（找了 *测试数据* 和 formated_result）——跳过")
             continue
 
         case_id = f"{nid}-{sanitize(package_node)}"
