@@ -82,9 +82,12 @@ python "<本目录>/scripts/eval_run.py" \
 ```bash
 python "<本目录>/scripts/case_gen.py" \
   --product <产物或打包技能目录> \
-  --packages <交付包根目录> \
+  --packages <交付包根目录/合集zip/目录里躺一堆zip都行> \
   --cases-out cases [--copy-data] [--force]
 ```
+
+> --packages 的消化语义与 migrate 一致（zip 解到临时区、嵌套 zip 递归解、纯目录零拷贝）；
+> 来自 zip 的测试数据自动强制拷入用例 data/（临时区跑完即清）。
 
 每个台账节点生成一个 `cases/<node_id>-<包节点名>/expected.json`（该节点为唯一期望根因）。
 故障树结构调整（node_id 重排）后**重跑一遍即全库刷新**，不存在 node_id 漂移的人工重对。

@@ -8,9 +8,13 @@
 
 用法:
     python case_gen.py --product <产物目录或打包技能目录> \
-                       --packages <交付包根目录（含各节点包）或单包目录> \
+                       --packages <交付包根目录/单包目录/zip（合集 zip、目录里躺一堆 zip 都行）> \
                        --cases-out <cases 输出目录> \
                        [--copy-data] [--force]
+
+--packages 的消化语义与 migrate 一致：zip → 解到临时区并递归解嵌套 zip；目录里有 zip →
+拷到临时区再解（绝不动用户目录）；纯目录 → 原样用。来自 zip/临时区的测试数据会**强制拷贝**
+进用例目录（临时区跑完即清，记路径就成空引用了）。
 
 输出（每个台账节点一个用例）:
     <cases-out>/<node_id>-<包节点名>/
@@ -27,10 +31,13 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import re
 import shutil
 import sys
+import tempfile
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -65,6 +72,49 @@ def load_tree(product: Path) -> Tuple[Dict[str, Any], str]:
         nodes = {n.get("node_id") or n.get("id"): n for n in nodes
                  if n.get("node_id") or n.get("id")}
     return nodes, ti.get("scenario", "")
+
+
+def _unzip(zp: Path, dst: Path) -> None:
+    try:
+        zf = zipfile.ZipFile(zp, metadata_encoding="gbk")   # Windows 打的包常见 GBK 文件名
+    except TypeError:                                        # 老 Python 无该参数
+        zf = zipfile.ZipFile(zp)
+    with zf:
+        zf.extractall(dst)
+
+
+def _explode(dst: Path) -> None:
+    """就地递归解嵌套 zip,3 层封顶;解到同名目录,解完删 zip(与 migrate 同款语义)。"""
+    for _ in range(3):
+        inner = sorted(dst.rglob("*.zip"))
+        if not inner:
+            break
+        for z in inner:
+            _unzip(z, z.with_suffix(""))
+            z.unlink()
+
+
+def prepare_packages_root(packages: Path, tmp: Path) -> Tuple[Path, bool]:
+    """把 --packages 消化成"全是目录"的形态（与 migrate 的 unpack 语义一致）。
+
+    返回 (有效根目录, 是否临时区)。临时区在本次运行结束后清理——来自临时区的
+    测试数据必须拷进用例目录，记路径会变成空引用。
+    """
+    if packages.is_dir():
+        if not any(packages.rglob("*.zip")):
+            return packages, False
+        dst = tmp / "packages"
+        print(f"[case_gen] --packages 里有 zip，拷到临时区解包（不动你的目录）…")
+        shutil.copytree(packages, dst)
+        _explode(dst)
+        return dst, True
+    if packages.suffix.lower() != ".zip":
+        raise SystemExit(f"--packages 应是目录或 .zip：{packages}")
+    dst = tmp / "packages"
+    print(f"[case_gen] --packages 是 zip，解到临时区…")
+    _unzip(packages, dst)
+    _explode(dst)
+    return dst, True
 
 
 def find_package_dir(packages_root: Path, package_node: str) -> Optional[Path]:
@@ -126,20 +176,30 @@ def main() -> None:
         pass
     ap = argparse.ArgumentParser(description="从 migrate 台账 + 交付包机械生成评估用例库")
     ap.add_argument("--product", required=True, help="场景产物目录（或打包技能根目录）")
-    ap.add_argument("--packages", required=True, help="交付包根目录（含各节点包）或单包目录")
+    ap.add_argument("--packages", required=True,
+                    help="交付包根目录/单包目录/zip（合集 zip、目录里躺一堆 zip 都行）")
     ap.add_argument("--cases-out", required=True, help="cases 输出目录")
     ap.add_argument("--copy-data", action="store_true",
                     help="把包内 测试数据/ 拷进 cases/<id>/data/（默认只记录来源路径，评估执行时"
-                         "直接用包内数据跑；数据大、包目录稳定时不必拷）")
+                         "直接用包内数据跑；数据大、包目录稳定时不必拷。--packages 是 zip 或"
+                         "目录里带 zip 时自动强制拷贝——临时解包区跑完即清）")
     ap.add_argument("--force", action="store_true",
                     help="已存在的用例目录默认跳过（幂等、不冲人工修改）；加本参数强制重生成")
     a = ap.parse_args()
 
     product = locate_product(Path(a.product).expanduser().resolve())
-    packages_root = Path(a.packages).expanduser().resolve()
+    given_packages = Path(a.packages).expanduser().resolve()
     cases_out = Path(a.cases_out).expanduser().resolve()
-    if not packages_root.exists():
-        raise SystemExit(f"--packages 不存在：{packages_root}")
+    if not given_packages.exists():
+        raise SystemExit(f"--packages 不存在：{given_packages}")
+
+    tmp = Path(tempfile.mkdtemp(prefix="case-gen-"))
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)   # 含 SystemExit 在内退出即清临时区
+    packages_root, ephemeral = prepare_packages_root(given_packages, tmp)
+    copy_data = a.copy_data or ephemeral
+    if ephemeral and not a.copy_data:
+        print("[case_gen] 包来自 zip/临时解包区 → 测试数据将自动拷入各用例的 data/"
+              "（临时区跑完即清，只记路径会变空引用）")
 
     ledger = load_json(product / "tree" / "migrations.json") \
         if (product / "tree" / "migrations.json").exists() else {}
@@ -176,7 +236,7 @@ def main() -> None:
             continue
 
         case_dir.mkdir(parents=True, exist_ok=True)
-        if a.copy_data:
+        if copy_data:
             dest = case_dir / "data"
             if dest.exists():
                 shutil.rmtree(dest)
@@ -187,7 +247,7 @@ def main() -> None:
 
         expected = build_expected(case_id, scenario, nid, node_name,
                                   package_node, entry, data_note)
-        expected["data_source"] = str(case_dir / "data") if a.copy_data else str(data_dir)
+        expected["data_source"] = str(case_dir / "data") if copy_data else str(data_dir)
         (case_dir / "expected.json").write_text(
             json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8")
         made.append(case_id)
