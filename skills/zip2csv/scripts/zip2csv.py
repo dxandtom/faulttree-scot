@@ -21,12 +21,23 @@ ZIP 解压 + 自动转换流水线
     <output_dir>/csv/<NEName>/CMD/*.csv
     <output_dir>/<zip_basename>_csv.zip
 
+进料三形态自动识别(数据解析全链路 1→2→3):
+    ①原始散包(单个/一堆 log/txt、rar、混杂 zip,**没有** LOG/CONFIG/DIAG/CMD 分类目录)
+      → 先调 vendor/ifilter.py 归类出 formated_result/<网元>/<CMD|CONFIG|LOG>/ 再走②;
+    ②分类目录(网元/LOG|CONFIG|DIAG|CMD 下裸 txt)→ 本脚本常规转换;
+    ③已是 csv → 不需要本脚本,直接喂绑定/runner。
+ifilter 是同事维护的原样引入件(vendor,不改),依赖三方件(rarfile/chardet/olefile/
+oletools/pandas)且首跑会自动 pip 安装——装不上时①走不了,②③不受影响。
+
 用法：
     python zip2csv.py <zip包或原始数据目录> [output_dir]     # 目录直接给,无需先压成 zip
     python zip2csv.py <zip包或原始数据目录> -o <output_dir>
+    python zip2csv.py <单个原始log/txt或rar>                 # 散文件也直接吃(自动走 ifilter 归类)
 """
 
 import argparse
+import shutil
+import subprocess
 import sys
 import os
 import zipfile
@@ -42,6 +53,34 @@ if SCRIPT_DIR not in sys.path:
 from logbuffer2csv import convert_file as logbuffer_convert
 from config2csv import parse_config_to_csv as config_convert
 from parse_diag_to_csv import parse_diag_to_csv as diag_convert
+
+
+VENDOR_IFILTER = os.path.join(os.path.dirname(SCRIPT_DIR), 'vendor', 'ifilter.py')
+
+
+def run_ifilter(raw_dir):
+    """原始散包形态(没有分类目录)→ 调 vendor/ifilter.py 把散 log/txt/嵌套包归类成
+    formated_result/<网元>/<CMD|CONFIG|LOG>/。成功返回 formated_result 路径,失败返回 None
+    (响亮报原因,绝不静默转出 0 个文件)。ifilter 会清掉 raw_dir 下它自己的旧产物
+    (formated_result*/_merged_temp_*),这是它的既有约定。"""
+    if not os.path.isfile(VENDOR_IFILTER):
+        print("  [err] 找不到 vendor/ifilter.py——原始散包解析不了。"
+              "请提供分类目录形态(网元/CMD|CONFIG|LOG 下裸 txt)或已转好的 csv")
+        return None
+    print(f"[2b/7] 调用 ifilter 归类原始散包: {raw_dir}")
+    print("  (ifilter 依赖三方件 rarfile/chardet/olefile/oletools/pandas,首跑会自动 pip 安装)")
+    try:
+        r = subprocess.run([sys.executable, VENDOR_IFILTER, raw_dir])
+    except Exception as e:  # noqa: BLE001
+        print(f"  [err] ifilter 启动失败: {e}")
+        return None
+    formated = os.path.join(raw_dir, 'formated_result')
+    if r.returncode != 0 or not os.path.isdir(formated):
+        print(f"  [err] ifilter 未产出归类结果(退出码 {r.returncode})。常见原因:三方件装不上"
+              "(受控环境禁 pip)。可在能装依赖的机器上运行"
+              " skills/zip2csv/vendor/ifilter.py <数据目录> 得到 formated_result/ 后再喂本脚本")
+        return None
+    return formated
 
 
 def find_data_dirs(extract_dir):
@@ -326,6 +365,17 @@ def main():
         csv_dir = os.path.join(output_dir, 'csv')
         print(f"[1/7] 目录输入,跳过解压,直接扫描: {src}")
         print(f"  输出目录: {output_dir}")
+    elif os.path.isfile(src) and not src.lower().endswith('.zip'):
+        # 单个原始散文件(.log/.txt/.rar 等):拷进输出目录 raw/ 暂存区统一识别——不直接把
+        # 文件所在目录交给 ifilter(它会把整个父目录连带无关文件全部卷进来)
+        output_dir = os.path.abspath(out_arg) if out_arg else src + '_csv'
+        extract_dir = os.path.join(output_dir, 'raw')
+        os.makedirs(extract_dir, exist_ok=True)
+        shutil.copy2(src, extract_dir)
+        zip_basename = os.path.splitext(os.path.basename(src))[0]
+        DEFAULT_NE = zip_basename
+        csv_dir = os.path.join(output_dir, 'csv')
+        print(f"[1/7] 单文件输入,暂存到 {extract_dir} 后识别形态")
     elif os.path.isfile(src):
         zip_path = src
         # 输出目录：默认为 zip 文件同名目录（去掉 .zip 后缀）
@@ -351,6 +401,21 @@ def main():
     print(f"[2/7] 扫描结果: LOG={len(data_dirs['LOG'])}, CONFIG={len(data_dirs['CONFIG'])}, "
           f"DIAG={len(data_dirs['DIAG'])}, CMD={len(data_dirs['CMD'])}")
 
+    # Step 2b: 一个分类目录都没有 = 原始散包形态 → 先 ifilter 归类再转
+    # (有分类目录就按分类走,散落的杂文件不再另行归类——混装时以分类目录为准)
+    if not any(data_dirs.values()):
+        formated = run_ifilter(extract_dir)
+        if formated is None:
+            sys.exit(3)
+        extract_dir = formated
+        data_dirs = find_data_dirs(extract_dir)
+        print(f"[2c/7] ifilter 归类完成,重扫: LOG={len(data_dirs['LOG'])}, "
+              f"CONFIG={len(data_dirs['CONFIG'])}, DIAG={len(data_dirs['DIAG'])}, "
+              f"CMD={len(data_dirs['CMD'])}")
+        if not any(data_dirs.values()):
+            print("  [err] ifilter 跑完仍无分类目录(数据内容识别不出)——检查数据是否为设备采集回显/日志")
+            sys.exit(3)
+
     # Step 3: 处理 LOG
     process_log_dirs(data_dirs['LOG'], csv_dir, extract_dir)
 
@@ -369,6 +434,8 @@ def main():
     # Step 7: 打包为 ZIP
     pack_csv_to_zip(csv_dir, output_dir, zip_basename)
 
+    # S 类脚本绑定直读裸 txt 的 raw 通道该指哪:走过 ifilter 就指 formated_result,否则原样
+    print(f"\nraw 通道建议(runner 的 --data raw=): {extract_dir}")
     print("\n全部完成！")
 
 

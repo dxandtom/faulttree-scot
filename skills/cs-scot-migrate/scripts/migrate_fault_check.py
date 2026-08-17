@@ -550,19 +550,23 @@ def refresh_engine(product: Path) -> None:
         else:
             main_py = z2c_dst / "scripts" / "zip2csv.py"
             cur = main_py.read_text(encoding="utf-8", errors="replace") if main_py.exists() else ""
-            if "collect_data_files" not in cur:          # 能力标记:递归收子目录+同名防覆盖这一代
-                if z2c_ok:                               # (更早代还只认 .txt/只吃 zip)——按代刷新,SKILL.md 一并带
-                    (z2c_dst / "scripts").mkdir(parents=True, exist_ok=True)
-                    if main_py.exists():
+            if "run_ifilter" not in cur:                 # 能力标记:原始散包自动 ifilter 归类这一代
+                if z2c_ok:                               # (上一代 collect_data_files 只认分类目录;更早代
+                    (z2c_dst / "scripts").mkdir(parents=True, exist_ok=True)   # 只认 .txt/只吃 zip)
+                    if main_py.exists():                 # ——按代刷新,SKILL.md 与 vendor/ 一并带
                         shutil.copy2(main_py, main_py.with_suffix(".py.bak"))
                     for p in sorted((z2c_src / "scripts").glob("*.py")):
                         shutil.copy2(p, z2c_dst / "scripts" / p.name)
                     if (z2c_src / "SKILL.md").exists():
                         shutil.copy2(z2c_src / "SKILL.md", z2c_dst / "SKILL.md")
-                    print("  打包技能 assets/zip2csv 已刷新(旧版只认 .txt/只吃 zip;主脚本备份 .py.bak)")
+                    if (z2c_src / "vendor").is_dir():    # ifilter 原样引入件:没有就加上,有就同版覆盖
+                        shutil.copytree(z2c_src / "vendor", z2c_dst / "vendor",
+                                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                                        dirs_exist_ok=True)
+                    print("  打包技能 assets/zip2csv 已刷新(旧版无原始散包 ifilter 归类;主脚本备份 .py.bak)")
                 else:
-                    print("  [warn] 打包技能的 assets/zip2csv 是旧版(只认 .txt/只吃 zip),"
-                          "且本机没有同门 zip2csv 技能可刷新——log.log 类数据会整目录跳过")
+                    print("  [warn] 打包技能的 assets/zip2csv 是旧版(无原始散包 ifilter 归类),"
+                          "且本机没有同门 zip2csv 技能可刷新——原始散 log/txt 进不了转换")
         # 根因规则副本(package_scenario 放在 assets/fault-tree-rca):缺→补挂;旧→整目录刷新
         rca_dst = product / "fault-tree-rca"
         rca_src = _mat("fault-tree-rca")

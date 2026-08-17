@@ -83,7 +83,7 @@ REQUIRED = (
     + [f"generate/scripts/{n}" for n in _GEN_SCRIPTS]
     + [f"generate/references/{n}" for n in _GEN_REFS]
     + [f"migrate/engine/{n}" for n in _MIG_ENGINE]
-    + [f"zip2csv/{s}" for s in ["SKILL.md"] + [f"scripts/{n}" for n in _Z2C]]
+    + [f"zip2csv/{s}" for s in ["SKILL.md", "vendor/ifilter.py"] + [f"scripts/{n}" for n in _Z2C]]
     + [f"cs-scot-execute/{s}" for s in
        ("SKILL.md", "scripts/runner.py", "scripts/check_data.py")]
     + [f"fault-tree-rca/{s}" for s in
