@@ -27,16 +27,24 @@ from pathlib import Path
 def _fmt_fact(f: dict) -> str:
     """一条 fact → 简短实测描述(只挑有意义的量)。
     D 类组合等瘦身后无数值字段的事实 → 回退成"判定为真(class X)",别渲染出空的「实测:」。
-    S 类脚本事实的金证据是 hits(命中的数据原文片段,代码抓的)——必须带上:评委和最终
-    报告的证据栏都靠它;命中原文是数据现场不是判据文本,成立节点上渲染不破回声策略。"""
+    S 类脚本事实的金证据是 evidence 标签(实体+命中原文+来源文件)与 hits(命中原文片段,
+    代码抓的)——必须带上:评委和最终报告的证据栏都靠它;命中原文是数据现场不是判据文本,
+    成立节点上渲染不破回声策略。"""
     bits = []
     for k in ("resolved_column", "value", "matched", "total", "ratio",
               "count_satisfied", "local", "peer", "op", "threshold"):
         if f.get(k) is not None:
             bits.append(f"{k}={f[k]}")
+    ev = [str(x).strip() for x in (f.get("evidence") or [])[:2] if str(x).strip()]
     hits = [str(h).strip() for h in (f.get("hits") or [])[:2] if str(h).strip()]
-    if hits:
+    if ev:                                               # 证据标签已含命中原文,勿再与 hits 双引
+        bits.append("证据:" + " / ".join(f"『{x[:160]}』" for x in ev))
+    elif hits:
         bits.append("命中原文:" + " / ".join(f"『{h[:80]}』" for h in hits))
+    if f.get("matched_nes"):
+        ck = f.get("checked_nes")
+        bits.append("命中网元:" + "、".join(str(x) for x in f["matched_nes"][:5])
+                    + (f"({len(f['matched_nes'])}/{ck})" if ck else ""))
     if not bits:
         return f"判定为真(class {f.get('class', '?')},组合/无数值型判据)"
     return ", ".join(bits)

@@ -18,7 +18,8 @@ from pathlib import Path
 
 _FACT_KEYS = ("status", "gap_kind", "predicate_satisfied", "matched", "total", "ratio", "top",
               "value", "count_satisfied", "valid", "n_rows", "filter_rows",
-              "absent", "matched_groups", "local", "peer", "equal", "params",
+              "absent", "matched_groups", "matched_nes", "checked_nes", "script",
+              "local", "peer", "equal", "params",
               "resolved_column", "reason")
 
 
@@ -55,6 +56,9 @@ def _holding(nodes: dict):
 def _fact_brief(f: dict) -> str:
     ff = _ff(f)
     kv = " ".join(f"{k}={ff[k]}" for k in _FACT_KEYS if k in ff)
+    ev = ff.get("evidence") or []
+    if ev:                                               # S 脚本现场证据(网元:实体 命中原文(来源:文件))
+        kv += " 证据=「" + "」「".join(str(x)[:160] for x in ev[:2]) + "」"
     mr = f.get("mapping_reason")
     return f"[{f.get('indicator')}/{f.get('id')}] {kv}" + (f"  ◂{mr}" if mr else "")
 

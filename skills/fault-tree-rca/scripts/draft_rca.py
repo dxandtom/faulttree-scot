@@ -79,7 +79,9 @@ def _actual(f: dict) -> str:
             bits.append(f"{k}={f[k]}")
     if f.get("absent"):
         bits.append("absent=true(缺失类:未出现=成立)")
-    if f.get("hits"):
+    if f.get("evidence"):                                # S 脚本证据标签:实体+命中原文+来源文件,比裸 hits 全
+        bits.append(";".join(str(x)[:220] for x in f["evidence"][:2]))
+    elif f.get("hits"):
         bits.append(f"命中原文:「{f['hits'][0]}」")
     if not bits and f.get("reason"):
         bits.append(str(f["reason"])[:120])
