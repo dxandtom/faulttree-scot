@@ -311,6 +311,19 @@ def _fc_gap_kind(v) -> str:
     return "no_data" if str(v).strip().lower() == "insufficient_data" else "cannot_judge"
 
 
+def _fc_item_str(x) -> str:
+    """matched_items/evidence 条目转人话:tester 契约里条目常是 dict(关键字段+_source_file/
+    _source_line),str() 直转是 Python repr 且截断后不成话——机械拼 k=v,溯源元键单独缀
+    「@文件:行」,不许把 repr 漏进报告证据栏。"""
+    if isinstance(x, dict):
+        kv = " ".join(f"{k}={v}" for k, v in x.items() if not str(k).startswith("_"))[:140]
+        src = str(x.get("_source_file") or "").replace("\\", "/").rsplit("/", 1)[-1]
+        line = str(x.get("_source_line") or "")
+        loc = (f"@{src}" if src else "") + (f":{line}" if line else "")
+        return (kv + loc) or str(x)
+    return str(x)
+
+
 def _fc_normalize(result):
     """脚本产出 → {网元: 单元结果} 映射。认三种形状:全局包裹(details.devices)/
     网元名直挂顶层 / 单网元裸结果。认不出 → None。"""
@@ -442,10 +455,10 @@ def fault_check(table, args, load):
                     data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
                     items = data.get("matched_items")
                     if isinstance(items, list) and items:    # 命中原文逐字引用(定长截断防上下文爆炸)
-                        label += f" 命中{len(items)}条:" + "、".join(f"「{str(x)[:120]}」" for x in items[:2])
+                        label += f" 命中{len(items)}条:" + "、".join(f"「{_fc_item_str(x)[:120]}」" for x in items[:2])
                         for x in items:
                             if len(hits_raw) < 3:
-                                hits_raw.append(str(x)[:160])
+                                hits_raw.append(_fc_item_str(x)[:160])
                     srcs = data.get("source_files")
                     if isinstance(srcs, list) and srcs:
                         names = "、".join(str(s).replace("\\", "/").rsplit("/", 1)[-1] for s in srcs[:2])
@@ -463,7 +476,7 @@ def fault_check(table, args, load):
         prefix = {"no_data": "数据不足(缺数据,补采可解)",
                   "cannot_judge": "数据在,无法判断(判据/脚本判不动)",
                   "mixed": "部分缺数据、部分无法判断"}[gap]
-        return {"status": "insufficient_data", "gap_kind": gap,
+        return {"status": "insufficient_data", "gap_kind": gap, "script": rel,
                 "reason": f"{prefix}:" + "; ".join(f"{n}: {e}" for n, e in bad[:5])}
     sat = bool(hit)
     note = f";另有 {len(bad)} 个网元未判({'; '.join(f'{n}: {e}' for n, e in bad[:3])})" if bad else ""
@@ -473,6 +486,7 @@ def fault_check(table, args, load):
         note = ";未命中说明:" + "; ".join((f"{n}: " if n != "(整体)" else "") + w for n, w in miss_why[:2]) + note
     out = {"status": "ok", "predicate_satisfied": sat,
            "matched_nes": hit, "checked_nes": len(hit) + len(miss), "data_via": how,
+           "script": rel,                                # 被判脚本真身(相对路径):追问"哪个脚本判的"有据
            "evidence": evidence[:8],
            "explain": (f"脚本判定:{len(hit)}/{len(hit) + len(miss)} 个网元命中"
                        f"({'、'.join(hit[:5])})" if sat

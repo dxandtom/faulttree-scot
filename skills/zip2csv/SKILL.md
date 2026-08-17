@@ -17,7 +17,7 @@ disable-model-invocation: false
 3. **CONFIG/** — 遍历所有 `.txt` 文件，调用 `config2csv.parse_config_to_csv()` 转换为 CSV
 4. **DIAG/** — 遍历所有 `.txt` 文件，调用 `parse_diag_to_csv.parse_diag_to_csv()` 转换为 CSV
 5. **CMD/** — DIAG 的新名字,同款处理(parse_diag_to_csv),输出到 `csv/<网元>/CMD/`(列 NEName/CmdName/ObjContent,下游认 ObjContent↔CmdResult 同义)
-5. **cmd/** — 基于 DIAG 输出的 CSV，生成汇总 CSV
+6. **cmd 汇总** — 基于 DIAG 输出的 CSV，在 `csv/<网元>/CMD/` 下生成汇总 CSV(列 NEName/CmdName/OriginCmd/CmdResult)
 
 ## 进料三形态自动识别（数据解析全链路 ①→②→③）
 
@@ -33,7 +33,12 @@ disable-model-invocation: false
 - `ifilter.py` 是同事维护的**原样引入件(vendor,不改内部逻辑)**,依赖三方件
   (rarfile/chardet/olefile/oletools/pandas),首跑会自动 pip 安装——**受控环境装不上时
   形态①走不了**(脚本会响亮报错并给出替代做法:在能装依赖的机器上先跑 ifilter),②③不受影响;
-- 走过 ifilter 后,S 类脚本直读的 raw 通道应指 `formated_result/`(脚本结束时会打印建议值)。
+- 走过 ifilter 后,S 类脚本直读的 raw 通道应指 `formated_result/`(脚本结束时会打印建议值);
+- **副作用告警**:ifilter 会在**输入目录里**写 `formated_result/` 并清删自己的旧产物,其清场
+  还会波及任何名字以 `_result` 结尾的目录(含输入目录的同名 `_result` 兄弟目录)——zip2csv
+  调用前已做避让检查,撞上疑似用户目录会**停手并点名**,按提示移走/改名后重跑;
+- 对同一目录**重跑**时,已有的 `formated_result/` 会被直接复用(不重新归类)——原始数据有更新,
+  先删掉 `formated_result/` 再跑(脚本发现复用会打 ⚠ 提醒)。
 
 ## 执行前检查
 
@@ -56,19 +61,18 @@ python "skills/zip2csv/scripts/zip2csv.py" <zip或目录> -o <output_dir>
 
 ```
 <output_dir>/
-├── extracted/          # 解压的原始文件
-│   ├── LOG/
-│   ├── CONFIG/
-│   └── DIAG/
-├── LOG/                # logbuffer CSV 输出
-│   └── *.csv
-├── CONFIG/             # config CSV 输出
-│   └── *.csv
-├── DIAG/               # diag CSV 输出
-│   └── *.csv
-└── cmd/                # cmd 汇总 CSV 输出
-    └── *.csv
+├── extracted/          # zip 输入:解压的原始文件(散包时 ifilter 的 formated_result/ 也在这里面)
+├── raw/                # 单个散文件输入:暂存区(formated_result/ 在其下)
+├── csv/                # 转换产物(按网元分目录)
+│   └── <网元>/
+│       ├── LOG/*.csv
+│       ├── CONFIG/*.csv
+│       ├── DIAG/*.csv
+│       └── CMD/*.csv   # 真 CMD 转换 + DIAG 派生汇总
+└── <输入名>_csv.zip     # 全部 csv 打包
 ```
+目录输入时没有 extracted/(就地扫描);散包目录输入时 ifilter 的 `formated_result/` 落在**输入目录内**。
+脚本结束打印「raw 通道建议」——S 类脚本直读裸 txt 时 `--data raw=` 就填它。
 
 ## cmd CSV 列映射
 

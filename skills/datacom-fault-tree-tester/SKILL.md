@@ -47,11 +47,14 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 - 单网元结构：`data_dir` 下直接是 `CONFIG/`、`CMD/`、`LOG/` 目录（网元名取 `data_dir` 目录名）
 
 **测试数据是原始散包时先归类**：拿到的是单个/一堆 log/txt、rar、混杂 zip（**没有**上述
-CONFIG/CMD/LOG 分类结构）→ 先用同门 zip2csv 内置的归类器整理成标准结构：
-`python skills/zip2csv/vendor/ifilter.py <原始目录或包>` → 产出的
-`formated_result/<网元>/<CMD|CONFIG|LOG>/` 就是本技能要的测试数据目录，直接当 `data_dir` 用。
+CONFIG/CMD/LOG 分类结构）→ 走同门 zip2csv（内置暂存防护）：
+`python skills/zip2csv/scripts/zip2csv.py <原始目录或包> -o <输出目录>`——它自动调内置
+ifilter 归类，结束时打印的「raw 通道建议」路径（`formated_result/<网元>/<CMD|CONFIG|LOG>/`）
+就是本技能要的测试数据目录，直接当 `data_dir` 用（顺手转出的 csv 本技能用不上，忽略即可）。
+**不许直接拿单个包/散文件去跑 `vendor/ifilter.py`**——ifilter 对单文件会把它所在的整个父目录
+连带无关文件卷进来，还会清删其中 `*_result` 目录；zip2csv 的暂存分支就是防这个的。
 ifilter 是原样引入件（不改内部逻辑），依赖三方件（rarfile/chardet/olefile/oletools/pandas）
-且首跑自动 pip 安装——装不上时向用户要已分类的数据，不许自己手工乱归类。
+且首跑自动 pip 安装——装不上时 zip2csv 会响亮报错，此时向用户要已分类的数据，不许自己手工乱归类。
 
 ---
 

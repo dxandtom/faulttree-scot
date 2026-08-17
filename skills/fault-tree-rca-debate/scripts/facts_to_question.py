@@ -43,8 +43,9 @@ def _fmt_fact(f: dict) -> str:
         bits.append("命中原文:" + " / ".join(f"『{h[:80]}』" for h in hits))
     if f.get("matched_nes"):
         ck = f.get("checked_nes")
-        bits.append("命中网元:" + "、".join(str(x) for x in f["matched_nes"][:5])
-                    + (f"({len(f['matched_nes'])}/{ck})" if ck else ""))
+        n = f.get("matched_nes_total") or len(f["matched_nes"])   # 瘦身截断过的用真值算几比几
+        names = "、".join(str(x) for x in f["matched_nes"][:5]) + ("等" if n > 5 else "")
+        bits.append(f"命中网元:{names}" + (f"({n}/{ck})" if ck else ""))
     if not bits:
         return f"判定为真(class {f.get('class', '?')},组合/无数值型判据)"
     return ", ".join(bits)

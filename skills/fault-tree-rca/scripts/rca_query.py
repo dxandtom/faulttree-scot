@@ -18,7 +18,7 @@ from pathlib import Path
 
 _FACT_KEYS = ("status", "gap_kind", "predicate_satisfied", "matched", "total", "ratio", "top",
               "value", "count_satisfied", "valid", "n_rows", "filter_rows",
-              "absent", "matched_groups", "matched_nes", "checked_nes", "script",
+              "absent", "matched_groups", "matched_nes", "matched_nes_total", "checked_nes", "script",
               "local", "peer", "equal", "params",
               "resolved_column", "reason")
 

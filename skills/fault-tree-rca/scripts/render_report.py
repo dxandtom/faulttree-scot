@@ -37,6 +37,11 @@ def _one(s, n=160) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _cell(s, n=160) -> str:
+    """表格单元格:竖线转义——设备回显命中原文常含 |(接口表等),不转义会把 md 表格串列。"""
+    return _one(s, n).replace("|", "\\|")
+
+
 def _ev_block(e: dict, indent="  ") -> list:
     """一条 evidence 条目 → 详情行(逐字来自 rca.json,只排版不改写)。"""
     lines = [f"{indent}- 判定:{e.get('judgment')}"]
@@ -71,8 +76,8 @@ def render(doc: dict) -> str:
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
             cand = (ev or [{}])[-1]
-            brief = _one(cand.get("actual") or cand.get("how") or c.get("support"), 120)
-            L.append(f"| {i} | {c.get('Root_cause')} | {brief} | {_one(c.get('recommend_solution'), 90) or '—'} |")
+            brief = _cell(cand.get("actual") or cand.get("how") or c.get("support"), 120)
+            L.append(f"| {i} | {_cell(c.get('Root_cause'), 80)} | {brief} | {_cell(c.get('recommend_solution'), 90) or '—'} |")
         L.append("")
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
