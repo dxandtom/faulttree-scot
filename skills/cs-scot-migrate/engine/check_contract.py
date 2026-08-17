@@ -35,7 +35,7 @@ from pathlib import Path
 # 入口候选:与 cs-scot-migrate 的探测口径一致,但不含 check_ne/diagnose_ne——
 # 那俩是"内部帮手"命名,撞上过入口误对号的实测事故,本体检只认全局入口。
 ENTRY_OK = ("fault_check", "diagnose", "main", "check")
-TRI = ("true", "false", "undetermined")
+TRI = ("true", "false", "undetermined", "insufficient_data")   # 四态契约(规范 v1.2);变量名沿用
 MD_REQUIRED = ("节点名称", "故障描述", "判断条件", "命中条件", "输出", "数据来源")
 
 # py<3.10 没有 sys.stdlib_module_names 时的兜底清单(常用标准库)
@@ -357,6 +357,8 @@ def _tri_of(result):
         return "true", shape
     if "false" in norm:
         return "false", shape
+    if "insufficient_data" in norm and "undetermined" not in norm:
+        return "insufficient_data", shape                # 纯缺数据;混"判不动"时按 undetermined 归并
     return "undetermined", shape
 
 
@@ -372,25 +374,27 @@ def _shape_items(iid, result, expect_undetermined, label):
                       "按规范附录6 的全局形态返回")]
     if shape == "empty":
         return [_warn(iid, f"{label}:返回空 dict(没有 matched 键;转接头按无判定处理)",
-                      '哪怕无数据也要返回 {"matched":"undetermined","details":{"reason":…}}(规范附录6)')]
+                      '哪怕无数据也要返回 {"matched":"insufficient_data","details":{"reason":…}}(规范附录6)')]
     if shape.startswith(("per-ne", "wrapped", "devices")):
         kind = {"p": "按网元字典", "w": "results 信封", "d": "details.devices 包裹"}[shape[0]]
         items.append(_warn(iid + "s", f"{label}:返回{kind}形态(契约要求全局形态;转接头兜得住)",
                            "顶层改成一个 matched+evidence,网元写进 evidence 的 type/id(规范附录6)"))
     if "+bool" in shape:
-        items.append(_warn(iid + "b", f"{label}:matched 是布尔值(契约要求字符串三态;转接头兜得住)",
-                           'matched 用 "true"/"false"/"undetermined" 字符串(规范附录6)'))
+        items.append(_warn(iid + "b", f"{label}:matched 是布尔值(契约要求字符串四态;转接头兜得住)",
+                           'matched 用 "true"/"false"/"undetermined"/"insufficient_data" 字符串(规范附录6)'))
     if expect_undetermined and tri in ("true", "false"):
         items.append(_fail(
             iid, f'{label}:空数据判成 "{tri}"——缺数据冒充结论,下游会把"没数据"当"排除/坐实"(实测事故)',
-            '判定所需数据缺失时必须 matched:"undetermined"+details.reason 写明缺什么(规范附录4)'))
+            '判定所需数据缺失时必须 matched:"insufficient_data"(旧三态包 undetermined 也认)'
+            '+details.reason 写明缺什么(规范附录4)'))
     elif not items:
         reason = ""
-        if tri == "undetermined" and shape == "global":
+        if tri in ("undetermined", "insufficient_data") and shape == "global":
             r = (result.get("details") or {}).get("reason") if isinstance(result.get("details"), dict) else None
             if not r:
-                items.append(_warn(iid + "r", f"{label}:undetermined 但 details.reason 没写原因",
-                                   "undetermined 必须带 details.reason 说明缺什么(规范附录6)"))
+                items.append(_warn(iid + "r", f"{label}:{tri} 但 details.reason 没写原因",
+                                   f"{tri} 必须带 details.reason("
+                                   "insufficient_data 写缺哪条命令/文件;undetermined 写为什么判不动;规范附录6)"))
                 return items
             reason = f'(reason:{str(r)[:60]})'
         items.append(_pass(iid, f'{label}:matched="{tri}" 形态合规{reason}'))
@@ -425,7 +429,7 @@ def _smoke_check(script: Path, entry_name, timeout, per_ne=False, entry_kwargs=N
         elif status == "error":
             hint = "先 data_path = Path(data_dir) 显式包装——下游按字符串传参(规范附录5)" \
                 if isinstance(val, TypeError) and "str" in str(val) else \
-                "缺数据必须返回 undetermined,不许抛异常/退出(规范附录4)"
+                "缺数据必须返回 insufficient_data(旧三态 undetermined 也认),不许抛异常/退出(规范附录4)"
             items.append(_fail("D2x", f"空目录(str 入参)调用崩了:{type(val).__name__}: {val}", hint))
         else:
             items.extend(_shape_items("D2", val, True, "空目录喂 str"))
@@ -441,7 +445,7 @@ def _smoke_check(script: Path, entry_name, timeout, per_ne=False, entry_kwargs=N
             items.append(_fail("D3t", f"多网元空目录调用超时(>{timeout}s)", "检查死循环"))
         elif status == "error":
             items.append(_fail("D3x", f"多网元根目录调用崩了:{type(val).__name__}: {val}",
-                               "多网元结构必须能吃(规范附录5);空数据走 undetermined"))
+                               "多网元结构必须能吃(规范附录5);空数据走 insufficient_data"))
         else:
             items.extend(_shape_items("D3", val, True, "多网元空目录"))
     return items, fn

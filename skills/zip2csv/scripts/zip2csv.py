@@ -21,12 +21,23 @@ ZIP 解压 + 自动转换流水线
     <output_dir>/csv/<NEName>/CMD/*.csv
     <output_dir>/<zip_basename>_csv.zip
 
+进料三形态自动识别(数据解析全链路 1→2→3):
+    ①原始散包(单个/一堆 log/txt、rar、混杂 zip,**没有** LOG/CONFIG/DIAG/CMD 分类目录)
+      → 先调 vendor/ifilter.py 归类出 formated_result/<网元>/<CMD|CONFIG|LOG>/ 再走②;
+    ②分类目录(网元/LOG|CONFIG|DIAG|CMD 下裸 txt)→ 本脚本常规转换;
+    ③已是 csv → 不需要本脚本,直接喂绑定/runner。
+ifilter 是同事维护的原样引入件(vendor,不改),依赖三方件(rarfile/chardet/olefile/
+oletools/pandas)且首跑会自动 pip 安装——装不上时①走不了,②③不受影响。
+
 用法：
     python zip2csv.py <zip包或原始数据目录> [output_dir]     # 目录直接给,无需先压成 zip
     python zip2csv.py <zip包或原始数据目录> -o <output_dir>
+    python zip2csv.py <单个原始log/txt或rar>                 # 散文件也直接吃(自动走 ifilter 归类)
 """
 
 import argparse
+import shutil
+import subprocess
 import sys
 import os
 import zipfile
@@ -42,6 +53,64 @@ if SCRIPT_DIR not in sys.path:
 from logbuffer2csv import convert_file as logbuffer_convert
 from config2csv import parse_config_to_csv as config_convert
 from parse_diag_to_csv import parse_diag_to_csv as diag_convert
+
+
+VENDOR_IFILTER = os.path.join(os.path.dirname(SCRIPT_DIR), 'vendor', 'ifilter.py')
+
+
+def run_ifilter(raw_dir):
+    """原始散包形态(没有分类目录)→ 调 vendor/ifilter.py 把散 log/txt/嵌套包归类成
+    formated_result/<网元>/<CMD|CONFIG|LOG>/。成功返回 formated_result 路径,失败返回 None
+    (响亮报原因,绝不静默转出 0 个文件)。
+    ifilter 的既有清场行为(vendor 约定,不改):递归删 raw_dir 下 formated_result*、任意名字
+    以 _result 结尾的目录、_merged_temp_*;Linux 下还会波及输入目录的同名 _result 兄弟目录。
+    调用前先避让——撞上疑似用户数据的目录必须停手,不许静默删。"""
+    if not os.path.isfile(VENDOR_IFILTER):
+        print("  [err] 找不到 vendor/ifilter.py——原始散包解析不了。"
+              "请提供分类目录形态(网元/CMD|CONFIG|LOG 下裸 txt)或已转好的 csv")
+        return None
+    hazards = []
+    for r, dirs, _fs in os.walk(raw_dir):
+        for d in dirs:
+            if d != 'formated_result' and (d.endswith('_result') or d.startswith('_merged_temp_')):
+                hazards.append(os.path.join(r, d))
+    sib = raw_dir.rstrip('/\\') + '_result'
+    if os.path.isdir(sib):
+        hazards.append(sib)
+    if hazards:
+        print("  [err] ifilter 归类前避让:它的清场行为会删掉下列目录(*_result/_merged_temp_*,"
+              "含输入目录的 _result 兄弟目录),为防误删用户数据先停手:")
+        for h in hazards[:10]:
+            print(f"        {h}")
+        print("        请把这些目录移走/改名,或把原始数据放进一个干净目录后重跑")
+        return None
+    print(f"[2b/7] 调用 ifilter 归类原始散包: {raw_dir}")
+    print("  (ifilter 依赖三方件 rarfile/chardet/olefile/oletools/pandas,首跑会自动 pip 安装)")
+    try:
+        r = subprocess.run([sys.executable, VENDOR_IFILTER, raw_dir])
+    except Exception as e:  # noqa: BLE001
+        print(f"  [err] ifilter 启动失败: {e}")
+        return None
+    formated = os.path.join(raw_dir, 'formated_result')
+    if r.returncode != 0 or not os.path.isdir(formated):
+        print(f"  [err] ifilter 未产出归类结果(退出码 {r.returncode})。常见原因:三方件装不上"
+              "(受控环境禁 pip)。可在能装依赖的机器上运行"
+              " skills/zip2csv/vendor/ifilter.py <数据目录> 得到 formated_result/ 后再喂本脚本")
+        return None
+    return formated
+
+
+def _formated_root(p):
+    """路径 p 向上找名为 formated_result 的祖先目录;没有返回 None(两平台通用,不做字符串切分)。"""
+    q = p
+    while q:
+        if os.path.basename(q) == 'formated_result':
+            return q
+        q2 = os.path.dirname(q)
+        if q2 == q:
+            return None
+        q = q2
+    return None
 
 
 def find_data_dirs(extract_dir):
@@ -326,6 +395,17 @@ def main():
         csv_dir = os.path.join(output_dir, 'csv')
         print(f"[1/7] 目录输入,跳过解压,直接扫描: {src}")
         print(f"  输出目录: {output_dir}")
+    elif os.path.isfile(src) and not src.lower().endswith('.zip'):
+        # 单个原始散文件(.log/.txt/.rar 等):拷进输出目录 raw/ 暂存区统一识别——不直接把
+        # 文件所在目录交给 ifilter(它会把整个父目录连带无关文件全部卷进来)
+        output_dir = os.path.abspath(out_arg) if out_arg else src + '_csv'
+        extract_dir = os.path.join(output_dir, 'raw')
+        os.makedirs(extract_dir, exist_ok=True)
+        shutil.copy2(src, extract_dir)
+        zip_basename = os.path.splitext(os.path.basename(src))[0]
+        DEFAULT_NE = zip_basename
+        csv_dir = os.path.join(output_dir, 'csv')
+        print(f"[1/7] 单文件输入,暂存到 {extract_dir} 后识别形态")
     elif os.path.isfile(src):
         zip_path = src
         # 输出目录：默认为 zip 文件同名目录（去掉 .zip 后缀）
@@ -351,6 +431,46 @@ def main():
     print(f"[2/7] 扫描结果: LOG={len(data_dirs['LOG'])}, CONFIG={len(data_dirs['CONFIG'])}, "
           f"DIAG={len(data_dirs['DIAG'])}, CMD={len(data_dirs['CMD'])}")
 
+    # Step 2b: 一个分类目录都没有 = 原始散包形态 → 先 ifilter 归类再转
+    # (有分类目录就按分类走,散落的杂文件不再另行归类——混装时以分类目录为准)
+    raw_hint = extract_dir                               # S 脚本 raw 通道该指哪(走过 ifilter 指 formated_result)
+    if not any(data_dirs.values()):
+        formated = run_ifilter(extract_dir)
+        if formated is None:
+            sys.exit(3)
+        extract_dir = formated
+        raw_hint = formated
+        data_dirs = find_data_dirs(extract_dir)
+        print(f"[2c/7] ifilter 归类完成,重扫: LOG={len(data_dirs['LOG'])}, "
+              f"CONFIG={len(data_dirs['CONFIG'])}, DIAG={len(data_dirs['DIAG'])}, "
+              f"CMD={len(data_dirs['CMD'])}")
+        if not any(data_dirs.values()):
+            print("  [err] ifilter 跑完仍无分类目录(数据内容识别不出)——检查数据是否为设备采集回显/日志")
+            sys.exit(3)
+    else:
+        # 分类目录来自上次 ifilter 归类的 formated_result:直接复用,不重新归类——数据有更新时要提醒
+        fr_roots = {r for lst in data_dirs.values() for p in lst
+                    for r in [_formated_root(p)] if r}
+        if fr_roots:
+            print(f"  ⚠ 检测到已有 ifilter 归类产物 formated_result({len(fr_roots)} 处),本次直接复用、"
+                  "不重新归类——原始数据有更新时,删掉 formated_result 目录后重跑")
+            if len(fr_roots) == 1 and all(_formated_root(p) for lst in data_dirs.values() for p in lst):
+                raw_hint = next(iter(fr_roots))          # 全部类别都在同一份归类产物里:raw 通道指它
+
+    # 归类产物里可能还有 KPI/LSDB/MOP 等类别——不在三表转换范围,点名播报,别静默装作全转了
+    known = ('LOG', 'CONFIG', 'DIAG', 'CMD')
+    noise = ('extracted', 'csv', 'raw', 'formated_result')
+    other_types = set()
+    for lst in data_dirs.values():
+        for p in lst:
+            parent = os.path.dirname(p)
+            for d in os.listdir(parent):
+                if os.path.isdir(os.path.join(parent, d)) and d.upper() not in known and d not in noise:
+                    other_types.add(d)
+    if other_types:
+        print(f"  ℹ 类别目录 {'、'.join(sorted(other_types))} 不在三表转换范围,已跳过"
+              "(KPI/LSDB 等如需使用请另行处理)")
+
     # Step 3: 处理 LOG
     process_log_dirs(data_dirs['LOG'], csv_dir, extract_dir)
 
@@ -369,6 +489,8 @@ def main():
     # Step 7: 打包为 ZIP
     pack_csv_to_zip(csv_dir, output_dir, zip_basename)
 
+    # S 类脚本绑定直读裸 txt 的 raw 通道该指哪:走过/复用过 ifilter 归类就指 formated_result,否则原样
+    print(f"\nraw 通道建议(runner 的 --data raw=): {raw_hint}")
     print("\n全部完成！")
 
 

@@ -79,7 +79,9 @@ def _actual(f: dict) -> str:
             bits.append(f"{k}={f[k]}")
     if f.get("absent"):
         bits.append("absent=true(缺失类:未出现=成立)")
-    if f.get("hits"):
+    if f.get("evidence"):                                # S 脚本证据标签:实体+命中原文+来源文件,比裸 hits 全
+        bits.append(";".join(str(x)[:220] for x in f["evidence"][:2]))
+    elif f.get("hits"):
         bits.append(f"命中原文:「{f['hits'][0]}」")
     if not bits and f.get("reason"):
         bits.append(str(f["reason"])[:120])
@@ -123,7 +125,23 @@ def _ev(nid: str, n: dict) -> dict:
         rs = [f.get("reason") for f in facts if f.get("reason")]
         if rs:
             e["actual"] = str(rs[0])[:160]
+        _apply_gap(e, facts)
     return e
+
+
+def _apply_gap(e: dict, facts) -> None:
+    """四态契约的判不了分型(转接头 gap_kind):缺数据(补采可解) vs 数据在判不动(判据质量信号)。
+    事实 reason 可能已带转接头的分型前缀(字面略长),按前缀族判重,避免双前缀。"""
+    kinds = {f.get("gap_kind") for f in facts if isinstance(f, dict) and f.get("gap_kind")}
+    if not kinds:
+        return
+    gk = ("cannot_judge" if kinds == {"cannot_judge"}
+          else "no_data" if kinds == {"no_data"} else "mixed")
+    e["gap_kind"] = gk
+    tag = {"no_data": "数据不足(缺数据)", "cannot_judge": "数据在,无法判断",
+           "mixed": "部分缺数据/部分无法判断"}[gk]
+    if not str(e.get("actual") or "").startswith(("数据不足", "数据在,", "部分缺")):
+        e["actual"] = (tag + (":" + e["actual"] if e.get("actual") else ""))[:200]
 
 
 def _path(nid: str, nodes: dict, limit=400):
@@ -182,7 +200,7 @@ def draft_pruned(data: dict) -> dict:
             entry["support_hint"] = _actual(f)
         if anc_insuf:
             entry["ancestor_insufficient"] = (
-                "祖先节点未验证(无绑定/数据不足):"
+                "祖先节点未验证(无绑定/数据不足/无法判断):"
                 + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in anc_insuf[:5])
                 + "——默认放行(零信息不冒充反证),由本节点成立事实自下而上蕴含;"
                   "finalize 落 caveats,报告提示'此处无判断'")
@@ -266,6 +284,8 @@ def draft_md(data: dict) -> dict:
                  "condition": (c.get("condition_text") or "")[:200], "actual": _actual(f)}
             if f.get("explain"):
                 e["how"] = f["explain"]
+            if tri == "数据不足":                          # md 形态同样带四态分型(与 _ev 同款)
+                _apply_gap(e, [f])
             buckets[tri].append(e)
     return {
         "_readme": _README + "(本输入为完整 md 形态,无剪枝树:路径请按 fault_tree_md 的层级自行回溯,"

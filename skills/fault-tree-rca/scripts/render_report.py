@@ -37,6 +37,11 @@ def _one(s, n=160) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _cell(s, n=160) -> str:
+    """表格单元格:竖线转义——设备回显命中原文常含 |(接口表等),不转义会把 md 表格串列。"""
+    return _one(s, n).replace("|", "\\|")
+
+
 def _ev_block(e: dict, indent="  ") -> list:
     """一条 evidence 条目 → 详情行(逐字来自 rca.json,只排版不改写)。"""
     lines = [f"{indent}- 判定:{e.get('judgment')}"]
@@ -71,8 +76,8 @@ def render(doc: dict) -> str:
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
             cand = (ev or [{}])[-1]
-            brief = _one(cand.get("actual") or cand.get("how") or c.get("support"), 120)
-            L.append(f"| {i} | {c.get('Root_cause')} | {brief} | {_one(c.get('recommend_solution'), 90) or '—'} |")
+            brief = _cell(cand.get("actual") or cand.get("how") or c.get("support"), 120)
+            L.append(f"| {i} | {_cell(c.get('Root_cause'), 80)} | {brief} | {_cell(c.get('recommend_solution'), 90) or '—'} |")
         L.append("")
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
@@ -112,7 +117,20 @@ def render(doc: dict) -> str:
             L.append("")
 
     if und:
-        L += ["## 待确认(数据不足,补齐后重跑可闭环)", ""]
+        # 四态分型:优先按结构化 gap_kind 计数,老产物无字段时按 reason 文本兜底
+        def _gk(c):
+            gk = c.get("gap_kind")
+            if gk in ("no_data", "cannot_judge", "mixed"):
+                return gk
+            r = str(c.get("reason") or "")
+            if r.startswith("部分缺"):
+                return "mixed"
+            return "cannot_judge" if r.startswith("数据在,无法判断") else "no_data"
+        ks = [_gk(c) for c in und]
+        cj, mx = ks.count("cannot_judge"), ks.count("mixed")
+        split = (f"(其中 数据不足 {len(und) - cj - mx} 条 · 数据在但无法判断 {cj} 条"
+                 + (f" · 混合 {mx} 条" if mx else ") ").rstrip() .rstrip(")") + ")") if (cj or mx) else ""
+        L += [f"## 待确认{split}(数据不足的补齐后重跑可闭环;无法判断的属判据/脚本问题,补数据无用)", ""]
         for c in und[:30]:
             L.append(f"- {(c.get('Fault_tree_path') or ['?'])[-1]}:{_one(c.get('reason'), 200)}")
         if len(und) > 30:

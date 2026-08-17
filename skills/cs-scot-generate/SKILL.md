@@ -43,6 +43,9 @@ description: 把故障树(Excel)+ 若干指标数据编译成场景诊断产物:
 > **zip2csv 的查找次序**:①先在**本技能目录内**找(与 SKILL.md/scripts/ 同层的
 > `zip2csv/scripts/zip2csv.py`,部署时可能内嵌);②没有再用同门独立技能
 > `skills/zip2csv/scripts/zip2csv.py`。zip、裸目录都直接吃,LOG 下 `.txt/.log` 双认。
+> **原始散包也直接喂它**(散 log/txt/rar、混杂 zip,连分类目录都没有的形态):zip2csv 会
+> 自动调内置 vendor/ifilter.py 归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/` 再转表
+> (ifilter 依赖三方件,装不上时它响亮报错并给替代做法——报错原样给用户,别硬闯)。
 > 转出 `csv/<网元>/LOG|CONFIG|DIAG|CMD/*.csv`,按子目录名对应指标(log / config / cmd;
 > DIAG=cmd 两代名);多网元同类 csv 合并成一张再当该指标的数据(同表头首行保留、其余逐文件追加)。
 > 四类目录之外的自由格式 txt 转不了表——归 S 脚本(迁移收编)或 custom 解析路线。

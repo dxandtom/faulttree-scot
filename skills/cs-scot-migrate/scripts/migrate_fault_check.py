@@ -306,7 +306,7 @@ def arbitrate_entry(fc: Path, deps, entry: str, per_ne: bool, kwargs: dict, expl
         raise SystemExit("烟测:所有候选入口空目录调用都不合契约:\n  "
                          + "\n  ".join(f"{n}(): {w}" for n, w in tried)
                          + "\n——契约要求:入口吃数据根目录,返回 {matched,evidence,details}"
-                           "(空数据=undetermined)。确认真入口后用 --entry 指定强推(只警告不拦),"
+                           "(空数据=insufficient_data,旧三态 undetermined 也认)。确认真入口后用 --entry 指定强推(只警告不拦),"
                            "或把问题反馈交付方按规范改脚本。")
 
 
@@ -446,19 +446,22 @@ def run_step(product: Path, script_name: str, desc: str) -> None:
 # (自包含兜底;维护:引擎侧改动后跑 scripts/sync_engine.py 对齐)。
 ENGINE_CAPS = {
     "condition_kernels.py": ("def k_script", "def alias_sources", "【位置 ",
-                             "except SystemExit",
-                             "xlsx_reader"),            # 末项=读 xlsx 零依赖(走同目录 xlsx_reader)
+                             "except SystemExit", "xlsx_reader",
+                             'setdefault("script"'),    # 末项=script 字段不覆盖 fault_check 写的脚本真身
     "xlsx_reader.py": ("def read_rows",),                # 零依赖 xlsx 读取器(旧产物没有此文件→直接补)
     # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
                       "_fc_tristate", "matched_items", "_StrPath",
-                      "raw_note", "_fc_no_judgment"),   # 末两项=raw 下落点破 + 单网元风格脚本逐网元重调
+                      "raw_note", "_fc_no_judgment", "_fc_gap_kind",
+                      "_fc_item_str"),                  # 末项=dict 证据条目转人话+script 真身(证据链这一代)
     "import_tree_excel.py": ('{"P", "S"}', "xlsx_reader"),   # S/P 放行 + cross 列 + 读表零依赖同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
 RUNNER_CAP = "execution_status"                          # 逐节点执行状态落盘(评估反思归因信号);
                                                          # 兼含前代:raw-only 放行 / diag↔cmd 互认
+TREE_PRUNE_CAP = "matched_nes"                           # 剪枝放行 S 证据(evidence/matched_nes/
+                                                         # explain 保底)这一代——旧版瘦身丢证据字段
 
 
 def _mat(name: str) -> Path:
@@ -535,39 +538,72 @@ def refresh_engine(product: Path) -> None:
             if cd_src is not None:
                 shutil.copy2(cd_src, cd_dst)
                 print("  打包技能补挂 scripts/check_data.py(数据入口体检:诊断前先验目录结构/点名清单表)")
+        tp_dst = skill_root / "scripts" / "tree_prune.py"
+        if tp_dst.exists() and TREE_PRUNE_CAP not in tp_dst.read_text(encoding="utf-8", errors="replace"):
+            tp_src = _engine_src("tree_prune.py", (TREE_PRUNE_CAP,),
+                                 _mat("cs-scot-execute") / "scripts")
+            if tp_src is None:
+                print("  [warn] 打包技能的 tree_prune.py 是旧版且无处取新版——剪枝瘦身会丢 S 脚本证据"
+                      "(网元/实体/来源文件),报告证据栏只剩一句命中原文")
+            else:
+                shutil.copy2(tp_dst, tp_dst.with_suffix(".py.bak"))
+                shutil.copy2(tp_src, tp_dst)
+                print("  打包技能的 tree_prune.py 已刷新(旧版剪枝丢 S 脚本证据字段;备份 .py.bak)")
         z2c_dst = product / "zip2csv"                    # 旧打包技能 assets/ 里没有/是旧版 zip2csv:补挂/刷新
         z2c_src = _mat("zip2csv")
-        z2c_ok = (z2c_src / "scripts" / "zip2csv.py").exists()
+        z2c_main_src = z2c_src / "scripts" / "zip2csv.py"
+        z2c_ok = z2c_main_src.exists()
+        z2c_new = z2c_ok \
+            and "run_ifilter" in z2c_main_src.read_text(encoding="utf-8", errors="replace") \
+            and (z2c_src / "vendor" / "ifilter.py").exists()   # 源自身也按代核验(主脚本新代+归类器在),
+        _z2c_ignore = shutil.ignore_patterns("__pycache__", "*.pyc")   # 别把旧源当新代刷进产物还报"已刷新"
         if not z2c_dst.is_dir():                         # (裸 txt 数据入口指引按它指路,没有它模型只能干瞪眼)
             if z2c_ok:
-                shutil.copytree(z2c_src, z2c_dst,
-                                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                shutil.copytree(z2c_src, z2c_dst, ignore=_z2c_ignore)
                 print("  打包技能补挂 assets/zip2csv(裸 txt→三表转换器)")
+                if not z2c_new:
+                    print("  [warn] 同门 zip2csv 是旧代(无 ifilter 散包归类/缺 vendor)——"
+                          "分类目录转表可用,原始散包解析能力没带上")
             else:
                 print("  [warn] 打包技能缺 assets/zip2csv,且本机没有同门 zip2csv 技能可拷——"
                       "裸 txt 数据现场转不了三表,原有单源绑定会整体数据不足")
         else:
             main_py = z2c_dst / "scripts" / "zip2csv.py"
             cur = main_py.read_text(encoding="utf-8", errors="replace") if main_py.exists() else ""
-            if "collect_data_files" not in cur:          # 能力标记:递归收子目录+同名防覆盖这一代
-                if z2c_ok:                               # (更早代还只认 .txt/只吃 zip)——按代刷新,SKILL.md 一并带
-                    (z2c_dst / "scripts").mkdir(parents=True, exist_ok=True)
-                    if main_py.exists():
+            if "run_ifilter" not in cur:                 # 能力标记:原始散包自动 ifilter 归类这一代
+                if z2c_new:                              # (上一代 collect_data_files 只认分类目录;更早代
+                    (z2c_dst / "scripts").mkdir(parents=True, exist_ok=True)   # 只认 .txt/只吃 zip)
+                    if main_py.exists():                 # ——按代刷新,SKILL.md 与 vendor/ 一并带
                         shutil.copy2(main_py, main_py.with_suffix(".py.bak"))
                     for p in sorted((z2c_src / "scripts").glob("*.py")):
                         shutil.copy2(p, z2c_dst / "scripts" / p.name)
                     if (z2c_src / "SKILL.md").exists():
                         shutil.copy2(z2c_src / "SKILL.md", z2c_dst / "SKILL.md")
-                    print("  打包技能 assets/zip2csv 已刷新(旧版只认 .txt/只吃 zip;主脚本备份 .py.bak)")
+                    shutil.copytree(z2c_src / "vendor", z2c_dst / "vendor",
+                                    ignore=_z2c_ignore, dirs_exist_ok=True)
+                    print("  打包技能 assets/zip2csv 已刷新(旧版无原始散包 ifilter 归类;主脚本备份 .py.bak)")
                 else:
-                    print("  [warn] 打包技能的 assets/zip2csv 是旧版(只认 .txt/只吃 zip),"
-                          "且本机没有同门 zip2csv 技能可刷新——log.log 类数据会整目录跳过")
+                    print("  [warn] 打包技能的 assets/zip2csv 是旧版(无原始散包 ifilter 归类),"
+                          "且本机同门 zip2csv 也不是新代(缺 run_ifilter 或 vendor)——原始散 log/txt 进不了转换")
+            # vendor 单独闭环:主脚本已是新代但归类器缺席(上次刷新时源缺 vendor 等)——标记已在,
+            # 上面的按代刷新不会再走,这里单独补拷,否则产物 run_ifilter 永远走"找不到 vendor"死路
+            cur2 = main_py.read_text(encoding="utf-8", errors="replace") if main_py.exists() else ""
+            if "run_ifilter" in cur2 and not (z2c_dst / "vendor" / "ifilter.py").exists():
+                if (z2c_src / "vendor" / "ifilter.py").exists():
+                    shutil.copytree(z2c_src / "vendor", z2c_dst / "vendor",
+                                    ignore=_z2c_ignore, dirs_exist_ok=True)
+                    print("  打包技能 assets/zip2csv 补挂 vendor/ifilter.py(主脚本新代但缺归类器)")
+                else:
+                    print("  [warn] 打包技能 assets/zip2csv 主脚本要 vendor/ifilter.py 但产物与同门源都没有"
+                          "——原始散包归类在现场走不通")
         # 根因规则副本(package_scenario 放在 assets/fault-tree-rca):缺→补挂;旧→整目录刷新
         rca_dst = product / "fault-tree-rca"
         rca_src = _mat("fault-tree-rca")
         rca_src_draft = rca_src / "scripts" / "draft_rca.py"
-        rca_ok = rca_src_draft.exists() and \
-            "auto_verdict" in rca_src_draft.read_text(encoding="utf-8", errors="replace")
+        _rca_caps = ("gap_kind", 'f.get("evidence")')    # 四态分型 + S 证据标签引用这一代
+        rca_src_text = rca_src_draft.read_text(encoding="utf-8", errors="replace") \
+            if rca_src_draft.exists() else ""
+        rca_ok = all(c in rca_src_text for c in _rca_caps)
         _rca_ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.py.bak", "runs", "result*")
         if not rca_dst.is_dir():
             if rca_ok:
@@ -579,8 +615,9 @@ def refresh_engine(product: Path) -> None:
         else:
             cur_draft = rca_dst / "scripts" / "draft_rca.py"
             cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
-            if "blocked_at_hint" not in cur \
-                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档(v4 层级矛盾降疑似)+机械报告
+            if any(c not in cur for c in _rca_caps) \
+                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档+机械报告+四态分型
+                                                                                  # +S 证据标签这一代(含前代 gap_kind/blocked_at_hint)
                 if rca_ok:
                     bak = rca_dst.with_name("fault-tree-rca.bak")
                     if bak.exists():
@@ -833,9 +870,12 @@ def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
                      "改完重跑同一条迁移命令——包没变时修复副本不会被覆盖,体检绿了绑定才落地;"
                      "正本问题按结尾返厂清单反馈交付方。")
         return "fail", "\n".join(lines)
+    def _bl_norm(seq):                                   # 四态兼容:undetermined 与 insufficient_data
+        return [("undetermined" if str(x).strip().lower() in ("undetermined", "insufficient_data")
+                 else str(x).strip().lower()) for x in (seq or [])]   # 同属"判不了",契约升级不算结论改变
     if repaired and prev.get("status") == "pending_repair" \
             and (prev.get("baseline") or {}).get("matched") and baseline \
-            and prev["baseline"]["matched"] != baseline.get("matched"):
+            and _bl_norm(prev["baseline"]["matched"]) != _bl_norm(baseline.get("matched")):
         return "fail", (f"  回归不一致:修复前测试数据 matched={prev['baseline']['matched']},"
                         f"修复后={baseline.get('matched')}——管道修复改变了判断结论,这就动到逻辑了。"
                         f"对照 scripts/custom/{fc.name}.orig 回滚多余改动,或把差异交人定夺。")

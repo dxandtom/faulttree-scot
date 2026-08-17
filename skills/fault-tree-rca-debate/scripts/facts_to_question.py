@@ -27,16 +27,25 @@ from pathlib import Path
 def _fmt_fact(f: dict) -> str:
     """一条 fact → 简短实测描述(只挑有意义的量)。
     D 类组合等瘦身后无数值字段的事实 → 回退成"判定为真(class X)",别渲染出空的「实测:」。
-    S 类脚本事实的金证据是 hits(命中的数据原文片段,代码抓的)——必须带上:评委和最终
-    报告的证据栏都靠它;命中原文是数据现场不是判据文本,成立节点上渲染不破回声策略。"""
+    S 类脚本事实的金证据是 evidence 标签(实体+命中原文+来源文件)与 hits(命中原文片段,
+    代码抓的)——必须带上:评委和最终报告的证据栏都靠它;命中原文是数据现场不是判据文本,
+    成立节点上渲染不破回声策略。"""
     bits = []
     for k in ("resolved_column", "value", "matched", "total", "ratio",
               "count_satisfied", "local", "peer", "op", "threshold"):
         if f.get(k) is not None:
             bits.append(f"{k}={f[k]}")
+    ev = [str(x).strip() for x in (f.get("evidence") or [])[:2] if str(x).strip()]
     hits = [str(h).strip() for h in (f.get("hits") or [])[:2] if str(h).strip()]
-    if hits:
+    if ev:                                               # 证据标签已含命中原文,勿再与 hits 双引
+        bits.append("证据:" + " / ".join(f"『{x[:160]}』" for x in ev))
+    elif hits:
         bits.append("命中原文:" + " / ".join(f"『{h[:80]}』" for h in hits))
+    if f.get("matched_nes"):
+        ck = f.get("checked_nes")
+        n = f.get("matched_nes_total") or len(f["matched_nes"])   # 瘦身截断过的用真值算几比几
+        names = "、".join(str(x) for x in f["matched_nes"][:5]) + ("等" if n > 5 else "")
+        bits.append(f"命中网元:{names}" + (f"({n}/{ck})" if ck else ""))
     if not bits:
         return f"判定为真(class {f.get('class', '?')},组合/无数值型判据)"
     return ", ".join(bits)
@@ -135,8 +144,15 @@ def facts_index(rca_input: dict) -> dict:
         st, obs = _tri4(entries)
         if st is None:
             continue
-        out[nid] = {"st": st, "obs": "; ".join(obs),
-                    "fail": _fmt_fail(entries), "insuf": _insuf_reason(entries)}
+        rec = {"st": st, "obs": "; ".join(obs),
+               "fail": _fmt_fail(entries), "insuf": _insuf_reason(entries)}
+        if st == "insufficient":                         # 四态分型:缺数据 vs 数据在判不动(注记口径用)
+            kinds = {(e.get("fact") or e).get("gap_kind") for e in entries
+                     if isinstance(e, dict) and (e.get("fact") or e).get("gap_kind")}
+            if kinds:
+                rec["gap"] = ("cannot_judge" if kinds == {"cannot_judge"}
+                              else "no_data" if kinds == {"no_data"} else "mixed")
+        out[nid] = rec
     return out
 
 

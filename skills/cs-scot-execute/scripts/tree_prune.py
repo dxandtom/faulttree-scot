@@ -35,14 +35,14 @@ def _facts_by_node(results: dict, alias: dict) -> dict:
     return m
 
 
-_FACT_KEEP = ("class", "status", "predicate_satisfied", "resolved_column", "value",
+_FACT_KEEP = ("class", "status", "gap_kind", "predicate_satisfied", "resolved_column", "value",
               "matched", "total", "ratio", "top", "count_satisfied",
               "valid", "n_rows", "filter_rows",
               "nulls", "op", "threshold", "absent",
               "group_by", "groups", "matched_groups", "sample_group",
               "match", "extract", "local", "peer", "equal", "fault_when", "n_local", "n_peer",
               "params", "expand", "fail_values", "hit_values", "sample_value",
-              "local_source", "peer_source", "hits")
+              "local_source", "peer_source", "hits", "checked_nes", "script")
 
 
 _AGG_ZH = {"mean": "平均", "min": "最小", "max": "最大", "sum": "合计", "last": "最新", "first": "最早"}
@@ -76,7 +76,9 @@ def _sub_explains(subs) -> str:
     parts = []
     for i, sf in enumerate((subs or [])[:4]):
         mark = _CIRCLED[i] if i < len(_CIRCLED) else f"{i + 1}."
-        parts.append(mark + (_explain(sf) or f"子条件{i + 1}({sf.get('class')} 类,详见 sub_facts)"))
+        # 重拼没有该类分支的子条件(如 S 脚本)同款用原 explain 保底;sub_facts 不入瘦身产物,别指过去
+        parts.append(mark + (_explain(sf) or str(sf.get("explain") or "")[:120]
+                             or f"子条件{i + 1}({sf.get('class')} 类)"))
     if len(subs or []) > 4:
         parts.append(f"…等共 {len(subs)} 个子条件")
     return ";".join(parts)
@@ -170,6 +172,18 @@ def _explain(f: dict) -> str:
     return ""
 
 
+def _ev_str(x) -> str:
+    """证据条目转人话:主通路(custom_lib 转接头)给的是拼好的字符串标签;file= 直调脚本可能
+    透传 {type,id,data} 原始 dict——机械拼 type:id + k=v(剔 data 大块与 _ 元键),
+    不许把 Python repr 漏给报告。"""
+    if isinstance(x, dict):
+        head = ":".join(str(x[k]) for k in ("type", "id") if x.get(k))
+        rest = " ".join(f"{k}={v}" for k, v in x.items()
+                        if k not in ("type", "id", "data") and not str(k).startswith("_"))
+        return (head + (" " + rest if rest else "")).strip() or str(x)
+    return str(x)
+
+
 def _slim_fact(entry: dict) -> dict:
     """精简一条事实:去掉与节点重复的 condition_text、截断 mapping_reason,只留关键结果字段。"""
     f = entry.get("fact") or {}
@@ -177,13 +191,22 @@ def _slim_fact(entry: dict) -> dict:
     if entry.get("mapping_reason"):
         out["mapping_reason"] = entry["mapping_reason"][:100]
     out.update({k: f[k] for k in _FACT_KEEP if k in f})
+    # S 脚本的现场证据限量放行:evidence 标签(网元:实体 命中原文(来源:文件))和命中网元名单是
+    # 报告证据栏与 harness 追问的原料——丢了它,报告只剩一句裸的"命中原文",哪个网元哪个文件全没了
+    if isinstance(f.get("evidence"), list) and f["evidence"]:
+        out["evidence"] = [_ev_str(x)[:300] for x in f["evidence"][:5]]
+    if isinstance(f.get("matched_nes"), list) and f["matched_nes"]:
+        out["matched_nes"] = [str(x) for x in f["matched_nes"][:8]]
+        if len(f["matched_nes"]) > 8:                    # 截断后总数另存,下游算"几比几"不失真
+            out["matched_nes_total"] = len(f["matched_nes"])
     # 非 ok 事实带上机器理由(截断):内核的"为什么数据不足"(含 extract 抽不到的样例、列解析失败详情)是 RCA 写
     # undetermined/复核错误绑定的弹药——绑定算错时,模型靠它才有翻案余地。只挂非 ok、封 160 字,压缩比无感。
     if f.get("status") != "ok" and f.get("reason"):
         out["reason"] = str(f["reason"])[:160]
-    ex = _explain(f)
+    # "怎么判的"人话:机械重拼自事实原字段;没有该类分支的(S 脚本)用事实原 explain 保底——
+    # 它由转接头/k_script 机械拼装("N/M 个网元命中"+脚本说明),数字同样不过模型的手
+    ex = _explain(f) or str(f.get("explain") or "")[:300]
     if ex:
-        # "怎么判的"人话:机械拼自事实原字段,RCA 的 evidence.how 直接引用——数字与规则不过模型的手
         out["explain"] = ex
     return out
 

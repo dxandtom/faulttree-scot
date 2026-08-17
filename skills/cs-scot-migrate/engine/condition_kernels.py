@@ -931,7 +931,7 @@ def k_script(table, b, sources):
     if isinstance(fact, dict) and fact.get("status") == "insufficient_data":
         out = dict(fact)
         out.setdefault("class", "S")
-        out["script"] = label
+        out.setdefault("script", label)
         out.setdefault("predicate_satisfied", None)
         if not str(out.get("reason") or "").strip():
             out["reason"] = "S 脚本报数据不足但没写 reason——脚本里补一句缺什么"
@@ -940,7 +940,8 @@ def k_script(table, b, sources):
             and isinstance(fact.get("predicate_satisfied"), bool):
         out = dict(fact)
         out.setdefault("class", "S")
-        out["script"] = label
+        out.setdefault("script", label)                  # fault_check 已写被判脚本真身(相对路径)时不覆盖
+                                                         # (label 是 func:fault_check,无信息量)
         out.setdefault("explain", f"S 脚本({label})判定 → "
                                   f"{'成立' if out['predicate_satisfied'] else '不成立'}")
         return out

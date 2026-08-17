@@ -1,6 +1,6 @@
 ---
 name: zip2csv
-description: 把华为设备诊断数据(ZIP 包或原始目录)批量转换为结构化 CSV——LOG/CONFIG/DIAG/CMD 目录下的 txt 逐个转表,并生成 cmd 汇总 CSV。当用户提到"解压zip转csv"、"zip转csv"、"批量转换诊断文件"、"处理zip包"时使用此技能。
+description: 把华为设备诊断数据(原始散包 log/txt/rar、ZIP 包或分类目录)批量转换为结构化 CSV——原始散包自动先经内置 ifilter 归类成网元/CMD|CONFIG|LOG 结构,再把各目录下的 txt 逐个转表,并生成 cmd 汇总 CSV。当用户提到"解压zip转csv"、"zip转csv"、"批量转换诊断文件"、"处理zip包"、"原始log解析"时使用此技能。
 disable-model-invocation: false
 ---
 
@@ -8,15 +8,37 @@ disable-model-invocation: false
 
 ## 功能概述
 
-接收一个 ZIP 压缩包**或原始数据目录**（目录直接给，无需先压 zip），自动完成以下流水线：
+接收一个 ZIP 压缩包**或原始数据目录**（目录直接给，无需先压 zip）**或单个/一堆原始散文件**（log/txt/rar），自动完成以下流水线：
 
+0. **形态识别**：没有 LOG/CONFIG/DIAG/CMD 分类目录的原始散包 → 先调 `vendor/ifilter.py` 归类（见下节），有分类目录则直接进入下一步
 1. **解压 ZIP** 到本地目录（目录输入则跳过解压、就地扫描）
 2. **LOG/** — 遍历所有 `.txt`/`.log` 文件（现场常见 log.log,两种都认,大小写不敏),调用 `logbuffer2csv.convert_file()` 转换为 CSV
    (命名迁移:**DIAG 更名 CMD**——两名并存兼容,新包 CMD、老包 DIAG 都认,同款回显解析)
 3. **CONFIG/** — 遍历所有 `.txt` 文件，调用 `config2csv.parse_config_to_csv()` 转换为 CSV
 4. **DIAG/** — 遍历所有 `.txt` 文件，调用 `parse_diag_to_csv.parse_diag_to_csv()` 转换为 CSV
 5. **CMD/** — DIAG 的新名字,同款处理(parse_diag_to_csv),输出到 `csv/<网元>/CMD/`(列 NEName/CmdName/ObjContent,下游认 ObjContent↔CmdResult 同义)
-5. **cmd/** — 基于 DIAG 输出的 CSV，生成汇总 CSV
+6. **cmd 汇总** — 基于 DIAG 输出的 CSV，在 `csv/<网元>/CMD/` 下生成汇总 CSV(列 NEName/CmdName/OriginCmd/CmdResult)
+
+## 进料三形态自动识别（数据解析全链路 ①→②→③）
+
+数据到手先分形态,本技能自动识别并从对应环节接入,**无论进来的是哪一段都能处理**:
+
+| 形态 | 特征 | 处理 |
+|---|---|---|
+| ① 原始散包 | 单个/一堆 log/txt、rar、混杂 zip,**没有** LOG/CONFIG/DIAG/CMD 分类目录 | 脚本自动调 `vendor/ifilter.py` 归类出 `formated_result/<网元>/<CMD\|CONFIG\|LOG>/`,再走② |
+| ② 分类目录 | 任意深度存在 LOG/CONFIG/DIAG/CMD 目录,内是裸 txt/log | 本技能常规转换为三表 csv |
+| ③ 已是 csv | 表头带 NEName/CmdName 等列 | **不需要本技能**,直接喂绑定/runner |
+
+- 混装(既有分类目录又有散文件)以分类目录为准,散文件不再另行归类;
+- `ifilter.py` 是同事维护的**原样引入件(vendor,不改内部逻辑)**,依赖三方件
+  (rarfile/chardet/olefile/oletools/pandas),首跑会自动 pip 安装——**受控环境装不上时
+  形态①走不了**(脚本会响亮报错并给出替代做法:在能装依赖的机器上先跑 ifilter),②③不受影响;
+- 走过 ifilter 后,S 类脚本直读的 raw 通道应指 `formated_result/`(脚本结束时会打印建议值);
+- **副作用告警**:ifilter 会在**输入目录里**写 `formated_result/` 并清删自己的旧产物,其清场
+  还会波及任何名字以 `_result` 结尾的目录(含输入目录的同名 `_result` 兄弟目录)——zip2csv
+  调用前已做避让检查,撞上疑似用户目录会**停手并点名**,按提示移走/改名后重跑;
+- 对同一目录**重跑**时,已有的 `formated_result/` 会被直接复用(不重新归类)——原始数据有更新,
+  先删掉 `formated_result/` 再跑(脚本发现复用会打 ⚠ 提醒)。
 
 ## 执行前检查
 
@@ -39,19 +61,18 @@ python "skills/zip2csv/scripts/zip2csv.py" <zip或目录> -o <output_dir>
 
 ```
 <output_dir>/
-├── extracted/          # 解压的原始文件
-│   ├── LOG/
-│   ├── CONFIG/
-│   └── DIAG/
-├── LOG/                # logbuffer CSV 输出
-│   └── *.csv
-├── CONFIG/             # config CSV 输出
-│   └── *.csv
-├── DIAG/               # diag CSV 输出
-│   └── *.csv
-└── cmd/                # cmd 汇总 CSV 输出
-    └── *.csv
+├── extracted/          # zip 输入:解压的原始文件(散包时 ifilter 的 formated_result/ 也在这里面)
+├── raw/                # 单个散文件输入:暂存区(formated_result/ 在其下)
+├── csv/                # 转换产物(按网元分目录)
+│   └── <网元>/
+│       ├── LOG/*.csv
+│       ├── CONFIG/*.csv
+│       ├── DIAG/*.csv
+│       └── CMD/*.csv   # 真 CMD 转换 + DIAG 派生汇总
+└── <输入名>_csv.zip     # 全部 csv 打包
 ```
+目录输入时没有 extracted/(就地扫描);散包目录输入时 ifilter 的 `formated_result/` 落在**输入目录内**。
+脚本结束打印「raw 通道建议」——S 类脚本直读裸 txt 时 `--data raw=` 就填它。
 
 ## cmd CSV 列映射
 

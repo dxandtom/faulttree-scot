@@ -184,6 +184,15 @@ def main() -> int:
             print("  → 裸 txt 还要转三表喂原有绑定:python <assets>/zip2csv/scripts/zip2csv.py <上面 raw= 的目录> -o <输出>")
         return 0
     print("✗ 认不出可用的数据形态:既没有 <网元>/CONFIG|CMD|LOG 结构,也没有表头能对上号的数据表。")
+    # 原始散包(散 log/txt/rar/嵌套 zip,连分类目录都没有)是可自动补救的:zip2csv 会调内置
+    # ifilter 归类后再转——这种情况指路,别一律停手问用户
+    raw_loose = next((p for p in root.rglob("*") if p.is_file()
+                      and p.suffix.lower() in (".txt", ".log", ".zip", ".rar")), None)
+    if raw_loose:
+        print("  目录里有散落的 log/txt/zip/rar → 疑似**原始散包**:先跑"
+              " python <assets>/zip2csv/scripts/zip2csv.py <本目录> -o <输出>(它自动调 ifilter 归类),")
+        print("  再对它打印的 formated_result/ 路径重跑本体检;zip2csv 若报 ifilter 依赖装不上,把报错原样给用户。")
+        return 2
     print("  把本报告原样给用户:请确认数据目录给对了没(常见错:给了外层目录/给了采集清单)。**不许硬闯**。")
     return 2
 

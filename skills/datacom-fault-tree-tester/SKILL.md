@@ -46,6 +46,16 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 - 多网元结构：`data_dir` 下存在网元子目录（每个子目录为一个网元）
 - 单网元结构：`data_dir` 下直接是 `CONFIG/`、`CMD/`、`LOG/` 目录（网元名取 `data_dir` 目录名）
 
+**测试数据是原始散包时先归类**：拿到的是单个/一堆 log/txt、rar、混杂 zip（**没有**上述
+CONFIG/CMD/LOG 分类结构）→ 走同门 zip2csv（内置暂存防护）：
+`python skills/zip2csv/scripts/zip2csv.py <原始目录或包> -o <输出目录>`——它自动调内置
+ifilter 归类，结束时打印的「raw 通道建议」路径（`formated_result/<网元>/<CMD|CONFIG|LOG>/`）
+就是本技能要的测试数据目录，直接当 `data_dir` 用（顺手转出的 csv 本技能用不上，忽略即可）。
+**不许直接拿单个包/散文件去跑 `vendor/ifilter.py`**——ifilter 对单文件会把它所在的整个父目录
+连带无关文件卷进来，还会清删其中 `*_result` 目录；zip2csv 的暂存分支就是防这个的。
+ifilter 是原样引入件（不改内部逻辑），依赖三方件（rarfile/chardet/olefile/oletools/pandas）
+且首跑自动 pip 安装——装不上时 zip2csv 会响亮报错，此时向用户要已分类的数据，不许自己手工乱归类。
+
 ---
 
 ## 执行流程概览
@@ -166,7 +176,7 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 3. **输出格式**：返回 JSON 格式结果
    ```json
    {
-     "matched": "true" | "false" | "undetermined",
+     "matched": "true" | "false" | "undetermined" | "insufficient_data",
      "evidence": [
        {
          "type": "ne|interface|port|tunnel",
@@ -174,13 +184,14 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
          "matched": "true",
          "data": {
            "source_files": [
-             {"file": "CMD/display bfd session all verbose.txt", "line_range": "1-50", "content": "完整命令回显块..."}
+             {"file": "CMD/display bfd session all verbose.txt", "line_range": "1-50", "content": "命中上下文回显块(≤20 行,不许整段日志塞入)..."}
            ],
            "matched_items": [
              {
                "name": "TELSPToAcc1",
                "state": "Down",
                "bind_interface": "Tunnel0/0/1",
+               "_source_file": "CMD/display bfd session all verbose.txt",
                "_source_line": "23-28"
              }
            ]
@@ -188,23 +199,26 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
        }
      ],
      "details": {
-       "reason": "无法判断的原因（当 matched 为 undetermined 时）"
+       "reason": "判不了的原因（matched 为 undetermined/insufficient_data 时必填）",
+       "searched_files": ["LOG/log.log", "…（matched 为 false 时建议填:查过哪些文件——排除有凭）"]
      }
    }
    ```
-   - `matched`：判断结果（字符串类型）
-     - `"true"`：故障条件匹配，检测到目标故障
-     - `"false"`：故障条件不匹配，未检测到目标故障
-     - `"undetermined"`：无法判断，脚本期待入参但实际未传对应入参、或入参类型/值不符合预期、或关键数据缺失
+   - `matched`：判断结果（字符串四态）
+     - `"true"`：数据在、查了、确定命中
+     - `"false"`：数据在、查了、**确定没有**——false 必须意味着"查了、确实没有"
+     - `"undetermined"`：数据在但**判不出来**（解析失败、格式不认识、入参不符、脚本出错自保）→ reason 写为什么判不动
+     - `"insufficient_data"`：**没数据可判**（命令没采集、文件缺失）→ reason **精确到缺哪条命令/哪个文件**（下游据此生成补采清单）
    - `type`：实体类型（ne/interface/port/tunnel 等）
    - `id`：实体标识（网元名、接口名、隧道名等）
-   - `data.source_files`：原始证据块，包含文件路径、行号范围、完整内容
-   - `data.matched_items`：命中的具体项，关键字段 + `_source_line` 指向原始位置
-   - `details.reason`：当 `matched` 为 `"undetermined"` 时，必须说明原因
+   - `data.source_files`：原始证据块，包含文件路径、行号范围、**命中上下文内容（≤20 行，不许整段日志塞入——下游上下文会被撑爆）**
+   - `data.matched_items`：命中的具体项，关键字段 + **`_source_file`/`_source_line`** 指向原始文件与位置（行号必须有文件归属）——报告证据栏、harness 上客户追问细节，都从这里逐字引用
+   - `details.reason`：当 `matched` 为 `"undetermined"`/`"insufficient_data"` 时，必须说明原因
+   - `details.searched_files`：`matched` 为 `"false"` 时**建议**记查过哪些文件——"查了、确实没有"有文件清单佐证，下游"排除留痕"有凭
 4. **文件命名**：生成与验证阶段存放在 `scripts/` 目录下（与共享解析库同目录，`from search_xxx import …` 才通）；**打包交付后从 `scripts/` 移入交付包，技能目录不留生成产物**——`scripts/` 只常驻 `search_*.py` 共享库和 `check_contract.py` 体检脚本，历史节点脚本的正本在各自交付包里
 5. **通用能力复用**：**必须**使用 `scripts/search_config.py` 中的 `parse_config_file()`, `find_config_item()`, `get_group_items()` 函数进行配置解析，**禁止**自行实现配置解析逻辑（详见 `判断方法_规范.md` 附录）
 6. **全局形态，不是按网元的字典**：顶层就是一个 `matched` + `evidence` 数组；**禁止**返回 `{"网元名": {...}}` 形式的字典——网元/接口/隧道等实体信息写进 `evidence` 条目的 `type`/`id`
-7. **缺数据必须 undetermined（禁止冒充结论）**：判定所需数据缺失（命令没采集、目录/文件缺失、解析失败）时，`matched` 必须为 `"undetermined"` 且 `details.reason` 写明缺什么；**禁止**用 `matched:"false"` + `details.error` 冒充"未检测到"，**禁止**解析失败后降级用其它方式硬判
+7. **判不了必须如实自报（禁止冒充结论）**：数据缺失（命令没采集、文件缺失）→ `matched:"insufficient_data"`；数据在但判不动（解析失败等）→ `matched:"undetermined"`；两者 `details.reason` 必填；**禁止**用 `matched:"false"` + `details.error` 冒充"未检测到"，**禁止**解析失败后降级用其它方式硬判
 8. **数据来源表列全**：判断方法.md 的「数据来源」表必须把脚本实际用到的每条命令都列上（下游按它核对采集覆盖）
 9. **依赖红线**：只允许 import **Python 标准库**和 `scripts/` 内的共享模块（`search_*.py`）；
    **禁止任何第三方库**——运行平台严格管控三方件，迁移落地后一跑就 ImportError
@@ -454,11 +468,14 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 1. **体检**：解压到临时目录，跑 `python scripts/check_contract.py <解压目录> --strict`；
 2. **全绿 → 跳过**：不重打包（版本历史不掺水），汇总记「已达标」；
 3. **有 FAIL/WARN → 只修管道**：入口签名改 `fault_check(data_dir)`、补多网元/单网元探测、
-   文件发现改 .txt/.log 双吃、输出改全局形态字符串三态、argv/print 挪进 `__main__`、
+   文件发现改 .txt/.log 双吃、输出改全局形态字符串四态（缺数据 insufficient_data 与判不动
+   undetermined 分开自报）、argv/print 挪进 `__main__`、
    补齐脚本 import 的 `search_*.py`——按体检输出的修法逐项修，**判断逻辑一行不动**；
    拿不准某处算不算判断逻辑 → **停下问用户，不赌**；
 4. **回归**：包里带测试数据的，体检会自动打「回归基线」行（matched + 证据数）——
-   修完重跑 `check_contract <目录> --strict` 必须全绿，且基线 matched 必须与修前一致，
+   修完重跑 `check_contract <目录> --strict` 必须全绿，且基线 matched 必须与修前一致
+   （唯一例外：三态改四态使 `undetermined`→`insufficient_data`，两者同属"判不了"，
+   下游基线比对视为等价，不算结论改变），
    **变了 = 动到逻辑了，停下问用户**（修前就跑不起来的没基线，只验修后合规）；
 5. **重打包**：新时间戳 zip 落 `output/`（照版本管理规矩，禁止覆盖旧包）；
    执行记录.md 追加「翻新记录」段：体检前 FAIL/WARN 清单、修了什么、修后体检结果、回归比对；
