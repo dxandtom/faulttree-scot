@@ -408,11 +408,12 @@ def fault_check(table, args, load):
             _sys.argv = argv_bak
 
     if ne_map is None:
-        return {"status": "insufficient_data",
+        return {"status": "insufficient_data", "gap_kind": "cannot_judge",
                 "reason": "脚本返回的形状认不出(既非 {matched,...} 也非 {网元:{matched,...}} "
                           "也非 details.devices 包裹)——核对 entry/per_ne 配置"}
     if not ne_map:
-        return {"status": "insufficient_data", "reason": "脚本一个网元都没读到(目录结构与脚本预期对不上,或数据缺失)"}
+        return {"status": "insufficient_data", "gap_kind": "no_data",
+                "reason": "脚本一个网元都没读到(目录结构与脚本预期对不上,或数据缺失)"}
     hit, miss, bad = [], [], []
     bad_kinds = set()                                    # 判不了的细分:no_data(缺数据)/cannot_judge(判不动)
     evidence, hits_raw, hit_why, miss_why = [], [], [], []

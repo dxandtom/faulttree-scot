@@ -429,7 +429,7 @@ def _smoke_check(script: Path, entry_name, timeout, per_ne=False, entry_kwargs=N
         elif status == "error":
             hint = "先 data_path = Path(data_dir) 显式包装——下游按字符串传参(规范附录5)" \
                 if isinstance(val, TypeError) and "str" in str(val) else \
-                "缺数据必须返回 undetermined,不许抛异常/退出(规范附录4)"
+                "缺数据必须返回 insufficient_data(旧三态 undetermined 也认),不许抛异常/退出(规范附录4)"
             items.append(_fail("D2x", f"空目录(str 入参)调用崩了:{type(val).__name__}: {val}", hint))
         else:
             items.extend(_shape_items("D2", val, True, "空目录喂 str"))
@@ -445,7 +445,7 @@ def _smoke_check(script: Path, entry_name, timeout, per_ne=False, entry_kwargs=N
             items.append(_fail("D3t", f"多网元空目录调用超时(>{timeout}s)", "检查死循环"))
         elif status == "error":
             items.append(_fail("D3x", f"多网元根目录调用崩了:{type(val).__name__}: {val}",
-                               "多网元结构必须能吃(规范附录5);空数据走 undetermined"))
+                               "多网元结构必须能吃(规范附录5);空数据走 insufficient_data"))
         else:
             items.extend(_shape_items("D3", val, True, "多网元空目录"))
     return items, fn

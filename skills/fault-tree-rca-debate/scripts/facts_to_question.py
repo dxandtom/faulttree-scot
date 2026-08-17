@@ -135,8 +135,15 @@ def facts_index(rca_input: dict) -> dict:
         st, obs = _tri4(entries)
         if st is None:
             continue
-        out[nid] = {"st": st, "obs": "; ".join(obs),
-                    "fail": _fmt_fail(entries), "insuf": _insuf_reason(entries)}
+        rec = {"st": st, "obs": "; ".join(obs),
+               "fail": _fmt_fail(entries), "insuf": _insuf_reason(entries)}
+        if st == "insufficient":                         # 四态分型:缺数据 vs 数据在判不动(注记口径用)
+            kinds = {(e.get("fact") or e).get("gap_kind") for e in entries
+                     if isinstance(e, dict) and (e.get("fact") or e).get("gap_kind")}
+            if kinds:
+                rec["gap"] = ("cannot_judge" if kinds == {"cannot_judge"}
+                              else "no_data" if kinds == {"no_data"} else "mixed")
+        out[nid] = rec
     return out
 
 

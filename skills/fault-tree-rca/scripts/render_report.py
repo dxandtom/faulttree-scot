@@ -112,9 +112,19 @@ def render(doc: dict) -> str:
             L.append("")
 
     if und:
-        # 四态分型:reason 带"无法判断"=数据在判不动(判据质量信号,与补数据是两回事)
-        cj = sum(1 for c in und if "无法判断" in str(c.get("reason") or ""))
-        split = f"(其中 数据不足 {len(und) - cj} 条 · 数据在但无法判断 {cj} 条)" if cj else ""
+        # 四态分型:优先按结构化 gap_kind 计数,老产物无字段时按 reason 文本兜底
+        def _gk(c):
+            gk = c.get("gap_kind")
+            if gk in ("no_data", "cannot_judge", "mixed"):
+                return gk
+            r = str(c.get("reason") or "")
+            if r.startswith("部分缺"):
+                return "mixed"
+            return "cannot_judge" if r.startswith("数据在,无法判断") else "no_data"
+        ks = [_gk(c) for c in und]
+        cj, mx = ks.count("cannot_judge"), ks.count("mixed")
+        split = (f"(其中 数据不足 {len(und) - cj - mx} 条 · 数据在但无法判断 {cj} 条"
+                 + (f" · 混合 {mx} 条" if mx else ") ").rstrip() .rstrip(")") + ")") if (cj or mx) else ""
         L += [f"## 待确认{split}(数据不足的补齐后重跑可闭环;无法判断的属判据/脚本问题,补数据无用)", ""]
         for c in und[:30]:
             L.append(f"- {(c.get('Fault_tree_path') or ['?'])[-1]}:{_one(c.get('reason'), 200)}")

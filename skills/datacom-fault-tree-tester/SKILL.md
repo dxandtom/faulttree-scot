@@ -201,7 +201,7 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
    - `id`：实体标识（网元名、接口名、隧道名等）
    - `data.source_files`：原始证据块，包含文件路径、行号范围、完整内容
    - `data.matched_items`：命中的具体项，关键字段 + `_source_line` 指向原始位置
-   - `details.reason`：当 `matched` 为 `"undetermined"` 时，必须说明原因
+   - `details.reason`：当 `matched` 为 `"undetermined"`/`"insufficient_data"` 时，必须说明原因
 4. **文件命名**：生成与验证阶段存放在 `scripts/` 目录下（与共享解析库同目录，`from search_xxx import …` 才通）；**打包交付后从 `scripts/` 移入交付包，技能目录不留生成产物**——`scripts/` 只常驻 `search_*.py` 共享库和 `check_contract.py` 体检脚本，历史节点脚本的正本在各自交付包里
 5. **通用能力复用**：**必须**使用 `scripts/search_config.py` 中的 `parse_config_file()`, `find_config_item()`, `get_group_items()` 函数进行配置解析，**禁止**自行实现配置解析逻辑（详见 `判断方法_规范.md` 附录）
 6. **全局形态，不是按网元的字典**：顶层就是一个 `matched` + `evidence` 数组；**禁止**返回 `{"网元名": {...}}` 形式的字典——网元/接口/隧道等实体信息写进 `evidence` 条目的 `type`/`id`
@@ -460,7 +460,9 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
    补齐脚本 import 的 `search_*.py`——按体检输出的修法逐项修，**判断逻辑一行不动**；
    拿不准某处算不算判断逻辑 → **停下问用户，不赌**；
 4. **回归**：包里带测试数据的，体检会自动打「回归基线」行（matched + 证据数）——
-   修完重跑 `check_contract <目录> --strict` 必须全绿，且基线 matched 必须与修前一致，
+   修完重跑 `check_contract <目录> --strict` 必须全绿，且基线 matched 必须与修前一致
+   （唯一例外：三态改四态使 `undetermined`→`insufficient_data`，两者同属"判不了"，
+   下游基线比对视为等价，不算结论改变），
    **变了 = 动到逻辑了，停下问用户**（修前就跑不起来的没基线，只验修后合规）；
 5. **重打包**：新时间戳 zip 落 `output/`（照版本管理规矩，禁止覆盖旧包）；
    执行记录.md 追加「翻新记录」段：体检前 FAIL/WARN 清单、修了什么、修后体检结果、回归比对；

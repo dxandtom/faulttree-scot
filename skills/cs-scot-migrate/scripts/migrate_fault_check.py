@@ -306,7 +306,7 @@ def arbitrate_entry(fc: Path, deps, entry: str, per_ne: bool, kwargs: dict, expl
         raise SystemExit("烟测:所有候选入口空目录调用都不合契约:\n  "
                          + "\n  ".join(f"{n}(): {w}" for n, w in tried)
                          + "\n——契约要求:入口吃数据根目录,返回 {matched,evidence,details}"
-                           "(空数据=undetermined)。确认真入口后用 --entry 指定强推(只警告不拦),"
+                           "(空数据=insufficient_data,旧三态 undetermined 也认)。确认真入口后用 --entry 指定强推(只警告不拦),"
                            "或把问题反馈交付方按规范改脚本。")
 
 
@@ -568,7 +568,7 @@ def refresh_engine(product: Path) -> None:
         rca_src = _mat("fault-tree-rca")
         rca_src_draft = rca_src / "scripts" / "draft_rca.py"
         rca_ok = rca_src_draft.exists() and \
-            "auto_verdict" in rca_src_draft.read_text(encoding="utf-8", errors="replace")
+            "gap_kind" in rca_src_draft.read_text(encoding="utf-8", errors="replace")
         _rca_ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.py.bak", "runs", "result*")
         if not rca_dst.is_dir():
             if rca_ok:
@@ -580,8 +580,9 @@ def refresh_engine(product: Path) -> None:
         else:
             cur_draft = rca_dst / "scripts" / "draft_rca.py"
             cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
-            if "blocked_at_hint" not in cur \
-                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档(v4 层级矛盾降疑似)+机械报告
+            if "gap_kind" not in cur \
+                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档+机械报告+四态分型这一代
+                                                                                  # (gap_kind 只存在于四态版 draft,含前代 blocked_at_hint)
                 if rca_ok:
                     bak = rca_dst.with_name("fault-tree-rca.bak")
                     if bak.exists():
@@ -834,9 +835,12 @@ def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
                      "改完重跑同一条迁移命令——包没变时修复副本不会被覆盖,体检绿了绑定才落地;"
                      "正本问题按结尾返厂清单反馈交付方。")
         return "fail", "\n".join(lines)
+    def _bl_norm(seq):                                   # 四态兼容:undetermined 与 insufficient_data
+        return [("undetermined" if str(x).strip().lower() in ("undetermined", "insufficient_data")
+                 else str(x).strip().lower()) for x in (seq or [])]   # 同属"判不了",契约升级不算结论改变
     if repaired and prev.get("status") == "pending_repair" \
             and (prev.get("baseline") or {}).get("matched") and baseline \
-            and prev["baseline"]["matched"] != baseline.get("matched"):
+            and _bl_norm(prev["baseline"]["matched"]) != _bl_norm(baseline.get("matched")):
         return "fail", (f"  回归不一致:修复前测试数据 matched={prev['baseline']['matched']},"
                         f"修复后={baseline.get('matched')}——管道修复改变了判断结论,这就动到逻辑了。"
                         f"对照 scripts/custom/{fc.name}.orig 回滚多余改动,或把差异交人定夺。")

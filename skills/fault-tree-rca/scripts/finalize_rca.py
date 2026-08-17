@@ -242,7 +242,8 @@ def main() -> int:
         undetermined.append({"Fault_tree_path": [e.get("node")],
                              "blocked_at": f"{e.get('node')}({nid})",
                              "reason": d.get("reason") or e.get("actual") or "数据不足",
-                             "observed": []})
+                             "observed": [],
+                             **({"gap_kind": e["gap_kind"]} if e.get("gap_kind") else {})})
 
     doc = {"rca_result": rca_result, "probable_causes": probable,
            "undetermined": undetermined, "tree_issues": {}}

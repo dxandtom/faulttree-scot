@@ -136,7 +136,11 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
                         anc_notes.append(f"⚠ 路径节点「{nm}」证据冲突(成立与强反证并存,拦升档存疑)")
                         conflict_anc.append(nm)
                     elif st == "insufficient":
-                        anc_notes.append(f"路径节点「{nm}」数据不足(默认放行,此处无判断;补数据可闭环)")
+                        if (fx.get(nid) or {}).get("gap") == "cannot_judge":
+                            anc_notes.append(f"路径节点「{nm}」数据在但无法判断"
+                                             "(默认放行,此处无判断;判据/脚本判不动,补数据无用)")
+                        else:
+                            anc_notes.append(f"路径节点「{nm}」数据不足(默认放行,此处无判断;补数据可闭环)")
                     elif st is None:
                         anc_notes.append(f"路径节点「{nm}」未验证(判据无绑定——默认放行,此处无判断)")
             unbound = _has_cond(ti_n) and not ti_n.get("pass_through") and not f
