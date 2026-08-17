@@ -70,7 +70,8 @@ _GEN_REFS = ["condition_binding_schema.md", "datacom_log_adapter.md", "plan_sche
 _MIG_ENGINE = [
     "assemble_scenario.py", "check_contract.py", "check_data.py", "condition_kernels.py",
     "custom_lib.py", "export_tree_excel.py", "import_tree_excel.py", "runner.py",
-    "search_cmd.py", "search_config.py", "search_diag_txt.py", "search_log.py", "xlsx_reader.py",
+    "search_cmd.py", "search_config.py", "search_diag_txt.py", "search_log.py",
+    "tree_prune.py", "xlsx_reader.py",
 ]
 _Z2C = ["zip2csv.py", "config2csv.py", "logbuffer2csv.py", "parse_diag_to_csv.py"]
 
