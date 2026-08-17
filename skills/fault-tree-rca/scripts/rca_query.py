@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-_FACT_KEYS = ("status", "predicate_satisfied", "matched", "total", "ratio", "top",
+_FACT_KEYS = ("status", "gap_kind", "predicate_satisfied", "matched", "total", "ratio", "top",
               "value", "count_satisfied", "valid", "n_rows", "filter_rows",
               "absent", "matched_groups", "local", "peer", "equal", "params",
               "resolved_column", "reason")

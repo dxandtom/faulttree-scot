@@ -112,7 +112,10 @@ def render(doc: dict) -> str:
             L.append("")
 
     if und:
-        L += ["## 待确认(数据不足,补齐后重跑可闭环)", ""]
+        # 四态分型:reason 带"无法判断"=数据在判不动(判据质量信号,与补数据是两回事)
+        cj = sum(1 for c in und if "无法判断" in str(c.get("reason") or ""))
+        split = f"(其中 数据不足 {len(und) - cj} 条 · 数据在但无法判断 {cj} 条)" if cj else ""
+        L += [f"## 待确认{split}(数据不足的补齐后重跑可闭环;无法判断的属判据/脚本问题,补数据无用)", ""]
         for c in und[:30]:
             L.append(f"- {(c.get('Fault_tree_path') or ['?'])[-1]}:{_one(c.get('reason'), 200)}")
         if len(und) > 30:

@@ -123,6 +123,16 @@ def _ev(nid: str, n: dict) -> dict:
         rs = [f.get("reason") for f in facts if f.get("reason")]
         if rs:
             e["actual"] = str(rs[0])[:160]
+        # 四态契约的判不了分型(转接头 gap_kind):缺数据(补采可解) vs 数据在判不动(判据质量信号)
+        kinds = {f.get("gap_kind") for f in facts if f.get("gap_kind")}
+        if kinds:
+            gk = ("cannot_judge" if kinds == {"cannot_judge"}
+                  else "no_data" if kinds == {"no_data"} else "mixed")
+            e["gap_kind"] = gk
+            tag = {"no_data": "数据不足(缺数据)", "cannot_judge": "数据在,无法判断",
+                   "mixed": "部分缺数据/部分无法判断"}[gk]
+            if not str(e["actual"]).startswith(tag):
+                e["actual"] = (tag + (":" + e["actual"] if e["actual"] else ""))[:200]
     return e
 
 
@@ -182,7 +192,7 @@ def draft_pruned(data: dict) -> dict:
             entry["support_hint"] = _actual(f)
         if anc_insuf:
             entry["ancestor_insufficient"] = (
-                "祖先节点未验证(无绑定/数据不足):"
+                "祖先节点未验证(无绑定/数据不足/无法判断):"
                 + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in anc_insuf[:5])
                 + "——默认放行(零信息不冒充反证),由本节点成立事实自下而上蕴含;"
                   "finalize 落 caveats,报告提示'此处无判断'")

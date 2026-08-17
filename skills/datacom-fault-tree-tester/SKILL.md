@@ -166,7 +166,7 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 3. **输出格式**：返回 JSON 格式结果
    ```json
    {
-     "matched": "true" | "false" | "undetermined",
+     "matched": "true" | "false" | "undetermined" | "insufficient_data",
      "evidence": [
        {
          "type": "ne|interface|port|tunnel",
@@ -188,14 +188,15 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
        }
      ],
      "details": {
-       "reason": "无法判断的原因（当 matched 为 undetermined 时）"
+       "reason": "判不了的原因（matched 为 undetermined/insufficient_data 时必填）"
      }
    }
    ```
-   - `matched`：判断结果（字符串类型）
-     - `"true"`：故障条件匹配，检测到目标故障
-     - `"false"`：故障条件不匹配，未检测到目标故障
-     - `"undetermined"`：无法判断，脚本期待入参但实际未传对应入参、或入参类型/值不符合预期、或关键数据缺失
+   - `matched`：判断结果（字符串四态）
+     - `"true"`：数据在、查了、确定命中
+     - `"false"`：数据在、查了、**确定没有**——false 必须意味着"查了、确实没有"
+     - `"undetermined"`：数据在但**判不出来**（解析失败、格式不认识、入参不符、脚本出错自保）→ reason 写为什么判不动
+     - `"insufficient_data"`：**没数据可判**（命令没采集、文件缺失）→ reason **精确到缺哪条命令/哪个文件**（下游据此生成补采清单）
    - `type`：实体类型（ne/interface/port/tunnel 等）
    - `id`：实体标识（网元名、接口名、隧道名等）
    - `data.source_files`：原始证据块，包含文件路径、行号范围、完整内容
@@ -204,7 +205,7 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 4. **文件命名**：生成与验证阶段存放在 `scripts/` 目录下（与共享解析库同目录，`from search_xxx import …` 才通）；**打包交付后从 `scripts/` 移入交付包，技能目录不留生成产物**——`scripts/` 只常驻 `search_*.py` 共享库和 `check_contract.py` 体检脚本，历史节点脚本的正本在各自交付包里
 5. **通用能力复用**：**必须**使用 `scripts/search_config.py` 中的 `parse_config_file()`, `find_config_item()`, `get_group_items()` 函数进行配置解析，**禁止**自行实现配置解析逻辑（详见 `判断方法_规范.md` 附录）
 6. **全局形态，不是按网元的字典**：顶层就是一个 `matched` + `evidence` 数组；**禁止**返回 `{"网元名": {...}}` 形式的字典——网元/接口/隧道等实体信息写进 `evidence` 条目的 `type`/`id`
-7. **缺数据必须 undetermined（禁止冒充结论）**：判定所需数据缺失（命令没采集、目录/文件缺失、解析失败）时，`matched` 必须为 `"undetermined"` 且 `details.reason` 写明缺什么；**禁止**用 `matched:"false"` + `details.error` 冒充"未检测到"，**禁止**解析失败后降级用其它方式硬判
+7. **判不了必须如实自报（禁止冒充结论）**：数据缺失（命令没采集、文件缺失）→ `matched:"insufficient_data"`；数据在但判不动（解析失败等）→ `matched:"undetermined"`；两者 `details.reason` 必填；**禁止**用 `matched:"false"` + `details.error` 冒充"未检测到"，**禁止**解析失败后降级用其它方式硬判
 8. **数据来源表列全**：判断方法.md 的「数据来源」表必须把脚本实际用到的每条命令都列上（下游按它核对采集覆盖）
 9. **依赖红线**：只允许 import **Python 标准库**和 `scripts/` 内的共享模块（`search_*.py`）；
    **禁止任何第三方库**——运行平台严格管控三方件，迁移落地后一跑就 ImportError
@@ -454,7 +455,8 @@ description: 故障树可理解性测试工具 — 验证 AI 能否准确识别�
 1. **体检**：解压到临时目录，跑 `python scripts/check_contract.py <解压目录> --strict`；
 2. **全绿 → 跳过**：不重打包（版本历史不掺水），汇总记「已达标」；
 3. **有 FAIL/WARN → 只修管道**：入口签名改 `fault_check(data_dir)`、补多网元/单网元探测、
-   文件发现改 .txt/.log 双吃、输出改全局形态字符串三态、argv/print 挪进 `__main__`、
+   文件发现改 .txt/.log 双吃、输出改全局形态字符串四态（缺数据 insufficient_data 与判不动
+   undetermined 分开自报）、argv/print 挪进 `__main__`、
    补齐脚本 import 的 `search_*.py`——按体检输出的修法逐项修，**判断逻辑一行不动**；
    拿不准某处算不算判断逻辑 → **停下问用户，不赌**；
 4. **回归**：包里带测试数据的，体检会自动打「回归基线」行（matched + 证据数）——

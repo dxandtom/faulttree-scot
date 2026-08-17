@@ -288,9 +288,10 @@ def _fc_no_judgment(ne_map) -> bool:
 
 
 def _fc_tristate(v):
-    """matched 值 → True / False / None(判不了)。tester 新契约是**字符串**三态
-    ("true"/"false"/"undetermined"),旧契约是 bool——字符串 "false" 按真值判会极性反转
-    (非空字符串恒真),必须显式映射;大小写不敏感;数值当 bool;认不出的值按判不了(诚实)。"""
+    """matched 值 → True / False / None(判不了)。tester 契约是**字符串**四态
+    ("true"/"false"/"undetermined"/"insufficient_data";旧包三态无 insufficient_data,照收),
+    旧旧契约是 bool——字符串 "false" 按真值判会极性反转(非空字符串恒真),必须显式映射;
+    大小写不敏感;数值当 bool;认不出的值按判不了(诚实)。"""
     if isinstance(v, bool):
         return v
     if isinstance(v, (int, float)):
@@ -300,7 +301,14 @@ def _fc_tristate(v):
         return True
     if s == "false":
         return False
-    return None                                          # "undetermined" / 空 / 未知值
+    return None                                          # "undetermined"/"insufficient_data"/空/未知值
+
+
+def _fc_gap_kind(v) -> str:
+    """判不了(_fc_tristate=None)的细分:缺数据还是判不动——四态契约的增量信息。
+    "insufficient_data" → no_data(缺数据:没采到命令/文件,补采可解);
+    其余("undetermined"/空/认不出) → cannot_judge(数据在,判不出——判据/脚本质量信号)。"""
+    return "no_data" if str(v).strip().lower() == "insufficient_data" else "cannot_judge"
 
 
 def _fc_normalize(result):
@@ -333,10 +341,11 @@ def fault_check(table, args, load):
            "entry_kwargs": {}(入口额外关键字参数,如 judgment_conditions)}
     数据:优先 load("raw_dir")(runner --data raw=<extracted目录>);没有则三表兜底重建。
     结果四种形态都认:旧按网元 map(matched 为 bool)/ results 信封 / details.devices 包裹 /
-    tester 新契约**全局形态**(顶层一个 matched,字符串三态 "true"/"false"/"undetermined",
-    evidence 为 {type,id,data} 结构体数组)。
-    翻译:任一实体判真 → 成立;全部实体 error/undetermined/无实体 → 数据不足(不冒充"正常");
-    否则不成立;matched:false 却带 details.error(缺数据冒充阴性的老毛病)按判不了处理。"""
+    tester 契约**全局形态**(顶层一个 matched,字符串四态 "true"/"false"/"undetermined"/
+    "insufficient_data";旧三态包无 insufficient_data 照收,evidence 为 {type,id,data} 结构体数组)。
+    翻译:任一实体判真 → 成立;全部实体判不了/无实体 → status=insufficient_data(不冒充"正常"),
+    并带 gap_kind 细分 no_data(缺数据,补采可解)/cannot_judge(数据在判不动,判据质量信号)/mixed;
+    否则不成立;matched:false 却带 details.error(缺数据冒充阴性的老毛病)按判不了(no_data)处理。"""
     import contextlib
     import importlib.util
     import io as _io
@@ -360,7 +369,8 @@ def fault_check(table, args, load):
     with tempfile.TemporaryDirectory(prefix="fc_") as td:
         root, how = _fc_prepare_data(load, Path(td))
         if root is None:
-            return {"status": "insufficient_data", "reason": f"数据整体缺失,脚本未运行:{how}"}
+            return {"status": "insufficient_data", "gap_kind": "no_data",
+                    "reason": f"数据整体缺失,脚本未运行:{how}"}
         sdir = str(script.parent)
         if sdir not in _sys.path:
             _sys.path.insert(0, sdir)                    # 交付脚本 import search_config 等同目录共享模块
@@ -404,19 +414,23 @@ def fault_check(table, args, load):
     if not ne_map:
         return {"status": "insufficient_data", "reason": "脚本一个网元都没读到(目录结构与脚本预期对不上,或数据缺失)"}
     hit, miss, bad = [], [], []
+    bad_kinds = set()                                    # 判不了的细分:no_data(缺数据)/cannot_judge(判不动)
     evidence, hits_raw, hit_why, miss_why = [], [], [], []
     for ne, r in ne_map.items():
         if not isinstance(r, dict) or ("matched" not in r):
             bad.append((ne, str((r or {}).get("error") or r)[:120] if isinstance(r, dict) else str(r)[:120]))
+            bad_kinds.add("cannot_judge")
             continue
         tri = _fc_tristate(r.get("matched"))
         det = r.get("details") if isinstance(r.get("details"), dict) else {}
         err = det.get("error") or r.get("error")
         reason = str(det.get("reason") or "").strip()
-        if tri is None:                                  # undetermined / 认不出的值 → 该实体判不了
+        if tri is None:                                  # undetermined/insufficient_data → 该实体判不了
             bad.append((ne, str(reason or err or f"matched={r.get('matched')!r},判不了")[:120]))
+            bad_kinds.add(_fc_gap_kind(r.get("matched")))
         elif tri is False and err:                       # 缺数据却报 false+error(冒充阴性的老毛病)→ 按判不了
             bad.append((ne, str(err)[:120]))
+            bad_kinds.add("no_data")
         elif tri:
             hit.append(ne)
             if reason:                                   # 脚本给的命中理由(人话)不能丢,进 explain
@@ -442,9 +456,14 @@ def fault_check(table, args, load):
             miss.append(ne)
             if reason:                                   # 未命中的人话理由同样留痕(如"步骤1成立但步骤2输出非空")
                 miss_why.append((ne, reason[:160]))
-    if not hit and not miss:                             # 全部网元都没给出 matched(error/坏形状)
-        return {"status": "insufficient_data",
-                "reason": "所有网元都未产出判定:" + "; ".join(f"{n}: {e}" for n, e in bad[:5])}
+    if not hit and not miss:                             # 全部网元都没给出 matched(error/坏形状/四态的两种判不了)
+        gap = ("no_data" if bad_kinds == {"no_data"}
+               else "cannot_judge" if bad_kinds == {"cannot_judge"} else "mixed")
+        prefix = {"no_data": "数据不足(缺数据,补采可解)",
+                  "cannot_judge": "数据在,无法判断(判据/脚本判不动)",
+                  "mixed": "部分缺数据、部分无法判断"}[gap]
+        return {"status": "insufficient_data", "gap_kind": gap,
+                "reason": f"{prefix}:" + "; ".join(f"{n}: {e}" for n, e in bad[:5])}
     sat = bool(hit)
     note = f";另有 {len(bad)} 个网元未判({'; '.join(f'{n}: {e}' for n, e in bad[:3])})" if bad else ""
     if sat and hit_why:

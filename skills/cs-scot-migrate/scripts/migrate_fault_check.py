@@ -453,7 +453,8 @@ ENGINE_CAPS = {
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
                       "_fc_tristate", "matched_items", "_StrPath",
-                      "raw_note", "_fc_no_judgment"),   # 末两项=raw 下落点破 + 单网元风格脚本逐网元重调
+                      "raw_note", "_fc_no_judgment",
+                      "_fc_gap_kind"),                  # 末项=四态契约(insufficient_data/undetermined 拆分)
     "import_tree_excel.py": ('{"P", "S"}', "xlsx_reader"),   # S/P 放行 + cross 列 + 读表零依赖同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
