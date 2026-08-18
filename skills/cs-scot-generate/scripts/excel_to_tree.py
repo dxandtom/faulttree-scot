@@ -183,6 +183,9 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
     for row in rows:
         full = [(row.get(c) or "").strip() for c in col_names]
         full = [v for v in full if v]
+        # 相邻同名层折叠:平台导出常见"向右填充/合并单元格展开"——同一行后段几百列全是同一个
+        # 叶子名,不折叠会建出上千级连环重名链(实测:渲染 md 递归爆栈)。只折相邻,零误伤。
+        full = [v for i, v in enumerate(full) if i == 0 or v != full[i - 1]]
         if not full:
             continue
         if exclude_re and any(exclude_re.search(v) for v in full):
@@ -244,6 +247,8 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
             triples.append((lvl, nm, cd))
         if not triples:
             continue
+        # 相邻同名层折叠(与 build_tree 同款,防右向填充数据建出千级重名链)
+        triples = [t for i, t in enumerate(triples) if i == 0 or t[1] != triples[i - 1][1]]
         names = [t[1] for t in triples]
         if exclude_re and any(exclude_re.search(n) for n in names):
             continue
@@ -293,20 +298,26 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
 
 def tree_to_markdown(tree: Dict[str, Any], lines: Optional[List[str]] = None,
                      level: int = 1) -> List[str]:
-    """把嵌套树渲染成 #/##/### 层级 Markdown,判断条件紧跟在标题下。"""
+    """把嵌套树渲染成 #/##/### 层级 Markdown,判断条件紧跟在标题下。
+    显式栈迭代而非递归:层级列被右向填充的导出表一行可达上千级,不该炸 RecursionError。
+    输出与原递归版逐字节一致(含顶层兄弟之间的空行)。"""
     if lines is None:
         lines = []
-    items = [(k, v) for k, v in tree.items() if k]
-    for i, (name, data) in enumerate(items):
-        if i > 0 and level == 1:
-            lines.append("")
-        lines.append("#" * level + " " + name)
+    stack = [(name, data, level) for name, data in reversed([(k, v) for k, v in tree.items() if k])]
+    first_top = True
+    while stack:
+        name, data, lvl = stack.pop()
+        if lvl == 1:
+            if not first_top:
+                lines.append("")
+            first_top = False
+        lines.append("#" * lvl + " " + name)
         if isinstance(data, dict) and "_judgment_" in data:
-            for j in data["_judgment_"]:
-                lines.append(j)
-        children = {k: v for k, v in data.items() if k != "_judgment_"} if isinstance(data, dict) else {}
-        if children:
-            tree_to_markdown(children, lines, level + 1)
+            lines.extend(data["_judgment_"])
+        children = [(k, v) for k, v in data.items() if k and k != "_judgment_"] \
+            if isinstance(data, dict) else []
+        for k, v in reversed(children):
+            stack.append((k, v, lvl + 1))
     return lines
 
 

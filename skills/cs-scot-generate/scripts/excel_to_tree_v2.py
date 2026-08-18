@@ -173,8 +173,11 @@ def default_out(anchor: Path, stem: str, slug, scenario: str):
     skill_dir = anchor / "scot技能" / stem
     if (skill_dir / "SKILL.md").exists() and (skill_dir / "assets").is_dir():
         return skill_dir, skill_dir / "assets", "技能已存在,续用(重跑建树直接更新其 assets)"
-    here = Path(__file__).resolve().parent
-    import package_scenario
+    try:
+        import package_scenario                          # 单文件部署(只带 v1/v2/xlsx_reader 三件套)
+    except ImportError:                                  # 没有打包脚本:不许崩,退回产物形态照常出树
+        return None, scenario_out_dir(anchor, stem), \
+            "打包脚本 package_scenario.py 不在(单文件部署)——退回产物形态;要直出技能请带全 scripts/ 目录"
     exe = package_scenario.find_material("cs-scot-execute")          # ①技能内嵌 ②同门 skills/
     rca = package_scenario.find_material("fault-tree-rca")
     if not slug:
