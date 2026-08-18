@@ -160,6 +160,22 @@ def find_english_slug(tree_sheets, scenario: str):
     return None
 
 
+def resolve_scenario_alias(tree_sheets, scenario: str):
+    """--start-node 传的是英文列(备选列)里的叫法时,翻译成主列真名。
+    背景:混血双列表的 --list 显示中文主列名,但老版脚本曾把英文列名列出来——用户/老会话
+    记住的英文名在新版下点不中,直接报"未找到"会让人以为脚本坏了。返回真名或 None。"""
+    for _name, header, rows in tree_sheets:
+        levels, _m, _me, fb = sheet_schema(header)
+        for col, lvl in levels:
+            for c in fb.get(lvl) or ():
+                for row in rows:
+                    if (row.get(c) or "").strip() == scenario:
+                        v = _lvl_value(row, col, fb.get(lvl))
+                        if v and v != scenario:
+                            return v
+    return None
+
+
 def is_tree_sheet(header: List[str]) -> bool:
     return any(classify(h)[0] == "level" for h in header)
 
@@ -173,8 +189,11 @@ def default_out(anchor: Path, stem: str, slug, scenario: str):
     skill_dir = anchor / "scot技能" / stem
     if (skill_dir / "SKILL.md").exists() and (skill_dir / "assets").is_dir():
         return skill_dir, skill_dir / "assets", "技能已存在,续用(重跑建树直接更新其 assets)"
-    here = Path(__file__).resolve().parent
-    import package_scenario
+    try:
+        import package_scenario                          # 单文件部署(只带 v1/v2/xlsx_reader 三件套)
+    except ImportError:                                  # 没有打包脚本:不许崩,退回产物形态照常出树
+        return None, scenario_out_dir(anchor, stem), \
+            "打包脚本 package_scenario.py 不在(单文件部署)——退回产物形态;要直出技能请带全 scripts/ 目录"
     exe = package_scenario.find_material("cs-scot-execute")          # ①技能内嵌 ②同门 skills/
     rca = package_scenario.find_material("fault-tree-rca")
     if not slug:
@@ -386,7 +405,15 @@ def main() -> None:
 
     index = build_index(tree, args.start_node, args.start_level)
     if not index.get("root"):
-        print(f"未在任何树页签找到场景「{args.start_node}」(L{args.start_level})。用 --list 核对名字。", file=sys.stderr)
+        alias = resolve_scenario_alias(tree, args.start_node)
+        if alias:
+            print(f"ℹ 「{args.start_node}」是英文列里的叫法,主列真名是「{alias}」——已按真名提取"
+                  "(--list 显示的是主列名;老版脚本曾列英文名,两代叫法都认)")
+            args.start_node = alias
+            index = build_index(tree, alias, args.start_level)
+    if not index.get("root"):
+        print(f"未在任何树页签找到场景「{args.start_node}」(L{args.start_level},主列与英文备选列都查过)。"
+              "用 --list 核对名字。", file=sys.stderr)
         sys.exit(1)
     # 深度体检:正常故障树十来层;几十层以上=层级列识别错位/异常数据,响亮报出来别静默产坏树
     def _depth(nid: str) -> int:
