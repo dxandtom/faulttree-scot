@@ -259,7 +259,8 @@ _CAP = 40                                                # 全局清单每节最
 class DossierKit:
     """rca_input + tree_index → 预组装分层卷宗(全局层惰性构建一次,组层按组缓存)。"""
 
-    def __init__(self, rca_input: dict, tree_index: dict):
+    def __init__(self, rca_input: dict, tree_index: dict, focus_note: str = ""):
+        self.focus_note = str(focus_note or "").strip()  # 辩题聚焦注记(事实短路筛给):点明辩什么+背景纪律
         nodes = (tree_index or {}).get("nodes") or {}
         self.names = {nid: (n.get("name") or nid) for nid, n in nodes.items()}
         self.conds = {nid: str(n.get("condition") or "").strip() for nid, n in nodes.items()}
@@ -357,8 +358,10 @@ class DossierKit:
         return self._global_text
 
     def _compose(self, header: str, vnodes) -> str:
-        return (header + "\n\n【本组节点档案(判据原文+实测事实;信息全员一致)】\n"
-                + self.group_text(vnodes) + "\n\n【全局案情】\n" + self.global_text())
+        # 聚焦注记放卷宗**开头**(任务框架之前):辩什么、背景纪律,各角色第一眼看到
+        return ((self.focus_note + "\n\n") if self.focus_note else "") \
+            + (header + "\n\n【本组节点档案(判据原文+实测事实;信息全员一致)】\n"
+               + self.group_text(vnodes) + "\n\n【全局案情】\n" + self.global_text())
 
     # ----- 各角色:信息同一份,只有任务框架不同 -----
     def for_defense(self, my_node, sibling_nodes) -> str:
@@ -383,7 +386,8 @@ class DossierKit:
             "数据实测反证与数据缺口,其次才是机制层面的质疑。", [target_node])
 
     def for_consistency(self) -> str:
-        return ("【你的任务】检查辩护词与判据、与已算出的数据事实是否自洽:"
+        return (((self.focus_note + "\n\n") if self.focus_note else "")
+                + "【你的任务】检查辩护词与判据、与已算出的数据事实是否自洽:"
                 "与实测矛盾的辩护主张要点名。\n\n【全局案情】\n" + self.global_text())
 
     def for_judge(self, vnodes) -> str:
