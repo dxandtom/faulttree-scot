@@ -386,20 +386,46 @@ def main() -> int:
             (out_dir / p).rename(arch / p)
         print(f"[归档] 上一轮 debate 产物 {len(stale)} 个 → {arch}(out-dir 只保留当前轮)")
 
-    # ---------- 事实短路筛(1根因 vs 100节点) ----------
+    # ---------- 事实短路筛(1根因 vs 100节点)+ 辩题分诊(三类:冲突/竞争/带伤) ----------
     screen = None if a.no_screen else _fact_screen(ri_path, out_dir)
-    if screen and not screen["contested"]:
-        if screen["clean_confirmed"]:
-            return _short_circuit(screen, ri_path, out_dir)   # 全干净:引擎整场跳过
-        print("[筛] 无成立候选(引擎将按弃权垫片工作),照常全树辩论供排序参考")
-        screen = None
+    topic_ids = []
+    if screen:
+        cands = list(dict.fromkeys(screen["contested"] + screen["clean_confirmed"]))
+        if not cands:
+            print("[筛] 无成立候选(引擎将按弃权垫片工作),照常全树辩论供排序参考")
+            screen = None
+        elif not screen["contested"] and len(cands) == 1:
+            return _short_circuit(screen, ri_path, out_dir)   # 唯一干净候选:引擎整场跳过
+        elif len(cands) >= 2:                            # 多候选竞争:全部候选都是辩题——辩主次/并发/
+            topic_ids = cands                            # 连锁与排序;确证仍凭机械事实,得分只管排序
+        else:
+            topic_ids = list(screen["contested"])        # 单一争议候选(自身冲突/层级矛盾):只辩它
     allowed_contested = None
     if screen:
-        allowed_contested = _contested_scope(tree_index, screen["contested"])
-        print(f"[筛] 争议候选 {len(screen['contested'])} 个"
-              f"({'、'.join(screen['contested'][:6])}{'…' if len(screen['contested']) > 6 else ''})"
-              f",引擎只辩其所在分支:{len(allowed_contested)}/{len(tree_index.get('nodes') or {})}"
-              f" 节点;干净候选 {len(screen['clean_confirmed'])} 个由代码机械确证,辩后合并")
+        allowed_contested = _contested_scope(tree_index, topic_ids)
+        competition = len(topic_ids) > len(screen["contested"])
+        n_all = len(tree_index.get("nodes") or {})
+        if competition:
+            print(f"[筛] 多候选竞争 {len(topic_ids)} 个"
+                  f"({'、'.join(topic_ids[:6])}{'…' if len(topic_ids) > 6 else ''})"
+                  f",引擎辩其所在分支定主次/排序:{len(allowed_contested)}/{n_all} 节点;"
+                  f"其中争议候选 {len(screen['contested'])} 个、干净候选 {len(screen['clean_confirmed'])} 个"
+                  "(确证凭机械事实,辩论得分只管排序与主次)")
+        else:
+            print(f"[筛] 争议候选 {len(screen['contested'])} 个"
+                  f"({'、'.join(screen['contested'][:6])}{'…' if len(screen['contested']) > 6 else ''})"
+                  f",引擎只辩其所在分支:{len(allowed_contested)}/{n_all}"
+                  f" 节点;干净候选 {len(screen['clean_confirmed'])} 个由代码机械确证,辩后合并")
+        (out_dir / "debate_screen.json").write_text(json.dumps({
+            "mode": "competition" if competition else "contested_only",
+            "topics": topic_ids,
+            "clean_confirmed": screen["clean_confirmed"],
+            "contested": screen["contested"],
+            "note": ("多候选竞争:全部候选进辩题分主次/并发/排序;确证凭机械事实,辩论得分只管排序"
+                     if competition else
+                     "干净候选由代码机械确证并入 rca_result(support 已注明未经辩论);"
+                     "引擎只辩争议候选所在分支")},
+            ensure_ascii=False, indent=2), encoding="utf-8")
 
     question = build_question(rca_input, tree_index)
     print(f"[1/4] 证据 question 已渲染({len(question)} 字符)")
@@ -442,7 +468,21 @@ def main() -> int:
             kit = None
             if not a.no_agent_question:
                 from facts_to_question import DossierKit
-                kit = DossierKit(rca_input, tree_index)
+                focus = ""
+                if screen and topic_ids:                 # 辩题聚焦注记:角色卷宗开头点明辩什么、背景纪律
+                    nmap = {nid: (n.get("name") or nid)
+                            for nid, n in (tree_index.get("nodes") or {}).items()}
+                    tnames = "、".join(f"「{nmap.get(t, t)}」" for t in topic_ids[:6]) \
+                        + ("…" if len(topic_ids) > 6 else "")
+                    if len(topic_ids) > len(screen["contested"]):
+                        focus = (f"【辩题聚焦】本案候选 {len(topic_ids)} 个({tnames})均有实测支撑、"
+                                 "并存竞争——辩论目标是分主次/并发/连锁并给出排序;候选真伪以证据引擎"
+                                 "实测为准,实测成立的不辩真伪,实测排除的背景节点不得翻案"
+                                 "(翻案线索写复核提示)。")
+                    else:
+                        focus = (f"【辩题聚焦】本案争点仅 {tnames};其余节点机械已定属背景,"
+                                 "可引用不可翻案(翻案线索写复核提示)。")
+                kit = DossierKit(rca_input, tree_index, focus_note=focus)
             boost_applied = _boost(proc, parallel=a.parallel, match_cache=not a.no_match_cache,
                                    debate_cache=not a.no_debate_cache, agent_kit=kit) or []
 
@@ -563,17 +603,12 @@ def main() -> int:
     print(f"[3/4] 引擎原始输出 → {out_dir / 'rca_debate_full.json'}"
           f"(路径 {len(top_orig)}/{len(top_soft)}/{len(top_ratio)},辩论 {len(debate_records)} 节点)")
 
-    # 事实短路筛的干净候选:机械合成后并进每个机制的确证档(引擎只辩了争议分支,两不相扰)
+    # 事实短路筛的干净候选:机械合成兜底——contested_only 模式它是唯一确证来源;
+    # competition 模式引擎照辩干净候选,适配层按事实升档,这里只兜"引擎 top-k 漏掉某干净候选"
+    # 的缺口(按 node_id 去重,不重复)。审计 debate_screen.json 已在分诊处落盘,此处不再写。
     manual_entries = []
     if screen and screen["clean_confirmed"]:
         manual_entries = _finalize_clean(screen, ri_path, out_dir)
-        if manual_entries:
-            (out_dir / "debate_screen.json").write_text(json.dumps({
-                "mode": "contested_only",
-                "clean_confirmed": screen["clean_confirmed"],
-                "contested": screen["contested"],
-                "note": "干净候选由代码机械确证并入 rca_result(support 已注明未经辩论);"
-                        "引擎只辩争议候选所在分支"}, ensure_ascii=False, indent=2), encoding="utf-8")
 
     mechs = list(_MECH_KEY) if a.mechanism == "all" else [a.mechanism]
     for m in mechs:

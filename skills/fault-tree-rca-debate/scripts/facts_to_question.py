@@ -259,7 +259,8 @@ _CAP = 40                                                # 全局清单每节最
 class DossierKit:
     """rca_input + tree_index → 预组装分层卷宗(全局层惰性构建一次,组层按组缓存)。"""
 
-    def __init__(self, rca_input: dict, tree_index: dict):
+    def __init__(self, rca_input: dict, tree_index: dict, focus_note: str = ""):
+        self.focus_note = str(focus_note or "").strip()  # 辩题聚焦注记(事实短路筛给):点明辩什么+背景纪律
         nodes = (tree_index or {}).get("nodes") or {}
         self.names = {nid: (n.get("name") or nid) for nid, n in nodes.items()}
         self.conds = {nid: str(n.get("condition") or "").strip() for nid, n in nodes.items()}
@@ -332,7 +333,8 @@ class DossierKit:
                 extra = f"\n  …等共 {len(lst)} 个(其余略)" if len(lst) > _CAP else ""
                 return f"\n【{label}】\n" + "\n".join(lst[:_CAP]) + extra
 
-            parts = [f"场景:{self.scenario}。以下事实均由代码在数据上算出(非人工主诉、非模型判断)。",
+            parts = ([self.focus_note] if self.focus_note else []) \
+                + [f"场景:{self.scenario}。以下事实均由代码在数据上算出(非人工主诉、非模型判断)。",
                      cap(held, "实测成立的节点(判据+实测)"),
                      cap(confl, "证据冲突的节点(成立与强反证并存——存疑,确证须人审)"),
                      cap(refuted, "已被数据证伪的节点(判据+反证;不可仅凭辩词翻案)"),
