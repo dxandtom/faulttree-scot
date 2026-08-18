@@ -333,8 +333,7 @@ class DossierKit:
                 extra = f"\n  …等共 {len(lst)} 个(其余略)" if len(lst) > _CAP else ""
                 return f"\n【{label}】\n" + "\n".join(lst[:_CAP]) + extra
 
-            parts = ([self.focus_note] if self.focus_note else []) \
-                + [f"场景:{self.scenario}。以下事实均由代码在数据上算出(非人工主诉、非模型判断)。",
+            parts = [f"场景:{self.scenario}。以下事实均由代码在数据上算出(非人工主诉、非模型判断)。",
                      cap(held, "实测成立的节点(判据+实测)"),
                      cap(confl, "证据冲突的节点(成立与强反证并存——存疑,确证须人审)"),
                      cap(refuted, "已被数据证伪的节点(判据+反证;不可仅凭辩词翻案)"),
@@ -359,8 +358,10 @@ class DossierKit:
         return self._global_text
 
     def _compose(self, header: str, vnodes) -> str:
-        return (header + "\n\n【本组节点档案(判据原文+实测事实;信息全员一致)】\n"
-                + self.group_text(vnodes) + "\n\n【全局案情】\n" + self.global_text())
+        # 聚焦注记放卷宗**开头**(任务框架之前):辩什么、背景纪律,各角色第一眼看到
+        return ((self.focus_note + "\n\n") if self.focus_note else "") \
+            + (header + "\n\n【本组节点档案(判据原文+实测事实;信息全员一致)】\n"
+               + self.group_text(vnodes) + "\n\n【全局案情】\n" + self.global_text())
 
     # ----- 各角色:信息同一份,只有任务框架不同 -----
     def for_defense(self, my_node, sibling_nodes) -> str:
@@ -385,7 +386,8 @@ class DossierKit:
             "数据实测反证与数据缺口,其次才是机制层面的质疑。", [target_node])
 
     def for_consistency(self) -> str:
-        return ("【你的任务】检查辩护词与判据、与已算出的数据事实是否自洽:"
+        return (((self.focus_note + "\n\n") if self.focus_note else "")
+                + "【你的任务】检查辩护词与判据、与已算出的数据事实是否自洽:"
                 "与实测矛盾的辩护主张要点名。\n\n【全局案情】\n" + self.global_text())
 
     def for_judge(self, vnodes) -> str:
