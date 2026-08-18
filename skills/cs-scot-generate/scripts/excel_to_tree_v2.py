@@ -220,6 +220,7 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
     nodes: Dict[str, Any] = {}
     root_id: Optional[str] = None
     short: Dict[str, str] = {}
+    padded_rows = 0
 
     def sid(chain: str) -> str:
         if chain not in short:
@@ -239,6 +240,16 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
         for row in rows:
             full = [(lvl, _lvl_value(row, c, fb.get(lvl))) for c, lvl in levels]
             full = [(lvl, v) for lvl, v in full if v]
+            # 连续同名层折叠:平台 DataExport 常见"向右填充/合并单元格展开"——同一行 L3 之后
+            # 几百列全是同一个叶子名,路径变成上千级连环重名链(实测:渲染 md 递归 994 层爆栈)。
+            # 只折叠**相邻**同名格,真实树不存在"同名节点直接挂在同名父下"的形态,零误伤。
+            deduped = full[:1]
+            for it in full[1:]:
+                if it[1] != deduped[-1][1]:
+                    deduped.append(it)
+            if len(deduped) != len(full):
+                padded_rows += 1
+            full = deduped
             if not full:
                 continue
             names = [v for _, v in full]
@@ -289,26 +300,42 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
                         if sv:
                             solutions.setdefault(nid, {}).setdefault(lang, sv)
                 parent_id = nid
+    if padded_rows:
+        print(f"ℹ 层级列右向填充折叠:{padded_rows} 行存在相邻同名层级格(DataExport 常见填充/"
+              "合并单元格展开),已按同一节点折叠——路径深度以折叠后为准")
     return {"scenario": scenario, "root": root_id, "nodes": nodes, "solutions": solutions}
 
 
 def index_to_markdown(index: Dict[str, Any]) -> str:
-    """扁平 index → #/##/### 层级 md;判断条件(按源标签)+ 元数据紧跟节点。"""
+    """扁平 index → #/##/### 层级 md;判断条件(按源标签)+ 元数据紧跟节点。
+    显式栈迭代而非递归:异常深的树(层级列识别错位/填充数据)不该炸 RecursionError,
+    要么正常渲染、要么(万一 index 被外部改出环)响亮点名坏在哪个节点。"""
     nodes = index["nodes"]
     lines: List[str] = []
-
-    def rec(nid: str, depth: int) -> None:
-        nd = nodes[nid]
-        lines.append("#" * depth + " " + nd["name"])
-        if nd.get("condition"):
-            lines.extend(nd["condition"].split("\n"))
-        for tag, v in (nd.get("meta") or {}).items():
-            lines.append(f"（{tag}）{v}")
-        for ch in nd["children"]:
-            rec(ch, depth + 1)
-
     if index.get("root"):
-        rec(index["root"], 1)
+        stack = [(index["root"], 1)]
+        on_path: set = set()                             # 防环:字典树建法本身无环,守卫护手改 index 的情形
+        seen_depth: Dict[str, int] = {}
+        while stack:
+            nid, depth = stack.pop()
+            if depth < 0:                                # 回溯标记:该节点子树渲染完,离开路径
+                on_path.discard(nid)
+                continue
+            if nid in on_path:
+                chain = "→".join(str(nodes.get(x, {}).get("name") or x) for x in list(seen_depth)[-5:])
+                raise SystemExit(f"树结构成环:节点「{nodes.get(nid, {}).get('name') or nid}」"
+                                 f"出现在自己的子孙链上(…{chain});tree_index 被改坏,重新建树")
+            on_path.add(nid)
+            seen_depth[nid] = depth
+            nd = nodes[nid]
+            lines.append("#" * depth + " " + nd["name"])
+            if nd.get("condition"):
+                lines.extend(nd["condition"].split("\n"))
+            for tag, v in (nd.get("meta") or {}).items():
+                lines.append(f"（{tag}）{v}")
+            stack.append((nid, -1))                      # 先压回溯标记,再逆序压子节点(保持原渲染顺序)
+            for ch in reversed(nd["children"]):
+                stack.append((ch, depth + 1))
     return "\n".join(lines) + "\n"
 
 
@@ -361,6 +388,17 @@ def main() -> None:
     if not index.get("root"):
         print(f"未在任何树页签找到场景「{args.start_node}」(L{args.start_level})。用 --list 核对名字。", file=sys.stderr)
         sys.exit(1)
+    # 深度体检:正常故障树十来层;几十层以上=层级列识别错位/异常数据,响亮报出来别静默产坏树
+    def _depth(nid: str) -> int:
+        d, cur = 0, nid
+        while cur:
+            d += 1
+            cur = index["nodes"].get(cur, {}).get("parent")
+        return d
+    max_d = max((_depth(n) for n in index["nodes"]), default=0)
+    if max_d > 32:
+        print(f"⚠ 树深 {max_d} 层,远超正常故障树——层级列识别可能错位(--list 核对场景、检查表头),"
+              "继续输出但下游多半不可用", file=sys.stderr)
     # 「高层不判断」规则(简单粗暴,用户定案):L1/L2 这种靠根的层级,判据多为场景分类/选路说明,
     # 不是故障条件——绑成判定会把整树确证卡死(实测:根节点"判断属于哪种场景"不成立 → 全树只能疑似)。
     # 场景**根节点不看母表层号一律豁免**(实测:场景在母表更深层时,根的"参考下级节点"判据被派了绑定,
