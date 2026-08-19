@@ -26,6 +26,35 @@ from pathlib import Path
 _BRIEF = re.compile(r"^(?P<ind>.+)_batch(?P<n>\d+)\.txt$")
 
 
+def _record_batch_timings(out: Path, ddir: Path, plan: dict) -> None:
+    """每批绑定耗时 = 结果文件 mtime − 简报 mtime(纯文件时间,零模型参与),幂等追加进
+    <OUT>/timing.json(重复收货不重记)。提效汇报的数据从这里拿,不靠人掐表。"""
+    import datetime as _dt
+    import json as _json
+    p = Path(out) / "timing.json"
+    try:
+        recs = _json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
+    except Exception:  # noqa: BLE001
+        recs = []
+    seen = {(r.get("step"), r.get("ind"), r.get("batch")) for r in recs if isinstance(r, dict)}
+    added = []
+    for ind in sorted(plan):
+        for n in sorted(plan[ind]):
+            bp, rp = ddir / f"{ind}_batch{n}.txt", ddir / f"{ind}_batch{n}_result.py"
+            if ("bind_batch", ind, n) in seen or not (bp.exists() and rp.exists()):
+                continue
+            dt = rp.stat().st_mtime - bp.stat().st_mtime
+            if dt <= 0:                                  # 简报比结果还新(重生成过)→ 算不出,跳过
+                continue
+            recs.append({"step": "bind_batch", "ind": ind, "batch": n, "seconds": round(dt, 1),
+                         "at": _dt.datetime.fromtimestamp(rp.stat().st_mtime).isoformat(timespec="seconds")})
+            added.append((ind, n, dt))
+    if added:
+        p.write_text(_json.dumps(recs, ensure_ascii=False, indent=1), encoding="utf-8")
+        print("绑定批次耗时(简报生成→结果落盘,取自文件时间):"
+              + "、".join(f"{i} 批{n} {d / 60:.1f}分" for i, n, d in added) + " → timing.json")
+
+
 def parse_result(path: Path, require_marker: bool = False):
     """结果文件 → (entries, 错误串或None)。认裸列表和 `CONDITIONS = [...]` 两种写法。
     require_marker=True(dispatch/manifest.json 声明)时,缺尾部完成标记按截断拒收——
@@ -257,6 +286,7 @@ def main() -> int:
             cp.unlink()
             print("\n单源批次里已无 cross_source 标记 → 陈旧的 cross_candidates.json 已清除。")
 
+    _record_batch_timings(out, ddir, plan)
     if all_warns:
         print(f"\n格式漂移点名({len(all_warns)} 处,条目已保留,修绑定后重写该批结果并重跑):")
         for w in all_warns[:40]:

@@ -4,7 +4,8 @@
 为什么要它:派发环节的三类实测事故——判据没读全就派发(贴不出原文)、EAV 源没带枚举
 (子代理自编指标名,实测 PORT_RxCRC)、不拆批(单次生成过长 → 回复截断/600s 流挂)——
 全是机械活没做对。散文规矩管不住弱模型,脚本管得住:简报由本脚本拼装,判据自动切批
-(默认 ≤50 条/批)、该源概览/枚举原文自动嵌入、公共规约与 C/G·EAV 铁规是固定文本,
+(默认 ≤12 条/批——小批防子代理写盘超时被掐+抬并行度)、该源概览/枚举原文自动嵌入、
+公共规约与 C/G·EAV 铁规是固定文本,
 模型只剩「每份简报派一个子代理」一个动作。
 
 产物:<OUT>/dispatch/<ind>_batch<N>.txt(自包含:公共规约 + 外挂知识(tree/knowledge.md
@@ -27,6 +28,7 @@ import json
 import math
 import re
 import sys
+import time
 from pathlib import Path
 
 COMMON_RULES = """【公共规约——逐条遵守】
@@ -193,6 +195,19 @@ OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
 **结果文件的最后一行**必须是完成标记(单独一行,写在列表 `]` 之后):
 # BATCH_COMPLETE
 (合并脚本靠它识别"写完了"还是"半路截断"——缺这行整批按截断重派。)"""
+
+
+def _record_timing(out, step: str, seconds: float, **extra) -> None:
+    """耗时打点 → <OUT>/timing.json(追加)。提效汇报的数据来源:数字从这里拿,不靠人掐表。"""
+    import datetime as _dt
+    p = Path(out) / "timing.json"
+    try:
+        recs = json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
+    except Exception:  # noqa: BLE001
+        recs = []
+    recs.append(dict({"step": step, "seconds": round(seconds, 1),
+                      "at": _dt.datetime.now().isoformat(timespec="seconds")}, **extra))
+    p.write_text(json.dumps(recs, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def _fail(msg: str) -> None:
@@ -368,11 +383,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="机械生成并行绑定的子代理简报(判据切批+概览/枚举嵌入+固定规约)")
     ap.add_argument("--out", required=True, help="场景产物目录 <OUT>")
     ap.add_argument("--indicators", default="", help="逗号分隔;缺省=按 <OUT>/scripts/*_analyzer.py 自动发现")
-    ap.add_argument("--batch-size", type=int, default=50)
+    ap.add_argument("--batch-size", type=int, default=12,
+                    help="每批判据条数上限(默认 12)。小批双收益:①子代理最后一次性 Write 结果文件,"
+                         "批大=这一次生成要十几分钟、期间零工具输出,会被主进程按'10 分钟无输出'掐死"
+                         "(实测);②批多=并行度高(61 条判据从 2 批并行变 5~6 批并行)。")
     ap.add_argument("--tree-index", default="", help="缺省=<OUT>/tree/*.tree_index.json(须唯一)")
     ap.add_argument("--cross", action="store_true",
                     help="生成跨源补绑简报(读 dispatch/cross_candidates.json,由 merge_conditions 汇集)")
     args = ap.parse_args()
+    t0 = time.time()
 
     out = Path(args.out)
     if args.tree_index:
@@ -572,6 +591,8 @@ def main() -> int:
         print("    结果写到简报指定的结果文件,最终回复只报『共 N 条,已写 <路径>』」")
         print("收货(可反复跑,先到先合):python merge_conditions.py --out \"<OUT>\" ——机械验收+合并+写进各 <ind>_analyzer.py。")
         print("子代理读不了文件的环境 → 主代理把简报全文读入后原样贴进派发词(纯复制)。")
+    _record_timing(out, "make_dispatch", time.time() - t0,
+                   judgments=len(conditions), briefs=len(written), batch_size=args.batch_size)
     if errors:
         print(f"\n✗ {len(errors)} 个源拒产(缺原料,补齐后重跑本脚本):", file=sys.stderr)
         for e in errors:
