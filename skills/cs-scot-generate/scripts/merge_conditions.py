@@ -196,6 +196,18 @@ def main() -> int:
                 pending_inds.add(ind)
                 continue
             entries, err = parse_result(rp, require_marker)
+            if err and ind == "cross" and "BATCH_COMPLETE" in err:
+                # cross 特赦通道:cross 规约要求本批**每条候选都表态**(单源批允许不认领,享受不了这条),
+                # 所以"缺完成标记"可以机械补证——结果里的 node_id 集合盖住简报候选集合 = 内容齐全,代收。
+                # 实测弱模型重派后仍丢标记行、然后主会话手工往文件里补标记(废掉截断闸的危险动作),这里堵住。
+                e2, err2 = parse_result(rp, False)
+                bp_ = ddir / f"{ind}_batch{n}.txt"
+                exp = set(re.findall(r"^\[(\w+)\]", bp_.read_text(encoding="utf-8"), re.M)) \
+                    if bp_.exists() else set()
+                if not err2 and exp and exp <= {str(x.get("node_id")) for x in e2 if isinstance(x, dict)}:
+                    print(f"⚠ cross 批{n}:缺完成标记,但本批 {len(exp)} 条候选已逐条表态(机械核对齐全)——代收。"
+                          "禁止手工往结果文件补 # BATCH_COMPLETE(那会废掉截断闸)")
+                    entries, err = e2, None
             if err:
                 pending.append(f"{ind} 批{n}:{err}——同简报重派该批")
                 pending_inds.add(ind)
