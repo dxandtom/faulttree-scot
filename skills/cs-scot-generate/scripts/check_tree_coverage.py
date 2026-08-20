@@ -214,6 +214,19 @@ def main() -> int:
             seen.add(cur); out.append(cur); cur = nodes[cur].get("parent")
         return out
 
+    # 跨源候选清单(软注记原料):dispatch/cross_candidates.json 是"cross 通道正在处理谁"的权威清单
+    # (merge 汇集 cross_source 标记 + make_dispatch --cross 机械兜底扫入无人认领者后写回)。
+    # 未绑节点若在这份清单上 = 流程中(等 cross 合并),不是真漏——路由批上线后每条判据基本只有
+    # 一次绑定机会,这类"已进候选"的未绑会变多,注记就是把它和真漏分开,防止中途跑本闸误判。
+    cross_ids = set()
+    try:
+        cand_p = Path(args.tree_index).resolve().parent.parent / "dispatch" / "cross_candidates.json"
+        if cand_p.exists():
+            cross_ids = {str(c.get("node_id")) for c in json.loads(cand_p.read_text(encoding="utf-8"))
+                         if isinstance(c, dict) and c.get("node_id")}
+    except (OSError, json.JSONDecodeError, AttributeError):
+        cross_ids = set()
+
     covered, leaf_only, miss_answerable, miss_branch = [], [], [], []
     for nid, n in targets.items():
         if nid in claimed:
@@ -238,28 +251,42 @@ def main() -> int:
         return s[:k] + ("…" if len(s) > k else "")
 
     total = len(targets)
+    n_pending = sum(1 for nid, *_ in (miss_answerable + leaf_only + miss_branch) if nid in cross_ids)
     print(f"{unit}覆盖度:树共 {total} 个需绑{unit};已绑 {len(covered)};未绑 {total - len(covered)} "
           f"= 漏绑(条件提到已喂列){len(miss_answerable)} + 分支已入未细绑{len(leaf_only)} + 整支未触达{len(miss_branch)}。")
+    if n_pending:
+        print(f"ℹ 未绑{unit}中 {n_pending} 个已进跨源候选(dispatch/cross_candidates.json,下面逐项标"
+              f"[跨源候选中])——它们在 cross 补绑流程中,不是终态;**先把 --cross 简报派完、"
+              f"merge 合并进 cross_analyzer.py,再跑本闸收口**(中途跑,未绑数会虚高)。")
+
+    def _xc(nid):
+        return " [跨源候选中]" if nid in cross_ids else ""
 
     if miss_answerable:
         print(f"\n❌ 漏绑(条件正文提到已喂列 {cols},本源能答却没绑)—— 补绑 C 类(没出现就 matched=0)或显式 decision:insufficient_data:")
         for nid, n, be in sorted(miss_answerable, key=lambda x: x[0]):
-            print(f"  - {nid} 「{n.get('name','')[:34]}」 L{n.get('level')} {'[分支已入]' if be else '[整支未入]'} src={_ds(n)}\n      cond: {_snip(n)}")
+            print(f"  - {nid} 「{n.get('name','')[:34]}」 L{n.get('level')} {'[分支已入]' if be else '[整支未入]'} src={_ds(n)}{_xc(nid)}\n      cond: {_snip(n)}")
 
     if miss_branch:
         print(f"\n⚠ 整支未触达(根→叶无任何绑定;逐支确认是'缺源(没喂对应信令/配置)'还是'漏判一整支'):")
-        roots_un = {}
+        roots_un, roots_xc = {}, {}
         for nid, n in miss_branch:
             # 聚到"未触达区域的入口"= 路径上未绑且非根的最高祖先(根本身不直接绑,聚到根没信息量)
             anc = [a for a in _ancestors(nid) if a not in claimed and nodes.get(a, {}).get("parent") is not None]
             top = anc[-1] if anc else nid
             roots_un[top] = roots_un.get(top, 0) + 1
+            if nid in cross_ids:
+                roots_xc[top] = roots_xc.get(top, 0) + 1
         for top, cnt in sorted(roots_un.items(), key=lambda x: -x[1])[:40]:
             tn = nodes.get(top, {})
-            print(f"  - 子树 {top} 「{tn.get('name','')[:34]}」 src={_ds(tn)} —— 含 {cnt} 个未绑{unit}")
+            xc = roots_xc.get(top, 0)
+            print(f"  - 子树 {top} 「{tn.get('name','')[:34]}」 src={_ds(tn)} —— 含 {cnt} 个未绑{unit}"
+                  + (f"(其中 {xc} 个在跨源候选中,等 cross 合并)" if xc else ""))
 
     if leaf_only:
-        print(f"\nℹ 分支已入、未细绑 {len(leaf_only)} 个(分支级已绑、定不到具体子因;多因缺信令/配置,确认无碍即可)。")
+        n_lx = sum(1 for nid, _ in leaf_only if nid in cross_ids)
+        print(f"\nℹ 分支已入、未细绑 {len(leaf_only)} 个(分支级已绑、定不到具体子因;多因缺信令/配置,确认无碍即可)"
+              + (f",其中 {n_lx} 个在跨源候选中。" if n_lx else "。"))
 
     # ---- 跨源认领对账(软提示,不改退出码)----
     # 子代理按源并行绑、互相看不见:一个节点的判据常是**多个子条件都要满足**、且同一事实可能落在多个源里。
