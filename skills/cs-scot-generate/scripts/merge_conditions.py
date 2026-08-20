@@ -147,8 +147,8 @@ def main() -> int:
     plan = {}                                           # ind -> [批号...](按简报发现)
     for p in sorted(ddir.iterdir()):
         m = _BRIEF.match(p.name)
-        if m:
-            plan.setdefault(m.group("ind"), []).append(int(m.group("n")))
+        if m and m.group("ind") != "route":             # route_batch*.txt 是路由简报(make_dispatch --route),
+            plan.setdefault(m.group("ind"), []).append(int(m.group("n")))  # 结果是 JSON 不是绑定,不归这里收
     if args.indicators:
         keep = {x.strip() for x in args.indicators.split(",") if x.strip()}
         plan = {k: v for k, v in plan.items() if k in keep}

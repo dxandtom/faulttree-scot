@@ -196,6 +196,23 @@ OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
 # BATCH_COMPLETE
 (合并脚本靠它识别"写完了"还是"半路截断"——缺这行整批按截断重派。)"""
 
+ROUTE_RULES = """【任务框架——只做路由,不做绑定】
+你要做的是"预分诊":逐条判断每个判据**可能**由下面哪些数据源回答,产出路由表。
+后续每个源会派专门的子代理做绑定(逐条读判据原文、语义映射、写映射理由)——那不是你的活,
+你只决定"这条判据要不要进某个源的批"。判断口径:
+- **多选宁多勿漏**:拿不准就把可能的源都选上——选多了只是该源的绑定代理多判一条(几十秒);
+  选漏了该判据不会进被漏源的批,要靠后面的覆盖校验和跨源补绑才捞得回来(拖慢整体);
+- 完全没把握的判据 → sources 填全部源(等同不裁剪,判据不会丢);
+- 判断依据:判据原文提到的对象对照各源列名词汇——告警名/告警码 → 有告警列的源;
+  配置项/接口/协议状态 → 配置类源;日志关键词/错误码 → 日志类源;跨源联查 → 涉及的源都选。"""
+
+ROUTE_OUTPUT = """【输出格式】
+把结果用 Write 写到文首【结果文件】路径,内容是一个 JSON 数组,每条:
+{"node_id": "<nN>", "sources": ["<源名>", ...]}
+- 本批**每条判据都必须出现**(漏条=该条回落广播,不报错但你这单白干一半);
+- 源名只能取自上方【可选源清单】的名字,原样照抄(写错的源名会被机械过滤掉);
+- 不写别的字段,不写理由;写完后最终回复只报一行「共 N 条,已写 <路径>」。"""
+
 
 def _record_timing(out, step: str, seconds: float, **extra) -> None:
     """耗时打点 → <OUT>/timing.json(追加)。提效汇报的数据来源:数字从这里拿,不靠人掐表。"""
@@ -300,6 +317,33 @@ def load_digests(out: Path) -> dict:
         return {}
 
 
+def _load_route(ddir: Path, inds) -> dict:
+    """dispatch/route_batch*_result.json(--route 小步的产物)→ {node_id: set(源名)}。
+    路由只决定"判据进谁的批",不是绑定——绑定仍由各源子代理逐条读原文做语义映射。
+    容错从宽:文件坏/不是数组 → 整批作废并警告(相关判据回落广播);条目缺 node_id 跳过;
+    源名过滤到本产物源集,过滤后为空 = 等同广播,不入表。路由永远只减重复、不丢判据。"""
+    routes = {}
+    if not ddir.is_dir():
+        return routes
+    for p in sorted(ddir.glob("route_batch*_result.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"[warn] 路由结果 {p.name} 读取失败({e}),该批路由作废(相关判据回落广播)",
+                  file=sys.stderr)
+            continue
+        if not isinstance(data, list):
+            print(f"[warn] 路由结果 {p.name} 不是 JSON 数组,作废(相关判据回落广播)", file=sys.stderr)
+            continue
+        for e in data:
+            if not isinstance(e, dict) or not e.get("node_id"):
+                continue
+            srcs = {s for s in (e.get("sources") or []) if s in inds}
+            if srcs:
+                routes[str(e["node_id"])] = srcs
+    return routes
+
+
 def digest_block(nid: str, dg: dict, include_depends: bool = False) -> str:
     """一条纪要 → 简报里的 ◆ 块(单源批与 --cross 补绑简报共用,防两处走形)。
     depends 只在 include_depends=True(跨源补绑简报)时附——单源批里它唯一的实测作用是投降诱饵
@@ -390,7 +434,14 @@ def main() -> int:
     ap.add_argument("--tree-index", default="", help="缺省=<OUT>/tree/*.tree_index.json(须唯一)")
     ap.add_argument("--cross", action="store_true",
                     help="生成跨源补绑简报(读 dispatch/cross_candidates.json,由 merge_conditions 汇集)")
+    ap.add_argument("--route", action="store_true",
+                    help="生成路由简报(预分诊小步):子代理只判每条判据可能归哪些源,写 "
+                         "dispatch/route_batch<N>_result.json;收货后重跑本脚本(不带 --route),"
+                         "各源批只装归自己的判据——砍掉'每源都判全量判据'的 N 倍重复")
     args = ap.parse_args()
+    if args.route and args.cross:
+        _fail("--route 与 --cross 互斥:路由是绑定前的预分诊,cross 是绑定后的补绑")
+        return 2
     t0 = time.time()
 
     out = Path(args.out)
@@ -418,6 +469,53 @@ def main() -> int:
         return 2
 
     ov_dir = out / "overview"
+
+    if args.route:                                       # 路由小步:只出"预分诊"简报,不出绑定简报
+        digests = load_digests(out)
+        pool = [c for c in conditions
+                if not any(s in inds for s in (digests.get(c[0]) or {}).get("sources") or [])]
+        if not pool:
+            print("全部判据都有纪要 sources 路由,无需路由批——直接跑本脚本(不带 --route)出简报。")
+            return 0
+        ddir = out / "dispatch"
+        ddir.mkdir(parents=True, exist_ok=True)
+        old = _load_route(ddir, inds)
+        if old:
+            print(f"⚠ dispatch/ 已有路由结果覆盖 {len(old)} 条判据——本次会重写路由简报,"
+                  "收到新结果后以新为准")
+        src_lines = ["【可选源清单(sources 只能从这些名字里选,原样照抄)】"]
+        for ind in inds:
+            ov = ov_dir / f"{ind}_overview.json"
+            cols = []
+            if ov.exists():
+                try:
+                    cols = (json.loads(ov.read_text(encoding="utf-8")).get("summary") or {}).get("columns") or []
+                except (OSError, json.JSONDecodeError):
+                    cols = []
+            hint = ("列名:" + "、".join(str(c) for c in cols[:30])) if cols \
+                else "(概览缺失,列名未知——拿不准是否归它时把它也选上)"
+            src_lines.append(f"- {ind}:{hint}")
+        src_block = "\n".join(src_lines)
+        batches = split_batches(pool, {}, 60)            # 路由是快判,批可以大:60 条/批
+        for i, batch in enumerate(batches, 1):
+            rp = ddir / f"route_batch{i}_result.json"
+            lines = [f"# 路由简报:第 {i}/{len(batches)} 批(本批 {len(batch)} 条判据,路由池共 {len(pool)} 条)\n"
+                     f"【结果文件】{rp}",
+                     ROUTE_RULES, src_block,
+                     f"【本批判据清单(共 {len(batch)} 条)】"]
+            for nid, name, cond in batch:
+                lines.append(f"\n[{nid}] {name}\n{cond}")
+            lines.append(ROUTE_OUTPUT)
+            (ddir / f"route_batch{i}.txt").write_text("\n\n".join(lines) + "\n", encoding="utf-8")
+        print(f"路由简报 {len(batches)} 份 → {ddir}/route_batch<N>.txt(判据 {len(pool)} 条,≤60 条/批)。")
+        print("派发句式(一份简报派一个子代理,批少通常 1 个就够):")
+        print("  「你的全部任务和材料在 <简报路径>,用 Read 读完它,照其中规约执行——")
+        print("    结果写到简报指定的结果文件,最终回复只报『共 N 条,已写 <路径>』」")
+        print("收货后重跑本脚本(不带 --route)出各源绑定简报;路由结果坏/缺 → 对应判据自动回落广播,不丢。")
+        _record_timing(out, "make_dispatch_route", time.time() - t0,
+                       judgments=len(pool), briefs=len(batches))
+        return 0
+
     # 外挂知识(tree/knowledge.md):按树的节点名+判据文本匹配「适用」标签,命中的条目进每份简报
     name_pool = scenario + "\n" + "\n".join(f"{name} {cond}" for _, name, cond in conditions)
     knowledge_text = load_knowledge(out, name_pool)
@@ -517,16 +615,33 @@ def main() -> int:
             print(f"⚠ 纪要超长截断 {len(trunc)} 条(正文>2000字或正则>8条,超出部分不进简报,"
                   f"必要时精简纪要):{'、'.join(trunc[:6])}")
 
+    route_map = _load_route(out / "dispatch", inds)      # 路由批结果(可选,--route 小步产出)
+
     def routed_conditions(ind):
-        """源路由:纪要声明了 sources 的判据只进对应源的批(省无用功);没纪要/没声明/声明的源
-        与本产物源集全对不上(响亮告警过)→ 广播(进每个源的批,老行为,谁能答谁答)。"""
+        """源路由三级:①纪要声明了 sources 的判据只进对应源的批(最强,来自交付包实测);
+        ②路由批标注(模型快判"可能归哪些源",多选宁多勿漏);③都没有 → 广播(进每个源的批,
+        老行为,谁能答谁答——三源全量重复=3× 判断量,路由批就是为砍它)。"""
         outc = []
         for c in conditions:
             srcs = (digests.get(c[0]) or {}).get("sources") or []
             known = [s for s in srcs if s in inds]
-            if not known or ind in known:
-                outc.append(c)
+            if known:
+                if ind in known:
+                    outc.append(c)
+                continue
+            rt = route_map.get(c[0])
+            if rt and ind not in rt:
+                continue
+            outc.append(c)
         return outc
+
+    if route_map:
+        routed_n = sum(1 for c in conditions if c[0] in route_map
+                       and not [s for s in (digests.get(c[0]) or {}).get("sources") or [] if s in inds])
+        total_evals = sum(len(routed_conditions(i)) for i in inds)
+        print(f"路由批生效:{routed_n} 条判据按路由裁剪,其余按纪要/广播;"
+              f"各源判断量合计 {total_evals}(广播口径为 {len(conditions) * len(inds)},"
+              f"省 {100 - round(total_evals * 100 / max(1, len(conditions) * len(inds)))}%)")
 
     if digests:
         orphan = [c for c in conditions
@@ -563,10 +678,10 @@ def main() -> int:
             continue
         enum_texts = [(f.name, f.read_text(encoding="utf-8")) for f in enum_files]
         ind_conds = routed_conditions(ind)
-        if digests and len(ind_conds) < len(conditions):
-            print(f"  {ind}:源路由后 {len(ind_conds)}/{len(conditions)} 条(其余判据的纪要声明归别的源)")
+        if (digests or route_map) and len(ind_conds) < len(conditions):
+            print(f"  {ind}:源路由后 {len(ind_conds)}/{len(conditions)} 条(其余判据由纪要/路由批归到别的源)")
         if not ind_conds:
-            print(f"  {ind}:没有归本源的判据(纪要全路由走了),本源不出简报")
+            print(f"  {ind}:没有归本源的判据(纪要/路由批全路由走了),本源不出简报")
             continue
         batches = split_batches(ind_conds, inject, args.batch_size)
         n_batches = len(batches)
@@ -582,7 +697,7 @@ def main() -> int:
     # 老 dispatch 目录没有铭牌 → merge 不启用该检查,向后兼容)
     (ddir / "manifest.json").write_text(json.dumps({"complete_marker": True}, ensure_ascii=False),
                                         encoding="utf-8")
-    print(f"判据共 {len(conditions)} 条 → 每源 {n_batches} 批(≤{args.batch_size} 条/批)。已生成简报 {len(written)} 份:")
+    print(f"判据共 {len(conditions)} 条 → 简报 {len(written)} 份(≤{args.batch_size} 条/批;路由/纪要生效时各源批数不同):")
     for ind, i, n, p in written:
         print(f"  {ind} 批{i}({n} 条) → {p}")
     if written:
