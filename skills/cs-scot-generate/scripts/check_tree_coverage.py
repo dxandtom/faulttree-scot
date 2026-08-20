@@ -150,6 +150,15 @@ def main() -> int:
         print("至少给一个 --analyzer 或 --facts", file=sys.stderr)
         return 2
 
+    # cross_analyzer 漏传点名:cross 通道的绑定同样认领叶子,漏传它 → 已绑数虚低、"整支未触达"虚高,
+    # 实测就这么误报过 ❌ 逼人白排查。位置按产物布局推(<OUT>/scripts/,与 tree_index 同圈)。
+    cross_ap = Path(args.tree_index).resolve().parent.parent / "scripts" / "cross_analyzer.py"
+    if cross_ap.exists() and cross_ap.resolve() not in {Path(a).resolve() for a in args.analyzer}:
+        n_cx = sum(_claims_from_analyzer(cross_ap).values())
+        if n_cx:
+            print(f"⚠ {cross_ap.name} 带 {n_cx} 个绑定单元却没传给本闸——已绑数会虚低、整支未触达会虚高。"
+                  f"把它也加上再跑:--analyzer \"{cross_ap}\"(有 cross_facts 再加 --facts)。")
+
     per_source = {}                                     # 源标签 → {node_id: 绑定单元数}(跨源认领对账用)
     def _merge(label, units):
         d = per_source.setdefault(label, {})

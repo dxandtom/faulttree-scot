@@ -440,9 +440,15 @@ def main() -> int:
                     help="生成路由简报(预分诊小步):子代理只判每条判据可能归哪些源,写 "
                          "dispatch/route_batch<N>_result.json;收货后重跑本脚本(不带 --route),"
                          "各源批只装归自己的判据——砍掉'每源都判全量判据'的 N 倍重复")
+    ap.add_argument("--no-route", action="store_true",
+                    help="显式跳过路由按广播派发(判断量 ×源数)。路由简报在场却没有结果时,"
+                         "正常模式默认拒产硬拦防跳步——确要广播才用这个放行")
     args = ap.parse_args()
     if args.route and args.cross:
         _fail("--route 与 --cross 互斥:路由是绑定前的预分诊,cross 是绑定后的补绑")
+        return 2
+    if args.route and args.no_route:
+        _fail("--route 与 --no-route 互斥")
         return 2
     t0 = time.time()
 
@@ -624,7 +630,21 @@ def main() -> int:
             print(f"⚠ 纪要超长截断 {len(trunc)} 条(正文>2000字或正则>8条,超出部分不进简报,"
                   f"必要时精简纪要):{'、'.join(trunc[:6])}")
 
-    route_map = _load_route(out / "dispatch", inds)      # 路由批结果(可选,--route 小步产出)
+    route_map = {} if args.no_route else _load_route(out / "dispatch", inds)  # 路由批结果(--route 小步产出)
+    # 跳步硬拦:路由简报生成了、结果却一条没解析出来 → 拒产。实测弱模型出完路由简报 19 秒就直接
+    # 重跑本命令(没派子代理、没收结果),脚本按"结果缺→回落广播"静默放行,路由白做、判断量 ×源数
+    # 全数回来。广播必须是显式选择(--no-route),不能是跳步的默认奖励。
+    if not args.no_route and not route_map:
+        rb = sorted((out / "dispatch").glob("route_batch*.txt")) if (out / "dispatch").is_dir() else []
+        if rb:
+            has_res = any((out / "dispatch").glob("route_batch*_result.json"))
+            _fail("路由简报已生成但路由没走完——"
+                  + ("结果文件在,但一条路由都没解析出来(全坏/全空,看上方 [warn])"
+                     if has_res else f"还没派子代理收结果({len(rb)} 份简报,0 份 route_batch*_result.json)")
+                  + "。两条路(二选一):\n"
+                    "  ① 按路由简报派子代理(派发句式见 --route 的输出),结果落盘后重跑本命令;\n"
+                    "  ② 确要跳过路由按广播派(判断量 ×源数,不推荐)→ 重跑本命令加 --no-route。")
+            return 1
 
     def routed_conditions(ind):
         """源路由三级:①纪要声明了 sources 的判据只进对应源的批(最强,来自交付包实测);
