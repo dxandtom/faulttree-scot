@@ -187,6 +187,10 @@ def main() -> int:
         for n in sorted(plan[ind]):
             rp = ddir / f"{ind}_batch{n}_result.py"
             tag = rp.stem
+            jp = ddir / f"{ind}_batch{n}_result.json"
+            if not rp.exists() and jp.exists():         # 子代理把扩展名写成 .json(路由批惯性,实测一轮 7 份)
+                jp.rename(rp)                           # → 机械代收改名,验收流程一字不松
+                print(f"⚠ {ind} 批{n}:结果写成了 .json,已代收为 {rp.name}(规约是 _result.py,验收照常)")
             if not rp.exists():
                 pending.append(f"{ind} 批{n}:结果文件未到({rp.name})——等子代理/同简报重派")
                 pending_inds.add(ind)
@@ -249,7 +253,12 @@ def main() -> int:
             all_warns += drift_warnings(entries, tag)
             got.append(f"批{n}={len(entries)}条" + (f"(去重-{dup})" if dup else ""))
         if not merged:
-            print(f"{ind}:0 批到货,未写入。")
+            if got:                                     # 结果到了、验收也过了,只是没有可写入本源的条目
+                print(f"{ind}:{' / '.join(got)}——到货但无直接绑定可写入"
+                      + (f"({n_marks} 条跨源标记已汇入候选,走 --cross 补绑)" if n_marks
+                         else "(子代理判定这些判据都不归本源答)"))
+            else:
+                print(f"{ind}:0 批到货,未写入。")
             continue
         analyzer = out / "scripts" / f"{ind}_analyzer.py"
         err = write_conditions(analyzer, merged)

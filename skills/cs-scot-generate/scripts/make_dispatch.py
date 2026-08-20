@@ -144,7 +144,8 @@ CROSS_RULES = """【跨源绑定规约——逐条遵守】
    产物,数据齐了也醒不来)。"""
 
 CROSS_OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
-把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
+把结果用 Write 写到文首【结果文件】路径(**文件名逐字照抄,以 `_result.py` 结尾——别写成 `.json`**),
+内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
 写完后最终回复只报一行「共 N 条,已写 <路径>」。每条字段:
 {"node_id":"<nN>","class":"…","source":"<最终查询落点的真实源名,如 config——绝不是 cross,必写>",
  ...类参数/param_from...,"mapping_reason":"<链条每一跳写实:参数从哪个源怎么抽、代到哪查什么>"}
@@ -181,7 +182,8 @@ stp bridge-address;④且该 MAC = display stp v-stp 回显 Bridge Mac 的 Activ
 (合并脚本靠它识别"写完了"还是"半路截断"——缺这行整批按截断重派。)"""
 
 OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
-把结果用 Write 写到文首【结果文件】路径,内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
+把结果用 Write 写到文首【结果文件】路径(**文件名逐字照抄,以 `_result.py` 结尾——别写成 `.json`**,
+那是路由批的格式;实测写错扩展名整批要返工),内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
 写完后最终回复只报一行「共 N 条,已写 <路径>」。**每条只写四类字段**:
 {{"node_id":"<nN>","class":"A/C/D/G/J/P 之一(B/E/F/H/I 已封存,别用)",...类参数...,"mapping_reason":"<写实>"}}
 - **id/node/condition_text/source 都不用写**——合并脚本会从 tree_index 机械回填(逐字、权威;
@@ -554,50 +556,57 @@ def main() -> int:
             print("没有跨源候选(无 cross_source 标记,诊断节点也都已被认领)——无需补绑。")
             return 0
         cond_by_id = {nid: (name, cond) for nid, name, cond in conditions}
-        rp = ddir / "cross_batch1_result.py"
-        sec = [f"# 跨源补绑简报:cross · 共 {len(cands)} 条候选判据\n【结果文件】{rp}",
-               f"你是诊断绑定专家,任务:为下面的跨源判据写 param_from/pair_from 绑定(或明确绑不了),"
-               f"产出 cross_analyzer.py 的 CONDITIONS 片段。场景:{scenario}。",
-               CROSS_RULES.format()]
+        ddir.mkdir(parents=True, exist_ok=True)
+        # 候选清单写回(含机械兜底扫进来的)——这是"cross 正在处理谁"的权威清单,
+        # check_tree_coverage 靠它给未绑叶子标"已进跨源候选",把"流程中"和"真漏"分开。
+        cand_p.write_text(json.dumps(cands, ensure_ascii=False, indent=1), encoding="utf-8")
+        shared = [f"你是诊断绑定专家,任务:为下面的跨源判据写 param_from/pair_from 绑定(或明确绑不了),"
+                  f"产出 cross_analyzer.py 的 CONDITIONS 片段。场景:{scenario}。",
+                  CROSS_RULES.format()]
         if knowledge_text:
-            sec.append("【外挂知识(业务同事手写:指路可信——去哪查/怎么查照它;但不是事实,查证靠数据)】\n"
-                       + knowledge_text)
+            shared.append("【外挂知识(业务同事手写:指路可信——去哪查/怎么查照它;但不是事实,查证靠数据)】\n"
+                          + knowledge_text)
         for ind in inds:
             ov = ov_dir / f"{ind}_overview.json"
             if ov.exists():
-                sec.append(f"【{ind} 源数据词汇——概览原文】\n" + ov.read_text(encoding="utf-8").strip())
+                shared.append(f"【{ind} 源数据词汇——概览原文】\n" + ov.read_text(encoding="utf-8").strip())
             else:
-                sec.append(f"【{ind} 源概览缺失】overview/{ind}_overview.json 不存在——该源列名未知,"
-                           "涉及它的绑定老实写 decision:insufficient_data 并注明缺概览")
+                shared.append(f"【{ind} 源概览缺失】overview/{ind}_overview.json 不存在——该源列名未知,"
+                              "涉及它的绑定老实写 decision:insufficient_data 并注明缺概览")
             for f in find_enums(ov_dir, ind):
-                sec.append(f"【{ind} 源数据词汇——枚举清单原文:{f.name}】\n"
-                           + f.read_text(encoding="utf-8").strip())
+                shared.append(f"【{ind} 源数据词汇——枚举清单原文:{f.name}】\n"
+                              + f.read_text(encoding="utf-8").strip())
         digests = load_digests(out)
         digests = {k: v for k, v in digests.items() if str(v.get("digest") or "").strip()}  # 空壳不注入
         if digests:
             n_hit = sum(1 for c in cands if str(c.get("node_id")) in digests)
             print(f"脚本纪要:跨源候选命中 {n_hit}/{len(cands)} 条——◆块已附进补绑简报(规格以纪要为准,"
                   "含依赖字段供 param_from 取材)")
-        lines = [f"【候选判据清单(共 {len(cands)} 条;condition_text 必须逐字取自这里)】"]
-        for c in cands:
-            nid = c.get("node_id")
-            name, cond = cond_by_id.get(nid, (c.get("node") or "?",
-                                              "(tree_index 里查不到判据原文——node_id 可能填错,核实后表态)"))
-            srcs = "、".join(c.get("sources") or [])
-            reasons = ";".join(c.get("reasons") or [])
-            lines.append(f"\n[{nid}] {name}(由 {srcs} 源标记" + (f":{reasons}" if reasons else "") + f")\n{cond}")
-            dg = digests.get(str(nid))
-            if dg:
-                lines.append(digest_block(str(nid), dg, include_depends=True))
-        sec.append("\n".join(lines))
-        sec.append(CROSS_OUTPUT_FORMAT)
-        ddir.mkdir(parents=True, exist_ok=True)
+        # 切批(≤12 条/批,与单源批同因):实测 27 条候选塞单代理,一跑 13 分钟、输出截断炸格式,整批返工。
+        # 词汇/规约每份简报原样重复——简报自包含,子代理互相看不见。
+        chunks = [cands[i:i + args.batch_size] for i in range(0, len(cands), args.batch_size)]
         (ddir / "manifest.json").write_text(json.dumps({"complete_marker": True}, ensure_ascii=False),
                                             encoding="utf-8")
-        bp = ddir / "cross_batch1.txt"
-        bp.write_text("\n\n".join(sec) + "\n", encoding="utf-8")
-        print(f"跨源补绑简报 → {bp}(候选 {len(cands)} 条)。派一个子代理处理,结果收 {rp.name},"
-              "然后重跑 merge_conditions.py 合并进 cross_analyzer.py。")
+        for i, chunk in enumerate(chunks, 1):
+            rp = ddir / f"cross_batch{i}_result.py"
+            lines = [f"【候选判据清单(共 {len(chunk)} 条;condition_text 必须逐字取自这里)】"]
+            for c in chunk:
+                nid = c.get("node_id")
+                name, cond = cond_by_id.get(nid, (c.get("node") or "?",
+                                                  "(tree_index 里查不到判据原文——node_id 可能填错,核实后表态)"))
+                srcs = "、".join(c.get("sources") or [])
+                reasons = ";".join(c.get("reasons") or [])
+                lines.append(f"\n[{nid}] {name}(由 {srcs} 源标记" + (f":{reasons}" if reasons else "") + f")\n{cond}")
+                dg = digests.get(str(nid))
+                if dg:
+                    lines.append(digest_block(str(nid), dg, include_depends=True))
+            sec = ([f"# 跨源补绑简报:cross · 第 {i}/{len(chunks)} 批(本批 {len(chunk)} 条,候选共 {len(cands)} 条;"
+                    f"其余批由别的子代理处理,你只管本批)\n【结果文件】{rp}"]
+                   + shared + ["\n".join(lines), CROSS_OUTPUT_FORMAT])
+            (ddir / f"cross_batch{i}.txt").write_text("\n\n".join(sec) + "\n", encoding="utf-8")
+        print(f"跨源补绑简报 {len(chunks)} 份 → {ddir / 'cross_batch<N>.txt'}(候选 {len(cands)} 条,"
+              f"≤{args.batch_size} 条/批)。一份简报派一个子代理(分波规矩同单源批),"
+              "结果收各批 cross_batch<N>_result.py,然后重跑 merge_conditions.py 合并进 cross_analyzer.py。")
         return 0
 
     digests = load_digests(out)
