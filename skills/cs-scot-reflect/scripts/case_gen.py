@@ -10,7 +10,10 @@
     python case_gen.py --product <产物目录或打包技能目录> \
                        --packages <交付包根目录/单包目录/zip（合集 zip、目录里躺一堆 zip 都行）> \
                        --cases-out <cases 输出目录> \
-                       [--copy-data] [--force]
+                       [--map <节点↔zip对应表 xlsx/csv>] [--copy-data] [--force]
+
+包目录混乱(「互补」变体、多时间戳版本、改名 zip)导致名字匹配大面积歧义时,**加 --map**:
+调优表导出天然带 node_id 列和产物 zip 文件名列,照表精确对号,零赌博。
 
 --packages 的消化语义与 migrate 一致：zip → 解到临时区并递归解嵌套 zip；目录里有 zip →
 拷到临时区再解（绝不动用户目录）；纯目录 → 原样用。来自 zip/临时区的测试数据会**强制拷贝**
@@ -171,8 +174,10 @@ def find_test_data(pkg_dir: Path) -> Optional[Path]:
     return cands[0] if cands else None
 
 
-def index_packages(root: Path) -> List[Dict[str, Any]]:
-    """全根扫一遍，建候选包索引：[{dir, aliases(归一化名集合), data}]。
+def index_packages(root: Path, zip_root: bool = False) -> List[Dict[str, Any]]:
+    """全根扫一遍，建候选包索引：[{dir, aliases(归一化名集合), title, src_zip, data}]。
+    zip_root=True(root 是 zip 解包临时区)时记 src_zip=包所在的顶层解包目录名(即来源 zip 的
+    文件名去扩展名,归一化)——--map 按它精确对号。
 
     包身份**优先取包内 判断方法*.md**（台账包名的同源出处，目录叫什么都不影响对号）：
     md 标题名 + md 文件名名 + 所在目录名 + 各级到 root 的中间目录名都记为别名。
@@ -192,9 +197,17 @@ def index_packages(root: Path) -> List[Dict[str, Any]]:
         seen.add(pdir)
         aliases = {_norm(n) for n in names if n}
         aliases.discard("")
+        src = ""
+        if zip_root:
+            try:
+                rel = pdir.relative_to(root)
+                seg = rel.parts[0] if rel.parts else pdir.name
+            except ValueError:
+                seg = pdir.name
+            src = _norm(re.sub(r"~\d+$", "", seg))         # 去掉同名 zip 改名共存加的 ~N 后缀
         # title=包的"正名"(md 标题优先):同名多版本判定的依据——两个候选 title 相同=同包不同批次
         pkgs.append({"dir": pdir, "aliases": aliases, "title": _norm(title),
-                     "data": find_test_data(pdir)})
+                     "src_zip": src, "data": find_test_data(pdir)})
 
     for md in sorted(root.rglob("判断方法*.md")):
         if "规范" in md.name:
@@ -267,6 +280,55 @@ def match_package(pkgs: List[Dict[str, Any]], package_node: str):
     return None, "找不到能对上的包（目录名/判断方法md标题都不匹配）"
 
 
+def load_node_zip_map(path: Path) -> Dict[str, str]:
+    """--map 对应表 → {node_id: 归一化 zip 名(去扩展名)}。**权威对号通道**:tester 实产包目录里
+    「互补」变体(真不同包)、多时间戳版本、改名 zip 会让名字模糊匹配大面积歧义/落空(实测 51 项
+    只对上 8),而调优表导出天然带 node_id 列 + 产物 zip 文件名列——照表对号,零赌博。
+    xlsx 用 openpyxl(migrate 调优表同款依赖);csv 用标准库。列识别:node_id 列=表头恰为
+    node_id;zip 列=表头含 zip/产物/文件名/优化包/package,识别不出就退化为"该行里以 .zip 结尾
+    的单元格"。值可带全路径,只取文件名。多页 xlsx 取第一页(调优表导出的汇总页)。"""
+    rows: List[list] = []
+    if path.suffix.lower() == ".csv":
+        import csv
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            rows = [list(r) for r in csv.reader(f)]
+    else:
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            raise SystemExit("--map 读 xlsx 需要 openpyxl(migrate 调优表同款依赖);"
+                             "装不上就把对应表另存为 csv 再传")
+        wb = load_workbook(path, read_only=True, data_only=True)
+        ws = wb.worksheets[0]
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+        wb.close()
+    if not rows:
+        raise SystemExit(f"--map 空表：{path}")
+    low = [str(h or "").strip().lower() for h in rows[0]]
+    if "node_id" not in low:
+        raise SystemExit("--map 表头里找不到 node_id 列——用带 node_id 的表(调优表导出即有)")
+    nid_col = low.index("node_id")
+    zip_col = next((i for i, h in enumerate(low)
+                    if any(k in h for k in ("zip", "产物", "文件名", "优化包", "package"))), None)
+    out: Dict[str, str] = {}
+    for r in rows[1:]:
+        nid = str(r[nid_col] or "").strip() if nid_col < len(r) else ""
+        if not nid:
+            continue
+        val = str(r[zip_col] or "").strip() if zip_col is not None and zip_col < len(r) else ""
+        if not val.lower().endswith(".zip"):
+            val = next((str(c).strip() for c in r
+                        if isinstance(c, str) and c.strip().lower().endswith(".zip")), "")
+        if not val:
+            continue
+        stem = _norm(re.sub(r"\.zip$", "", Path(val.replace("\\", "/")).name, flags=re.I))
+        if nid in out and out[nid] != stem:
+            print(f"[case_gen] ⚠ --map 里 {nid} 对应多个不同 zip,取首见", file=sys.stderr)
+            continue
+        out[nid] = stem
+    return out
+
+
 def sanitize(name: str) -> str:
     """目录名安全化：路径分隔符等一律换下划线（中文保留——用例库本就在中文环境用）。"""
     return re.sub(r'[\\/:*?"<>|\s]+', "_", str(name)).strip("_") or "unnamed"
@@ -310,6 +372,10 @@ def main() -> None:
                          "目录里带 zip 时自动强制拷贝——临时解包区跑完即清）")
     ap.add_argument("--force", action="store_true",
                     help="已存在的用例目录默认跳过（幂等、不冲人工修改）；加本参数强制重生成")
+    ap.add_argument("--map", dest="map_path", default="",
+                    help="节点↔zip 对应表(xlsx/csv,须含 node_id 列 + zip 文件名列,如调优表导出的"
+                         "「产物文件名」)。给了它,台账节点优先按表精确对号——治「互补」变体/多时间戳"
+                         "版本/改名 zip 造成的名字匹配歧义;表里没有的节点回落名字匹配")
     a = ap.parse_args()
 
     product = locate_product(Path(a.product).expanduser().resolve())
@@ -336,9 +402,12 @@ def main() -> None:
 
     pkg_index = []
     for root in package_roots:
-        pkg_index += index_packages(root)
+        pkg_index += index_packages(root, zip_root=(ephemeral and root == package_roots[0]))
     print(f"[case_gen] 在 {' 与 '.join(str(r) for r in package_roots)} 下扫到 {len(pkg_index)} 个候选包"
           f"（身份以包内 判断方法*.md 为准，目录名只是别名之一）")
+    nid_zip = load_node_zip_map(Path(a.map_path).expanduser().resolve()) if a.map_path else {}
+    if nid_zip:
+        print(f"[case_gen] --map 载入 {len(nid_zip)} 条节点↔zip 对应——这些节点按表精确对号,不走名字匹配")
 
     made, skipped, problems = [], [], []
     for nid, entry in sorted(ledger.items()):
@@ -350,11 +419,29 @@ def main() -> None:
             continue
         node_name = node.get("name", package_node)
 
-        pkg, why = match_package(pkg_index, package_node)
-        if pkg is None:
-            problems.append(f"{nid}「{package_node}」：{why}——跳过")
-            continue
-        if why:                                            # 对上了但带注记(同名多版本取最新)——响亮播报
+        pkg, why = None, None
+        want = nid_zip.get(nid)
+        if want:                                           # --map 权威通道:按来源 zip 精确对号
+            hits = [p for p in pkg_index if p.get("src_zip") == want]
+            if not hits:
+                problems.append(f"{nid}「{package_node}」：--map 指到 zip「{want}」,但 --packages 里"
+                                f"没有这个 zip(或没解出内容)——核对表/补包;跳过")
+                continue
+            if len(hits) == 1:
+                pkg = hits[0]
+            else:                                          # 同一个 zip 解出多个子包:在子集内再按名字分
+                pkg, why = match_package(hits, package_node)
+                if pkg is None:
+                    problems.append(f"{nid}「{package_node}」：--map 的 zip「{want}」里有多个子包"
+                                    f"且分不开({why})——跳过")
+                    continue
+            why = "; ".join(x for x in (f"按 --map 对号 zip「{want}」", why) if x)
+        else:
+            pkg, why = match_package(pkg_index, package_node)
+            if pkg is None:
+                problems.append(f"{nid}「{package_node}」：{why}——跳过")
+                continue
+        if why:                                            # 对上了但带注记(map 对号/同名多版本取最新)
             print(f"  ⚠ {nid}「{package_node}」：{why}")
         data_dir = pkg["data"]
         if data_dir is None:
