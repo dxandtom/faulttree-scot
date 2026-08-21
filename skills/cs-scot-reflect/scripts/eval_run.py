@@ -541,67 +541,47 @@ def build_v9_checks(
     classify_data: Dict[str, Any],
     run_data: Dict[str, Any]
 ) -> Dict[str, Dict[str, Any]]:
-    """将各检查结果转换为 v9 SKILL.md 规定的 checks 结构
+    """将分类结果转换为 checks 结构(v11:六键三态,与「六类按序命中即停」严格一致)
 
-    SKILL.md checks 格式:
-        {
-          "env_failure":  {"passed": bool, "detail": any},
-          "binding_gap":  {"passed": bool, "detail": any},
-          "knowledge_gap":{"passed": bool, "detail": any},
-          "criteria_gap": {"passed": bool, "detail": any},
-          "verdict_gap":  {"passed": bool, "detail": any}
-        }
-    """
-    # env_failure: 检查是否有执行失败的节点
-    exec_failures = []
-    execution_status = run_data.get("execution_status", {})
-    for node_id, status in execution_status.items():
-        if isinstance(status, dict) and not status.get("ok", True):
-            exec_failures.append(node_id)
-    env_failure_passed = len(exec_failures) == 0
-
-    # binding_gap: 检查是否有未绑定节点（check_binding.py 的输出键是 "unbound"）
-    unbound_nodes = binding_check_data.get("unbound") or binding_check_data.get("unbound_nodes") or []
-    unbound_count = binding_check_data.get("unbound_count", len(unbound_nodes))
-    binding_gap_passed = unbound_count == 0
-
-    # knowledge_gap: tree_check 返回 missing 节点列表
-    missing_nodes = tree_check_data.get("missing", []) if tree_check_data else []
-    knowledge_gap_passed = len(missing_nodes) == 0
-
-    # criteria_gap / verdict_gap: classify 输出的 error_class 是整数（0~5），不是字符串
+    {
+      "env_failure":  {"passed": true/false/null, "detail": any},
+      "input_gap":    {...}, "binding_gap": {...}, "knowledge_gap": {...},
+      "criteria_gap": {...}, "verdict_gap": {...}
+    }
+    passed 三态:true=评了且通过;false=命中(整场唯一,链条停在这);
+    **null=没评到**(前序命中,按序评估已终止)。v10 之前把没评到的关写成
+    passed:true,平台/评分一读就是"通过",语义错——三态就是为修它。
+    passed 一律按 classify 的 error_class(0~5)链条推导(单一事实来源);
+    detail 只在命中的那关附机械原料(执行失败节点/缺源/未绑列表/问题节点)。"""
     classified = classify_data.get("classified", False)
     try:
-        error_class = int(classify_data.get("error_class"))
+        ec = int(classify_data.get("error_class"))
     except (TypeError, ValueError):
-        error_class = -1
-    criteria_gap_passed = not (classified and error_class == 4)
+        ec = None
+    if not classified:
+        ec = None                                        # PASS:六关全过
 
-    # verdict_gap: classify 中 VERDICT_GAP 触发
-    verdict_gap_passed = not (classified and error_class == 5)
-
-    return {
-        "env_failure": {
-            "passed": env_failure_passed,
-            "detail": exec_failures if exec_failures else None
-        },
-        "binding_gap": {
-            "passed": binding_gap_passed,
-            "detail": unbound_nodes if unbound_nodes else None
-        },
-        "knowledge_gap": {
-            "passed": knowledge_gap_passed,
-            "detail": missing_nodes if missing_nodes else None
-        },
-        "criteria_gap": {
-            "passed": criteria_gap_passed,
-            "detail": classify_data.get("details", {}).get("node_id") if not criteria_gap_passed else None
-        },
-        "verdict_gap": {
-            "passed": verdict_gap_passed,
-            "detail": classify_data.get("details", {}).get("node_id") if not verdict_gap_passed else None
-        }
+    exec_failures = [nid for nid, st in (run_data.get("execution_status") or {}).items()
+                     if isinstance(st, dict) and not st.get("ok", True)]
+    unbound_nodes = binding_check_data.get("unbound") or binding_check_data.get("unbound_nodes") or []
+    missing_nodes = (tree_check_data or {}).get("missing") or []
+    cd_node = (classify_data.get("details") or {}).get("node_id")   # details 可能是 None,别 .get 上炸
+    details = {
+        0: exec_failures or None,
+        1: run_data.get("missing_inputs") or None,
+        2: unbound_nodes or cd_node,
+        3: missing_nodes or cd_node,
+        4: cd_node,
+        5: cd_node,
     }
+    keys = ["env_failure", "input_gap", "binding_gap", "knowledge_gap", "criteria_gap", "verdict_gap"]
+    out = {}
+    for i, key in enumerate(keys):
+        passed = True if ec is None or i < ec else (False if i == ec else None)
+        # detail 双职:命中关=定级原料;通过关=信息栏(如 PASS 场也把未绑节点留档,不定级);
+        # 没评到(null)不附——别让数据暗示"评过"。
+        out[key] = {"passed": passed, "detail": details[i] if passed is not None else None}
+    return out
 
 
 def _compute_verdict(
@@ -854,6 +834,23 @@ def generate_report(
             encoding="utf-8"
         )
         print(f"[eval_run] {case_id}: 报告已写入 {report_path}")
+
+        # 平台展示适配:同目录机械产出 quality_score.json(六维 BOOLEAN 计分,短路后未评维度
+        # 记 null/N-A,总分=通过关数/6×100;口径与实现见 score_report.py)。EVAL_ERROR 无有效
+        # 评分主动跳过;生成失败不拖垮评估——报告仍是权威,可手跑 score_report.py 补出。
+        try:
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location(
+                "score_report", Path(__file__).resolve().parent / "score_report.py")
+            _sr = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_sr)
+            _score_path = _sr.write_score(report_path)
+            print(f"[eval_run] {case_id}: 平台评分已写入 {_score_path}")
+        except ValueError as e:
+            print(f"[eval_run] {case_id}: 不产 quality_score({e})")
+        except Exception as e:  # noqa: BLE001
+            print(f"[eval_run] ⚠ {case_id}: quality_score.json 生成失败({e})——评估报告不受影响,"
+                  f"可手跑 score_report.py \"{report_path}\" 补出")
 
         # 写入 eval_run.json（本次评估元数据，内部用）
         eval_run_meta = {

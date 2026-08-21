@@ -210,6 +210,7 @@ Step 3: 综合裁定 verdict
 ├── fuse_history.jsonl            # 熔断历史（跨轮累计，同case同节点同类计数）
 └── <case_id>-v<round>-<时间戳>/
     ├── evaluation_report.json    # 完整评估报告（唯一对外出口）
+    ├── quality_score.json        # 平台展示评分（六维 BOOLEAN + 总分，机械转换自报告）
     ├── failure_signatures.json   # 本用例失败签名（内部用）
     └── eval_run.json             # 本次评估元数据（内部用）
 ```
@@ -269,6 +270,7 @@ Step 3: 综合裁定 verdict
 
   "checks": {
     "env_failure": { "passed": true, "detail": null },
+    "input_gap": { "passed": true, "detail": null },
     "binding_gap": { "passed": true, "detail": null },
     "knowledge_gap": { "passed": true, "detail": null },
     "criteria_gap": { "passed": true, "detail": null },
@@ -276,6 +278,42 @@ Step 3: 综合裁定 verdict
   }
 }
 ```
+
+> `checks` 六键与错误分类六类一一对应,**passed 三态**:`true`=评了且通过;`false`=命中
+> (整场唯一,链条停在这,detail 附机械原料);**`null`=没评到**(前序命中,按序评估已终止)。
+> 三态按 classify 的 error_class 链条机械推导——旧版把没评到的关写成 `passed:true`,
+> 下游一读就是"通过",语义错,v11 起修正。
+
+### quality_score.json(平台展示评分,机械转换自报告)
+
+评估流程末尾由 eval_run.py 自动生成(`score_report.py`,零模型参与);平台展示**直接读这个文件**。
+也可对任意历史报告手跑补出:`python scripts/score_report.py <evaluation_report.json 或其目录>`。
+
+```json
+{
+  "total_score": 83,
+  "dimensions": {
+    "env_failure":   {"value": true,  "score": 100, "reason": {"default": "通过:未发现执行环境(ENV_FAILURE)类问题。", "zh_CN": "…", "en_US": "Passed: no Execution Environment (ENV_FAILURE) issue detected."}},
+    "input_gap":     {"value": true,  "score": 100, "reason": {"default": "…", "zh_CN": "…", "en_US": "…"}},
+    "binding_gap":   {"value": true,  "score": 100, "reason": {"default": "…", "zh_CN": "…", "en_US": "…"}},
+    "knowledge_gap": {"value": true,  "score": 100, "reason": {"default": "…", "zh_CN": "…", "en_US": "…"}},
+    "criteria_gap":  {"value": true,  "score": 100, "reason": {"default": "…", "zh_CN": "…", "en_US": "…"}},
+    "verdict_gap":   {"value": false, "score": 0,   "reason": {"default": "未通过(VERDICT_GAP):<机械摘要,逐字取自 verdict_detail.reason>", "zh_CN": "…", "en_US": "Failed (VERDICT_GAP). See zh_CN for mechanical details."}}
+  },
+  "meta": {"case_id": "…", "scenario": "…", "round": 1, "verdict": "FAIL", "evaluation_time": "…", "error_class": "VERDICT_GAP"}
+}
+```
+
+口径(与"六关按序、命中即停"严格一致,不做程度打分):
+- 六维度=六类错误,顺序即评估顺序;`value_type=BOOLEAN`——通过 `value:true,score:100`,
+  命中 `value:false,score:0`,**没评到 `value:null,score:null`**(展示层渲染成 N/A);
+- **total_score = 通过维度数 ÷ 6 × 100(取整)**,语义"六关过了几关":全过 100、
+  挂第 1 关 0、挂最后一关 83——挂得越早分越低;
+- `reason` 三语模板化(default=zh_CN;en_US 固定模板,机械转换不做自由翻译),失败维度
+  zh_CN 附逐字机械摘要;
+- EVAL_ERROR(评估自身失败)**不产**此文件——宁缺评分,不拿假分冒充;
+- 维度 key/三语名称与描述/权重(等权 1/6)/排序的平台置信度配置对照表:
+  `references/score_dimensions.md`。
 
 ### failure_signatures.json（内部便利文件）
 
