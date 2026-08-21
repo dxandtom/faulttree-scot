@@ -148,22 +148,65 @@ def check_env_failure(run_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def check_input_gap(run_data: Dict[str, Any], missed_count: int) -> Optional[Dict[str, Any]]:
+def _sources_absent_in_case_data(missing, expected_data: Dict[str, Any]) -> set:
+    """机械判定:缺的源在**用例自带数据里本来就不存在**的集合。
+
+    依据=用例数据是判定的充分数据(tester 契约:这份数据跑出来就该命中期望)。数据里压根
+    没有某类内容而期望仍要求命中,等于宣告"该根因不需要那个源"——缺它不是数据入口问题,
+    是判据绑定落点问题,不该被类1 截胡(实测:22 个无 LOG 采集的用例全被归 INPUT_GAP,
+    工单开成"使用方补数据"的死指令,而正解是迁移/改绑)。
+    判定=扫用例 data 目录的文件/目录名(上限 5000 个),名字里含源名(cmd/diag 互为同义)
+    即认为该源内容在场;expected 没记 data_source 或目录不存在 → 判不了,返回空集(保守)。"""
+    root = str(expected_data.get("data_source") or "").strip()
+    if not root or not Path(root).is_dir():
+        return set()
+    names = set()
+    for i, p in enumerate(Path(root).rglob("*")):
+        names.add(p.name.lower())
+        if i > 5000:
+            break
+    syn = {"cmd": ("cmd", "diag"), "diag": ("diag", "cmd")}
+    absent = set()
+    for k in missing:
+        keys = syn.get(str(k).lower(), (str(k).lower(),))
+        if not any(kk in n for n in names for kk in keys):
+            absent.add(k)
+    return absent
+
+
+def check_input_gap(run_data: Dict[str, Any], missed_count: int,
+                    expected_data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """类1: INPUT_GAP 检测
 
     条件: missing_inputs非空 且 有期望根因 MISSED（缺数据但全命中不算错，由 verdict 层
     按 PASS_WITH_GAPS 处理；阴性用例假阳与缺数据无因果，也不在这里拦）
+    **且缺的源是本可提供的**——两条机械豁免通道,命中即从缺口里剔除:
+    ① run.json 的 missing_kind 标 collection_absent(runner 认定采集不含该类,非漏传);
+    ② 用例自带数据里本来就没有该类内容(见 _sources_absent_in_case_data)。
+    剔完为空 → 类1 不成立,穿透继续查绑定层(修法在那边:迁移/改绑,不是要数据)。
     """
     missing = run_data.get("missing_inputs", [])
-    if missing and missed_count > 0:
-        return {
-            "class": 1,
-            "error_category": "INPUT_GAP",
-            "verdict": "needs_data",
-            "reason": f"缺失数据源: {missing}，且有期望根因漏判",
-            "missing_inputs": missing
-        }
-    return None
+    if not (missing and missed_count > 0):
+        return None
+    kind = run_data.get("missing_kind") or {}
+    absent = {k for k in missing if kind.get(k) == "collection_absent"}
+    if expected_data is not None:
+        absent |= _sources_absent_in_case_data([k for k in missing if k not in absent], expected_data)
+    supportable = [k for k in missing if k not in absent]
+    if not supportable:
+        print(f"[classify] 缺源 {sorted(absent)} 为数据形态天然不含(用例数据即如此,期望仍要求命中)"
+              "→ 不构成 INPUT_GAP,穿透继续查绑定层")
+        return None
+    reason = f"缺失数据源: {supportable}，且有期望根因漏判"
+    if absent:
+        reason += f"(另有 {sorted(absent)} 为数据形态天然不含,不计入)"
+    return {
+        "class": 1,
+        "error_category": "INPUT_GAP",
+        "verdict": "needs_data",
+        "reason": reason,
+        "missing_inputs": supportable
+    }
 
 
 def check_binding_gap(
@@ -366,7 +409,7 @@ def classify(
     # 按顺序检测各类错误
     checks = [
         ("ENV_FAILURE", lambda: check_env_failure(run_data)),
-        ("INPUT_GAP", lambda: check_input_gap(run_data, missed_count)),
+        ("INPUT_GAP", lambda: check_input_gap(run_data, missed_count, expected_data)),
         ("BINDING_GAP", lambda: check_binding_gap(binding_check, missed_nodes,
                                                   tree_index_data, rca_data)),
         ("KNOWLEDGE_GAP", lambda: check_knowledge_gap(tree_check, expected_roots)),
