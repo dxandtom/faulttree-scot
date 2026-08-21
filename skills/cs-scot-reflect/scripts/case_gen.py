@@ -94,27 +94,39 @@ def _explode(dst: Path) -> None:
             z.unlink()
 
 
-def prepare_packages_root(packages: Path, tmp: Path) -> Tuple[Path, bool]:
-    """把 --packages 消化成"全是目录"的形态（与 migrate 的 unpack 语义一致）。
+def prepare_packages_root(packages: Path, tmp: Path) -> Tuple[List[Path], bool]:
+    """把 --packages 消化成可扫描的根目录清单（与 migrate 的 unpack 语义一致）。
 
-    返回 (有效根目录, 是否临时区)。临时区在本次运行结束后清理——来自临时区的
+    目录里有 zip 时**只把 zip 文件拷进临时区解包**、原目录保持只读扫描（双根）——不整目录
+    copytree：实测用户的包目录里躺着 _work/__pycache__ 等深层嵌套，整拷会顶爆 Windows 路径
+    长度上限；而这些目录本就不该被复制——zip 才需要解，散包（含 _work 下带测试数据的）原地读。
+    返回 (根目录列表, 是否用了临时区)。临时区在本次运行结束后清理——来自临时区的
     测试数据必须拷进用例目录，记路径会变成空引用。
     """
     if packages.is_dir():
-        if not any(packages.rglob("*.zip")):
-            return packages, False
+        zips = [z for z in sorted(packages.rglob("*.zip")) if "__pycache__" not in z.parts]
+        if not zips:
+            return [packages], False
         dst = tmp / "packages"
-        print(f"[case_gen] --packages 里有 zip，拷到临时区解包（不动你的目录）…")
-        shutil.copytree(packages, dst)
+        dst.mkdir(parents=True, exist_ok=True)
+        print(f"[case_gen] --packages 里有 {len(zips)} 个 zip——只拷 zip 进临时区解包，"
+              "原目录只读扫描（不整目录拷：_work/__pycache__ 深层嵌套会顶爆 Windows 路径长度，实测）…")
+        for z in zips:
+            t = dst / z.name
+            i = 1
+            while t.exists():                              # 不同子目录里的同名 zip：改名共存，不覆盖
+                t = dst / f"{z.stem}~{i}{z.suffix}"
+                i += 1
+            shutil.copy2(z, t)
         _explode(dst)
-        return dst, True
+        return [dst, packages], True
     if packages.suffix.lower() != ".zip":
         raise SystemExit(f"--packages 应是目录或 .zip：{packages}")
     dst = tmp / "packages"
     print(f"[case_gen] --packages 是 zip，解到临时区…")
     _unzip(packages, dst)
     _explode(dst)
-    return dst, True
+    return [dst], True
 
 
 _FW = str.maketrans({"（": "(", "）": ")", "【": "[", "】": "]", "：": ":",
@@ -169,41 +181,68 @@ def index_packages(root: Path) -> List[Dict[str, Any]]:
     pkgs: List[Dict[str, Any]] = []
     seen: set = set()
 
-    def _add(pdir: Path, names) -> None:
+    def _add(pdir: Path, names, title: str = "") -> None:
         if pdir in seen:
             for p in pkgs:
                 if p["dir"] == pdir:
                     p["aliases"].update(_norm(n) for n in names if n)
+                    if not p["title"] and title:
+                        p["title"] = _norm(title)
             return
         seen.add(pdir)
         aliases = {_norm(n) for n in names if n}
         aliases.discard("")
-        pkgs.append({"dir": pdir, "aliases": aliases, "data": find_test_data(pdir)})
+        # title=包的"正名"(md 标题优先):同名多版本判定的依据——两个候选 title 相同=同包不同批次
+        pkgs.append({"dir": pdir, "aliases": aliases, "title": _norm(title),
+                     "data": find_test_data(pdir)})
 
     for md in sorted(root.rglob("判断方法*.md")):
         if "规范" in md.name:
             continue
         pdir = md.parent
-        names = [_md_name(md), re.sub(r"^判断方法[\s_\-::]*", "", md.stem), pdir.name]
+        primary = _md_name(md) or re.sub(r"^判断方法[\s_\-::]*", "", md.stem)
+        names = [primary, re.sub(r"^判断方法[\s_\-::]*", "", md.stem), pdir.name]
         if pdir != root:                                  # 中间层目录名也算别名(多套一层的形态)
             names += [p.name for p in pdir.parents if p != root and root in p.parents]
-        _add(pdir, names)
+        _add(pdir, names, title=primary or "")
 
     # 没被 md 覆盖的"散数据包"：自身直下有测试数据目录的目录
     for d in sorted(p for p in root.rglob("*") if p.is_dir()):
         if d in seen or "测试数据" in d.name:
             continue
         if any(c.is_dir() and "测试数据" in c.name for c in d.iterdir()):
-            _add(d, [d.name])
+            _add(d, [d.name], title=d.name)
     if root not in seen and find_test_data(root):          # 根目录本身就是单包
-        _add(root, [root.name])
+        _add(root, [root.name], title=root.name)
     return pkgs
+
+
+def _version_stamp(p: Dict[str, Any]) -> tuple:
+    """同名多版本的排序键：路径里最大的「日期[-时刻]」串（tester 包名自带,如 _20260811-090000），
+    退目录 mtime。只用于 title 相同的候选间选最新，不参与身份判定。"""
+    stamps = [a + (b or "000000")
+              for a, b in re.findall(r"(\d{8})[-_T]?(\d{6})?", str(p["dir"]))]
+    try:
+        mt = p["dir"].stat().st_mtime
+    except OSError:
+        mt = 0.0
+    return (max(stamps) if stamps else "", mt)
+
+
+def _pkg_label(p: Dict[str, Any]) -> str:
+    """播报用的包标识:取末两段路径——zip 解包形态里内层目录常同名(接口DOWN),
+    时间戳在外层(接口DOWN_20260811-090000/接口DOWN),只打内层名分不清取了哪版。"""
+    parts = p["dir"].parts
+    return "/".join(parts[-2:]) if len(parts) >= 2 else p["dir"].name
 
 
 def match_package(pkgs: List[Dict[str, Any]], package_node: str):
     """按归一化阶梯对号：①别名精确相等 ②别名包含包名 ③包名包含别名(别名≥4字防碰瓷)。
 
-    返回 (包, None) 或 (None, 问题说明)。同级多个命中=歧义，点名候选交人，不瞎猜。
+    返回 (包, 注记或None) 或 (None, 问题说明)。同级多个命中时分两种：
+    - 候选的「正名」(判断方法 md 标题)完全相同 = **同一个包的不同批次版本**(tester 重复生成,
+      文件名只差时间戳,实测一个文件夹里躺 84 个 zip 大半是这种)→ 机械取最新、响亮播报,不全灭;
+    - 正名不同 = 真歧义，点名候选交人，不瞎猜。
     """
     key = _norm(package_node)
     if not key:
@@ -217,7 +256,13 @@ def match_package(pkgs: List[Dict[str, Any]], package_node: str):
         if len(tier) == 1:
             return tier[0], None
         if len(tier) > 1:
-            names = ", ".join(str(p["dir"].name) for p in tier[:4])
+            titles = {p.get("title") or "" for p in tier}
+            if len(titles) == 1 and "" not in titles:
+                pick = max(tier, key=_version_stamp)
+                others = "、".join(_pkg_label(p) for p in tier if p is not pick)
+                return pick, (f"同名多版本 {len(tier)} 个(判断方法标题一致=同包不同批次),"
+                              f"机械取最新 {_pkg_label(pick)};忽略:{others}")
+            names = ", ".join(_pkg_label(p) for p in tier[:4])
             return None, f"多个候选包都对得上（{names}…）——歧义不瞎猜，把包目录名改唯一或人工指认"
     return None, "找不到能对上的包（目录名/判断方法md标题都不匹配）"
 
@@ -275,7 +320,7 @@ def main() -> None:
 
     tmp = Path(tempfile.mkdtemp(prefix="case-gen-"))
     atexit.register(shutil.rmtree, tmp, ignore_errors=True)   # 含 SystemExit 在内退出即清临时区
-    packages_root, ephemeral = prepare_packages_root(given_packages, tmp)
+    package_roots, ephemeral = prepare_packages_root(given_packages, tmp)
     copy_data = a.copy_data or ephemeral
     if ephemeral and not a.copy_data:
         print("[case_gen] 包来自 zip/临时解包区 → 测试数据将自动拷入各用例的 data/"
@@ -289,8 +334,10 @@ def main() -> None:
 
     nodes, scenario = load_tree(product)
 
-    pkg_index = index_packages(packages_root)
-    print(f"[case_gen] 在 {packages_root} 下扫到 {len(pkg_index)} 个候选包"
+    pkg_index = []
+    for root in package_roots:
+        pkg_index += index_packages(root)
+    print(f"[case_gen] 在 {' 与 '.join(str(r) for r in package_roots)} 下扫到 {len(pkg_index)} 个候选包"
           f"（身份以包内 判断方法*.md 为准，目录名只是别名之一）")
 
     made, skipped, problems = [], [], []
@@ -307,6 +354,8 @@ def main() -> None:
         if pkg is None:
             problems.append(f"{nid}「{package_node}」：{why}——跳过")
             continue
+        if why:                                            # 对上了但带注记(同名多版本取最新)——响亮播报
+            print(f"  ⚠ {nid}「{package_node}」：{why}")
         data_dir = pkg["data"]
         if data_dir is None:
             problems.append(f"{nid}「{package_node}」：对上了包 {pkg['dir'].name}，但里面没有"
@@ -328,6 +377,8 @@ def main() -> None:
             data_note = "数据已拷入 data/"
         else:
             data_note = f"数据在包内：{data_dir}"
+        if why:
+            data_note += f"；{why}"                        # 版本取舍进留痕,审计时知道数据来自哪一版
 
         expected = build_expected(case_id, scenario, nid, node_name,
                                   package_node, entry, data_note)
