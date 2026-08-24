@@ -78,8 +78,8 @@ Step 3: 输出分类结果
 
 ## 类2：BINDING_GAP（绑定层毛病）
 
-**定义**：绑定层的一切不一致——孤儿绑定（产出事实但树上无此节点），或节点有判据却没有
-任何绑定**且该节点与本用例的漏判相关**。
+**定义**：绑定层的一切不一致——孤儿绑定（产出事实但树上无此节点），或**漏判期望根因
+自身**有判据却没有任何绑定。
 
 **Verdict**: `needs_binding`
 
@@ -92,20 +92,23 @@ Step 3: 输出分类结果
 1. 节点存在
 2. 节点有 `condition`（判据）
 3. 节点在所有 analyzer 脚本中都没有任何绑定
-4. **相关性**：该节点是某个漏判（MISSED）期望根因**自身**，或位于其**祖先链**上
+4. **相关性**：该节点是某个漏判（MISSED）期望根因**自身**
 
-> 为什么要第 4 条：执行链有一条合规调优通道——中间节点判断方法不成熟时，人工清空该节点
-> 绑定，RCA 按"默认放行、报告注明此处未做判断"处理。全树扫到未绑定就报会把这条通道
-> 当错误无限追杀。与漏判无关的未绑定节点只进报告的信息栏（checks.binding_gap.detail），
-> 不定级、不进 feedback。
+> 为什么要第 4 条、且**只认自身不认祖先**：
+> - 祖先未绑定解释不了漏判——v4 执行口径（fault-tree-rca 的 rca_rules.md）规定
+>   未绑定/数据不足的**上级=默认放行**、永不阻断叶子确证。按"路径上级"定级只会
+>   引人往祖先补无 tester 包背书的绑定（=发明绑定）。
+> - 执行链另有一条合规调优通道——中间节点判断方法不成熟时，人工清空该节点绑定，
+>   RCA 按"默认放行、报告注明此处未做判断"处理。全树扫到未绑定就报会把这条通道
+>   当错误无限追杀。与漏判无关的未绑定节点只进报告的信息栏
+>   （checks.binding_gap.detail），不定级、不进 feedback。
 
 ### 检测逻辑（伪代码）
 
 ```
 for each missed_expected_node:
-    for node in {missed_expected_node} ∪ ancestors(missed_expected_node):
-        if node.has_condition and not node.has_any_binding:
-            → BINDING_GAP(node)
+    if missed_expected_node.has_condition and not missed_expected_node.has_any_binding:
+        → BINDING_GAP(missed_expected_node)
 ```
 
 ### 证据字段
