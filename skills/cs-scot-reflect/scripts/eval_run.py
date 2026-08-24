@@ -183,10 +183,12 @@ def find_case_result_dir(result_dir: Path, case_id: str,
     """为指定 case 查找对应的 result 子目录
 
     single 模式（用户直接指到结果目录）原样采用。
-    multi 模式按阶梯对号（多个命中取最新）:
-    ① 目录名含 case_id（执行时用 --result-suffix 显式标注的，仍然优先认）；
-    ② run.json 记录的输入数据路径落在本用例数据目录内（runner 每轮都写"出生证明"，
-       执行侧零配合——这是批量对号的主力通道）；
+    multi 模式按阶梯对号（多个命中取最新;带 -abandoned/-superseded 后缀的目录不参与）:
+    ① 目录名含完整 case_id（执行时用 --result-suffix 显式标注的，仍然优先认）；
+    ①b 目录名后缀段与 case_id 按段精确比对（后缀只认字母数字-_,执行侧常只带 nX 短段;
+       n5 只配 n5-*，配不上 n50-*）；
+    ② run.json 记录的输入数据路径落在本用例数据目录内（runner 每轮都写"出生证明"；
+       注意执行侧若喂的是合并副本目录，此通道会失手——①b 就是为这兜底）；
     ③ 只有一个候选 → 用它并警告；
     ④ 都对不上 → 拒绝猜测返回 None（拿别的用例的结果对账会把漏判/假阳全部张冠李戴）。
 
@@ -207,6 +209,13 @@ def find_case_result_dir(result_dir: Path, case_id: str,
     if named:
         return named[0]
 
+    by_sfx = [d for d in with_rca if _suffix_token_match(d, case_id)]
+    if by_sfx:
+        if len(by_sfx) > 1:
+            print(f"[warn] {case_id}: 短后缀命中 {len(by_sfx)} 个目录,取最新 {by_sfx[0].name}"
+                  f"(旧轮次确不该参与对号就改名加 -superseded 后缀移出)")
+        return by_sfx[0]
+
     by_inputs = [d for d in with_rca if _run_inputs_match(d, data_anchors or [])]
     if by_inputs:
         print(f"[info] {case_id}: 按 run.json 记录的输入数据路径对号 → {by_inputs[0].name}")
@@ -225,8 +234,14 @@ def find_case_result_dir(result_dir: Path, case_id: str,
     return None
 
 
+_RETIRED_SUFFIXES = ("-abandoned", "-superseded")   # 人工标记"移出对号"的目录后缀(空壳/残次轮留档)
+
+
 def find_result_subdirs(result_dir: Path) -> List[Path]:
     """在 result-dir 下查找所有 result-<timestamp> 格式的子目录
+
+    带 -abandoned / -superseded 后缀的目录 = 人工标记的空壳/残次轮留档,不参与对号
+    (实测:首次探路只喂了部分数据的残次轮若参与对号,可能顶掉正式轮)。
 
     Returns:
         按修改时间倒序排列的子目录列表
@@ -234,11 +249,25 @@ def find_result_subdirs(result_dir: Path) -> List[Path]:
     if not result_dir.exists():
         return []
     subdirs = sorted(
-        [d for d in result_dir.iterdir() if d.is_dir() and d.name.startswith("result-")],
+        [d for d in result_dir.iterdir() if d.is_dir() and d.name.startswith("result-")
+         and not d.name.endswith(_RETIRED_SUFFIXES)],
         key=lambda d: d.stat().st_mtime,
         reverse=True
     )
     return subdirs
+
+
+_SUBDIR_SFX_RE = re.compile(r"^result-(?:(?P<sfx>.+)-)?\d{8}T\d{6}Z-[0-9a-f]{6}$")
+
+
+def _suffix_token_match(d: Path, case_id: str) -> bool:
+    """①b 短后缀对号:runner 的 --result-suffix 只认字母数字-_,执行侧常按规约只用 case_id 的
+    nX 短段当后缀(中文进不了后缀)——目录名装不下完整 case_id 时,取目录名的后缀段与 case_id
+    **按段精确**比对:后缀 n5 只配 n5-*,配不上 n50-*(实测 9 个用例因短后缀配不上完整
+    case_id、run.json 又指向合并副本目录,双通道全失手被误判 EVAL_ERROR)。"""
+    m = _SUBDIR_SFX_RE.match(d.name)
+    sfx = (m.group("sfx") or "") if m else ""
+    return bool(sfx) and (case_id == sfx or case_id.startswith(sfx + "-"))
 
 
 
