@@ -89,6 +89,18 @@ def find_tree_indexes(skill_dir: Path) -> List[Path]:
     return sorted(tree_dir.glob("*.tree_index.json"))
 
 
+def find_skill_scripts_dir(skill_dir: Path, tree_index: Path) -> Path:
+    """analyzer 脚本目录——跟着 tree_index 走：两种布局里 tree/ 与 scripts/ 都是兄弟目录
+    （产物根/tree ↔ 产物根/scripts；<skill>/assets/tree ↔ <skill>/assets/scripts）。
+    指错目录 = check_binding 一个绑定都看不见 → 全树被当"未绑定"，一切漏判错归 BINDING_GAP。
+    """
+    for d in (tree_index.parent.parent / "scripts",
+              skill_dir / "assets" / "scripts", skill_dir / "scripts"):
+        if d.is_dir():
+            return d
+    return skill_dir / "scripts"
+
+
 def load_json(path: Path) -> Dict[str, Any]:
     """通用 JSON 加载"""
     try:
@@ -1150,10 +1162,14 @@ def main() -> None:
         tree_index = tree_indexes[0]
 
         # 执行一次 check_binding.py
+        skill_scripts_dir = find_skill_scripts_dir(skill_dir, tree_index)
+        if not skill_scripts_dir.is_dir():
+            print(f"[warn] 找不到 analyzer 脚本目录（按 {skill_scripts_dir} 兜底）——"
+                  "绑定检查将把全树当未绑定，BINDING_GAP 归因不可信，先核对 --skill-dir")
         binding_out = temp_dir / "shared_binding_check.json"
         binding_args = [
             "--tree-index", str(tree_index),
-            "--scripts-dir", str(skill_dir / "scripts"),
+            "--scripts-dir", str(skill_scripts_dir),
             "--out", str(binding_out)
         ]
         print(f"[eval_run] 执行共享绑定检查（所有case共用）...")

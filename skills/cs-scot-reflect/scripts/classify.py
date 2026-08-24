@@ -19,8 +19,9 @@
     0: ENV_FAILURE - execution_status.*.ok == false 或 run.json不存在
     1: INPUT_GAP - missing_inputs非空 且 有期望根因 MISSED
     2: BINDING_GAP - 绑定层的一切毛病：孤儿绑定（orphan：产出事实但树上无此节点，
-       典型=删节点没清绑定）；或 有判据无绑定且与漏判相关（漏判期望根因自身/其祖先）。
-       全树其余未绑定节点不定错——"清空绑定让节点默认放行"是执行链的合规调优通道，不追杀。
+       典型=删节点没清绑定）；或 漏判期望根因**自身**有判据无绑定。
+       祖先未绑定不算：v4 执行口径（rca_rules.md）未绑定上级=默认放行、永不阻断叶子确证，
+       解释不了漏判；全树其余未绑定节点也不定错——"清空绑定让节点默认放行"是合规调优通道。
     3: KNOWLEDGE_GAP - tree_index不存在该节点
     4: CRITERIA_GAP - predicate vs expected_facts不相等
     5: VERDICT_GAP - 裁决≠期望（含阴性用例假阳）——纯裁决层，事实全对还归错档才是它
@@ -31,7 +32,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 
 # 错误类别定义
@@ -62,26 +63,6 @@ def load_json(path: Path) -> Dict[str, Any]:
     except (json.JSONDecodeError, OSError) as e:
         print(f"[warn] 无法读取 {path}: {e}", file=sys.stderr)
         return {}
-
-
-def ancestor_chain(tree_index_data: Dict[str, Any], node_id: str) -> Set[str]:
-    """从 tree_index 沿 parent 指针上溯，返回 node_id 的祖先集合（不含自身）。
-
-    执行链的 tree_index：nodes 是字典，node_id 就是 key，节点体带 parent 字段。
-    """
-    nodes = tree_index_data.get("nodes", {})
-    if isinstance(nodes, list):  # 列表形态兜底：转成 {node_id: node}
-        nodes = {n.get("node_id") or n.get("id"): n for n in nodes
-                 if n.get("node_id") or n.get("id")}
-    chain: Set[str] = set()
-    cur = node_id
-    while cur in nodes:
-        parent = nodes[cur].get("parent")
-        if not parent or parent in chain:
-            break
-        chain.add(parent)
-        cur = parent
-    return chain
 
 
 def extract_actual_facts(rca_input_data: Dict[str, Any]) -> Dict[str, bool]:
@@ -212,16 +193,16 @@ def check_input_gap(run_data: Dict[str, Any], missed_count: int,
 def check_binding_gap(
     binding_check: Dict[str, Any],
     missed_nodes: List[str],
-    tree_index_data: Dict[str, Any],
     rca_data: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
     """类2: BINDING_GAP 检测（绑定层的一切毛病）
 
     条件一（孤儿绑定）: rca.json 的 tree_issues.orphan_node_ids 非空——执行产出了某节点
     的事实但树上没有这个节点（典型：删节点没清绑定），是绑定/树不一致，修法=清残留绑定。
-    条件二（缺绑定）: 有判据但无绑定（静态查tree_index），且该节点与本用例的漏判相关——
-    未绑定节点是某个漏判期望根因自身，或位于其祖先链上。
-    全树其余未绑定节点（含故意清空绑定走"默认放行"通道的）不定错。
+    条件二（缺绑定）: 某个漏判期望根因**自身**有判据但无绑定（静态查tree_index）。
+    祖先未绑定不构成本类：v4 执行口径（rca_rules.md）未绑定/数据不足的上级=默认放行、
+    永不阻断叶子确证，解释不了叶子漏判——按"路径上级"开票只会引人往祖先补无包背书的绑定。
+    全树其余未绑定节点（含故意清空绑定走"默认放行"通道的）也不定错。
     """
     # 孤儿绑定：绑定指到树上不存在的节点——硬性不一致，先于缺绑定报
     orphan_nodes = ((rca_data or {}).get("tree_issues") or {}).get("orphan_node_ids", [])
@@ -244,20 +225,17 @@ def check_binding_gap(
 
     unbound_by_id = {u.get("node_id"): u for u in unbound if u.get("node_id")}
     for mid in missed_nodes:
-        relevant_ids = {mid} | ancestor_chain(tree_index_data, mid)
-        for rid in relevant_ids:
-            if rid in unbound_by_id:
-                hit = unbound_by_id[rid]
-                where = "自身" if rid == mid else f"路径上级（期望根因 {mid} 的祖先）"
-                return {
-                    "class": 2,
-                    "error_category": "BINDING_GAP",
-                    "verdict": "needs_binding",
-                    "node_id": rid,
-                    "node_name": hit.get("name", ""),
-                    "reason": f"节点{rid}有判据但无任何绑定（漏判期望根因的{where}）",
-                    "evidence": ["tree_index.json#" + rid]
-                }
+        if mid in unbound_by_id:
+            hit = unbound_by_id[mid]
+            return {
+                "class": 2,
+                "error_category": "BINDING_GAP",
+                "verdict": "needs_binding",
+                "node_id": mid,
+                "node_name": hit.get("name", ""),
+                "reason": f"节点{mid}有判据但无任何绑定（漏判期望根因的自身）",
+                "evidence": ["tree_index.json#" + mid]
+            }
     return None
 
 
@@ -410,8 +388,7 @@ def classify(
     checks = [
         ("ENV_FAILURE", lambda: check_env_failure(run_data)),
         ("INPUT_GAP", lambda: check_input_gap(run_data, missed_count, expected_data)),
-        ("BINDING_GAP", lambda: check_binding_gap(binding_check, missed_nodes,
-                                                  tree_index_data, rca_data)),
+        ("BINDING_GAP", lambda: check_binding_gap(binding_check, missed_nodes, rca_data)),
         ("KNOWLEDGE_GAP", lambda: check_knowledge_gap(tree_check, expected_roots)),
         ("CRITERIA_GAP", lambda: check_criteria_gap(rca_input_data, expected_data)),
         ("VERDICT_GAP", lambda: check_verdict_gap(rca_data, reconcile_data, missed_nodes))
