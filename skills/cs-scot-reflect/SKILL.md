@@ -77,9 +77,11 @@ python "<本目录>/scripts/eval_run.py" \
 | 技能 + 现成用例库（日常回归主路径） | `regress.py --skill-dir <技能> --case-dir <用例库> --out <工作目录>`（**不再跑 case_gen**——用例库是一次建、反复用的资产） |
 | 技能 + 用例库 + 已有执行结果 | `regress.py ... --eval-only --result-dir <既有结果根>`（只判卷；等价于批量 eval_run） |
 
-它逐用例只跑**确定性链**：runner（自动 `--data raw=<用例data>`；用例目录下有
-`data_map.json`（`{"cmd": "相对data的路径", ...}`）则逐条追加表映射——表映射属"形态识别"
-模型步，机械层不猜）→ draft_rca 机械起草 → finalize_rca 机械合成 → 判卷。
+它逐用例只跑**确定性链**：runner（自动 `--data raw=<网元层父目录>`——data 外多包一层
+（如 `formated_result/`）时按"唯一子目录链下探到 <网元>/CMD|CONFIG|LOG 的父层"确定性定位，
+多岔不猜；用例目录下有 `data_map.json`（`{"cmd": "相对data的路径", ...}`）则逐条追加
+表映射——表映射属"形态识别"模型步，机械层不猜）→ draft_rca 机械起草 →
+finalize_rca 机械合成 → 判卷。
 **finalize 拦下需权衡的真冲突时，该用例记「挂起待裁决」并点名，脚本绝不代裁**——由你按
 fault-tree-rca 法则在该结果目录补 decisions.json、重跑 finalize+render，再用
 `--eval-only`（或 `--case <该用例>`）补判。汇总落 `<工作目录>/regress_summary.json`，

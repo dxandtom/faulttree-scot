@@ -81,9 +81,40 @@ def case_suffix(case_id: str, idx: int) -> str:
     return re.sub(r"[^0-9A-Za-z_-]", "", seg) or f"c{idx}"
 
 
+_NE_KINDS = {"cmd", "config", "log", "diag", "logbuf"}
+
+
+def find_raw_root(data_dir: Path) -> Path:
+    """raw 通道的正确层级=网元层的父目录(其下是 <网元>/CMD|CONFIG|LOG/…)。
+    用例数据常在外面多包一层(如 formated_result/),直接拿 data 目录当 raw 会让 S 适配器
+    报"不合布局"整体判不了。这里用与 check_data 建议同源的**确定性**规则定位:本层任一
+    子目录(网元)底下有 CMD/CONFIG/LOG 类子目录 → 本层就是 raw 根;否则仅当只有唯一
+    子目录时才下探一层(多岔不猜),最多探 4 层;探不到原样返回(适配器的报错自带正确喂法)。"""
+    cur = data_dir
+    for _ in range(4):
+        try:
+            subs = [d for d in cur.iterdir() if d.is_dir()]
+        except OSError:
+            return data_dir
+        for ne in subs:
+            try:
+                if any(g.is_dir() and g.name.lower() in _NE_KINDS for g in ne.iterdir()):
+                    return cur
+            except OSError:
+                continue
+        if len(subs) != 1:
+            return data_dir
+        cur = subs[0]
+    return data_dir
+
+
 def build_data_args(data_dir: Path):
-    """--data 参数(机械):恒带 raw=<data 目录>;data_map.json 在场则逐条追加(相对 data 解析)。"""
-    pairs = {"raw": str(data_dir)}
+    """--data 参数(机械):恒带 raw=<网元层父目录>(见 find_raw_root);
+    data_map.json 在场则逐条追加(相对 data 解析)。"""
+    raw_root = find_raw_root(data_dir)
+    if raw_root != data_dir:
+        print(f"  raw 根已定位到网元层父目录:{raw_root}(data 外多包了一层)")
+    pairs = {"raw": str(raw_root)}
     mp = data_dir.parent / "data_map.json"
     if mp.exists():
         try:
