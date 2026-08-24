@@ -66,6 +66,28 @@ python "<本目录>/scripts/eval_run.py" \
   [--prev-evaluation <上一轮-evaluation_report.json-path>]
 ```
 
+### 一键回归（regress.py：技能+用例库 → 自动执行+判卷）
+
+用户给的是**技能 + 用例材料**、想直接看回归结果（而不是已经跑好的 result-* 目录）时，
+不必手工串 execute 与判卷——按手上有什么选入口：
+
+| 用户手上有 | 入口 |
+|---|---|
+| 技能 + tester 交付包（没有用例库） | `regress.py --skill-dir <技能> --packages <包目录> [--map 对应表] --case-dir <建库落点> --out <工作目录>`（先代跑 case_gen 建库，再回归） |
+| 技能 + 现成用例库（日常回归主路径） | `regress.py --skill-dir <技能> --case-dir <用例库> --out <工作目录>`（**不再跑 case_gen**——用例库是一次建、反复用的资产） |
+| 技能 + 用例库 + 已有执行结果 | `regress.py ... --eval-only --result-dir <既有结果根>`（只判卷；等价于批量 eval_run） |
+
+它逐用例只跑**确定性链**：runner（自动 `--data raw=<用例data>`；用例目录下有
+`data_map.json`（`{"cmd": "相对data的路径", ...}`）则逐条追加表映射——表映射属"形态识别"
+模型步，机械层不猜）→ draft_rca 机械起草 → finalize_rca 机械合成 → 判卷。
+**finalize 拦下需权衡的真冲突时，该用例记「挂起待裁决」并点名，脚本绝不代裁**——由你按
+fault-tree-rca 法则在该结果目录补 decisions.json、重跑 finalize+render，再用
+`--eval-only`（或 `--case <该用例>`）补判。汇总落 `<工作目录>/regress_summary.json`，
+逐用例日志在 `<工作目录>/logs/`。
+
+口径边界：一键回归供**日常回归**；要对外发布的量化数字仍按 A/B 双会话规格跑
+（诊断会话不读 expected.json，见「防泄题红线」）。
+
 ## 输入说明
 
 ### 0. 路径约定（无硬编码）
