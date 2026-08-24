@@ -128,6 +128,10 @@ def main() -> None:
         data_dir = out / "cases" / cid / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         (data_dir / "占位.txt").write_text("演练数据占位\n", encoding="utf-8")
+        if cid == "drill-1-input":
+            # 类1 的 v11 语义:缺的源必须是用例数据**本可提供**的(数据里有、这轮没喂到);
+            # 数据里天然没有该类内容的缺口不构成类1(穿透查绑定层)——所以教具得放一份 log 内容
+            (data_dir / "logbuffer采集.txt").write_text("演练 log 数据\n", encoding="utf-8")
         exp["data_source"] = str(data_dir)
         run_doc["inputs"]["raw"]["path"] = str(data_dir)
         wj(f"cases/{cid}/expected.json", exp)

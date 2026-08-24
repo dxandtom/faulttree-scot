@@ -1070,7 +1070,9 @@ def main() -> None:
 
     result_dir = Path(args.result_dir)
     skill_dir = Path(args.skill_dir)
-    cases_dir = Path(args.cases_dir)
+    # 批量模式的用例根 = --case-dir 给的路径;它此前只被当"模式开关",扫描却用 --cases-dir 的
+    # 缺省值 cases,--case-dir 传绝对路径直接报"case-dir 不存在: cases"(51 用例实跑逮到)。
+    cases_dir = Path(args.case_dir) if args.case_dir else Path(args.cases_dir)
     prev_evaluation = Path(args.prev_evaluation) if args.prev_evaluation else None
 
     # v9: 输出目录默认规则

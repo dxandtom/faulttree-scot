@@ -224,7 +224,7 @@ def _file_fingerprint(path: str) -> dict:
 
 
 def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[str, str], base: Path,
-                        missing_inputs=None, index_root: Path = None) -> None:
+                        missing_inputs=None, index_root: Path = None, missing_kind: dict = None) -> None:
     """记下「这次运行 = 哪个产物 + 哪些输入数据」:run_dir/run.json + 往 index_root/index.jsonl 追加一行
     (总索引:一行一轮,含结果目录名,事后按输入指纹检索/去重都靠它)。index_root 缺省=base。"""
     import datetime
@@ -234,6 +234,8 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
                 "product_dir": str(base), "inputs": inputs}
     if missing_inputs:                                   # 部分数据运行:铭牌上写明缺口,事后一看便知这轮少了啥
         manifest["missing_inputs"] = sorted(missing_inputs)
+        if missing_kind:                                 # 缺口性质:collection_absent=采集不含该类(非漏传,
+            manifest["missing_kind"] = missing_kind      # 评估归因据此不判 INPUT_GAP)/not_provided=没喂
     (run_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     idx = (index_root if index_root is not None else base) / "index.jsonl"
     idx.parent.mkdir(parents=True, exist_ok=True)
@@ -472,8 +474,13 @@ def main() -> None:
                   f"用 --data <指标>=<文件> 提供,如 --data {next(iter(required))}=<文件>。", file=sys.stderr)
             sys.exit(2)
     if missing:
-        print(f"[warn] 缺少数据源: {', '.join(missing)} —— 相应解析步骤将跳过,"
-              "其判据本轮无事实(RCA 按「数据不足」对待);结尾有缺口汇总。")
+        if "raw" in provided:                            # 原始包通道在场:分类是转换器做的,某类为空≠用户少传
+            print(f"[warn] 本次采集数据不含 {', '.join(missing)} 类内容 —— 相应解析步骤将跳过,"
+                  "其判据本轮无事实(RCA 按「数据不足」对待)。这是采集数据的形态,不是漏传"
+                  "(用户上传的是完整原始包,CMD/CONFIG/LOG 分类是内部概念),别让用户补数;结尾有缺口汇总。")
+        else:
+            print(f"[warn] 缺少数据源: {', '.join(missing)} —— 相应解析步骤将跳过,"
+                  "其判据本轮无事实(RCA 按「数据不足」对待);结尾有缺口汇总。")
     if has_star and "raw" not in provided:                # 迁移的 S 脚本吃原始目录,忘传 raw 是高频事故
         print("[warn] 未提供 --data raw=<原始数据目录>:迁移的脚本节点(S 类)只能从三表兜底重建,"
               "数据不齐会整体「数据不足」——有原始采集目录就带上(层级给**网元层的父目录**,"
@@ -504,7 +511,9 @@ def main() -> None:
         raise SystemExit(f"结果目录已存在:{result_dir} —— --run-id 与已有轮次重名,换一个(或不传、用自动运行号)")
     result_dir.mkdir(parents=True, exist_ok=True)
     _write_run_manifest(result_dir, run_id, plan, data_map, base, missing_inputs=missing,
-                        index_root=result_base)
+                        index_root=result_base,
+                        missing_kind={k: ("collection_absent" if "raw" in provided else "not_provided")
+                                      for k in missing})
     print(f"  结果目录:{result_dir}(本轮独立目录,并发安全;历史轮次=同级其它 result-*,索引 index.jsonl)")
     print(f"  run_id={run_id}(已记 run.json;本轮所有产出:rca_input.json / rca.json 都在上面这个目录)")
 
@@ -549,15 +558,22 @@ def main() -> None:
         tr = node.get("transition") or {}
         cur = None if tr.get("end") else tr.get("next_on_success")
 
-    if missing:                                          # 收尾汇总:这轮缺了啥、影响了啥、怎么补
+    if missing:                                          # 收尾汇总:这轮缺了啥、影响了啥、(必要时)怎么补
         prov = sorted(set(required) & provided)
         print("\n⚠ 数据源缺口汇总(本轮为**部分数据**运行):")
         print(f"  plan 需要: {', '.join(required)};本次提供: {', '.join(prov) if prov else '(无)'}")
         for k, ids in missing.items():
             print(f"  - 缺 {k} → 已跳过步骤: {', '.join(ids)};该源绑定的判据本轮无事实,"
                   "RCA 按「数据不足/未覆盖」对待(rca_input 已标 missing_indicators)")
-        print("  结论只代表已提供数据能看到的部分;补齐后重跑: "
-              + " ".join(f"--data {k}=<文件>" for k in missing) + "(runner 会自动归档本轮)。")
+        if "raw" in provided:
+            # 缺口性质分型:原始包在场,某类为空 = 采集本身不含该类(设备可能没开这类采集)。
+            # "请用户补数"是死指令——用户上传的就是完整原始包,不感知内部分类,多半也补不出来。
+            print("  缺口性质:**采集数据不含上述类别内容**(分类由转换器机械完成,原始包即如此)——"
+                  "不是漏传,无需向用户要数;确认现场真采过这类内容时,核对 zip2csv 转换输出是否遗漏。")
+            print("  结论只代表已提供数据能看到的部分。")
+        else:
+            print("  结论只代表已提供数据能看到的部分;补齐后重跑: "
+                  + " ".join(f"--data {k}=<文件>" for k in missing) + "(runner 会自动归档本轮)。")
     print("SCoT 执行流程完成(script 步骤已跑;agent_skill/RCA 待对应技能完成,见上方提示)。")
 
 
