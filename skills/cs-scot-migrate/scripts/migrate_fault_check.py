@@ -454,8 +454,8 @@ ENGINE_CAPS = {
     "custom_lib.py": ('@register("fault_check")', 'result.get("results")', "argv_bak",
                       "_fc_tristate", "matched_items", "_StrPath",
                       "raw_note", "_fc_no_judgment", "_fc_gap_kind",
-                      "_fc_item_str",
-                      "_fc_purge_shared"),              # 末项=共享模块缓存隔离(同进程连跑多脚本防状态串门)
+                      "_fc_item_str", "_fc_purge_shared",
+                      'ne_dst / "DIAG"'),               # 末项=raw 镜像两代目录名互为别名(DIAG 不再被改名弄丢)
     "import_tree_excel.py": ('{"P", "S"}', "xlsx_reader"),   # S/P 放行 + cross 列 + 读表零依赖同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
