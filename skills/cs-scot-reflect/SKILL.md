@@ -333,6 +333,8 @@ Step 3: 综合裁定 verdict
   命中 `value:false,score:0`,**没评到 `value:null,score:null`**(展示层渲染成 N/A);
 - **total_score = 通过维度数 ÷ 6 × 100(取整)**,语义"六关过了几关":全过 100、
   挂第 1 关 0、挂最后一关 83——挂得越早分越低;
+- **PASS 与 PASS_WITH_GAPS 同待遇=六维全 true、总分 100**:PASS_WITH_GAPS 的数据缺口
+  住在 verdict 层注记,六关(错误分类)判定全部通过,不因缺口扣分;
 - `reason` 三语模板化(default=zh_CN;en_US 固定模板,机械转换不做自由翻译),失败维度
   zh_CN 附逐字机械摘要;
 - EVAL_ERROR(评估自身失败)**不产**此文件——宁缺评分,不拿假分冒充;

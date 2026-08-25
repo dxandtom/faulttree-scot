@@ -67,7 +67,9 @@ def build_score(report: dict) -> dict:
         ec = int(vd.get("error_class"))
     except (TypeError, ValueError):
         ec = None
-    if verdict == "PASS":
+    if verdict.startswith("PASS"):
+        # PASS 与 PASS_WITH_GAPS 同待遇:后者=全命中+数据缺口注记,缺口住在 verdict 层,
+        # 六关(错误分类)判定全部通过——只认 "PASS" 精确串曾把 PASS_WITH_GAPS 打成全 N/A、0 分
         ec = None
     elif ec is None:
         # 非 PASS 却没定位到错误类:链条推导不出"过了几关",保守全 N/A、0 分,响亮提示
