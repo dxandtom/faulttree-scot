@@ -387,6 +387,22 @@ def fault_check(table, args, load):
         sdir = str(script.parent)
         if sdir not in _sys.path:
             _sys.path.insert(0, sdir)                    # 交付脚本 import search_config 等同目录共享模块
+
+        def _fc_purge_shared():
+            # 同一进程连续调多个交付脚本时,它们 import 的同目录共享模块(search_*.py 等)会被
+            # sys.modules 全局缓存:前一个包载入的模块连同其模块级状态(缓存、全局变量)直接
+            # 喂给后面的脚本——这些脚本在交付方那里本是各自独立进程跑的,串门会污染判定
+            # (实测:n4 直跑 true、经本壳在 cross 整链里跑变 false)。调用前后都清掉脚本目录
+            # 下的缓存模块,保证每个脚本冷启动。
+            for _n, _m in list(_sys.modules.items()):
+                _f = getattr(_m, "__file__", None)
+                try:
+                    if _f and str(Path(_f).resolve().parent) == str(script.parent.resolve()):
+                        del _sys.modules[_n]
+                except OSError:
+                    continue
+
+        _fc_purge_shared()
         spec = importlib.util.spec_from_file_location(f"fc_{script.stem}", script)
         mod = importlib.util.module_from_spec(spec)
         sink = _io.StringIO()
@@ -419,6 +435,7 @@ def fault_check(table, args, load):
                                                "——脚本未做规范要求的多网元探测,请交付方补)")
         finally:
             _sys.argv = argv_bak
+            _fc_purge_shared()
 
     if ne_map is None:
         return {"status": "insufficient_data", "gap_kind": "cannot_judge",
