@@ -60,6 +60,18 @@ def find_assets(skill_dir: Path) -> Path | None:
     return None
 
 
+def find_runner(skill_dir: Path) -> Path:
+    """执行器解析:打包技能自带副本优先(<skill>/scripts/runner.py,打包时随产物同代
+    分发,B 会话实战用的就是它)——没带(裸产物/老打包)才退同门 cs-scot-execute。"""
+    cands = (skill_dir / "scripts" / "runner.py",
+             SKILLS_ROOT / "cs-scot-execute" / "scripts" / "runner.py")
+    for c in cands:
+        if c.exists():
+            return c
+    raise SystemExit("找不到执行器 runner.py(技能自带 scripts/runner.py 与同门 "
+                     "cs-scot-execute 都没有)——用最新打包重出技能,或部署 cs-scot-execute")
+
+
 def find_rca_scripts(assets: Path) -> Path:
     """RCA 机械链脚本目录:产物内挂副本优先(与产物同代),缺 draft 才退同门 fault-tree-rca。"""
     vend = assets / "fault-tree-rca" / "scripts"
@@ -231,10 +243,7 @@ def main() -> int:
             print(f"[regress] {skill_dir} 下找不到 plan.json(assets/ 或根)——不是可执行产物;"
                   "只判卷请用 --eval-only --result-dir")
             return 2
-        runner = SKILLS_ROOT / "cs-scot-execute" / "scripts" / "runner.py"
-        if not runner.exists():
-            print(f"[regress] 找不到执行器 {runner}(cs-scot-execute 未与本技能同目录部署)")
-            return 2
+        runner = find_runner(skill_dir)
         rca_scripts = find_rca_scripts(assets)
         solutions = assets / "tree" / "solutions.json"
 
