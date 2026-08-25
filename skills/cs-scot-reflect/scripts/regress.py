@@ -60,30 +60,43 @@ def find_assets(skill_dir: Path) -> Path | None:
     return None
 
 
+_BUNDLE = "cs-scot-generate-optimize"                    # 打包发布的聚合技能,内含各组件副本
+
+
 def find_runner(skill_dir: Path) -> Path:
-    """执行器解析:打包技能自带副本优先(<skill>/scripts/runner.py,打包时随产物同代
-    分发,B 会话实战用的就是它)——没带(裸产物/老打包)才退同门 cs-scot-execute。"""
-    cands = (skill_dir / "scripts" / "runner.py",
-             SKILLS_ROOT / "cs-scot-execute" / "scripts" / "runner.py")
+    """执行器解析,按序:①打包技能自带副本(<skill>/scripts/runner.py,随产物同代分发,
+    实战 B 会话用的就是它);②同门 cs-scot-execute;③聚合技能里的副本
+    (cs-scot-generate-optimize 打包发布时内含各组件目录)。都没有才硬停并给修法。"""
+    bundle = SKILLS_ROOT / _BUNDLE
+    cands = [skill_dir / "scripts" / "runner.py",
+             SKILLS_ROOT / "cs-scot-execute" / "scripts" / "runner.py",
+             bundle / "cs-scot-execute" / "scripts" / "runner.py",
+             bundle / "execute" / "scripts" / "runner.py"]
     for c in cands:
         if c.exists():
             return c
-    raise SystemExit("找不到执行器 runner.py(技能自带 scripts/runner.py 与同门 "
-                     "cs-scot-execute 都没有)——用最新打包重出技能,或部署 cs-scot-execute")
+    if bundle.is_dir():                                   # 聚合技能的子目录名各版本不一,浅层兜底搜一把
+        hits = sorted(bundle.glob("*/scripts/runner.py"))
+        if hits:
+            return hits[0]
+    raise SystemExit("找不到执行器 runner.py(技能自带 scripts/、同门 cs-scot-execute、"
+                     f"聚合技能 {_BUNDLE} 里都没有)——用最新打包重出技能,或部署 cs-scot-execute")
 
 
 def find_rca_scripts(assets: Path) -> Path:
-    """RCA 机械链脚本目录:产物内挂副本优先(与产物同代),缺 draft 才退同门 fault-tree-rca。"""
+    """RCA 机械链脚本目录,按序:①产物内挂副本(与产物同代);②同门 fault-tree-rca;
+    ③聚合技能 cs-scot-generate-optimize 里的副本。"""
     vend = assets / "fault-tree-rca" / "scripts"
     if (vend / "draft_rca.py").exists():
         return vend
-    sib = SKILLS_ROOT / "fault-tree-rca" / "scripts"
-    if (sib / "draft_rca.py").exists():
-        print(f"[regress] 产物内挂 fault-tree-rca 缺 draft_rca.py(旧代副本)→ 用同门技能副本 {sib}"
-              "(建议跑一次 migrate 刷新产物副本,保持版本同代)")
-        return sib
-    raise SystemExit("找不到 draft_rca.py(产物 assets/fault-tree-rca 和同门 skills/fault-tree-rca 都没有)"
-                     "——RCA 机械链跑不了;先用 migrate 刷新产物或补全 skills")
+    for d in (SKILLS_ROOT / "fault-tree-rca" / "scripts",
+              SKILLS_ROOT / _BUNDLE / "fault-tree-rca" / "scripts"):
+        if (d / "draft_rca.py").exists():
+            print(f"[regress] 产物内挂 fault-tree-rca 缺 draft_rca.py(旧代副本)→ 用 {d}"
+                  "(建议跑一次 migrate 刷新产物副本,保持版本同代)")
+            return d
+    raise SystemExit("找不到 draft_rca.py(产物 assets/fault-tree-rca、同门 fault-tree-rca、"
+                     f"聚合技能 {_BUNDLE} 里都没有)——先用 migrate 刷新产物或补全部署")
 
 
 def case_suffix(case_id: str, idx: int) -> str:

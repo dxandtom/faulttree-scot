@@ -88,8 +88,9 @@ fault-tree-rca 法则在该结果目录补 decisions.json、重跑 finalize+rend
 逐用例日志在 `<工作目录>/logs/`。
 
 执行器与 RCA 链的来源都**优先用打包技能自带的副本**（`<skill>/scripts/runner.py`、
-`<skill>/assets/fault-tree-rca/`，与产物同代），技能没带才退同门部署的
-cs-scot-execute / fault-tree-rca——不需要为一键回归单独部署执行技能。
+`<skill>/assets/fault-tree-rca/`，与产物同代），其次是同门部署的
+cs-scot-execute / fault-tree-rca，最后到聚合技能 cs-scot-generate-optimize
+内含的组件副本里找——不需要为一键回归单独部署执行技能。
 
 口径边界：一键回归供**日常回归**；要对外发布的量化数字仍按 A/B 双会话规格跑
 （诊断会话不读 expected.json，见「防泄题红线」）。
