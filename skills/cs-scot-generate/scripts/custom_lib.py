@@ -226,17 +226,22 @@ def _fc_layout_from_raw(raw, tmp_root):
         flat = False
     if not nes:
         return None
-    need_mirror = flat or any((d / "DIAG").is_dir() and not (d / "CMD").is_dir() for d in nes)
+    need_mirror = flat or any((d / "DIAG").is_dir() != (d / "CMD").is_dir() for d in nes)
     if not need_mirror:
         return raw
     root = tmp_root / "raw_mirror"
     for d in nes:
         ne_dst = root / (raw.name if flat else d.name)
-        for k in ("CONFIG", "CMD", "LOG"):
+        for k in kinds:                                  # 原名全部保留:脚本按交付时的目录名找数据
             if (d / k).is_dir():
                 shutil.copytree(d / k, ne_dst / k, dirs_exist_ok=True)
+        # DIAG/CMD 是同一类数据的两代目录名,脚本两种都可能认:缺哪个补哪个当别名,**绝不改名**。
+        # 实测(n4):旧逻辑把 DIAG 改名成 CMD,认 DIAG 的脚本找不到自己的诊断文件——直跑 true、
+        # 经本壳整链跑变判不动,就是这一刀砍掉了原名。
         if (d / "DIAG").is_dir() and not (d / "CMD").is_dir():
-            shutil.copytree(d / "DIAG", ne_dst / "CMD", dirs_exist_ok=True)   # 平台 DIAG 已更名 CMD:目录别名
+            shutil.copytree(d / "DIAG", ne_dst / "CMD", dirs_exist_ok=True)
+        if (d / "CMD").is_dir() and not (d / "DIAG").is_dir():
+            shutil.copytree(d / "CMD", ne_dst / "DIAG", dirs_exist_ok=True)
     return root
 
 
