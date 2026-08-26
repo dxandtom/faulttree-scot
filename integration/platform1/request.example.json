@@ -1,0 +1,6 @@
+{
+  "excel": "样例/平台导出.xlsx",
+  "skill_obskey": "obs://bucket/skills/tree_42_v3.zip",
+  "version_id": "1001",
+  "callback_url": ""
+}

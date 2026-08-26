@@ -1017,30 +1017,43 @@ def _clear_targets(nodes, clears):
 # ---------- 对应表模式(--map:zip 名 ↔ 树路径) ----------
 # 层级列表头:格式没跟交付方钉死,能认的都认——裸 L1 / L1(Chinese) / L1(中文) / 全角括号/
 # 大小写/内部空格;唯独「L3 Code」这类编码列(无括号带后缀)不吃。
+# 平台1 导出表(L1_Name_CN/L1_Name_EN 成对 + Product_Obs + Product_Name)也认:
+# 节点定位取 _Name_CN 列(树节点名是中文),_Name_EN 与 Product_Obs(下载用的 obs 地址,
+# 是工装层的事)整列忽略,Product_Name 当 zip 列。
 _MAP_LVL_RE = re.compile(r"^L(\d+)(?:\([^)]*\))?$", re.IGNORECASE)
+_MAP_LVL_CN_RE = re.compile(r"^L(\d+)_Name_CN$", re.IGNORECASE)
+_MAP_LVL_EN_RE = re.compile(r"^L(\d+)_Name_EN$", re.IGNORECASE)
 
 
 def _parse_map_header(header):
     """表头 → (层级列升序 [(层,原列名)…], zip 列名, 判据列名|None);不像对应表(缺层级列/
     缺 zip 列/带 node_id——那是我们的调优表)→ (None, None, None)。
-    zip 列:先认整格就叫 zip 的,没有再认唯一含 zip 的列名。
+    zip 列:先认整格就叫 zip 的,没有再认 Product_Name(平台1 表:值=交付 zip 包名),
+    再认唯一含 zip 的列名。
+    平台1 表的 L{n}_Name_CN 当层级列(定位靠中文名),L{n}_Name_EN 与 Product_Obs 整列忽略。
     判据列(可选):表头含 判据/判断方法/判断条件/judgment 的列——**在场即启用"双空=清除"语义**
     (老表没有此列,行为一切照旧,零兼容风险)。"""
-    lvls, zip_col, zipish, jd_col = [], None, [], None
+    lvls, zip_col, pname_col, zipish, jd_col = [], None, None, [], None
     for h in header:
         hn = str(h).strip().replace("（", "(").replace("）", ")").replace(" ", "")
         if hn.lower() == "node_id":
             return None, None, None                      # 有 node_id 的是调优表,不是对应表
-        m = _MAP_LVL_RE.match(hn)
+        m = _MAP_LVL_RE.match(hn) or _MAP_LVL_CN_RE.match(hn)
         if m:
             lvls.append((int(m.group(1)), h))
+        elif _MAP_LVL_EN_RE.match(hn) or hn.lower() == "product_obs":
+            continue                                     # 平台1 表:英文名列/obs 地址列,不参与
         elif hn.lower() == "zip":
             zip_col = h
+        elif hn.lower() == "product_name":
+            pname_col = h                                # 平台1 表:zip 包名列
         elif "zip" in hn.lower():
             zipish.append(h)
         elif jd_col is None and ("判据" in hn or "判断方法" in hn or "判断条件" in hn
                                  or "judgment" in hn.lower()):
             jd_col = h
+    if zip_col is None:
+        zip_col = pname_col
     if zip_col is None and len(zipish) == 1:
         zip_col = zipish[0]
     if not lvls or zip_col is None:
@@ -1087,8 +1100,9 @@ def load_map_excel(path: Path):
     header, rows = _read_table(path)
     lvls, zip_col, jd_col = _parse_map_header(header)
     if lvls is None:
-        raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名/带 (Chinese) 等后缀都认)"
-                         f"+「zip」列,且不该有 node_id 列;实际表头:{header}")
+        raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名/带 (Chinese) 后缀/平台1 的"
+                         f" L1_Name_CN 都认)+「zip」列(或平台1 的 Product_Name 列),"
+                         f"且不该有 node_id 列;实际表头:{header}")
     out, zipless, clears = [], [], []
     for i, r in enumerate(rows, start=2):
         z = str(r.get(zip_col) or "").strip()
