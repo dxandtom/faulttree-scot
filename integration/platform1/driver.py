@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 """平台1 联调驱动——把平台的优化请求翻成技能的本地输入,跑完迁移后回调。工装层,不进技能。
 
-链路(与平台1 对齐的口径):
-  平台点优化按钮 → 调我方接口(excel 文件流 + 上一版 skill 的 obskey + skill_version 表 id)
+链路(字段名与平台1 接口文档 callDongXuanOptimizeApi 对齐):
+  平台点优化 → POST 我方接口(multipart:versionId + excelFile + prevObjectkey)
   → 我方受理即回 success(见 server.py)→ 本驱动异步干活:
      ① 解析平台 excel(L*_Name_CN/EN + Product_Obs + Product_Name,层级动态)
-     ② 按 Product_Obs 下载各节点交付 zip 包、按 obskey 下载上一版 skill(downloader.py)
+     ② 按 Product_Obs 逐条下载节点 zip、按 prevObjectkey 下载上一版 skill(downloader.py)
      ③ 解包 skill、定位产物目录(技能形态认 assets/)
      ④ 调 cs-scot-migrate 对应表批量迁移(表直接喂 --map,技能已认平台表格式)
      ⑤ 重打包新版 skill zip
-     ⑥ 回调平台 update 接口(version_id + skill 产物文件);没配回调地址就只打印产物路径
-  skill obskey 为空 = 平台侧还没有 skill → 生成场景:本驱动不代跑(生成要走 cs-scot-generate
-  的模型会话),打印指引后退出码 4。
+     ⑥ 回调平台 POST /workspace/faultTreeNode/optimizeCallback
+       (multipart:versionId + skillFile 文件流;OBS 上传与版本记录更新由平台做)
 
-用法(本地模拟,平台请求先落成 request.json;样例见 request.example.json):
+三种优化场景(平台按选择导出 excel;prevObjectkey 首次优化为 null):
+  MULTI/ALL:表里有技能行 + 有上一版 skill → 本驱动全自动跑(主路)
+  表里有行 + 无上一版:生成场景,要走 cs-scot-generate 的模型会话,本驱动不代跑(退出码 4)
+  NONE(空壳表,只有表头):无迁移可做——无上一版按生成场景退 4;有上一版属待与平台
+  确认的语义(期望我们回什么?),退出码 5,不瞎动
+
+用法(本地模拟;样例见 request.example.json):
   python integration/platform1/driver.py --request request.json \
       [--workdir 工作目录] [--fake-store 本地样例目录] [--keep]
-
-节点选择(单个/所有/0节点):按平台口径由 excel 行数体现——平台导出哪些行,就迁移哪些节点,
-驱动不做二次筛选;若联调发现平台是全量导出+另带选择参数,再在这里按参数裁表。
 """
 from __future__ import annotations
 
@@ -41,9 +43,9 @@ MIGRATE = REPO / "skills" / "cs-scot-migrate" / "scripts" / "migrate_fault_check
 sys.path.insert(0, str(HERE))
 import downloader  # noqa: E402
 
-# 回调报文字段名——平台样例到了照实改这里(集中一处)
-CB_FIELD_ID = "id"          # fault_tree_skill_version 表的 id
-CB_FIELD_FILE = "file"      # skill 产物文件
+# 回调报文字段名(平台接口文档 /workspace/faultTreeNode/optimizeCallback)
+CB_FIELD_ID = "versionId"       # 请求带来的 versionId 原样带回,平台按它匹配版本记录
+CB_FIELD_FILE = "skillFile"     # 优化后的 skill zip 文件流(OBS 上传由平台做)
 
 
 # ---------- ① 平台 excel 解析(只取驱动要的三样:路径/包名/obs 地址) ----------
@@ -161,26 +163,31 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
 def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         keep: bool = False) -> Path | None:
     excel = Path(req["excel"]).resolve()
-    obskey = str(req.get("skill_obskey") or "").strip()
-    version_id = str(req.get("version_id") or "").strip()
+    obskey = str(req.get("prevObjectkey") or "").strip()
+    version_id = str(req.get("versionId") or "").strip()
     cb_url = str(req.get("callback_url") or "").strip()
     if not excel.exists():
         raise SystemExit(f"excel 不存在:{excel}")
     if not version_id:
-        raise SystemExit("request 里缺 version_id(fault_tree_skill_version 表 id)")
+        raise SystemExit("request 里缺 versionId(平台预生成的版本 UUID,回调时原样带回)")
+    if obskey.lower() in ("null", "none"):                # 平台首次优化传 null
+        obskey = ""
 
+    rows = parse_platform_excel(excel)
+    print(f"[表] {excel.name}:{len(rows)} 个待迁移节点")
     if not obskey:
-        print("skill_obskey 为空 → 平台侧还没有 skill,属生成场景:"
+        print("prevObjectkey 为空(首次优化)→ 平台侧还没有 skill,属生成场景:"
               "用 cs-scot-generate 走模型会话从头生成,本驱动不代跑。")
         sys.exit(4)
+    if not rows:
+        print("NONE 场景(空壳表,只有表头)+ 已有上一版 skill:无迁移可做。"
+              "期望我们回什么(原样返回?仅刷新?)属待与平台确认的语义,不瞎动。")
+        sys.exit(5)
 
     work = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="p1opt-"))
     work.mkdir(parents=True, exist_ok=True)
     bundle, skill_dir, out_dir = work / "bundle", work / "skill", work / "out"
     bundle.mkdir(exist_ok=True)
-
-    rows = parse_platform_excel(excel)
-    print(f"[表] {excel.name}:{len(rows)} 个待迁移节点")
     for names, name, obs in rows:
         downloader.download_zip(obs, name, bundle, fake_store=fake_store)
         print(f"[下载] {'/'.join(names)} ← {name}")
@@ -197,7 +204,7 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
               f"不回调、不打包;工作目录留在 {work} 供排查。")
         sys.exit(rc)
 
-    out_zip = repack(skill_dir, out_dir / f"skill_v{version_id}.zip")
+    out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
     print(f"[产物] {out_zip}")
     if cb_url:
         post_callback(cb_url, version_id, out_zip)

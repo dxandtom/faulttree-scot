@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
 """平台1 obs 下载封装——工装层,不进技能。
 
-两条真路(等平台材料到位后接线)+ 一条自测路(--fake-store,不碰网络):
+真路已按平台1 的下载脚本(download_fault_tree_artifact.py,同目录)接线:
+该脚本不直连 obs,而是把 {"docId": <obs 地址>, "file_name": <落名>} POST 给平台的下载服务
+(端点与鉴权在 obs_headers_config.json 里,含 token/psf 密钥路径,**不进仓库**,联调机器上
+自己放到本目录)。zip 包和上一版 skill 走同一个接口:docId 分别取表里的 Product_Obs 和
+请求里的 prevObjectkey——这就是"下载 skill 能力"的改造,单条调用、custom_file_name 指定
+落名,逐条下载(不用它的多条批量:多条时服务端会打成一个带时间戳的大 zip,结构不可控)。
 
-- download_zip(obs_path, name, dst_dir):按 excel 里的 Product_Obs 地址下载交付 zip 包。
-  平台1 给的下载脚本放到本目录(建议名 platform_download.py)后,在 _platform_fetch()
-  里按它的真实用法接线——现在是占位,会明确报错提示接线。
-- download_skill(obskey, dst_dir):按 objectkey 下载上一版 skill 文件。平台脚本目前
-  **只有下 zip 的能力,没有按 obskey 下 skill 的能力**,这是要在平台脚本基础上改造出来的
-  (拿到脚本源码后照它的 obs 客户端初始化方式补一个按 key 取对象即可),同样在
-  _platform_fetch() 里接线。
+联调机器上需要:pandas、requests、psf(内部库)、obs_headers_config.json(+token/密钥文件)。
+环境变量(可选):PLATFORM1_ENV=dev|beta(缺省用配置文件 default.env)、
+PLATFORM1_DL_CONFIG=<配置文件路径>(缺省用同目录 obs_headers_config.json)。
 
-fake 模式(联调第一步“纯本地跑通”用):给 --fake-store 目录,下载就变成从该目录按文件名拷贝
-——zip 按 Product_Name 取,skill 按 obskey 的文件名部分取。这样不通 obs 也能把整条驱动链
-先跑起来。
+fake 模式(联调第一步"纯本地跑通"用):给 --fake-store 目录,下载就变成从该目录按文件名拷贝
+——zip 按 Product_Name 取,skill 按 obskey 的文件名部分取。不碰网络、不需要上述依赖。
 """
 from __future__ import annotations
 
+import importlib.util
+import os
 import shutil
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-# 平台1 下载脚本放这里(拿到后改名或改这个常量)
-PLATFORM_SCRIPT = HERE / "platform_download.py"
+PLATFORM_SCRIPT = HERE / "download_fault_tree_artifact.py"
+
+_PLATFORM_MOD = None
 
 
 def _fake_fetch(store: Path, filename: str, dst: Path) -> Path:
@@ -35,14 +38,39 @@ def _fake_fetch(store: Path, filename: str, dst: Path) -> Path:
     return dst
 
 
+def _load_platform_module():
+    """加载平台下载脚本(它模块级 import psf/pandas 并初始化加密件,只在联调机器上装得起)。"""
+    global _PLATFORM_MOD
+    if _PLATFORM_MOD is None:
+        if not PLATFORM_SCRIPT.exists():
+            raise SystemExit(f"缺平台下载脚本:{PLATFORM_SCRIPT};联调自测请先用 --fake-store")
+        spec = importlib.util.spec_from_file_location("p1_download", PLATFORM_SCRIPT)
+        mod = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(mod)
+        except Exception as e:
+            raise SystemExit(
+                f"平台下载脚本加载失败:{e}\n"
+                f"它依赖 pandas/requests/psf(内部库)与同目录 obs_headers_config.json"
+                f"(含 token 与密钥路径)——联调机器上装好、放好再跑;自测用 --fake-store。")
+        _PLATFORM_MOD = mod
+    return _PLATFORM_MOD
+
+
 def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
-    """真路占位:kind='zip' 时 locator 是 Product_Obs 地址,kind='skill' 时是 objectkey。
-    拿到平台1 的下载脚本后在这里接线(subprocess 调它,或 import 后调它的函数),
-    下载产物落到 dst。"""
-    raise SystemExit(
-        f"obs 真实下载还没接线(要下 {kind}:{locator})。\n"
-        f"把平台1 的下载脚本放到 {PLATFORM_SCRIPT} 并在 downloader._platform_fetch() 里"
-        f"按它的用法接上;联调自测请先用 --fake-store。")
+    """真路:单条调平台下载服务。kind='zip' 时 locator=Product_Obs,kind='skill' 时
+    locator=prevObjectkey——同一接口,docId 即 obs 地址。文件落 dst。"""
+    mod = _load_platform_module()
+    cfg = os.environ.get("PLATFORM1_DL_CONFIG", "") or None
+    dl = mod.OBSDownloader(cfg)
+    env = os.environ.get("PLATFORM1_ENV", "") or dl.config.get("default", {}).get("env", "dev")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    res = dl.download_artifacts([{"docId": locator, "file_name": dst.name}],
+                                dst.parent, env, custom_file_name=dst.name)
+    if res.get("success") != 1 or not dst.exists():
+        raise SystemExit(f"平台下载失败({kind}:{locator}):{res};原因见上方脚本输出"
+                         f"(JSON 响应=服务端拒绝,常见是 token 过期或该 obs 路径无权限)")
+    return dst
 
 
 def download_zip(obs_path: str, name: str, dst_dir: Path, fake_store: Path | None = None) -> Path:
@@ -55,7 +83,7 @@ def download_zip(obs_path: str, name: str, dst_dir: Path, fake_store: Path | Non
 
 
 def download_skill(obskey: str, dst_dir: Path, fake_store: Path | None = None) -> Path:
-    """按 objectkey 下载上一版 skill 文件(zip)到 dst_dir。"""
+    """按 prevObjectkey(obs 地址)下载上一版 skill 文件(zip)到 dst_dir。"""
     fname = Path(str(obskey)).name or "skill.zip"
     if not fname.lower().endswith(".zip"):
         fname += ".zip"
