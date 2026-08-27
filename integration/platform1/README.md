@@ -66,7 +66,7 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 服务模式默认带模型档(PLATFORM1_WITH_MODEL=0 可关)。线上口径是**一单一轮**:
 每次点优化只做一轮模型处置就交付(部分交付兜底,已修的管道副本随包带走),
 没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
-(本地盯着跑想多轮收敛,设 PLATFORM1_MODEL_ROUNDS)。每单请求的全程日志在
+(本地实验同理:重跑同一条命令就是下一轮)。每单请求的全程日志在
 `integration/platform1/_runs/v<versionId前8>/run.log`。终端开着服务就在;
 要长期挂(关终端不掉)再用 Windows 计划任务或 nssm 包一层,联调阶段不必。
 常见坑:平台服务器到你机器 8080 的网络(内网互通/防火墙)。

@@ -302,7 +302,19 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     cmd = [sys.executable, str(MIGRATE), "--package", str(bundle),
            "--product", str(product), "--auto", "--map", str(excel)]
     print("[迁移]", " ".join(cmd))
+
+    def _fix_tuning(rc, out):
+        # 存量调优表的旧版结构病(如多个顶层节点)卡预导入:备份 .bak 后重建再跑一次。
+        # 只有存在可落地的行、迁移进到写入阶段才会触发收编——纯机械问题,机械修
+        if rc != 0 and "预导入(收编现有调优表) 失败" in out:
+            print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
+                  "(病表备份为 .bak,从产物重建)")
+            rc, out = _run_migrate(cmd + ["--rebuild-tuning"])
+            print(f"[修表] 重跑退出码 {rc}")
+        return rc, out
+
     rc, last_out = _run_migrate(cmd)
+    rc, last_out = _fix_tuning(rc, last_out)
     if rc != 0 and with_model:
         # 机械挡吃不下的失败项(语义对号/修管道/补入口)交给模型:起 Claude Code 无头会话
         # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
@@ -328,34 +340,15 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         else:
             claude_cmd[0] = exe
             timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
-            # 线上口径:一单请求只做一轮模型处置就交付(部分交付兜底),没修完的
-            # 下次点优化在交付包基础上续迁——不让平台一单等几轮。多轮收敛留给
-            # 本地盯着跑的场合:PLATFORM1_MODEL_ROUNDS 调大即可。
-            rounds = int(os.environ.get("PLATFORM1_MODEL_ROUNDS", "1"))
-            prev_fail = None
-            for rnd in range(1, rounds + 1):
-                mlog = work / f"model_session_{rnd}.log"
-                print(f"[模型] 第 {rnd}/{rounds} 轮:起 Claude Code 无头会话处置失败项"
-                      f"(cs-scot-migrate 技能),每一步动作实时打在下面,事件流落 {mlog}")
-                _model_session(claude_cmd, mlog, timeout)
-                rc, out = _run_migrate(cmd)
-                last_out = out
-                print(f"[模型] 第 {rnd} 轮处置后复跑机械迁移,退出码 {rc}")
-                if rc != 0 and "预导入(收编现有调优表) 失败" in out:
-                    # 存量调优表的旧版结构病(如多个顶层节点):备份 .bak 后重建,再跑一次
-                    print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
-                          "(病表备份为 .bak,从产物重建)")
-                    rc, out = _run_migrate(cmd + ["--rebuild-tuning"])
-                    last_out = out
-                    print(f"[修表] 重跑退出码 {rc}")
-                if rc == 0:
-                    break
-                m = re.search(r"落地 (\d+)/(\d+) 行", out)
-                fails = (int(m.group(2)) - int(m.group(1))) if m else None
-                if prev_fail is not None and fails is not None and fails >= prev_fail:
-                    print(f"[模型] 本轮无新进展(仍 {fails} 行未落地),不再追加轮次")
-                    break
-                prev_fail = fails
+            # 一单一轮:点一次优化只做一轮模型处置,复跑验证后就交付(部分交付
+            # 兜底),没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
+            mlog = work / "model_session.log"
+            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),"
+                  f"每一步动作实时打在下面,事件流落 {mlog}")
+            _model_session(claude_cmd, mlog, timeout)
+            rc, last_out = _run_migrate(cmd)
+            print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
+            rc, last_out = _fix_tuning(rc, last_out)
     if rc != 0:
         result = _parse_migrate_result(last_out)
         effective = (result["landed"] + len(result["skipped"])) if result else 0
