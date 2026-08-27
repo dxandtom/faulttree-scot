@@ -289,8 +289,17 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
             print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),"
                   f"通常 10-30 分钟;它每一步动作会实时打在下面,原始事件流落 {mlog}")
             _model_session(claude_cmd, mlog, timeout)
-            rc = subprocess.run(cmd, cwd=str(REPO)).returncode
+            rerun = subprocess.run(cmd, cwd=str(REPO), capture_output=True,
+                                   text=True, encoding="utf-8", errors="replace")
+            print((rerun.stdout or "") + (rerun.stderr or ""))
+            rc = rerun.returncode
             print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
+            if rc != 0 and "预导入(收编现有调优表) 失败" in (rerun.stdout or "") + (rerun.stderr or ""):
+                # 存量调优表的旧版结构病(如多个顶层节点):备份 .bak 后从产物重建,再跑一次
+                print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
+                      "(病表备份为 .bak,从产物重建)")
+                rc = subprocess.run(cmd + ["--rebuild-tuning"], cwd=str(REPO)).returncode
+                print(f"[修表] 重跑退出码 {rc}")
     if rc != 0:
         print(f"[停] 迁移退出码 {rc}(3=有对不上号的行,清单见上方输出)。"
               f"不回调、不打包;工作目录留在 {work} 供排查。")
