@@ -59,6 +59,7 @@
 - [ ] 下载服务对 skill 所在 bucket(如 netcare-skill)是否放行——联调第 2 步第一件事就是
       拿真 prevObjectkey 试一次单条下载
 - [ ] NONE(空壳表)+ 有上一版时平台期望我们回什么(原样返回?仅刷新?)
-- [ ] 回调接口的鉴权(接口文档未提;若要 token,加在 driver.post_callback 的请求头)
+- [x] 回调接口不用鉴权(用户与平台确认,2026-08-26)
 - [ ] 我方接口的正式 URL(文档示例 /xxx/api/v1/fault-tree/optimize 标注"以实际为准";
-      server.py 现挂 /optimize,平台配地址时对齐即可)
+      我方接口就是 server.py,现挂 POST /optimize——把 http://<本机IP>:8080/optimize
+      给平台配上即可;对方要求特定路径的话改 server.py 里 @app.post 一行)
