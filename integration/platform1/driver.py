@@ -110,17 +110,22 @@ def parse_platform_excel(path: Path):
 
 # ---------- ③ skill 解包与产物目录定位 ----------
 
-def unpack_skill(zip_path: Path, dst: Path) -> Path:
-    """解包上一版 skill,返回迁移用的产物目录:
-    技能形态认 assets/;唯一顶层目录先下探一层;都不是就用解包根。"""
-    with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(dst)
+def _locate_product(dst: Path) -> Path:
+    """解包目录里定位迁移用的产物目录:技能形态认 assets/;唯一顶层目录先下探一层;
+    都不是就用解包根。"""
     root = dst
     entries = [p for p in root.iterdir() if not p.name.startswith("__MACOSX")]
     if len(entries) == 1 and entries[0].is_dir():
         root = entries[0]
     assets = root / "assets"
     return assets if assets.is_dir() else root
+
+
+def unpack_skill(zip_path: Path, dst: Path) -> Path:
+    """解包上一版 skill,返回迁移用的产物目录。"""
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(dst)
+    return _locate_product(dst)
 
 
 # ---------- ⑤ 重打包 ----------
@@ -264,11 +269,21 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
             print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
         return out_zip
     for names, name, obs in rows:
+        fname = name if name.lower().endswith(".zip") else name + ".zip"
+        if (bundle / fname).exists():
+            print(f"[下载] {'/'.join(names)} ← {fname}(已在,跳过)")
+            continue
         downloader.download_zip(obs, name, bundle, fake_store=fake_store)
         print(f"[下载] {'/'.join(names)} ← {name}")
-    skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
-    product = unpack_skill(skill_zip, skill_dir)
-    print(f"[skill] 上一版已解包,产物目录:{product}")
+    if skill_dir.exists() and any(skill_dir.rglob("tree/migrations.json")):
+        # 续跑同一工作目录:上一轮迁移成果(tree_index/调优表/修复副本)就地保留——
+        # 重新解包会把 zip 里的旧版 tree_index 盖回去,而台账又让已迁移的包被跳过,账实不符
+        product = _locate_product(skill_dir)
+        print(f"[skill] 续跑:沿用工作目录里已迁移的产物(不重新解包),产物目录:{product}")
+    else:
+        skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+        product = unpack_skill(skill_zip, skill_dir)
+        print(f"[skill] 上一版已解包,产物目录:{product}")
 
     cmd = [sys.executable, str(MIGRATE), "--package", str(bundle),
            "--product", str(product), "--auto", "--map", str(excel)]
