@@ -1,10 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-故障树产物批量下载脚本(平台1 同事提供的原版,downloader.py 按它接线;勿自行改动逻辑)
+故障树产物批量下载脚本(平台1 同事提供;downloader.py 按它接线)
 功能:读取Excel文件中的Product_Obs和Product_Name,逐条下载OBS产物
 用法:python download_fault_tree_artifact.py <excel_file> [--output_dir <output_dir>] [--env dev|beta]
 依赖:pandas、requests、psf(内部库)+ 同目录 obs_headers_config.json(含 token/密钥路径,不进仓库)
+
+与原版的唯一差异(应我方要求改,2026-08-27):平台一次下载有数量限制,download_batch
+超过 5 条时按 5 个一批分批下载——每批得到一个合集 zip(文件名加 _partN),都落在同一个
+输出目录;最后一批只剩 1 条时按单条方式落原名(服务端单条返回的是文件本身,不是合集包)。
 """
 
 import argparse
@@ -30,6 +34,7 @@ PsfConfig.set_config("psf", "ssl_server_cert_switch", "on")
 
 CONFIG_FILE = Path(__file__).parent / "obs_headers_config.json"
 DEFAULT_OUTPUT_DIR = Path(__file__).parent / "downloads"
+BATCH_DOWNLOAD_SIZE = 5   # 平台一次下载有数量限制:超过就按这个数分批
 
 _psf_config_cache = {}
 
@@ -236,12 +241,25 @@ class OBSDownloader:
             results["success"] = batch_result["success"]
             results["failed"] = batch_result["failed"]
         else:
-            print(f"[下载] 有{len(artifacts)}条数据，批量下载")
-            extension = 'zip'
-            timestamped_name = generate_timestamp_name(excel_basename, extension)
-            batch_result = self.download_artifacts(artifacts, output_dir, env, custom_file_name=timestamped_name)
-            results["success"] = batch_result["success"]
-            results["failed"] = batch_result["failed"]
+            batches = [artifacts[i:i + BATCH_DOWNLOAD_SIZE]
+                       for i in range(0, len(artifacts), BATCH_DOWNLOAD_SIZE)]
+            print(f"[下载] 有{len(artifacts)}条数据，分 {len(batches)} 批下载"
+                  f"（每批至多 {BATCH_DOWNLOAD_SIZE} 个）")
+            for bi, batch in enumerate(batches, 1):
+                print(f"[批次 {bi}/{len(batches)}] {len(batch)} 个")
+                if len(batch) == 1:
+                    # 服务端单条返回的是文件本身（不是合集包），按单条方式落原名
+                    batch_result = self.download_artifacts(batch, output_dir, env,
+                                                           custom_file_name=None)
+                else:
+                    suffix = excel_basename if len(batches) == 1 else f"{excel_basename}_part{bi}"
+                    timestamped_name = generate_timestamp_name(suffix, 'zip')
+                    batch_result = self.download_artifacts(batch, output_dir, env,
+                                                           custom_file_name=timestamped_name)
+                results["success"] += batch_result["success"]
+                results["failed"] += batch_result["failed"]
+                if bi < len(batches):
+                    time.sleep(1)
 
         return results
 
