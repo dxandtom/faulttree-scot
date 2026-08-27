@@ -15,8 +15,8 @@
 三种优化场景(平台按选择导出 excel;prevObjectkey 首次优化为 null):
   MULTI/ALL:表里有技能行 + 有上一版 skill → 本驱动全自动跑(主路)
   表里有行 + 无上一版:生成场景,要走 cs-scot-generate 的模型会话,本驱动不代跑(退出码 4)
-  NONE(空壳表,只有表头):无迁移可做——无上一版按生成场景退 4;有上一版属待与平台
-  确认的语义(期望我们回什么?),退出码 5,不瞎动
+  NONE(空壳表,只有表头)+ 有上一版:无迁移可做——现行 skill 原样下载回传,
+  让平台状态正常闭环(顺带这就是「skill 下载」的独立验证路)
 
 用法(本地模拟;样例见 request.example.json):
   python integration/platform1/driver.py --request request.json \
@@ -182,15 +182,26 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         print("prevObjectkey 为空(首次优化)→ 平台侧还没有 skill,属生成场景:"
               "用 cs-scot-generate 走模型会话从头生成,本驱动不代跑。")
         sys.exit(4)
-    if not rows:
-        print("NONE 场景(空壳表,只有表头)+ 已有上一版 skill:无迁移可做。"
-              "期望我们回什么(原样返回?仅刷新?)属待与平台确认的语义,不瞎动。")
-        sys.exit(5)
 
     work = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="p1opt-"))
     work.mkdir(parents=True, exist_ok=True)
     bundle, skill_dir, out_dir = work / "bundle", work / "skill", work / "out"
     bundle.mkdir(exist_ok=True)
+
+    if not rows:
+        # NONE 场景(空壳表,只有表头):无节点要迁移——现行 skill 原样返回,
+        # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING)
+        print("NONE 场景(空壳表):无迁移可做,现行 skill 原样返回。")
+        skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+        out_dir.mkdir(exist_ok=True)
+        out_zip = out_dir / f"skill_{version_id[:8]}.zip"
+        shutil.copy2(skill_zip, out_zip)
+        print(f"[产物] {out_zip}(与现行 skill 逐字节相同)")
+        if cb_url:
+            post_callback(cb_url, version_id, out_zip)
+        else:
+            print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
+        return out_zip
     for names, name, obs in rows:
         downloader.download_zip(obs, name, bundle, fake_store=fake_store)
         print(f"[下载] {'/'.join(names)} ← {name}")

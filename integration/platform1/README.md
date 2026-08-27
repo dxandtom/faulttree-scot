@@ -25,26 +25,42 @@
 - **MULTI / ALL**(表里有技能行 + 有上一版 skill)→ 主路,全自动;
 - 表里有行 + `prevObjectkey=null`(首次优化)→ 生成场景:走 cs-scot-generate 的模型会话,
   驱动不代跑,退出码 4;
-- **NONE**(空壳表,只有表头)+ 有上一版 → 无迁移可做,期望语义待和平台确认,退出码 5,不瞎动。
+- **NONE**(空壳表,只有表头)+ 有上一版 → 无迁移可做,**现行 skill 原样下载回传**,
+  让平台状态正常闭环(顺带这就是「skill 下载」的独立验证路)。
 
 迁移退出码非 0(3=有对不上号的行):不打包、不回调,工作目录保留供排查。
 
-## 三步联调
+## 联调实验(按序,前一个绿了再下一个)
 
-1. **纯本地跑通(不碰网络)**:把样例(excel、各节点 zip、上一版 skill zip)放进一个目录当
-   假货架,跑:
-   ```
-   python integration/platform1/driver.py --request request.json --fake-store <样例目录>
-   ```
-   fake 模式按文件名取:zip 按 Product_Name,skill 按 prevObjectkey 的文件名部分。
-2. **接通真下载**:平台下载脚本已在本目录(`download_fault_tree_artifact.py`,原版未改)。
-   联调机器上装 `pandas requests` + psf(内部库),把 `obs_headers_config.json`
-   (含 endpoint/invokeToken/psf 密钥路径,**不进仓库**)和 token/密钥文件放到本目录,
-   去掉 `--fake-store` 重跑同一条命令。环境切换用 `PLATFORM1_ENV=dev|beta`
-   (缺省用配置文件 default.env)。
-3. **接真请求**:`pip install fastapi uvicorn python-multipart`,配
-   `PLATFORM1_CALLBACK_URL=http://<平台1>/workspace/faultTreeNode/optimizeCallback`,
-   起 server.py,平台点按钮打过来。
+处理链本身已在开发环境端到端演练全绿(平台表→下载→解包→migrate→重打包→回调收一发,
+scratchpad 的 test_platform_e2e.py),联调机器上只验证"真材料、真网络"这几样。
+
+**实验 A · 链路(fake 货架,不碰网络)**:验证真实 excel + 真实 zip 能走完迁移。
+建个货架目录放:各节点 zip(文件名=表里 Product_Name)+ 现行 skill zip
+(拿本地场景产物目录整个压缩,文件名=request 里 prevObjectkey 的最后一段),照
+request.example.json 建 request.json(callback_url 留空),跑:
+```
+python integration/platform1/driver.py --request request.json --fake-store <货架目录>
+```
+预期:打印逐条下载→迁移汇总→产物 zip 路径。
+
+**实验 B · skill 真下载(碰网络,一件事)**:验证下载服务肯给 skill 文件。
+本目录放好 `obs_headers_config.json` + token/psf 密钥(同下载脚本原来那套,**不进仓库**;
+`pandas requests` + psf 环境与你跑通下载脚本时相同)。造一个**只有表头**的空壳表,
+request.json 里 excel 指它、prevObjectkey 填一个真实的 skill objectkey(找开发要),
+**去掉 --fake-store** 跑同一条命令——驱动只做"下载 skill→原样打包"一件事。
+下载被拒(响应是 JSON 而非文件流)= 服务端权限没放行,把输出甩给平台侧。
+
+**实验 C · 全链真下载**:实验 A 的 request 换真表,去掉 --fake-store 重跑。
+产物 zip 人工抽查(判据进树、绑定换血、migrations.json 台账)。
+
+**实验 D · 接真请求(收官)**:`pip install fastapi uvicorn python-multipart`,配
+`PLATFORM1_CALLBACK_URL=http://<平台1>/workspace/faultTreeNode/optimizeCallback`,起:
+```
+python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/platform1
+```
+把 `http://<本机IP>:8080/optimize` 给平台配上,让管理员点一次优化。
+常见坑:平台服务器到你机器 8080 的网络(内网互通/防火墙)。
 
 ## 已定(平台材料齐了)
 
@@ -59,8 +75,7 @@
 - [ ] 下载服务对 skill 所在 bucket(如 netcare-skill)是否放行——代码已就绪(skill 与 zip
       同接口同格式,都带 file_name),若被拒属平台侧配置;联调第 2 步第一件事拿真
       prevObjectkey 试一次单条下载
-- [x] NONE(空壳表):无迁移可做,不处理(用户拍板);注意驱动此时不回调,平台侧该记录会
-      一直挂 OPTIMIZING(状态机拒绝重复提交)——建议知会平台这种请求别发或自行收尾
+- [x] NONE(空壳表):现行 skill 原样下载回传(用户拍板:不动逻辑原样返回),平台状态正常闭环
 - [ ] 回调接口要不要鉴权待定——口子已留:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头
       (例 {"invokeToken": "..."}),不设=不带
 - [ ] 我方接口的正式 URL(文档示例 /xxx/api/v1/fault-tree/optimize 标注"以实际为准";
