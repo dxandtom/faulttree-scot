@@ -179,8 +179,10 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     rows = parse_platform_excel(excel)
     print(f"[表] {excel.name}:{len(rows)} 个待迁移节点")
     if not obskey:
-        print("prevObjectkey 为空(首次优化)→ 平台侧还没有 skill,属生成场景:"
-              "用 cs-scot-generate 走模型会话从头生成,本驱动不代跑。")
+        print("prevObjectkey 为空(首次优化)→ 平台侧还没有 skill。从头生成一棵技能"
+              "需要专家判据文档等素材,而平台请求里只有 excel(仅节点路径,无判据列)"
+              "和 zip 包,凑不齐——首版 skill 应线下用 cs-scot-generate 生成后录入平台,"
+              "优化按钮只管之后的迭代。本驱动不处理这种请求。")
         sys.exit(4)
 
     work = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="p1opt-"))

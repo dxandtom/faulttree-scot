@@ -81,3 +81,7 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 - [ ] 我方接口的正式 URL(文档示例 /xxx/api/v1/fault-tree/optimize 标注"以实际为准";
       我方接口就是 server.py,现挂 POST /optimize——把 http://<本机IP>:8080/optimize
       给平台配上即可;对方要求特定路径的话改 server.py 里 @app.post 一行)
+- [ ] 首次优化(prevObjectkey=null)的分工要与平台对齐:平台请求只有 excel(仅节点路径,
+      无判据列)+ zip 包,凑不齐从头生成一棵技能的素材(专家判据文档、场景层配置),
+      按包拼节点也只是残缺骨架跑不起来——建议口径:首版 skill 线下用 cs-scot-generate
+      生成后录入平台,优化按钮只管有 skill 之后的迭代;驱动遇到 null 拒绝并说明原因
