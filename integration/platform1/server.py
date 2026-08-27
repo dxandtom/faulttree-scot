@@ -35,13 +35,15 @@ app = FastAPI(title="scot-optimize")
 
 
 def _run_driver(req_file: Path, workdir: Path):
-    """后台任务:driver 起独立进程跑(它内部 sys.exit,不能进本进程),日志落 run.log。"""
+    """后台任务:driver 起独立进程跑(它内部 sys.exit,不能进本进程),日志落 run.log。
+    服务模式默认带模型档(没人盯终端,失败项由模型自动处置);PLATFORM1_WITH_MODEL=0 关。"""
+    args = [sys.executable, str(HERE / "driver.py"), "--request", str(req_file),
+            "--workdir", str(workdir / "work"), "--keep"]
+    if os.environ.get("PLATFORM1_WITH_MODEL", "1") != "0":
+        args.append("--with-model")
     log = workdir / "run.log"
     with log.open("w", encoding="utf-8") as fh:
-        subprocess.run(
-            [sys.executable, str(HERE / "driver.py"), "--request", str(req_file),
-             "--workdir", str(workdir / "work"), "--keep"],
-            stdout=fh, stderr=subprocess.STDOUT, cwd=str(HERE.parents[1]))
+        subprocess.run(args, stdout=fh, stderr=subprocess.STDOUT, cwd=str(HERE.parents[1]))
 
 
 @app.post("/optimize")
