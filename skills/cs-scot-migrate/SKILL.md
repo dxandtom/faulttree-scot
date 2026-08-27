@@ -62,6 +62,10 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 - **表头怎么写都认**(格式没跟交付方钉死,宽进):层级列裸 `L1`/`L2`…、`L1(Chinese)`、`L1(中文)`、
   全角括号、大小写、带空格都行;**没有 node_id**(有 node_id 的会被当成我们的调优表拒收);
   zip 列叫 `zip`(或唯一一个列名含 zip 的);zip 值带/不带 `.zip` 都行;
+  **平台1 导出表直接给也认**(`L1_Name_CN`/`L1_Name_EN` 成对 + `Product_Obs` + `Product_Name`,
+  层级动态):节点定位取 `_Name_CN` 列,`_Name_EN` 与 `Product_Obs`(obs 下载地址,工装层的事)
+  整列忽略,`Product_Name` 当 zip 列——zip 包本身先由联调驱动按 `Product_Obs` 下载到位
+  (见 `integration/platform1/`);
   **判据列可选**(表头含 判据/判断方法/判断条件/judgment 的列)——在场即启用下面的清除行语义,
   老表没有此列行为一切照旧;
 - **行语义三种**(全量表口径,机械分类):

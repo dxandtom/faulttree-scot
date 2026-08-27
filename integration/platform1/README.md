@@ -1,0 +1,87 @@
+# 平台1 本地联调工装
+
+把平台1 的"优化按钮"请求翻成技能的本地输入,跑完迁移后回调。**这一层是工装,不进技能**:
+技能(cs-scot-migrate / cs-scot-generate)只认本地已摆好的文件;下载、回调、状态这些平台概念
+都停在这层。上平台2 时本目录整体由开发的集成代码替换,技能原样上。
+
+## 链路(字段名与平台接口文档 callDongXuanOptimizeApi 一致)
+
+```
+平台1 点优化 ──POST multipart(versionId + excelFile + prevObjectkey)──▶ server.py
+                          │ 受理即回 success,后台:
+                          ▼
+                      driver.py
+   ① 解析平台 excel(L*_Name_CN/EN + Product_Obs + Product_Name,层级动态)
+   ② downloader.py:按 Product_Obs 逐条下载节点 zip;按 prevObjectkey 下载上一版 skill
+      (同一个平台下载服务,docId 即 obs 地址——"下载 skill 能力"的改造就在这)
+   ③ 解包 skill,定位产物目录(技能形态认 assets/)
+   ④ 调 cs-scot-migrate 对应表批量迁移(平台表直接喂 --map,技能已认这格式)
+   ⑤ 重打包新版 skill zip
+   ⑥ 回调 POST /workspace/faultTreeNode/optimizeCallback(versionId + skillFile 文件流)
+      平台收到后自己上传 OBS、把版本记录置 COMPLETED
+```
+
+三种优化场景(节点选择=平台按选择导出 excel 行):
+- **MULTI / ALL**(表里有技能行 + 有上一版 skill)→ 主路,全自动;
+- 表里有行 + `prevObjectkey=null`(首次优化)→ 生成场景:走 cs-scot-generate 的模型会话,
+  驱动不代跑,退出码 4;
+- **NONE**(空壳表,只有表头)+ 有上一版 → 无迁移可做,**现行 skill 原样下载回传**,
+  让平台状态正常闭环(顺带这就是「skill 下载」的独立验证路)。
+
+迁移退出码非 0(3=有对不上号的行):不打包、不回调,工作目录保留供排查。
+
+## 联调实验(按序,前一个绿了再下一个)
+
+处理链本身已在开发环境端到端演练全绿(平台表→下载→解包→migrate→重打包→回调收一发,
+scratchpad 的 test_platform_e2e.py),联调机器上只验证"真材料、真网络"这几样。
+
+**实验 A · 链路(fake 货架,不碰网络)**:验证真实 excel + 真实 zip 能走完迁移。
+建个货架目录放:各节点 zip(文件名=表里 Product_Name)+ 现行 skill zip
+(拿本地场景产物目录整个压缩,文件名=request 里 prevObjectkey 的最后一段),照
+request.example.json 建 request.json(callback_url 留空),跑:
+```
+python integration/platform1/driver.py --request request.json --fake-store <货架目录>
+```
+预期:打印逐条下载→迁移汇总→产物 zip 路径。
+
+**实验 B · skill 真下载(碰网络,一件事)**:验证下载服务肯给 skill 文件。
+本目录放好 `obs_headers_config.json` + token/psf 密钥(同下载脚本原来那套,**不进仓库**;
+`pandas requests` + psf 环境与你跑通下载脚本时相同)。造一个**只有表头**的空壳表,
+request.json 里 excel 指它、prevObjectkey 填一个真实的 skill objectkey(找开发要),
+**去掉 --fake-store** 跑同一条命令——驱动只做"下载 skill→原样打包"一件事。
+下载被拒(响应是 JSON 而非文件流)= 服务端权限没放行,把输出甩给平台侧。
+
+**实验 C · 全链真下载**:实验 A 的 request 换真表,去掉 --fake-store 重跑。
+产物 zip 人工抽查(判据进树、绑定换血、migrations.json 台账)。
+
+**实验 D · 接真请求(收官)**:`pip install fastapi uvicorn python-multipart`,配
+`PLATFORM1_CALLBACK_URL=http://<平台1>/workspace/faultTreeNode/optimizeCallback`,起:
+```
+python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/platform1
+```
+把 `http://<本机IP>:8080/optimize` 给平台配上,让管理员点一次优化。
+常见坑:平台服务器到你机器 8080 的网络(内网互通/防火墙)。
+
+## 已定(平台材料齐了)
+
+- [x] 请求字段:versionId(UUID)/ excelFile(文件流)/ prevObjectkey(首次为 null)
+- [x] 回调字段:versionId + skillFile(zip 文件流);OBS 上传与版本记录更新由平台做
+- [x] 节点选择语义:NONE=空壳表 / MULTI=选中行 / ALL=全部后代行
+- [x] 下载脚本源码(download_fault_tree_artifact.py);skill 下载改造 = 同接口按
+      prevObjectkey 单条调用(downloader._platform_fetch)
+
+## 剩余待确认
+
+- [ ] 下载服务对 skill 所在 bucket(如 netcare-skill)是否放行——代码已就绪(skill 与 zip
+      同接口同格式,都带 file_name),若被拒属平台侧配置;联调第 2 步第一件事拿真
+      prevObjectkey 试一次单条下载
+- [x] NONE(空壳表):现行 skill 原样下载回传(用户拍板:不动逻辑原样返回),平台状态正常闭环
+- [ ] 回调接口要不要鉴权待定——口子已留:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头
+      (例 {"invokeToken": "..."}),不设=不带
+- [ ] 我方接口的正式 URL(文档示例 /xxx/api/v1/fault-tree/optimize 标注"以实际为准";
+      我方接口就是 server.py,现挂 POST /optimize——把 http://<本机IP>:8080/optimize
+      给平台配上即可;对方要求特定路径的话改 server.py 里 @app.post 一行)
+- [ ] 首次优化(prevObjectkey=null)的分工要与平台对齐:平台请求只有 excel(仅节点路径,
+      无判据列)+ zip 包,凑不齐从头生成一棵技能的素材(专家判据文档、场景层配置),
+      按包拼节点也只是残缺骨架跑不起来——建议口径:首版 skill 线下用 cs-scot-generate
+      生成后录入平台,优化按钮只管有 skill 之后的迭代;驱动遇到 null 拒绝并说明原因
