@@ -224,23 +224,26 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                   f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
                   f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
                   f"改逻辑就跳过并在最后列入返厂清单,绝不赌。完成后汇报改了哪些文件、跳过了哪些。")
+        # 本地联调默认按用户的日常用法起会话(全权限);平台2 集成时权限策略另定
         claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
-                                    "claude --permission-mode acceptEdits -p").split() + [prompt]
+                                    "claude --dangerously-skip-permissions -p").split() + [prompt]
         exe = shutil.which(claude_cmd[0])   # Windows 上 npm 装的是 claude.cmd,须 which 解析
         if exe is None:
             print(f"[模型] 找不到命令「{claude_cmd[0]}」——跳过模型档,按机械迁移结果处理。"
-                  f"(检查 Claude Code 是否在 PATH,或设 PLATFORM1_CLAUDE_CMD 指定完整调用,"
-                  f"如 set PLATFORM1_CLAUDE_CMD=C:\\path\\claude.cmd --permission-mode acceptEdits -p)")
+                  f"(检查 Claude Code 是否在 PATH,或设 PLATFORM1_CLAUDE_CMD 指定完整调用)")
         else:
             claude_cmd[0] = exe
             mlog = work / "model_session.log"
             timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
-            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),"
-                  f"要几分钟;完整输出落 {mlog}")
+            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能)。"
+                  f"这一步通常要 10-30 分钟,期间本终端没有输出属正常;"
+                  f"想看进展就另开窗口盯 {mlog} 的大小(会话输出有缓冲,可能结束才落盘),"
+                  f"或在任务管理器确认 node 进程在跑。超时上限 {timeout} 秒。")
             try:
                 with mlog.open("w", encoding="utf-8") as fh:
                     subprocess.run(claude_cmd, cwd=str(REPO), stdout=fh,
-                                   stderr=subprocess.STDOUT, timeout=timeout)
+                                   stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                   timeout=timeout)
             except subprocess.TimeoutExpired:
                 print(f"[模型] 会话超时({timeout} 秒,可用 PLATFORM1_MODEL_TIMEOUT 调大),"
                       f"按已修部分继续")
