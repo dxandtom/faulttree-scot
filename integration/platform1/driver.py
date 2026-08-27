@@ -323,10 +323,14 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                   f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约体检 FAIL 的照修法"
                   f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
                   f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
-                  f"改逻辑就跳过并在最后列入返厂清单,绝不赌。两条实测经验:S3 这类文件过滤"
+                  f"改逻辑就跳过并在最后列入返厂清单,绝不赌。三条实测经验:S3 这类文件过滤"
                   f"在同一脚本里常有多处(不同函数各扫一遍目录),要全文搜 .txt 过滤逐处改净;"
                   f"S5 第三方库(如 chardet)属管道,按修法换标准库实现(编码探测退化为"
-                  f" utf-8/gbk 依次尝试 + errors='replace')。完成后汇报改了哪些文件、跳过了哪些。")
+                  f" utf-8/gbk 依次尝试 + errors='replace');缺入口的脚本补完入口前体检"
+                  f"跑不了,清单上只看得见缺入口——补完薄封装后顺手把同一脚本的 S3"
+                  f"(.txt/.log 双后缀)与 D3(缺数据判 insufficient_data 而非 false)"
+                  f"查一遍修净,免得复跑才暴露、又拖到下一单。"
+                  f"完成后汇报改了哪些文件、跳过了哪些。")
         # 本地联调默认按用户的日常用法起会话(全权限);平台2 集成时权限策略另定
         claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
                                     "claude --dangerously-skip-permissions -p").split()
