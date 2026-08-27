@@ -994,6 +994,9 @@ def _factory_report(rows):
             print(f"      - {s}")
 
 
+REBUILD_TUNING = False   # --rebuild-tuning:存量调优表备份为 .bak 后从产物重建(旧版导出器的结构病解法)
+
+
 def _surgery(product: Path, edits, adds=(), note=None) -> None:
     """edits=[(nid, condition, binding)…] 改既有行;adds=[(父nid, 父链名字, 节点名, condition, binding)…]
     新增行(增节点,node_id 留空由 import 分配)。预导入收编(如需)→ 一次导出 → 改/增 N 行 →
@@ -1002,6 +1005,15 @@ def _surgery(product: Path, edits, adds=(), note=None) -> None:
     tis = sorted((product / "tree").glob("*.tree_index.json"))
     xls = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
                  if not p.name.startswith("~$"))
+    if REBUILD_TUNING and xls:
+        for p in xls:
+            bak = p.with_suffix(p.suffix + ".bak")
+            if bak.exists():
+                bak.unlink()
+            p.rename(bak)
+            print(f"  [重建] 存量调优表 {p.name} 已备份为 {bak.name} 并移除——"
+                  f"用当前版导出器从产物重建;若里面有未导入的手工修改,从 .bak 找回")
+        xls = []
     if xls and tis and xls[0].stat().st_mtime > tis[0].stat().st_mtime:
         print("  [0/3] 调优表比 tree_index 新 → 先导入收编现有内容(有未导入的人工修改也不会丢)…")
         try:
@@ -1009,7 +1021,8 @@ def _surgery(product: Path, edits, adds=(), note=None) -> None:
         except SystemExit as e:
             raise SystemExit(str(e) + "\n提示:预导入失败卡的是**存量调优表**,不是这次的交付包。"
                              "若这份调优表里没有【尚未导入】的手工修改,把 tree/ 下的 *.tuning.xlsx 删掉重跑迁移即可"
-                             "(会用当前版导出器从产物重建;「多个顶层节点/层级列错位」这类结构病多为旧版导出器所产)。")
+                             "(会用当前版导出器从产物重建;「多个顶层节点/层级列错位」这类结构病多为旧版导出器所产);"
+                             "或直接加 --rebuild-tuning 重跑——自动备份 .bak 后重建,不用手删。")
     print("  [1/3] 导出调优表…")
     run_step(product, "export_tree_excel.py", "导出调优表")
     for nid, cond, b in edits:
@@ -1626,10 +1639,15 @@ def main() -> None:
                     help="内容指纹与台账一致的包默认跳过(全量交付幂等,人工调优不被冲)——"
                          "加本参数强制全部重迁")
     ap.add_argument("--script", help="包里有多个 fault_check_*.py 时指定文件名")
+    ap.add_argument("--rebuild-tuning", action="store_true",
+                    help="存量调优表备份为 .bak 后从产物重建(预导入报「多个顶层节点」这类"
+                         "旧版导出器结构病时用;有未导入的手工修改可从 .bak 找回)")
     ap.add_argument("--entry", help="入口函数名(默认自动探测)")
     ap.add_argument("--per-ne", action="store_true", help="入口吃单网元目录(自动探测不准时手工指定)")
     ap.add_argument("--entry-kwargs", help='入口额外关键字参数 JSON(如 {"judgment_conditions": {}})')
     a = ap.parse_args()
+    global REBUILD_TUNING
+    REBUILD_TUNING = bool(getattr(a, "rebuild_tuning", False))
     product = Path(a.product).expanduser().resolve()
     if not (product / "tree").is_dir() or not (product / "scripts").is_dir():
         if (product / "assets" / "tree").is_dir() and (product / "assets" / "scripts").is_dir():
