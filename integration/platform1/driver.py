@@ -161,6 +161,54 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
         return resp.status
 
 
+# ---------- 模型会话(事件流实时转发,判活一眼可见) ----------
+
+def _model_session(claude_cmd, mlog: Path, timeout: int) -> None:
+    """起 Claude Code 无头会话:事件流逐行接收——原始行落 mlog,关键动作翻译成
+    人话实时打到终端(带时间戳),看得见它每一步在干什么;超时杀进程按已修部分继续。"""
+    import time
+    start = time.time()
+    try:
+        proc = subprocess.Popen(claude_cmd, cwd=str(REPO), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                text=True, encoding="utf-8", errors="replace", bufsize=1)
+    except OSError as e:
+        print(f"[模型] 会话启动失败({e}),按机械迁移结果处理")
+        return
+    with mlog.open("w", encoding="utf-8") as fh:
+        for line in proc.stdout:
+            fh.write(line)
+            fh.flush()
+            if time.time() - start > timeout:
+                proc.kill()
+                print(f"[模型] 会话超时({timeout} 秒,PLATFORM1_MODEL_TIMEOUT 可调大),"
+                      f"按已修部分继续")
+                break
+            ts = time.strftime("%H:%M:%S")
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                s = line.strip()
+                if s:
+                    print(f"  [{ts}] {s[:120]}")
+                continue
+            if ev.get("type") == "assistant":
+                for blk in (ev.get("message") or {}).get("content") or []:
+                    if blk.get("type") == "tool_use":
+                        inp = blk.get("input") or {}
+                        brief = str(inp.get("file_path") or inp.get("command")
+                                    or inp.get("pattern") or "")[:90]
+                        print(f"  [{ts}] {blk.get('name')}  {brief}")
+                    elif blk.get("type") == "text" and str(blk.get("text", "")).strip():
+                        print(f"  [{ts}] 说:{str(blk['text']).strip()[:110]}")
+            elif ev.get("type") == "result":
+                print(f"  [{ts}] 会话结束:{str(ev.get('result', ''))[:200]}")
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
 # ---------- 主流程 ----------
 
 def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
@@ -226,7 +274,10 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                   f"改逻辑就跳过并在最后列入返厂清单,绝不赌。完成后汇报改了哪些文件、跳过了哪些。")
         # 本地联调默认按用户的日常用法起会话(全权限);平台2 集成时权限策略另定
         claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
-                                    "claude --dangerously-skip-permissions -p").split() + [prompt]
+                                    "claude --dangerously-skip-permissions -p").split()
+        if "--output-format" not in claude_cmd:
+            claude_cmd += ["--output-format", "stream-json", "--verbose"]  # 事件流:每步实时一行
+        claude_cmd.append(prompt)
         exe = shutil.which(claude_cmd[0])   # Windows 上 npm 装的是 claude.cmd,须 which 解析
         if exe is None:
             print(f"[模型] 找不到命令「{claude_cmd[0]}」——跳过模型档,按机械迁移结果处理。"
@@ -235,25 +286,9 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
             claude_cmd[0] = exe
             mlog = work / "model_session.log"
             timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
-            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能)。"
-                  f"这一步通常要 10-30 分钟,期间本终端没有输出属正常;"
-                  f"想看进展就另开窗口盯 {mlog} 的大小(会话输出有缓冲,可能结束才落盘),"
-                  f"或在任务管理器确认 node 进程在跑。超时上限 {timeout} 秒。")
-            try:
-                with mlog.open("w", encoding="utf-8") as fh:
-                    subprocess.run(claude_cmd, cwd=str(REPO), stdout=fh,
-                                   stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                   timeout=timeout)
-            except subprocess.TimeoutExpired:
-                print(f"[模型] 会话超时({timeout} 秒,可用 PLATFORM1_MODEL_TIMEOUT 调大),"
-                      f"按已修部分继续")
-            except OSError as e:
-                print(f"[模型] 会话启动失败({e}),按机械迁移结果处理")
-            if mlog.exists():
-                tail = mlog.read_text(encoding="utf-8", errors="replace").strip().splitlines()
-                print(f"[模型] 会话输出末尾({min(len(tail), 20)}/{len(tail)} 行):")
-                for ln in tail[-20:]:
-                    print("  | " + ln)
+            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),"
+                  f"通常 10-30 分钟;它每一步动作会实时打在下面,原始事件流落 {mlog}")
+            _model_session(claude_cmd, mlog, timeout)
             rc = subprocess.run(cmd, cwd=str(REPO)).returncode
             print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
     if rc != 0:
