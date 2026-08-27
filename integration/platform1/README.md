@@ -28,7 +28,10 @@
 - **NONE**(空壳表,只有表头)+ 有上一版 → 无迁移可做,**现行 skill 原样下载回传**,
   让平台状态正常闭环(顺带这就是「skill 下载」的独立验证路)。
 
-迁移退出码非 0(3=有对不上号的行):不打包、不回调,工作目录保留供排查。
+迁移有失败行时按**部分交付**处理(用户拍板):包里有已生效内容(本次落地或此前已迁移)
+就照样打包回调——已落地节点先生效,成功/跳过/失败清单连原因写进包内
+`tree/migration_report.json`;一个生效内容都没有才停下不回调(回传无变化的包只会误导
+版本记录),工作目录保留供排查。
 
 ## 联调实验(按序,前一个绿了再下一个)
 
@@ -60,6 +63,9 @@ request.json 里 excel 指它、prevObjectkey 填一个真实的 skill objectkey
 python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/platform1
 ```
 把 `http://<本机IP>:8080/optimize` 给平台配上,让管理员点一次优化。
+服务模式默认带模型档(PLATFORM1_WITH_MODEL=0 可关);每单请求的全程日志在
+`integration/platform1/_runs/v<versionId前8>/run.log`。终端开着服务就在;
+要长期挂(关终端不掉)再用 Windows 计划任务或 nssm 包一层,联调阶段不必。
 常见坑:平台服务器到你机器 8080 的网络(内网互通/防火墙)。
 
 ## 已定(平台材料齐了)
@@ -78,6 +84,10 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 - [x] NONE(空壳表):现行 skill 原样下载回传(用户拍板:不动逻辑原样返回),平台状态正常闭环
 - [ ] 回调接口要不要鉴权待定——口子已留:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头
       (例 {"invokeToken": "..."}),不设=不带
+- [ ] 回调接口需要「部分成功」字段(用户拍板:部分落地也交付,已落地节点先生效)——
+      现回调只有 versionId+skillFile,成功/失败节点清单暂写在包内 tree/migration_report.json
+      (total/landed/ok/skipped/failed 带表行号与原因),平台解包可查;建议平台侧
+      回调加字段直接带这份清单
 - [ ] 我方接口的正式 URL(文档示例 /xxx/api/v1/fault-tree/optimize 标注"以实际为准";
       我方接口就是 server.py,现挂 POST /optimize——把 http://<本机IP>:8080/optimize
       给平台配上即可;对方要求特定路径的话改 server.py 里 @app.post 一行)

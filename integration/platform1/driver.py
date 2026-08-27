@@ -177,6 +177,20 @@ def _run_migrate(cmd):
     return r.returncode, out
 
 
+def _parse_migrate_result(out: str):
+    """从迁移输出解析结果清单:落地/跳过/失败(带表行号与原因)。解析不到返回 None。"""
+    m = re.search(r"落地 (\d+)/(\d+) 行", out)
+    if not m:
+        return None
+    ok = [{"node_id": a, "name": b} for a, b in re.findall(r"✓ (n\d+)「([^」]+)」", out)]
+    skipped = [{"node_id": a, "name": b}
+               for a, b in re.findall(r"= (n\d+)「([^」]+)」 未变化", out)]
+    failed = [{"name": a, "excel_row": int(b), "reason": c.strip()[:300]}
+              for a, b, c in re.findall(r"✗ 「([^」]+)」\(表第(\d+)行[^)]*\):(.*)", out)]
+    return {"total": int(m.group(2)), "landed": int(m.group(1)),
+            "ok": ok, "skipped": skipped, "failed": failed}
+
+
 # ---------- 模型会话(事件流实时转发,判活一眼可见) ----------
 
 def _model_session(claude_cmd, mlog: Path, timeout: int) -> None:
@@ -288,7 +302,7 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     cmd = [sys.executable, str(MIGRATE), "--package", str(bundle),
            "--product", str(product), "--auto", "--map", str(excel)]
     print("[迁移]", " ".join(cmd))
-    rc = subprocess.run(cmd, cwd=str(REPO)).returncode
+    rc, last_out = _run_migrate(cmd)
     if rc != 0 and with_model:
         # 机械挡吃不下的失败项(语义对号/修管道/补入口)交给模型:起 Claude Code 无头会话
         # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
@@ -322,12 +336,14 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                       f"(cs-scot-migrate 技能),每一步动作实时打在下面,事件流落 {mlog}")
                 _model_session(claude_cmd, mlog, timeout)
                 rc, out = _run_migrate(cmd)
+                last_out = out
                 print(f"[模型] 第 {rnd} 轮处置后复跑机械迁移,退出码 {rc}")
                 if rc != 0 and "预导入(收编现有调优表) 失败" in out:
                     # 存量调优表的旧版结构病(如多个顶层节点):备份 .bak 后重建,再跑一次
                     print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
                           "(病表备份为 .bak,从产物重建)")
                     rc, out = _run_migrate(cmd + ["--rebuild-tuning"])
+                    last_out = out
                     print(f"[修表] 重跑退出码 {rc}")
                 if rc == 0:
                     break
@@ -338,9 +354,21 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                     break
                 prev_fail = fails
     if rc != 0:
-        print(f"[停] 迁移退出码 {rc}(3=有对不上号的行,清单见上方输出)。"
-              f"不回调、不打包;工作目录留在 {work} 供排查。")
-        sys.exit(rc)
+        result = _parse_migrate_result(last_out)
+        effective = (result["landed"] + len(result["skipped"])) if result else 0
+        if not result or effective == 0:
+            print(f"[停] 迁移退出码 {rc},且包里没有任何已生效的迁移内容——"
+                  f"不回调、不打包(回传无变化的包只会误导版本记录);"
+                  f"工作目录留在 {work} 供排查。")
+            sys.exit(rc)
+        # 部分交付:已落地的节点先生效,成功/失败清单连原因写进包内,平台可解包查看
+        result["versionId"] = version_id
+        report = product / "tree" / "migration_report.json"
+        report.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"[部分交付] 已生效 {effective}/{result['total']}(本次落地 {result['landed']}"
+              f" + 此前已迁移 {len(result['skipped'])}),失败 {len(result['failed'])} 个"
+              f"——节点清单与原因已写入包内 tree/migration_report.json。"
+              f"注意:回调接口暂无「部分成功」字段,需与平台定口径(见 README 待确认)。")
 
     out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
     print(f"[产物] {out_zip}")
