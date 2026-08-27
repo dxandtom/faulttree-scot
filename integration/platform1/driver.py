@@ -28,6 +28,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -161,6 +162,16 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
         return resp.status
 
 
+# ---------- 迁移执行(捕获输出供决策,同时转发到终端) ----------
+
+def _run_migrate(cmd):
+    r = subprocess.run(cmd, cwd=str(REPO), capture_output=True,
+                       text=True, encoding="utf-8", errors="replace")
+    out = (r.stdout or "") + (r.stderr or "")
+    print(out)
+    return r.returncode, out
+
+
 # ---------- 模型会话(事件流实时转发,判活一眼可见) ----------
 
 def _model_session(claude_cmd, mlog: Path, timeout: int) -> None:
@@ -271,7 +282,10 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                   f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约体检 FAIL 的照修法"
                   f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
                   f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
-                  f"改逻辑就跳过并在最后列入返厂清单,绝不赌。完成后汇报改了哪些文件、跳过了哪些。")
+                  f"改逻辑就跳过并在最后列入返厂清单,绝不赌。两条实测经验:S3 这类文件过滤"
+                  f"在同一脚本里常有多处(不同函数各扫一遍目录),要全文搜 .txt 过滤逐处改净;"
+                  f"S5 第三方库(如 chardet)属管道,按修法换标准库实现(编码探测退化为"
+                  f" utf-8/gbk 依次尝试 + errors='replace')。完成后汇报改了哪些文件、跳过了哪些。")
         # 本地联调默认按用户的日常用法起会话(全权限);平台2 集成时权限策略另定
         claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
                                     "claude --dangerously-skip-permissions -p").split()
@@ -284,22 +298,30 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                   f"(检查 Claude Code 是否在 PATH,或设 PLATFORM1_CLAUDE_CMD 指定完整调用)")
         else:
             claude_cmd[0] = exe
-            mlog = work / "model_session.log"
             timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
-            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),"
-                  f"通常 10-30 分钟;它每一步动作会实时打在下面,原始事件流落 {mlog}")
-            _model_session(claude_cmd, mlog, timeout)
-            rerun = subprocess.run(cmd, cwd=str(REPO), capture_output=True,
-                                   text=True, encoding="utf-8", errors="replace")
-            print((rerun.stdout or "") + (rerun.stderr or ""))
-            rc = rerun.returncode
-            print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
-            if rc != 0 and "预导入(收编现有调优表) 失败" in (rerun.stdout or "") + (rerun.stderr or ""):
-                # 存量调优表的旧版结构病(如多个顶层节点):备份 .bak 后从产物重建,再跑一次
-                print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
-                      "(病表备份为 .bak,从产物重建)")
-                rc = subprocess.run(cmd + ["--rebuild-tuning"], cwd=str(REPO)).returncode
-                print(f"[修表] 重跑退出码 {rc}")
+            rounds = int(os.environ.get("PLATFORM1_MODEL_ROUNDS", "3"))
+            prev_fail = None
+            for rnd in range(1, rounds + 1):
+                mlog = work / f"model_session_{rnd}.log"
+                print(f"[模型] 第 {rnd}/{rounds} 轮:起 Claude Code 无头会话处置失败项"
+                      f"(cs-scot-migrate 技能),每一步动作实时打在下面,事件流落 {mlog}")
+                _model_session(claude_cmd, mlog, timeout)
+                rc, out = _run_migrate(cmd)
+                print(f"[模型] 第 {rnd} 轮处置后复跑机械迁移,退出码 {rc}")
+                if rc != 0 and "预导入(收编现有调优表) 失败" in out:
+                    # 存量调优表的旧版结构病(如多个顶层节点):备份 .bak 后重建,再跑一次
+                    print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
+                          "(病表备份为 .bak,从产物重建)")
+                    rc, out = _run_migrate(cmd + ["--rebuild-tuning"])
+                    print(f"[修表] 重跑退出码 {rc}")
+                if rc == 0:
+                    break
+                m = re.search(r"落地 (\d+)/(\d+) 行", out)
+                fails = (int(m.group(2)) - int(m.group(1))) if m else None
+                if prev_fail is not None and fails is not None and fails >= prev_fail:
+                    print(f"[模型] 本轮无新进展(仍 {fails} 行未落地),不再追加轮次")
+                    break
+                prev_fail = fails
     if rc != 0:
         print(f"[停] 迁移退出码 {rc}(3=有对不上号的行,清单见上方输出)。"
               f"不回调、不打包;工作目录留在 {work} 供排查。")
