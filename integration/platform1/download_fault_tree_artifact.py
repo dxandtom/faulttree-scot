@@ -6,9 +6,10 @@
 用法:python download_fault_tree_artifact.py <excel_file> [--output_dir <output_dir>] [--env dev|beta]
 依赖:pandas、requests、psf(内部库)+ 同目录 obs_headers_config.json(含 token/密钥路径,不进仓库)
 
-与原版的唯一差异(应我方要求改,2026-08-27):平台一次下载有数量限制,download_batch
-超过 5 条时按 5 个一批分批下载——每批得到一个合集 zip(文件名加 _partN),都落在同一个
-输出目录;最后一批只剩 1 条时按单条方式落原名(服务端单条返回的是文件本身,不是合集包)。
+与原版的差异(应我方要求改,2026-08-27):平台一次下载有数量限制,download_batch
+超过 5 条时按 5 个一批分批下载,下载完自动把各批产物合并成一个总 zip——文件名与
+不分批时相同(<excel名>_<时间戳>.zip),里面是各节点 zip,与原版多条下载的格式一致;
+合并后删除分批的中间文件。有批次失败时保留合并结果并点名警告(总包不含失败条目)。
 """
 
 import argparse
@@ -16,6 +17,7 @@ import json
 import os
 import sys
 import urllib.parse
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -66,6 +68,24 @@ def generate_timestamp_name(prefix: str, extension: str) -> str:
     """生成带时间戳的文件名，如: prefix_2026-08-19-16-15-16.zip"""
     ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     return f"{prefix}_{ts}.{extension}"
+
+
+def _merge_parts(parts, out_zip):
+    """把分批下载的产物合成一个总 zip(与不分批时的格式一致:总包里是各节点 zip)。
+    parts: [(路径, 是否合集包)];合集包抽出内部条目,散节点 zip 原样收入;合并后删中间文件。"""
+    with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as zout:
+        for path, is_bundle in parts:
+            if is_bundle:
+                with zipfile.ZipFile(path) as zin:
+                    for item in zin.namelist():
+                        if item.endswith('/'):
+                            continue
+                        zout.writestr(Path(item).name, zin.read(item))
+            else:
+                zout.write(path, path.name)
+    for path, _ in parts:
+        Path(path).unlink()
+    return out_zip
 
 
 class OBSDownloader:
@@ -245,21 +265,33 @@ class OBSDownloader:
                        for i in range(0, len(artifacts), BATCH_DOWNLOAD_SIZE)]
             print(f"[下载] 有{len(artifacts)}条数据，分 {len(batches)} 批下载"
                   f"（每批至多 {BATCH_DOWNLOAD_SIZE} 个）")
+            part_files = []
             for bi, batch in enumerate(batches, 1):
                 print(f"[批次 {bi}/{len(batches)}] {len(batch)} 个")
                 if len(batch) == 1:
                     # 服务端单条返回的是文件本身（不是合集包），按单条方式落原名
+                    fname = urllib.parse.unquote(batch[0].get('file_name', 'download.zip'))
                     batch_result = self.download_artifacts(batch, output_dir, env,
                                                            custom_file_name=None)
+                    if batch_result["success"]:
+                        part_files.append((output_dir / fname, False))
                 else:
                     suffix = excel_basename if len(batches) == 1 else f"{excel_basename}_part{bi}"
                     timestamped_name = generate_timestamp_name(suffix, 'zip')
                     batch_result = self.download_artifacts(batch, output_dir, env,
                                                            custom_file_name=timestamped_name)
+                    if batch_result["success"]:
+                        part_files.append((output_dir / timestamped_name, True))
                 results["success"] += batch_result["success"]
                 results["failed"] += batch_result["failed"]
                 if bi < len(batches):
                     time.sleep(1)
+
+            if len(batches) > 1 and part_files:
+                merged = _merge_parts(part_files, output_dir / generate_timestamp_name(excel_basename, 'zip'))
+                print(f"[合并] {len(part_files)} 个分批产物 -> {merged}（与不分批时同格式，中间文件已删）")
+                if results["failed"]:
+                    print(f"[警告] 有 {results['failed']} 条下载失败，总包不含这些条目，建议排查后重跑")
 
         return results
 
