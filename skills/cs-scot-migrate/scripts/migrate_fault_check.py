@@ -175,8 +175,42 @@ def find_scripts(pkg: Path, script_arg: str | None, node_name: str | None = None
         else:
             raise SystemExit(f"交付包里有多个脚本且无一与节点名「{node_name}」精确同名,"
                              f"用 --script 指定一个:{[p.name for p in fcs]}")
-    deps = sorted({p for p in pkg.rglob("search_*.py")}, key=lambda p: p.name)
+    cands = sorted({p for p in pkg.rglob("search_*.py")}, key=lambda p: p.name)
+    deps = _needed_deps(fc, cands)
+    if len(deps) != len(cands):
+        print(f"  [依赖] 包里 {len(cands)} 个共享模块,按 import 闭包只收 {len(deps)} 个,"
+              f"其余不相关的不进产物")
     return fc, deps
+
+
+def _needed_deps(fc: Path, cands):
+    """共享模块按 import 闭包收敛:只收选中脚本(及其依赖链)实际 import 的 search_* 模块
+    ——平台存包把整个共享脚本目录都打进去时,不相关的共享件不进产物。
+    同名多份优先与脚本同目录的那份。"""
+    by_name = {}
+    for p in sorted(cands, key=lambda p: (p.parent != fc.parent, str(p))):
+        by_name.setdefault(p.stem, p)
+    need, queue, seen = [], [fc], {fc}
+    while queue:
+        f = queue.pop()
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                mods = [al.name for al in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                mods = [node.module]
+            else:
+                continue
+            for m in mods:
+                p = by_name.get(m.split(".")[0])
+                if p is not None and p not in seen:
+                    seen.add(p)
+                    need.append(p)
+                    queue.append(p)
+    return sorted(need, key=lambda p: p.name)
 
 
 # 入口候选(优先级序)。fault_check 是 tester 规范的约定入口名(与文件名前缀同名),排最前——
@@ -774,6 +808,26 @@ def _copy_scripts(product: Path, fc: Path, deps) -> None:
               "(正本仍须自包含,反馈交付方)")
 
 
+def _stage_no_entry(product: Path, fc: Path, deps) -> str:
+    """入口探测失败:脚本副本+基准+修法 sidecar 落 scripts/custom/,统一进管道修复通道
+    ——照 sidecar 修法在副本里补 fault_check(data_dir) 薄封装(判断逻辑一行不动),
+    重跑同一条命令时 _effective 认修复副本,入口探到即续迁。返回给失败清单的处置提示。"""
+    _copy_scripts(product, fc, deps)                     # 已修过的副本自动保留不覆盖
+    custom = product / "scripts" / "custom"
+    orig = custom / (fc.name + ".orig")
+    if not orig.exists():
+        orig.write_bytes(fc.read_bytes())                # 基准:包没变时重跑认修复副本
+    side = custom / (fc.name + ".contract.json")
+    side.write_text(json.dumps({
+        "status": "pending_repair", "reason": "no_entry",
+        "fix": "在副本里补一个 fault_check(data_dir) 薄封装入口:接收数据目录参数,"
+               "调用原有判断逻辑并返回契约结果(matched/evidence/details);"
+               "判断逻辑一行不动,拿不准算不算逻辑就停下问人",
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    return (f"脚本副本已落 scripts/custom/{fc.name},照 {fc.name}.contract.json 的修法"
+            f"补薄封装入口后重跑同一条命令即续迁")
+
+
 # ---------- 收编体检(契约闸)+ 管道修复循环 ----------
 _CC_CACHE = []
 # 体检 FAIL 里转接头运行时兜得住的项(能走到这一步=烟测仲裁已确认驱动得动):
@@ -1270,8 +1324,9 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         eff_fc = _effective(product, fc)                 # 修过管道的副本生效(重跑续迁不被原件卡死)
         entry, per_ne, kwargs, all_defs, argc, note = detect_entry(eff_fc)
         if entry is None:
-            fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})",
-                          f'--only "{method["name"]}" --node {nid or "<节点号>"} --entry <函数名>(去掉 --map)'))
+            hint = _stage_no_entry(product, fc, deps)
+            fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})——{hint}",
+                          f'或人工指定:--only "{method["name"]}" --node {nid or "<节点号>"} --entry <函数名>(去掉 --map)'))
             continue
         supplied, unsupplied = _with_supplied(fc, deps)
         if unsupplied:
@@ -1444,8 +1499,9 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
         eff_fc = _effective(product, fc)                 # 修过管道的副本生效(重跑续迁不被原件卡死)
         entry, per_ne, kwargs, all_defs, argc, note = detect_entry(eff_fc)
         if entry is None:
-            fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})",
-                          f'--only "{label}" --node <节点号> --entry <吃目录参数的函数名>'))
+            hint = _stage_no_entry(product, fc, deps)
+            fails.append((label, f"探测不到可用入口(顶层函数:{all_defs[:8]}{';' + note if note else ''})——{hint}",
+                          f'或人工指定:--only "{label}" --node <节点号> --entry <吃目录参数的函数名>'))
             continue
         exact = [cnid for cnid, nd in nodes.items()
                  if str(nd.get("name") or "").strip() == method["name"].strip()]
