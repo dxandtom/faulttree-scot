@@ -152,8 +152,10 @@ def parse_method_md(pkg: Path):
     return {"name": name, "condition": text.strip(), "core": (core or text).strip(), "file": cands[0]}
 
 
-def find_scripts(pkg: Path, script_arg: str | None):
-    """交付包里的 fault_check 脚本 + 共享模块(search_*.py)。verify_*.py 调试遗留不收。"""
+def find_scripts(pkg: Path, script_arg: str | None, node_name: str | None = None):
+    """交付包里的 fault_check 脚本 + 共享模块(search_*.py)。verify_*.py 调试遗留不收。
+    多脚本包(平台存包常把整个共享脚本目录都打进去):按 tester 命名规范
+    fault_check_<节点名>.py 精确同名唯一命中就自动选——规范约定不是赌;对不上仍硬停。"""
     fcs = sorted(set(pkg.rglob("fault_check_*.py")))
     if script_arg:
         hit = [p for p in fcs if p.name == script_arg] or [pkg / script_arg]
@@ -165,7 +167,14 @@ def find_scripts(pkg: Path, script_arg: str | None):
     elif not fcs:
         raise SystemExit("交付包里没有 fault_check_*.py(无脚本的包只有判断方法文档,走人工改调优表即可)")
     else:
-        raise SystemExit(f"交付包里有多个脚本,用 --script 指定一个:{[p.name for p in fcs]}")
+        want = f"fault_check_{(node_name or '').strip()}.py"
+        hit = [p for p in fcs if p.name == want]
+        if node_name and len(hit) == 1:
+            print(f"  [对号] 多脚本包:按节点名精确命中 {want},其余 {len(fcs) - 1} 个脚本忽略")
+            fc = hit[0]
+        else:
+            raise SystemExit(f"交付包里有多个脚本且无一与节点名「{node_name}」精确同名,"
+                             f"用 --script 指定一个:{[p.name for p in fcs]}")
     deps = sorted({p for p in pkg.rglob("search_*.py")}, key=lambda p: p.name)
     return fc, deps
 
@@ -1254,7 +1263,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
             continue
         try:
             method = parse_method_md(sub)
-            fc, deps = find_scripts(sub, None)
+            fc, deps = find_scripts(sub, None, node_name=method["name"])
         except SystemExit as e:
             fails.append((label, str(e), None))
             continue
@@ -1428,7 +1437,7 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
         try:
             method = parse_method_md(sub)
             label = method["name"]
-            fc, deps = find_scripts(sub, None)
+            fc, deps = find_scripts(sub, None, node_name=method["name"])
         except SystemExit as e:
             fails.append((label, str(e), None))
             continue
@@ -1626,7 +1635,7 @@ def main() -> None:
             return                                       # migrate_batch 自带退出码,到不了这里
 
         method = parse_method_md(pkg)
-        fc, deps = find_scripts(pkg, a.script)
+        fc, deps = find_scripts(pkg, a.script, node_name=method["name"])
         eff_fc = _effective(product, fc)                 # 修过管道的副本生效(重跑续迁不被原件卡死)
         entry, per_ne, kwargs, all_defs, argc, note = detect_entry(eff_fc)
         if a.entry:
