@@ -27,7 +27,18 @@ sys.path.insert(0, str(HERE))
 def spread(downloads: Path, store: Path) -> int:
     store.mkdir(parents=True, exist_ok=True)
     n = 0
+    # 兼容"总 zip 已被手动解压成文件夹"的情况:子目录里的 zip 原样收进货架(只扫一层)
+    for sub in sorted(p for p in downloads.iterdir() if p.is_dir()):
+        inner = sorted(sub.glob("*.zip"))
+        if inner:
+            print(f"[文件夹] {sub.name}:{len(inner)} 个 zip 原样入货架")
+            for zp in inner:
+                if zp.resolve() != (store / zp.name).resolve():
+                    shutil.copy2(zp, store / zp.name)
+                n += 1
     for zp in sorted(downloads.glob("*.zip")):
+        if zp.resolve() == (store / zp.name).resolve():
+            continue                                     # 货架自身当输入目录时跳过已就位的文件
         with zipfile.ZipFile(zp) as zf:
             inner = [i for i in zf.namelist()
                      if i.lower().endswith(".zip") and not i.endswith("/")]
