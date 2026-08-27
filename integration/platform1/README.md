@@ -56,10 +56,13 @@
 
 ## 剩余待确认
 
-- [ ] 下载服务对 skill 所在 bucket(如 netcare-skill)是否放行——联调第 2 步第一件事就是
-      拿真 prevObjectkey 试一次单条下载
-- [ ] NONE(空壳表)+ 有上一版时平台期望我们回什么(原样返回?仅刷新?)
-- [x] 回调接口不用鉴权(用户与平台确认,2026-08-26)
+- [ ] 下载服务对 skill 所在 bucket(如 netcare-skill)是否放行——代码已就绪(skill 与 zip
+      同接口同格式,都带 file_name),若被拒属平台侧配置;联调第 2 步第一件事拿真
+      prevObjectkey 试一次单条下载
+- [x] NONE(空壳表):无迁移可做,不处理(用户拍板);注意驱动此时不回调,平台侧该记录会
+      一直挂 OPTIMIZING(状态机拒绝重复提交)——建议知会平台这种请求别发或自行收尾
+- [ ] 回调接口要不要鉴权待定——口子已留:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头
+      (例 {"invokeToken": "..."}),不设=不带
 - [ ] 我方接口的正式 URL(文档示例 /xxx/api/v1/fault-tree/optimize 标注"以实际为准";
       我方接口就是 server.py,现挂 POST /optimize——把 http://<本机IP>:8080/optimize
       给平台配上即可;对方要求特定路径的话改 server.py 里 @app.post 一行)

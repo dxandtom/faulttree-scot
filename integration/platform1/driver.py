@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -150,9 +151,11 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
          f'filename="{zip_path.name}"\r\nContent-Type: application/zip',
          zip_path.read_bytes())
     body.write(f"--{boundary}--\r\n".encode("utf-8"))
-    req = urllib.request.Request(
-        url, data=body.getvalue(), method="POST",
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    extra = os.environ.get("PLATFORM1_CB_HEADERS", "")
+    if extra:                       # 鉴权口子:回调若要 token,环境变量塞 JSON 请求头
+        headers.update(json.loads(extra))   # 例 {"invokeToken": "..."} 或 {"Cookie": "..."}
+    req = urllib.request.Request(url, data=body.getvalue(), method="POST", headers=headers)
     with urllib.request.urlopen(req, timeout=60) as resp:
         print(f"[回调] {url} → HTTP {resp.status}")
         return resp.status
