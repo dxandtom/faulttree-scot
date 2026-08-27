@@ -328,7 +328,10 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         else:
             claude_cmd[0] = exe
             timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
-            rounds = int(os.environ.get("PLATFORM1_MODEL_ROUNDS", "3"))
+            # 线上口径:一单请求只做一轮模型处置就交付(部分交付兜底),没修完的
+            # 下次点优化在交付包基础上续迁——不让平台一单等几轮。多轮收敛留给
+            # 本地盯着跑的场合:PLATFORM1_MODEL_ROUNDS 调大即可。
+            rounds = int(os.environ.get("PLATFORM1_MODEL_ROUNDS", "1"))
             prev_fail = None
             for rnd in range(1, rounds + 1):
                 mlog = work / f"model_session_{rnd}.log"
@@ -368,6 +371,7 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         print(f"[部分交付] 已生效 {effective}/{result['total']}(本次落地 {result['landed']}"
               f" + 此前已迁移 {len(result['skipped'])}),失败 {len(result['failed'])} 个"
               f"——节点清单与原因已写入包内 tree/migration_report.json。"
+              f"已修的管道副本也随包带走,下一次点优化在这版基础上续迁。"
               f"注意:回调接口暂无「部分成功」字段,需与平台定口径(见 README 待确认)。")
 
     out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
