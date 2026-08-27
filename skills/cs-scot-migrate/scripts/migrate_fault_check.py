@@ -168,10 +168,19 @@ def find_scripts(pkg: Path, script_arg: str | None, node_name: str | None = None
         raise SystemExit("交付包里没有 fault_check_*.py(无脚本的包只有判断方法文档,走人工改调优表即可)")
     else:
         want = f"fault_check_{(node_name or '').strip()}.py"
-        hit = [p for p in fcs if p.name == want]
+        hit = sorted((p for p in fcs if p.name == want), key=lambda p: (len(p.parts), str(p)))
         if node_name and len(hit) == 1:
             print(f"  [对号] 多脚本包:按节点名精确命中 {want},其余 {len(fcs) - 1} 个脚本忽略")
             fc = hit[0]
+        elif node_name and hit and all(h.read_bytes() == hit[0].read_bytes() for h in hit[1:]):
+            # 同名多份但逐字节相同(包顶层一份、scripts/ 共享目录又一份的实况)→ 取最浅的
+            print(f"  [对号] 多脚本包:按节点名精确命中 {want}(包里 {len(hit)} 份同名且内容相同,"
+                  f"取 {hit[0].relative_to(pkg).as_posix()}),其余脚本忽略")
+            fc = hit[0]
+        elif node_name and hit:
+            raise SystemExit(f"交付包里「{want}」有 {len(hit)} 份且内容不同"
+                             f"({[h.relative_to(pkg).as_posix() for h in hit]})——不赌,"
+                             f"用 --script 指定正主(建议交付方清掉过期拷贝)")
         else:
             raise SystemExit(f"交付包里有多个脚本且无一与节点名「{node_name}」精确同名,"
                              f"用 --script 指定一个:{[p.name for p in fcs]}")

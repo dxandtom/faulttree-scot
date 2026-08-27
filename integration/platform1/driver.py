@@ -226,10 +226,20 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                   f"就停下列入返厂清单,绝不赌。处置完重跑迁移命令验证,汇报落地行数与仍失败的清单。")
         claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
                                     "claude --permission-mode acceptEdits -p").split() + [prompt]
-        print("[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能)…")
-        subprocess.run(claude_cmd, cwd=str(REPO))
-        rc = subprocess.run(cmd, cwd=str(REPO)).returncode
-        print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
+        exe = shutil.which(claude_cmd[0])   # Windows 上 npm 装的是 claude.cmd,须 which 解析
+        if exe is None:
+            print(f"[模型] 找不到命令「{claude_cmd[0]}」——跳过模型档,按机械迁移结果处理。"
+                  f"(检查 Claude Code 是否在 PATH,或设 PLATFORM1_CLAUDE_CMD 指定完整调用,"
+                  f"如 set PLATFORM1_CLAUDE_CMD=C:\\path\\claude.cmd --permission-mode acceptEdits -p)")
+        else:
+            claude_cmd[0] = exe
+            print("[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),要几分钟…")
+            try:
+                subprocess.run(claude_cmd, cwd=str(REPO))
+            except OSError as e:
+                print(f"[模型] 会话启动失败({e}),按机械迁移结果处理")
+            rc = subprocess.run(cmd, cwd=str(REPO)).returncode
+            print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
     if rc != 0:
         print(f"[停] 迁移退出码 {rc}(3=有对不上号的行,清单见上方输出)。"
               f"不回调、不打包;工作目录留在 {work} 供排查。")
