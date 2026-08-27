@@ -218,12 +218,12 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     if rc != 0 and with_model:
         # 机械挡吃不下的失败项(语义对号/修管道/补入口)交给模型:起 Claude Code 无头会话
         # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
-        prompt = (f"用 cs-scot-migrate 技能继续处理一次批量迁移的失败项。"
-                  f"迁移命令(已跑过一轮,失败清单可重跑取得):{' '.join(cmd)}。"
-                  f"按 SKILL.md 的规矩逐项处置:能语义对号的对号;契约体检 FAIL 的照修法"
-                  f"只修 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
-                  f" *.contract.json 的修法补 fault_check(data_dir) 薄封装;拿不准算不算改逻辑"
-                  f"就停下列入返厂清单,绝不赌。处置完重跑迁移命令验证,汇报落地行数与仍失败的清单。")
+        prompt = (f"用 cs-scot-migrate 技能处理一次批量迁移的失败项,只改文件,不用跑命令。"
+                  f"失败清单看这条命令上一轮的输出(可以重跑它看,但验证不归你,驱动会自动复跑):"
+                  f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约体检 FAIL 的照修法"
+                  f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
+                  f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
+                  f"改逻辑就跳过并在最后列入返厂清单,绝不赌。完成后汇报改了哪些文件、跳过了哪些。")
         claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
                                     "claude --permission-mode acceptEdits -p").split() + [prompt]
         exe = shutil.which(claude_cmd[0])   # Windows 上 npm 装的是 claude.cmd,须 which 解析
@@ -233,11 +233,24 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                   f"如 set PLATFORM1_CLAUDE_CMD=C:\\path\\claude.cmd --permission-mode acceptEdits -p)")
         else:
             claude_cmd[0] = exe
-            print("[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),要几分钟…")
+            mlog = work / "model_session.log"
+            timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
+            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),"
+                  f"要几分钟;完整输出落 {mlog}")
             try:
-                subprocess.run(claude_cmd, cwd=str(REPO))
+                with mlog.open("w", encoding="utf-8") as fh:
+                    subprocess.run(claude_cmd, cwd=str(REPO), stdout=fh,
+                                   stderr=subprocess.STDOUT, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                print(f"[模型] 会话超时({timeout} 秒,可用 PLATFORM1_MODEL_TIMEOUT 调大),"
+                      f"按已修部分继续")
             except OSError as e:
                 print(f"[模型] 会话启动失败({e}),按机械迁移结果处理")
+            if mlog.exists():
+                tail = mlog.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+                print(f"[模型] 会话输出末尾({min(len(tail), 20)}/{len(tail)} 行):")
+                for ln in tail[-20:]:
+                    print("  | " + ln)
             rc = subprocess.run(cmd, cwd=str(REPO)).returncode
             print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
     if rc != 0:
