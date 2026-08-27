@@ -24,19 +24,18 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 
+def _looks_like_node_pkg(d: Path) -> bool:
+    """tester 交付包被解压软件解开后的形态:顶层有 判断方法*.md / fault_check*.py /
+    测试数据目录 之一(skill 产物目录顶层没有这些,不会误伤)。"""
+    return (any(d.glob("判断方法*.md")) or any(d.glob("fault_check*.py"))
+            or (d / "测试数据").is_dir())
+
+
 def spread(downloads: Path, store: Path) -> int:
     store.mkdir(parents=True, exist_ok=True)
     n = 0
-    # 兼容"总 zip 已被手动解压成文件夹"的情况:子目录里的 zip 原样收进货架(只扫一层)
-    for sub in sorted(p for p in downloads.iterdir() if p.is_dir()):
-        inner = sorted(sub.glob("*.zip"))
-        if inner:
-            print(f"[文件夹] {sub.name}:{len(inner)} 个 zip 原样入货架")
-            for zp in inner:
-                if zp.resolve() != (store / zp.name).resolve():
-                    shutil.copy2(zp, store / zp.name)
-                n += 1
-    for zp in sorted(downloads.glob("*.zip")):
+    # 1) 递归收所有 zip(嵌套多深都认):合集拆平铺,散节点包原样拷入
+    for zp in sorted(list(downloads.rglob("*.zip"))):
         if zp.resolve() == (store / zp.name).resolve():
             continue                                     # 货架自身当输入目录时跳过已就位的文件
         with zipfile.ZipFile(zp) as zf:
@@ -56,6 +55,20 @@ def spread(downloads: Path, store: Path) -> int:
                 print(f"[节点包] {zp.name}:原样入货架")
                 shutil.copy2(zp, store / zp.name)
                 n += 1
+    # 2) 节点包被解压软件解成文件夹的:重新压成 zip 入货架(包内套一层同名目录,交付包口径)
+    for d in sorted(list(p for p in downloads.rglob("*") if p.is_dir())):
+        if d.resolve() == store.resolve() or not _looks_like_node_pkg(d):
+            continue
+        out = store / (d.name + ".zip")
+        if out.exists():
+            print(f"[跳过] {d.name}(货架里已有 {out.name})")
+            continue
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in sorted(d.rglob("*")):
+                if p.is_file():
+                    zf.write(p, f"{d.name}/{p.relative_to(d).as_posix()}")
+        print(f"[压包] 文件夹 {d.name} → {out.name}(节点包被解开过,重新打包)")
+        n += 1
     return n
 
 

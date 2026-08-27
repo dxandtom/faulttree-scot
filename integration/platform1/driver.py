@@ -164,7 +164,7 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
 # ---------- 主流程 ----------
 
 def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
-        keep: bool = False) -> Path | None:
+        keep: bool = False, with_model: bool = False) -> Path | None:
     excel = Path(req["excel"]).resolve()
     obskey = str(req.get("prevObjectkey") or "").strip()
     version_id = str(req.get("versionId") or "").strip()
@@ -215,6 +215,21 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
            "--product", str(product), "--auto", "--map", str(excel)]
     print("[迁移]", " ".join(cmd))
     rc = subprocess.run(cmd, cwd=str(REPO)).returncode
+    if rc != 0 and with_model:
+        # 机械挡吃不下的失败项(语义对号/修管道/补入口)交给模型:起 Claude Code 无头会话
+        # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
+        prompt = (f"用 cs-scot-migrate 技能继续处理一次批量迁移的失败项。"
+                  f"迁移命令(已跑过一轮,失败清单可重跑取得):{' '.join(cmd)}。"
+                  f"按 SKILL.md 的规矩逐项处置:能语义对号的对号;契约体检 FAIL 的照修法"
+                  f"只修 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
+                  f" *.contract.json 的修法补 fault_check(data_dir) 薄封装;拿不准算不算改逻辑"
+                  f"就停下列入返厂清单,绝不赌。处置完重跑迁移命令验证,汇报落地行数与仍失败的清单。")
+        claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
+                                    "claude --permission-mode acceptEdits -p").split() + [prompt]
+        print("[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能)…")
+        subprocess.run(claude_cmd, cwd=str(REPO))
+        rc = subprocess.run(cmd, cwd=str(REPO)).returncode
+        print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
     if rc != 0:
         print(f"[停] 迁移退出码 {rc}(3=有对不上号的行,清单见上方输出)。"
               f"不回调、不打包;工作目录留在 {work} 供排查。")
@@ -237,10 +252,15 @@ def main():
     ap.add_argument("--workdir", help="工作目录(缺省用临时目录)")
     ap.add_argument("--fake-store", help="本地样例目录:按文件名模拟 obs 下载,不碰网络")
     ap.add_argument("--keep", action="store_true", help="保留工作目录(排查用)")
+    ap.add_argument("--with-model", action="store_true",
+                    help="机械迁移有失败行时,起 Claude Code 无头会话按 cs-scot-migrate 技能"
+                         "处置(语义对号/修管道/补入口),完了复跑机械迁移;命令可用环境变量"
+                         " PLATFORM1_CLAUDE_CMD 覆盖(默认 claude --permission-mode acceptEdits -p)")
     a = ap.parse_args()
     req = json.loads(Path(a.request).read_text(encoding="utf-8"))
     run(req, workdir=Path(a.workdir) if a.workdir else None,
-        fake_store=Path(a.fake_store) if a.fake_store else None, keep=a.keep)
+        fake_store=Path(a.fake_store) if a.fake_store else None, keep=a.keep,
+        with_model=a.with_model)
 
 
 if __name__ == "__main__":
