@@ -26,6 +26,7 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
 FIELD_EXCEL = "excelFile"        # Excel 二进制文件流(NONE/MULTI/ALL 按选择导出)
 FIELD_PREV = "prevObjectkey"     # 上一版 skill 的 OBS 地址;首次优化为 null/缺省
 FIELD_VERSION = "versionId"      # 平台预生成的版本 UUID,回调时原样带回
+FIELD_OPTYPE = "optimizeType"    # NONE=只刷引擎代码 / MULTI=部分表不动结构 / ALL=结构以表为准
 
 HERE = Path(__file__).resolve().parent
 WORK_ROOT = Path(os.environ.get("PLATFORM1_WORK", HERE / "_runs"))
@@ -50,13 +51,15 @@ def _run_driver(req_file: Path, workdir: Path):
 async def optimize(background: BackgroundTasks,
                    excel_file: UploadFile = File(..., alias=FIELD_EXCEL),
                    prev_objectkey: str = Form("", alias=FIELD_PREV),
-                   version_id: str = Form(..., alias=FIELD_VERSION)):
+                   version_id: str = Form(..., alias=FIELD_VERSION),
+                   optimize_type: str = Form("", alias=FIELD_OPTYPE)):
     run_dir = WORK_ROOT / f"v{version_id[:8]}"
     run_dir.mkdir(parents=True, exist_ok=True)
     excel_path = run_dir / (excel_file.filename or "export.xlsx")
     excel_path.write_bytes(await excel_file.read())
     req = {"excel": str(excel_path), "prevObjectkey": prev_objectkey,
-           "versionId": version_id, "callback_url": CALLBACK_URL}
+           "versionId": version_id, "optimizeType": optimize_type,
+           "callback_url": CALLBACK_URL}
     req_file = run_dir / "request.json"
     req_file.write_text(json.dumps(req, ensure_ascii=False, indent=2), encoding="utf-8")
     background.add_task(_run_driver, req_file, run_dir)

@@ -21,12 +21,20 @@
       平台收到后自己上传 OBS、把版本记录置 COMPLETED
 ```
 
-三种优化场景(节点选择=平台按选择导出 excel 行):
-- **MULTI / ALL**(表里有技能行 + 有上一版 skill)→ 主路,全自动;
-- 表里有行 + `prevObjectkey=null`(首次优化)→ 生成场景:走 cs-scot-generate 的模型会话,
-  驱动不代跑,退出码 4;
-- **NONE**(空壳表,只有表头)+ 有上一版 → 无迁移可做,**现行 skill 原样下载回传**,
-  让平台状态正常闭环(顺带这就是「skill 下载」的独立验证路)。
+optimizeType 三档(平台口径,请求带 `optimizeType` 字段;excel 为增强表:
+`L*_Name_CN/EN + judgement_condition_cn/en + Product_Obs/Name`,判据列取 cn):
+- **NONE** = 问题不在节点:下载现行 skill → migrate `--refresh-only` 把引擎代码刷到当前代
+  (树与绑定不动)→ 回传。引擎的"当前代"来自本机仓库,联调机器记得先拉新;
+- **MULTI** = 部分表:只动列出的节点、**不动树结构**——迁移(zip)、清判据(双空行)、
+  判据同步(判据变了绑定不动)照做,新增节点行拒绝(migrate `--map-mode multi`);
+- **ALL** = 全量表:判据与**树结构都以表为准**——增节点(含纯判据结构节点)、
+  表里踪影全无的节点自动删(调优表 .bak 可回退、台账 deleted_at 留痕、两道防误删保险),
+  migrate `--map-mode all`。
+
+不带 `optimizeType` 的请求(本地实验/老请求)走老行为:空壳表=现行 skill 原样回传
+(「skill 真下载」实验的判定标尺),有行=迁移且不带 --map-mode(能加不删)。
+`prevObjectkey=null`(首次优化)一律拒绝,退出码 4:首版 skill 线下 generate 生成后录入,
+优化按钮只管迭代(分工待与平台对齐,见待确认清单)。
 
 迁移有失败行时按**部分交付**处理(用户拍板):包里有已生效内容(本次落地或此前已迁移)
 就照样打包回调——已落地节点先生效,成功/跳过/失败清单连原因写进包内
@@ -84,7 +92,9 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 - [ ] 下载服务对 skill 所在 bucket(如 netcare-skill)是否放行——代码已就绪(skill 与 zip
       同接口同格式,都带 file_name),若被拒属平台侧配置;联调第 2 步第一件事拿真
       prevObjectkey 试一次单条下载
-- [x] NONE(空壳表):现行 skill 原样下载回传(用户拍板:不动逻辑原样返回),平台状态正常闭环
+- [x] optimizeType 语义(平台口径已问清):NONE=只刷引擎代码 / MULTI=部分表不动结构 /
+      ALL=全量表判据与结构以表为准——驱动与 migrate(--map-mode)已按此实现;
+      增强表判据列 judgement_condition_cn/en 已适配(取 cn)
 - [ ] 回调接口要不要鉴权待定——口子已留:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头
       (例 {"invokeToken": "..."}),不设=不带
 - [ ] 回调接口的「部分成功」字段——**平台已口头同意加**(口径也对上了:部分成功也算成功);

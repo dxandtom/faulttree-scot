@@ -178,17 +178,27 @@ def _run_migrate(cmd):
 
 
 def _parse_migrate_result(out: str):
-    """从迁移输出解析结果清单:落地/跳过/失败(带表行号与原因)。解析不到返回 None。"""
+    """从迁移输出解析结果清单:落地/新增/跳过/判据同步/删除/失败(带表行号与原因)。
+    解析不到返回 None。"""
     m = re.search(r"落地 (\d+)/(\d+) 行", out)
     if not m:
         return None
     ok = [{"node_id": a, "name": b} for a, b in re.findall(r"✓ (n\d+)「([^」]+)」", out)]
+    added = [{"node_id": a, "name": b} for a, b in re.findall(r"\+ (n\d+)「([^」]+)」 新增", out)]
     skipped = [{"node_id": a, "name": b}
                for a, b in re.findall(r"= (n\d+)「([^」]+)」 未变化", out)]
+    jd_synced = [{"node_id": a, "name": b}
+                 for a, b in re.findall(r"~ (n\d+)「([^」]+)」 判据已按对应表更新", out)]
+    deleted = [{"node_id": a, "name": b}
+               for a, b in re.findall(r"✂ (n\d+)「([^」]+)」 已删除", out)]
     failed = [{"name": a, "excel_row": int(b), "reason": c.strip()[:300]}
               for a, b, c in re.findall(r"✗ 「([^」]+)」\(表第(\d+)行[^)]*\):(.*)", out)]
-    return {"total": int(m.group(2)), "landed": int(m.group(1)),
-            "ok": ok, "skipped": skipped, "failed": failed}
+    r = {"total": int(m.group(2)), "landed": int(m.group(1)),
+         "ok": ok, "skipped": skipped, "failed": failed}
+    for k, v in (("added", added), ("jd_synced", jd_synced), ("deleted", deleted)):
+        if v:
+            r[k] = v
+    return r
 
 
 # ---------- 模型会话(事件流实时转发,判活一眼可见) ----------
@@ -247,6 +257,12 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     obskey = str(req.get("prevObjectkey") or "").strip()
     version_id = str(req.get("versionId") or "").strip()
     cb_url = str(req.get("callback_url") or "").strip()
+    # optimizeType(平台口径):NONE=问题不在节点,把 skill 引擎代码刷到当前代;
+    # MULTI=部分表,只动列出的节点、不动树结构;ALL=全量表,判据与树结构都以表为准。
+    # 缺省(本地实验/老请求)= 老行为:空表原样回传,有行走迁移且不带 --map-mode。
+    otype = str(req.get("optimizeType") or "").strip().lower()
+    if otype and otype not in ("none", "multi", "all"):
+        raise SystemExit(f"optimizeType 不认识:「{req.get('optimizeType')}」(认 NONE/MULTI/ALL)")
     if not excel.exists():
         raise SystemExit(f"excel 不存在:{excel}")
     if not version_id:
@@ -255,7 +271,8 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         obskey = ""
 
     rows = parse_platform_excel(excel)
-    print(f"[表] {excel.name}:{len(rows)} 个待迁移节点")
+    print(f"[表] {excel.name}:{len(rows)} 个待迁移节点"
+          + (f";optimizeType={otype.upper()}" if otype else ""))
     if not obskey:
         print("prevObjectkey 为空(首次优化)→ 平台侧还没有 skill。从头生成一棵技能"
               "需要专家判据文档等素材,而平台请求里只有 excel(仅节点路径,无判据列)"
@@ -268,10 +285,31 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     bundle, skill_dir, out_dir = work / "bundle", work / "skill", work / "out"
     bundle.mkdir(exist_ok=True)
 
-    if not rows:
-        # NONE 场景(空壳表,只有表头):无节点要迁移——现行 skill 原样返回,
-        # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING)
-        print("NONE 场景(空壳表):无迁移可做,现行 skill 原样返回。")
+    if otype == "none":
+        # NONE 单(平台口径):问题不在节点——把 skill 的引擎代码刷到当前代后回传。
+        # 引擎的"当前代"取自本机仓库副本:线上跑之前保证联调机器仓库已拉新。
+        print("[NONE] 问题不在节点:下载现行 skill → 引擎翻新(--refresh-only)→ 回传。")
+        skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+        product = unpack_skill(skill_zip, skill_dir)
+        print(f"[skill] 已解包,产物目录:{product}")
+        rc, _out = _run_migrate([sys.executable, str(MIGRATE),
+                                 "--refresh-only", "--product", str(product)])
+        if rc != 0:
+            print(f"[停] 引擎翻新退出码 {rc}——不回调,工作目录留在 {work} 供排查。")
+            sys.exit(rc)
+        out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
+        print(f"[产物] {out_zip}(引擎已刷到当前代,树与绑定未动)")
+        if cb_url:
+            post_callback(cb_url, version_id, out_zip)
+        else:
+            print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
+        return out_zip
+
+    if not rows and not otype:
+        # 空壳表且没带 optimizeType(本地实验/老请求):现行 skill 原样返回,
+        # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING);
+        # 逐字节一致也正是「skill 真下载」实验的判定标尺
+        print("空壳表(未带 optimizeType):无迁移可做,现行 skill 原样返回。")
         skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
         out_dir.mkdir(exist_ok=True)
         out_zip = out_dir / f"skill_{version_id[:8]}.zip"
@@ -301,6 +339,8 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
 
     cmd = [sys.executable, str(MIGRATE), "--package", str(bundle),
            "--product", str(product), "--auto", "--map", str(excel)]
+    if otype in ("multi", "all"):
+        cmd += ["--map-mode", otype]                      # multi=不动树结构 / all=结构以表为准
     print("[迁移]", " ".join(cmd))
 
     def _fix_tuning(rc, out):
