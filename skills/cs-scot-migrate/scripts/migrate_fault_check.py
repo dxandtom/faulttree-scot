@@ -1390,6 +1390,18 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     (节点保留、幂等、台账 cleared_at 留痕;--no-clear 只点名不执行)。"""
     entries, zipless, clears, n_lvls = load_map_excel(map_path)
     mode = getattr(a, "map_mode", "auto") or "auto"
+    # 手工改过调优表(表比 tree_index 新)→ 开头就收编,这一轮的对号直接看新树。
+    # 不能只靠 _surgery 里的 [0/3]:全跳过/全失败的轮次进不了写入阶段,收编永远轮不上
+    tis0 = sorted((product / "tree").glob("*.tree_index.json"))
+    xls0 = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
+                  if not p.name.startswith("~$"))
+    if not REBUILD_TUNING and xls0 and tis0 and xls0[0].stat().st_mtime > tis0[0].stat().st_mtime:
+        print("  [收编] 调优表比 tree_index 新(可能有手工修改)→ 先导入,再按新树对号…")
+        try:
+            run_step(product, "import_tree_excel.py", "预导入(收编现有调优表)")
+        except SystemExit as e:
+            raise SystemExit(str(e) + "\n提示:卡的是**存量调优表**(手工修改不合规?),按上面报错"
+                             "修表重跑;确认表里没有要保的手工修改,可加 --rebuild-tuning 重建。")
     index = load_index(product)
     nodes = index.get("nodes") or {}
     ledger = _ledger_read(product)
