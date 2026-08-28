@@ -1149,7 +1149,7 @@ def _is_subseq(sub, full) -> bool:
     return all(any(s == f for f in it) for s in sub)
 
 
-def _delete_targets(nodes, all_paths, n_lvls):
+def _delete_targets(nodes, all_paths, n_lvls, force=False):
     """--map-mode all 的删除候选:树上有、整张全量表(迁移/结构/清除行路径的并集)里
     踪影全无的节点。"在表里"用与 resolve_node_by_path 同一套子序列语义(根→节点的名字链
     按顺序出现在某行路径里;母表高层可以比我们的树多)——由此候选集天然对子树封闭:
@@ -1174,6 +1174,12 @@ def _delete_targets(nodes, all_paths, n_lvls):
             continue
         name = str(nodes[nid].get("name") or nid)
         (too_deep if len(ch) > n_lvls else dels).append((nid, name))
+    non_root = sum(1 for ch in chains.values() if len(ch) > 1)
+    if not force and dels and len(dels) > max(3, non_root // 2):
+        # 第三道保险:全量表应包含全部节点——候选过半更像「部分表被标成了 ALL」
+        return None, (f"删除候选 {len(dels)}/{non_root} 个,超过全树一半——这更像部分表被标成了"
+                      " ALL(全量表应包含全部节点);一个不删。确认这张表确为全量导出、"
+                      "就是要大改版,加 --force 重跑以执行删除")
     return dels, too_deep
 
 
@@ -1511,12 +1517,28 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         elif mode == "all":
             struct_miss.append((names, "路径只有一层且树上无同名,定位不了"))
 
+    # 清除行先行解析(执行仍在落地手术之后):ALL 单里,双空行定位不到=平台树有这层、
+    # 本地树没有(平台的无判据结构节点导出就是双空)→ 补建裸节点(无判据无绑定);
+    # 它名下的新叶子行第二遍运行即可挂上(与增节点"先落父再落子"同一条规矩)
+    c_edits, clear_already, clear_miss = [], [], []
+    if clears and not a.no_clear:
+        c_edits, clear_already, clear_miss = _clear_targets(nodes, clears)
+        if mode == "all" and clear_miss:
+            rest = []
+            for cnames, cwhy in clear_miss:
+                pnid = resolve_node_by_path(nodes, cnames[:-1])[0] if len(cnames) >= 2 else None
+                if pnid is not None:
+                    sadds.append((pnid, _name_chain(nodes, pnid), cnames[-1], "", None))
+                else:
+                    rest.append((cnames, cwhy))
+            clear_miss = rest
+
     # ALL 单全量对账的删除候选:整张表(迁移/结构/清除行)里踪影全无的树节点
     dels, too_deep, del_guard = [], [], None
     if mode == "all":
         all_paths = [names for names, _z, _r, _j in entries] \
             + [names for names, _jd in zipless] + [names for names, _r in clears]
-        res = _delete_targets(nodes, all_paths, n_lvls)
+        res = _delete_targets(nodes, all_paths, n_lvls, force=a.force)
         if res[0] is None:
             del_guard = res[1]
         else:
@@ -1548,11 +1570,11 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                     led.append((new_nid, m["name"], fc.name, entry, per_ne, kwargs, fp,
                                 _gate_extra(gates.get(f"+{pnid}/{name}"))))
                 added_report.append((new_nid, name, pnid, fc.name, entry, note))
-            for pnid, _chain, name, _cond, _b in sadds:
+            for pnid, _chain, name, scond, _b in sadds:
                 new_nid = next((k for k, nd in new_nodes.items()
                                 if str(nd.get("name") or "").strip() == name
                                 and nd.get("parent") == pnid), None)
-                sadd_report.append((new_nid, name, pnid))
+                sadd_report.append((new_nid, name, pnid, bool(str(scond or "").strip())))
         _ledger(product, led)
         if dels:                                         # 台账留痕:节点连行一起删了,记 deleted_at
             now = datetime.datetime.now().isoformat(timespec="seconds")
@@ -1566,12 +1588,12 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                 (product / "tree" / "migrations.json").write_text(
                     json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 清除行执行:界面上删了判据与包 → 清判据+绑定(节点保留;走调优表手术,与迁移同一合规通道)
-    cleared_report, clear_already, clear_miss = [], [], []
+    # 清除行执行(解析在落地手术前已做):界面删了判据与包 → 清判据+绑定(节点保留;
+    # 走调优表手术,与迁移同一合规通道)
+    cleared_report = []
     if clears and a.no_clear:
         print(f"\n  [info] --no-clear:{len(clears)} 个清除行(双空)只点名不执行")
     elif clears:
-        c_edits, clear_already, clear_miss = _clear_targets(nodes, clears)
         if c_edits:
             print(f"\n  清除行执行:清 {len(c_edits)} 个节点的判据+绑定(节点保留;"
                   "删除整节点仍走调优表删行,人确认):")
@@ -1605,9 +1627,9 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     for new_nid, name, pnid, fc_name, entry, note in added_report:
         print(f"  + {new_nid or '?'}「{name}」 新增,挂在 {pnid}「{nodes[pnid].get('name')}」下 ← {fc_name}:{entry}"
               + (f"  ⚠ {note}" if note else ""))
-    for new_nid, name, pnid in sadd_report:
-        print(f"  + {new_nid or '?'}「{name}」 新增(仅判据,无绑定),挂在"
-              f" {pnid}「{nodes[pnid].get('name')}」下")
+    for new_nid, name, pnid, has_jd in sadd_report:
+        print(f"  + {new_nid or '?'}「{name}」 新增({'仅判据,无绑定' if has_jd else '结构节点:平台树有、本地没有'}),"
+              f"挂在 {pnid}「{nodes[pnid].get('name')}」下")
     for snid, _jd in jd_edits:
         print(f"  ~ {snid}「{nodes[snid].get('name')}」 判据已按对应表更新(绑定不动;"
               "脚本若落后于新判据,由交付方补包后走迁移行换血)")
@@ -1658,7 +1680,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         print(f"\n  ⚠ 台账里迁移过、表里节点还在但**没配 zip** 的 {len(retracted)} 个(优化包撤了?):"
               + "、".join(f"{n}「{nodes[n].get('name')}」" for n in retracted[:6])
               + " ——保留现状,向交付方确认")
-    if gone:
+    if gone and mode != "multi":                          # MULTI=部分表,不在表里是常态,不该吓人
         print(f"\n  ⚠ 台账里迁移过、**对应表里已无该节点** 的 {len(gone)} 个(上游可能删了节点):"
               + "、".join(f"{n}「{nodes[n].get('name')}」" for n in gone[:6])
               + " ——树里仍保留,不自动删;确认后走调优表删行(删行→import 即生效)")
