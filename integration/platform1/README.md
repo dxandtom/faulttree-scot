@@ -87,14 +87,15 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 - [x] NONE(空壳表):现行 skill 原样下载回传(用户拍板:不动逻辑原样返回),平台状态正常闭环
 - [ ] 回调接口要不要鉴权待定——口子已留:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头
       (例 {"invokeToken": "..."}),不设=不带
-- [ ] 回调接口需要「部分成功」字段(用户拍板:部分落地也交付,已落地节点先生效)——
-      现回调只有 versionId+skillFile,成功/失败节点清单暂写在包内 tree/migration_report.json
-      (total/landed/ok/skipped/failed 带表行号与原因),平台解包可查;建议平台侧
-      回调加字段直接带这份清单
+- [ ] 回调接口的「部分成功」字段——**平台已口头同意加**(口径也对上了:部分成功也算成功);
+      待平台给字段名与格式(建议直接收包内 tree/migration_report.json 的结构:
+      total/landed/ok/skipped/failed 带表行号与原因),定了就在 post_callback 里随回调带上;
+      在那之前清单仍写在包内,平台解包可查
 - [ ] 我方接口的正式 URL(文档示例 /xxx/api/v1/fault-tree/optimize 标注"以实际为准";
       我方接口就是 server.py,现挂 POST /optimize——把 http://<本机IP>:8080/optimize
       给平台配上即可;对方要求特定路径的话改 server.py 里 @app.post 一行)
-- [ ] 首次优化(prevObjectkey=null)的分工要与平台对齐:平台请求只有 excel(仅节点路径,
-      无判据列)+ zip 包,凑不齐从头生成一棵技能的素材(专家判据文档、场景层配置),
-      按包拼节点也只是残缺骨架跑不起来——建议口径:首版 skill 线下用 cs-scot-generate
-      生成后录入平台,优化按钮只管有 skill 之后的迭代;驱动遇到 null 拒绝并说明原因
+- [ ] 首次优化(prevObjectkey=null)的分工要与平台对齐(**已提问,平台暂未答复这条**):
+      平台请求只有 excel(仅节点路径,无判据列)+ zip 包,凑不齐从头生成一棵技能的素材
+      (专家判据文档、场景层配置),按包拼节点也只是残缺骨架跑不起来——建议口径:
+      首版 skill 线下用 cs-scot-generate 生成后录入平台,优化按钮只管有 skill 之后的迭代
+      (没 skill 时置灰按钮,或平台单开萃取入口再谈 bootstrap);驱动遇到 null 拒绝并说明原因
