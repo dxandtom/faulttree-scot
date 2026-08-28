@@ -1533,8 +1533,16 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     # 本地树没有(平台的无判据结构节点导出就是双空)→ 补建裸节点(无判据无绑定);
     # 它名下的新叶子行第二遍运行即可挂上(与增节点"先落父再落子"同一条规矩)
     c_edits, clear_already, clear_miss = [], [], []
+    clear_guard = None
     if clears and not a.no_clear:
         c_edits, clear_already, clear_miss = _clear_targets(nodes, clears)
+        with_jd = sum(1 for nd in nodes.values() if str(nd.get("condition") or "").strip())
+        if not a.force and c_edits and len(c_edits) > max(3, with_jd // 2):
+            # 与删除过半闸对称:清除过半更像「平台判据数据没录全」,不像专家批量删判据
+            clear_guard = (f"清除行要实际清掉 {len(c_edits)}/{with_jd} 个有判据的节点,超过一半"
+                           "——更像平台判据数据没录全(空≠删除),而非专家批量删判据;"
+                           "清除一律不执行。确认表里的空判据确为删除指令,加 --force 重跑")
+            c_edits = []
         if mode == "all" and clear_miss:
             rest = []
             for cnames, cwhy in clear_miss:
@@ -1651,6 +1659,8 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         print(f"  = {nid}「{nodes[nid].get('name')}」 未变化,跳过(此前的人工调优不受影响)")
     if del_guard:
         print(f"\n  ⚠ {del_guard}")
+    if clear_guard:
+        print(f"\n  ⚠ {clear_guard}")
     if too_deep:
         print(f"\n  [info] {len(too_deep)} 个节点深度超出表层级列数(表表达不了),不删:"
               + "、".join(f"{n}「{nm}」" for n, nm in too_deep[:6]))
