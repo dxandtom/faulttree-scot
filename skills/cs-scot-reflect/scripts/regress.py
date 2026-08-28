@@ -328,13 +328,18 @@ def main() -> int:
     passed = [r for r in done if str(r.get("verdict", "")).startswith("PASS")]
     pending = [r for r in rows if r["stage"] == "pending_adjudication"]
     broken = [r for r in rows if r["stage"] in ("exec_fail", "eval_error")]
+    acc = (len(passed) / len(done)) if done else None
     summary = {"total": len(rows), "evaluated": len(done), "passed": len(passed),
+               "accuracy": acc,
                "pending_adjudication": [r["case_id"] for r in pending],
                "exec_or_eval_failed": [r["case_id"] for r in broken], "cases": rows}
     sp = out / "regress_summary.json"
     sp.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n[regress] 汇总:{len(rows)} 用例 | 已判卷 {len(done)}(通过 {len(passed)})"
           f" | 挂起待裁决 {len(pending)} | 执行/判卷异常 {len(broken)}")
+    if acc is not None:
+        print(f"  准确率:{len(passed)}/{len(done)} = {acc:.1%}(口径:通过/已判卷;"
+              f"挂起与异常用例不计入分母,清完它们数字才算完整)")
     if pending:
         print("  ⏸ 挂起用例(裁决后重跑 finalize+render,再 `--eval-only` 或 --case 补判):"
               + "、".join(r["case_id"] for r in pending))

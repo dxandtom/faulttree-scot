@@ -178,17 +178,27 @@ def _run_migrate(cmd):
 
 
 def _parse_migrate_result(out: str):
-    """从迁移输出解析结果清单:落地/跳过/失败(带表行号与原因)。解析不到返回 None。"""
+    """从迁移输出解析结果清单:落地/新增/跳过/判据同步/删除/失败(带表行号与原因)。
+    解析不到返回 None。"""
     m = re.search(r"落地 (\d+)/(\d+) 行", out)
     if not m:
         return None
     ok = [{"node_id": a, "name": b} for a, b in re.findall(r"✓ (n\d+)「([^」]+)」", out)]
+    added = [{"node_id": a, "name": b} for a, b in re.findall(r"\+ (n\d+)「([^」]+)」 新增", out)]
     skipped = [{"node_id": a, "name": b}
                for a, b in re.findall(r"= (n\d+)「([^」]+)」 未变化", out)]
+    jd_synced = [{"node_id": a, "name": b}
+                 for a, b in re.findall(r"~ (n\d+)「([^」]+)」 判据已按对应表更新", out)]
+    deleted = [{"node_id": a, "name": b}
+               for a, b in re.findall(r"✂ (n\d+)「([^」]+)」 已删除", out)]
     failed = [{"name": a, "excel_row": int(b), "reason": c.strip()[:300]}
               for a, b, c in re.findall(r"✗ 「([^」]+)」\(表第(\d+)行[^)]*\):(.*)", out)]
-    return {"total": int(m.group(2)), "landed": int(m.group(1)),
-            "ok": ok, "skipped": skipped, "failed": failed}
+    r = {"total": int(m.group(2)), "landed": int(m.group(1)),
+         "ok": ok, "skipped": skipped, "failed": failed}
+    for k, v in (("added", added), ("jd_synced", jd_synced), ("deleted", deleted)):
+        if v:
+            r[k] = v
+    return r
 
 
 # ---------- 模型会话(事件流实时转发,判活一眼可见) ----------
@@ -247,6 +257,12 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     obskey = str(req.get("prevObjectkey") or "").strip()
     version_id = str(req.get("versionId") or "").strip()
     cb_url = str(req.get("callback_url") or "").strip()
+    # optimizeType(平台口径):NONE=问题不在节点,把 skill 引擎代码刷到当前代;
+    # MULTI=部分表,只动列出的节点、不动树结构;ALL=全量表,判据与树结构都以表为准。
+    # 缺省(本地实验/老请求)= 老行为:空表原样回传,有行走迁移且不带 --map-mode。
+    otype = str(req.get("optimizeType") or "").strip().lower()
+    if otype and otype not in ("none", "multi", "all"):
+        raise SystemExit(f"optimizeType 不认识:「{req.get('optimizeType')}」(认 NONE/MULTI/ALL)")
     if not excel.exists():
         raise SystemExit(f"excel 不存在:{excel}")
     if not version_id:
@@ -255,7 +271,8 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         obskey = ""
 
     rows = parse_platform_excel(excel)
-    print(f"[表] {excel.name}:{len(rows)} 个待迁移节点")
+    print(f"[表] {excel.name}:{len(rows)} 个待迁移节点"
+          + (f";optimizeType={otype.upper()}" if otype else ""))
     if not obskey:
         print("prevObjectkey 为空(首次优化)→ 平台侧还没有 skill。从头生成一棵技能"
               "需要专家判据文档等素材,而平台请求里只有 excel(仅节点路径,无判据列)"
@@ -268,10 +285,31 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     bundle, skill_dir, out_dir = work / "bundle", work / "skill", work / "out"
     bundle.mkdir(exist_ok=True)
 
-    if not rows:
-        # NONE 场景(空壳表,只有表头):无节点要迁移——现行 skill 原样返回,
-        # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING)
-        print("NONE 场景(空壳表):无迁移可做,现行 skill 原样返回。")
+    if otype == "none":
+        # NONE 单(平台口径):问题不在节点——把 skill 的引擎代码刷到当前代后回传。
+        # 引擎的"当前代"取自本机仓库副本:线上跑之前保证联调机器仓库已拉新。
+        print("[NONE] 问题不在节点:下载现行 skill → 引擎翻新(--refresh-only)→ 回传。")
+        skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+        product = unpack_skill(skill_zip, skill_dir)
+        print(f"[skill] 已解包,产物目录:{product}")
+        rc, _out = _run_migrate([sys.executable, str(MIGRATE),
+                                 "--refresh-only", "--product", str(product)])
+        if rc != 0:
+            print(f"[停] 引擎翻新退出码 {rc}——不回调,工作目录留在 {work} 供排查。")
+            sys.exit(rc)
+        out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
+        print(f"[产物] {out_zip}(引擎已刷到当前代,树与绑定未动)")
+        if cb_url:
+            post_callback(cb_url, version_id, out_zip)
+        else:
+            print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
+        return out_zip
+
+    if not rows and not otype:
+        # 空壳表且没带 optimizeType(本地实验/老请求):现行 skill 原样返回,
+        # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING);
+        # 逐字节一致也正是「skill 真下载」实验的判定标尺
+        print("空壳表(未带 optimizeType):无迁移可做,现行 skill 原样返回。")
         skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
         out_dir.mkdir(exist_ok=True)
         out_zip = out_dir / f"skill_{version_id[:8]}.zip"
@@ -301,8 +339,22 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
 
     cmd = [sys.executable, str(MIGRATE), "--package", str(bundle),
            "--product", str(product), "--auto", "--map", str(excel)]
+    if otype in ("multi", "all"):
+        cmd += ["--map-mode", otype]                      # multi=不动树结构 / all=结构以表为准
     print("[迁移]", " ".join(cmd))
+
+    def _fix_tuning(rc, out):
+        # 存量调优表的旧版结构病(如多个顶层节点)卡预导入:备份 .bak 后重建再跑一次。
+        # 只有存在可落地的行、迁移进到写入阶段才会触发收编——纯机械问题,机械修
+        if rc != 0 and "预导入(收编现有调优表) 失败" in out:
+            print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
+                  "(病表备份为 .bak,从产物重建)")
+            rc, out = _run_migrate(cmd + ["--rebuild-tuning"])
+            print(f"[修表] 重跑退出码 {rc}")
+        return rc, out
+
     rc, last_out = _run_migrate(cmd)
+    rc, last_out = _fix_tuning(rc, last_out)
     if rc != 0 and with_model:
         # 机械挡吃不下的失败项(语义对号/修管道/补入口)交给模型:起 Claude Code 无头会话
         # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
@@ -311,10 +363,14 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
                   f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约体检 FAIL 的照修法"
                   f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
                   f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
-                  f"改逻辑就跳过并在最后列入返厂清单,绝不赌。两条实测经验:S3 这类文件过滤"
+                  f"改逻辑就跳过并在最后列入返厂清单,绝不赌。三条实测经验:S3 这类文件过滤"
                   f"在同一脚本里常有多处(不同函数各扫一遍目录),要全文搜 .txt 过滤逐处改净;"
                   f"S5 第三方库(如 chardet)属管道,按修法换标准库实现(编码探测退化为"
-                  f" utf-8/gbk 依次尝试 + errors='replace')。完成后汇报改了哪些文件、跳过了哪些。")
+                  f" utf-8/gbk 依次尝试 + errors='replace');缺入口的脚本补完入口前体检"
+                  f"跑不了,清单上只看得见缺入口——补完薄封装后顺手把同一脚本的 S3"
+                  f"(.txt/.log 双后缀)与 D3(缺数据判 insufficient_data 而非 false)"
+                  f"查一遍修净,免得复跑才暴露、又拖到下一单。"
+                  f"完成后汇报改了哪些文件、跳过了哪些。")
         # 本地联调默认按用户的日常用法起会话(全权限);平台2 集成时权限策略另定
         claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
                                     "claude --dangerously-skip-permissions -p").split()
@@ -328,31 +384,15 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         else:
             claude_cmd[0] = exe
             timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
-            rounds = int(os.environ.get("PLATFORM1_MODEL_ROUNDS", "3"))
-            prev_fail = None
-            for rnd in range(1, rounds + 1):
-                mlog = work / f"model_session_{rnd}.log"
-                print(f"[模型] 第 {rnd}/{rounds} 轮:起 Claude Code 无头会话处置失败项"
-                      f"(cs-scot-migrate 技能),每一步动作实时打在下面,事件流落 {mlog}")
-                _model_session(claude_cmd, mlog, timeout)
-                rc, out = _run_migrate(cmd)
-                last_out = out
-                print(f"[模型] 第 {rnd} 轮处置后复跑机械迁移,退出码 {rc}")
-                if rc != 0 and "预导入(收编现有调优表) 失败" in out:
-                    # 存量调优表的旧版结构病(如多个顶层节点):备份 .bak 后重建,再跑一次
-                    print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
-                          "(病表备份为 .bak,从产物重建)")
-                    rc, out = _run_migrate(cmd + ["--rebuild-tuning"])
-                    last_out = out
-                    print(f"[修表] 重跑退出码 {rc}")
-                if rc == 0:
-                    break
-                m = re.search(r"落地 (\d+)/(\d+) 行", out)
-                fails = (int(m.group(2)) - int(m.group(1))) if m else None
-                if prev_fail is not None and fails is not None and fails >= prev_fail:
-                    print(f"[模型] 本轮无新进展(仍 {fails} 行未落地),不再追加轮次")
-                    break
-                prev_fail = fails
+            # 一单一轮:点一次优化只做一轮模型处置,复跑验证后就交付(部分交付
+            # 兜底),没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
+            mlog = work / "model_session.log"
+            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),"
+                  f"每一步动作实时打在下面,事件流落 {mlog}")
+            _model_session(claude_cmd, mlog, timeout)
+            rc, last_out = _run_migrate(cmd)
+            print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
+            rc, last_out = _fix_tuning(rc, last_out)
     if rc != 0:
         result = _parse_migrate_result(last_out)
         effective = (result["landed"] + len(result["skipped"])) if result else 0
@@ -368,6 +408,7 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         print(f"[部分交付] 已生效 {effective}/{result['total']}(本次落地 {result['landed']}"
               f" + 此前已迁移 {len(result['skipped'])}),失败 {len(result['failed'])} 个"
               f"——节点清单与原因已写入包内 tree/migration_report.json。"
+              f"已修的管道副本也随包带走,下一次点优化在这版基础上续迁。"
               f"注意:回调接口暂无「部分成功」字段,需与平台定口径(见 README 待确认)。")
 
     out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
