@@ -106,6 +106,10 @@ def main() -> None:
         ("drill-1-input", _exp("drill-1-input", "n7", "链路震荡"),
          _run(missing=["log"]), RCA_INPUT, RCA_EMPTY,
          "FAIL·类1 INPUT_GAP(数据缺失且漏判)→工单:人工兜底档,补数据清单"),
+        ("drill-2-form", _exp("drill-2-form", "n7", "链路震荡"),
+         _run(missing=["cmd"]), RCA_INPUT, RCA_EMPTY,
+         "FAIL·类2 BINDING_GAP(绑定形态不匹配:cmd raw 在场、表未供)→工单:自动迭代档,"
+         "migrate 重迁换 S 绑定(实测原型:mpls n33 老式 cmd 表绑定)"),
         ("drill-2-orphan", _exp("drill-2-orphan", "n7", "链路震荡"),
          _run(), RCA_INPUT,
          {**RCA_EMPTY, "tree_issues": {"orphan_node_ids": ["n88"]}},
@@ -129,9 +133,14 @@ def main() -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
         (data_dir / "占位.txt").write_text("演练数据占位\n", encoding="utf-8")
         if cid == "drill-1-input":
-            # 类1 的 v11 语义:缺的源必须是用例数据**本可提供**的(数据里有、这轮没喂到);
-            # 数据里天然没有该类内容的缺口不构成类1(穿透查绑定层)——所以教具得放一份 log 内容
-            (data_dir / "logbuffer采集.txt").write_text("演练 log 数据\n", encoding="utf-8")
+            # 类1 语义:缺的源必须是用例数据**本可提供**的——且在场的得是**表文件**
+            # (raw 形态在场没喂到=类2 绑定形态不匹配,不是类1)。教具放一份 log 表文件,
+            # 演示"表在场没喂→补喂/映射"这条正宗类1
+            (data_dir / "logbuffer采集.csv").write_text("Summary\n演练 log 表\n", encoding="utf-8")
+        if cid == "drill-2-form":
+            # 类2 绑定形态不匹配教具:cmd 内容以 raw 形态在场(目录+txt,无表文件)
+            (data_dir / "网元A" / "CMD").mkdir(parents=True, exist_ok=True)
+            (data_dir / "网元A" / "CMD" / "采集.txt").write_text("演练 cmd raw\n", encoding="utf-8")
         exp["data_source"] = str(data_dir)
         run_doc["inputs"]["raw"]["path"] = str(data_dir)
         wj(f"cases/{cid}/expected.json", exp)
