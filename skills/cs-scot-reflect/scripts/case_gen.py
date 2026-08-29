@@ -250,9 +250,9 @@ def index_packages(root: Path, zip_root: bool = False) -> List[Dict[str, Any]]:
             continue
         if any(c.is_dir() and "测试数据" in c.name for c in d.iterdir()):
             _add(d, [d.name], title=d.name)
-    if root not in seen and find_test_data(root):          # 根目录本身就是单包
-        _add(root, [root.name], title=root.name)
-    return pkgs
+    if not pkgs and root not in seen and find_test_data(root):   # 根目录本身就是单包
+        _add(root, [root.name], title=root.name)          # (已识别出子包时根不算——单 zip 解进
+    return pkgs                                           #  stem 子目录后,根只是解包区,不是包)
 
 
 def _version_stamp(p: Dict[str, Any]) -> tuple:
