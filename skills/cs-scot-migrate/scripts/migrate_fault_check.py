@@ -495,6 +495,19 @@ def edit_tuning_condition(product: Path, nid: str, condition: str):
     return path
 
 
+def edit_tuning_solution(product: Path, nid: str, text: str):
+    """调优表**只改解决方案**(中文列;English 列与判据/绑定一格不碰):以表为准同步。"""
+    path, wb, ws, header, id_col = _open_tuning(product)
+    col = _ensure_col(ws, header, "Recommend Solution(Chinese)")
+    row = next((r for r in range(2, ws.max_row + 1)
+                if str(ws.cell(row=r, column=id_col).value or "").strip() == nid), None)
+    if row is None:
+        raise SystemExit(f"调优表里找不到节点 {nid} 的行(表刚由 export 生成,不该缺——核对节点号)")
+    ws.cell(row=row, column=col).value = text or None
+    wb.save(path)
+    return path
+
+
 def edit_tuning_del(product: Path, nid: str):
     """调优表**删行**(全量表口径的删节点):按 node_id 定位整行删除,import 重建后节点消失。
     只应由 --map-mode all 的全量对账调用(候选集天然含整棵子树,见 _delete_targets)。"""
@@ -1029,10 +1042,11 @@ def _factory_report(rows):
 REBUILD_TUNING = False   # --rebuild-tuning:存量调优表备份为 .bak 后从产物重建(旧版导出器的结构病解法)
 
 
-def _surgery(product: Path, edits, adds=(), cond_edits=(), dels=(), note=None) -> None:
+def _surgery(product: Path, edits, adds=(), cond_edits=(), dels=(), sol_edits=(), note=None) -> None:
     """edits=[(nid, condition, binding)…] 改既有行;adds=[(父nid, 父链名字, 节点名, condition, binding)…]
     新增行(增节点,node_id 留空由 import 分配);cond_edits=[(nid, condition)…] 只改判据
-    绑定不动(判据同步行);dels=[nid…] 删行(全量表口径删节点,最后执行)。
+    绑定不动(判据同步行);dels=[nid…] 删行(全量表口径删节点,最后执行);
+    sol_edits=[(nid, 解决方案文本)…] 只改解决方案中文列。
     预导入收编(如需)→ 一次导出 → 改/增/删 N 行 → 一次导入 → 回导。批量也只走一轮
     export/import:落地是**原子**的——任一行编译不过,整批不生效。
     表比 tree_index 新(可能有未导入的人工修改,也可能只是上次迁移的回导)→ 先导入收编,绝不覆盖。"""
@@ -1065,11 +1079,14 @@ def _surgery(product: Path, edits, adds=(), cond_edits=(), dels=(), note=None) -
         edit_tuning_add(product, pnid, pchain, name, cond, b)
     for nid, cond in cond_edits:
         edit_tuning_condition(product, nid, cond)
+    for nid, sol in sol_edits:
+        edit_tuning_solution(product, nid, sol)
     for nid in dels:
         edit_tuning_del(product, nid)
     print(f"  [2/3] 已改调优表 {len(edits)} 行"
           + (f" + 新增 {len(adds)} 行(node_id 由导入自动分配)" if adds else "")
           + (f" + 判据同步 {len(cond_edits)} 行(绑定不动)" if cond_edits else "")
+          + (f" + 解决方案同步 {len(sol_edits)} 行" if sol_edits else "")
           + (f" + 删行 {len(dels)} 个(全量表里已无该节点)" if dels else "")
           + ":" + (note or "判据→原文列,旧绑定清空,绑定:cross→S(fault_check)"))
     print("  [3/3] 编译回产物…")
@@ -1202,12 +1219,18 @@ def _parse_map_header(header):
     平台1 表的 L{n}_Name_CN 当层级列(定位靠中文名),L{n}_Name_EN 与 Product_Obs 整列忽略。
     判据列(可选):表头含 判据/判断方法/判断条件/judgment/judgement 的列——**在场即启用
     "双空=清除"与"判据以表为准"语义**(老表没有此列,行为一切照旧,零兼容风险)。
-    平台1 增强表判据列成对(judgement_condition_cn/en):取 cn(树节点判据是中文),en 忽略。"""
-    lvls, zip_col, pname_col, zipish, jd_cands = [], None, None, [], []
+    平台1 增强表判据列成对(judgement_condition_cn/en):取 cn(树节点判据是中文),en 忽略。
+    标记列(可选,第四返回值):表头含 是否修改/是否变更/需要优化/is_modified/modified 等
+    ——在场即启用**标记契约**:结构(增删)仍看行的出现/消失,内容(迁移/判据同步/清除/
+    解决方案同步)只对标记行执行;未标记行只当结构参照(zip 不迁、判据不同也不动只提示)。
+    解决方案列(可选,第五返回值):表头含 解决方案/solution 的列(成对取 cn 弃 en)——
+    在场即启用"解决方案以表为准"同步(空不清除:很多节点本无解决方案,空≠删除)。"""
+    lvls, zip_col, pname_col, zipish, jd_cands, mk_col, sol_cands = \
+        [], None, None, [], [], None, []
     for h in header:
         hn = str(h).strip().replace("（", "(").replace("）", ")").replace(" ", "")
         if hn.lower() == "node_id":
-            return None, None, None                      # 有 node_id 的是调优表,不是对应表
+            return None, None, None, None, None          # 有 node_id 的是调优表,不是对应表
         m = _MAP_LVL_RE.match(hn) or _MAP_LVL_CN_RE.match(hn)
         if m:
             lvls.append((int(m.group(1)), h))
@@ -1219,6 +1242,12 @@ def _parse_map_header(header):
             pname_col = h                                # 平台1 表:zip 包名列
         elif "zip" in hn.lower():
             zipish.append(h)
+        elif ("是否修改" in hn or "是否变更" in hn or "是否优化" in hn or "需要优化" in hn
+              or "修改标记" in hn or "is_modified" in hn.lower() or "need_optimize" in hn.lower()
+              or hn.lower() in ("modified", "changed", "is_update", "update_flag")):
+            mk_col = h                                   # 标记列:在判据列之前认,防"判据是否修改"误吸
+        elif "解决方案" in hn or "solution" in hn.lower():
+            sol_cands.append(h)                          # 解决方案列(平台名或调优表 Recommend Solution)
         elif ("判据" in hn or "判断方法" in hn or "判断条件" in hn
               or "judgment" in hn.lower() or "judgement" in hn.lower()):
             jd_cands.append(h)
@@ -1227,10 +1256,19 @@ def _parse_map_header(header):
     if zip_col is None and len(zipish) == 1:
         zip_col = zipish[0]
     if not lvls or zip_col is None:
-        return None, None, None
-    non_en = [c for c in jd_cands if not str(c).strip().lower().endswith("_en")]
-    jd_col = (non_en or jd_cands)[0] if jd_cands else None
-    return sorted(lvls), zip_col, jd_col
+        return None, None, None, None, None
+
+    def _pick_cn(cands):
+        non_en = [c for c in cands if not str(c).strip().lower().endswith("_en")
+                  and "english" not in str(c).lower()]
+        return (non_en or cands)[0] if cands else None
+
+    return sorted(lvls), zip_col, _pick_cn(jd_cands), mk_col, _pick_cn(sol_cands)
+
+
+def _mk_true(v) -> bool:
+    """标记列取值:是/要/需要/Y/yes/1/true(不分大小写)算"要改",其余(含空)算"不改"。"""
+    return str(v or "").strip().lower() in ("y", "yes", "1", "true", "是", "要", "需要", "修改")
 
 
 def _read_table(path: Path):
@@ -1270,32 +1308,45 @@ def load_map_excel(path: Path):
       (全量对账用它区分"还在只是没包" vs "节点已从树里删除");
     - zip 空 + 判据空 + **表有判据列** → 清除行:用户在界面上删了该节点的判据与包
       → 清该节点的判据+绑定(**节点本身保留**;删除整节点走 --map-mode all 的全量对账)。
-    返回 ([(路径名字列表, zip名, 行号, 判据文本)], [(结构行路径, 判据文本)],
-          [(清除行路径, 行号)], 层级列数)。"""
+    返回 ([(路径名字列表, zip名, 行号, 判据文本)], [(结构行路径, 判据文本, 标记)],
+          [(清除行路径, 行号)], 层级列数, {路径元组: 解决方案文本})。
+    **标记契约**(表有标记列时):内容动作只对标记行执行——未标记行的 zip 不迁(只当登记,
+    提示一行)、双空不清;结构增删不看标记(看行的出现/消失)。无标记列=全部行视同已标记。
+    解决方案:只收**标记行的非空值**进末位字典(以表为准同步;空≠删除,不清)。"""
     header, rows = _read_table(path)
-    lvls, zip_col, jd_col = _parse_map_header(header)
+    lvls, zip_col, jd_col, mk_col, sol_col = _parse_map_header(header)
     if lvls is None:
         raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名/带 (Chinese) 后缀/平台1 的"
                          f" L1_Name_CN 都认)+「zip」列(或平台1 的 Product_Name 列),"
                          f"且不该有 node_id 列;实际表头:{header}")
-    out, zipless, clears = [], [], []
+    out, zipless, clears, sols = [], [], [], {}
     for i, r in enumerate(rows, start=2):
         z = str(r.get(zip_col) or "").strip()
         jd = str(r.get(jd_col) or "").strip() if jd_col is not None else ""
+        marked = _mk_true(r.get(mk_col)) if mk_col is not None else True
         names = [v for v in (str(r.get(c) or "").strip() for _l, c in lvls) if v]
+        if names and marked and sol_col is not None:
+            sol = str(r.get(sol_col) or "").strip()
+            if sol:
+                sols[tuple(names)] = sol                 # 解决方案以表为准(空≠删除,不收)
         if not z:
-            if names and jd_col is not None and not jd:
-                clears.append((names, i))                # 双空=清除指令(界面删了判据与包)
+            if names and jd_col is not None and not jd and marked:
+                clears.append((names, i))                # 双空+标记=清除指令(界面删了判据与包)
             elif names:
-                zipless.append((names, jd))
+                zipless.append((names, jd, marked))
             continue
         if not names:
             raise SystemExit(f"对应表第 {i} 行填了 zip「{z}」但层级列全空——没有节点路径,对应不了")
+        if not marked:
+            print(f"  [标记] 第 {i} 行「{names[-1]}」填了 zip 但未标记变更——按标记契约不迁移,"
+                  "只当结构参照")
+            zipless.append((names, jd, marked))
+            continue
         out.append((names, z, i, jd))
-    if not out and not clears and not (jd_col is not None and zipless):
-        raise SystemExit("对应表里没有任何一行填了 zip 列,也没有清除行(双空)或可同步的判据行"
-                         "——没有要执行的对应关系")
-    return out, zipless, clears, len(lvls)
+    if not out and not clears and not sols and not (jd_col is not None and zipless):
+        raise SystemExit("对应表里没有任何一行填了 zip 列,也没有清除行(双空)或可同步的"
+                         "判据/解决方案行——没有要执行的对应关系")
+    return out, zipless, clears, len(lvls), sols
 
 
 def find_map_table(pkg: Path):
@@ -1388,8 +1439,20 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     台账里有、表里已消失的迁移节点点名待人工确认(不自动删树);
     **清除行**(表有判据列时,判据格+zip 格双空=界面删了该节点的判据与包)→ 清该节点判据+绑定
     (节点保留、幂等、台账 cleared_at 留痕;--no-clear 只点名不执行)。"""
-    entries, zipless, clears, n_lvls = load_map_excel(map_path)
+    entries, zipless, clears, n_lvls, sols = load_map_excel(map_path)
     mode = getattr(a, "map_mode", "auto") or "auto"
+    # 手工改过调优表(表比 tree_index 新)→ 开头就收编,这一轮的对号直接看新树。
+    # 不能只靠 _surgery 里的 [0/3]:全跳过/全失败的轮次进不了写入阶段,收编永远轮不上
+    tis0 = sorted((product / "tree").glob("*.tree_index.json"))
+    xls0 = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
+                  if not p.name.startswith("~$"))
+    if not REBUILD_TUNING and xls0 and tis0 and xls0[0].stat().st_mtime > tis0[0].stat().st_mtime:
+        print("  [收编] 调优表比 tree_index 新(可能有手工修改)→ 先导入,再按新树对号…")
+        try:
+            run_step(product, "import_tree_excel.py", "预导入(收编现有调优表)")
+        except SystemExit as e:
+            raise SystemExit(str(e) + "\n提示:卡的是**存量调优表**(手工修改不合规?),按上面报错"
+                             "修表重跑;确认表里没有要保的手工修改,可加 --rebuild-tuning 重建。")
     index = load_index(product)
     nodes = index.get("nodes") or {}
     ledger = _ledger_read(product)
@@ -1497,18 +1560,23 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     # 判据同步行:zip 空 + 判据有值——树上有该节点且判据与表不同 → 只同步判据(绑定不动);
     # 树上没有 + ALL 单 → 纯判据新增(结构节点,无绑定);MULTI/旧默认不动结构
     synced_nids = {e[0] for e in jd_edits}
-    for names, jd in zipless:
-        if not jd:
+    unmarked_diff = []
+    for names, jd, mk in zipless:
+        if not jd and mode != "all":
             continue                                     # 老表(无判据列):结构行零动作,照旧
         znid, _zw, _zd = resolve_node_by_path(nodes, names)
         if znid is not None:
-            if znid in synced_nids or znid in seen_nid:
+            if not jd or znid in synced_nids or znid in seen_nid:
                 continue
             cur = str((nodes.get(znid) or {}).get("condition") or "")
             if _norm_jd(jd) != _norm_jd(cur):
-                jd_edits.append((znid, jd))
-                synced_nids.add(znid)
+                if mk:
+                    jd_edits.append((znid, jd))
+                    synced_nids.add(znid)
+                else:                                    # 标记契约:未标记不动,只提示
+                    unmarked_diff.append((znid, names[-1]))
         elif mode == "all" and len(names) >= 2:
+            # 结构以表为准,增节点不看标记:jd 空 = 平台的无判据结构层,建裸节点
             pnid, _pw, _pd = resolve_node_by_path(nodes, names[:-1])
             if pnid is not None:
                 sadds.append((pnid, _name_chain(nodes, pnid), names[-1], jd, None))
@@ -1517,12 +1585,36 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         elif mode == "all":
             struct_miss.append((names, "路径只有一层且树上无同名,定位不了"))
 
+    # 解决方案同步(标记行、非空、与产物 solutions.json 的中文文案不同才动;空≠删除)
+    sol_edits = []
+    if sols:
+        sp = product / "tree" / "solutions.json"
+        try:
+            cur_sols = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {}
+        except Exception:
+            cur_sols = {}
+        for names_t, sol in sols.items():
+            snid2, _sw, _sd = resolve_node_by_path(nodes, list(names_t))
+            if snid2 is None:
+                continue                                 # 本次新增节点的解决方案:下一单幂等补上
+            cur = str((cur_sols.get(snid2) or {}).get("zh") or "")
+            if _norm_jd(sol) != _norm_jd(cur):
+                sol_edits.append((snid2, sol))
+
     # 清除行先行解析(执行仍在落地手术之后):ALL 单里,双空行定位不到=平台树有这层、
     # 本地树没有(平台的无判据结构节点导出就是双空)→ 补建裸节点(无判据无绑定);
     # 它名下的新叶子行第二遍运行即可挂上(与增节点"先落父再落子"同一条规矩)
     c_edits, clear_already, clear_miss = [], [], []
+    clear_guard = None
     if clears and not a.no_clear:
         c_edits, clear_already, clear_miss = _clear_targets(nodes, clears)
+        with_jd = sum(1 for nd in nodes.values() if str(nd.get("condition") or "").strip())
+        if not a.force and c_edits and len(c_edits) > max(3, with_jd // 2):
+            # 与删除过半闸对称:清除过半更像「平台判据数据没录全」,不像专家批量删判据
+            clear_guard = (f"清除行要实际清掉 {len(c_edits)}/{with_jd} 个有判据的节点,超过一半"
+                           "——更像平台判据数据没录全(空≠删除),而非专家批量删判据;"
+                           "清除一律不执行。确认表里的空判据确为删除指令,加 --force 重跑")
+            c_edits = []
         if mode == "all" and clear_miss:
             rest = []
             for cnames, cwhy in clear_miss:
@@ -1537,7 +1629,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     dels, too_deep, del_guard = [], [], None
     if mode == "all":
         all_paths = [names for names, _z, _r, _j in entries] \
-            + [names for names, _jd in zipless] + [names for names, _r in clears]
+            + [names for names, _jd, _mk in zipless] + [names for names, _r in clears]
         res = _delete_targets(nodes, all_paths, n_lvls, force=a.force)
         if res[0] is None:
             del_guard = res[1]
@@ -1545,7 +1637,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
             dels, too_deep = res
 
     added_report = []
-    if oks or adds or sadds or jd_edits or dels:
+    if oks or adds or sadds or jd_edits or sol_edits or dels:
         refresh_engine(product)
         for _sub, _m, fc, deps, *_rest in oks + adds:
             _copy_scripts(product, fc, deps)
@@ -1556,7 +1648,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                    _binding(fc.name, entry, per_ne, kwargs, m["name"]))
                   for _sub, m, fc, _deps, entry, per_ne, kwargs, pnid, name, _note, _fp, cond in adds]
                  + sadds,
-                 cond_edits=jd_edits, dels=[dnid for dnid, _nm in dels])
+                 cond_edits=jd_edits, dels=[dnid for dnid, _nm in dels], sol_edits=sol_edits)
         upgrade_cross_scaffold(product)
         led = [(nid, m["name"], fc.name, entry, per_ne, kwargs, fp, _gate_extra(gates.get(nid)))
                for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, _note, fp, _cond in oks]
@@ -1617,6 +1709,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
           + (f"(其中新增节点 {len(adds)} 个)" if adds else "")
           + (f",跳过 {len(skips)} 行(内容与上次迁移一致;--force 强制重迁)" if skips else "")
           + (f",判据同步 {len(jd_edits)} 个(绑定不动)" if jd_edits else "")
+          + (f",解决方案同步 {len(sol_edits)} 个" if sol_edits else "")
           + (f",纯判据新增 {len(sadds)} 个" if sadds else "")
           + (f",删除节点 {len(dels)} 个(全量表口径)" if dels else "")
           + (f",清除 {len(cleared_report)} 个节点(判据+绑定)" if cleared_report else "")
@@ -1633,12 +1726,16 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     for snid, _jd in jd_edits:
         print(f"  ~ {snid}「{nodes[snid].get('name')}」 判据已按对应表更新(绑定不动;"
               "脚本若落后于新判据,由交付方补包后走迁移行换血)")
+    for snid, _s in sol_edits:
+        print(f"  ≈ {snid}「{nodes[snid].get('name')}」 解决方案已按对应表更新")
     for dnid, dnm in dels:
         print(f"  ✂ {dnid}「{dnm}」 已删除(全量表里已无该节点;调优表已删行,台账留 deleted_at)")
     for nid, label in skips:
         print(f"  = {nid}「{nodes[nid].get('name')}」 未变化,跳过(此前的人工调优不受影响)")
     if del_guard:
         print(f"\n  ⚠ {del_guard}")
+    if clear_guard:
+        print(f"\n  ⚠ {clear_guard}")
     if too_deep:
         print(f"\n  [info] {len(too_deep)} 个节点深度超出表层级列数(表表达不了),不删:"
               + "、".join(f"{n}「{nm}」" for n, nm in too_deep[:6]))
@@ -1646,6 +1743,10 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         print(f"\n  [info] {len(struct_miss)} 个纯判据行定位不了(父路径也对不上,不赌):")
         for snames, swhy in struct_miss[:6]:
             print(f"  - {'/'.join(snames)}:{swhy}")
+    if unmarked_diff:
+        print(f"\n  [info] {len(unmarked_diff)} 个未标记行的判据与树不同(按标记契约未动,"
+              "确要改就在表里标记后重跑):"
+              + "、".join(f"{n}「{nm}」" for n, nm in unmarked_diff[:6]))
     if fails:
         print(f"\n  未落地 {len(fails)} 行(对应不上决不赌):")
         for label, why, cmd in fails:
@@ -1664,13 +1765,13 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     # 全量对账:台账里迁移过、这次对应表里却没有配 zip 的节点——上游删了节点?撤了优化包?
     # 只点名不动手(删节点是结构手术,必须人确认;评估反思/删除指令能力接上后由那边闭环)。
     zipless_nids = set()
-    for names, _jd in zipless:
+    for names, _jd, _mk in zipless:
         znid, _w, _d = resolve_node_by_path(nodes, names)
         if znid:
             zipless_nids.add(znid)
     covered = set(seen_nid) \
         | {cnid for cnid, _nm in cleared_report} | {cnid for cnid, _nm in clear_already} \
-        | synced_nids | {dnid for dnid, _nm in dels}
+        | synced_nids | {dnid for dnid, _nm in dels} | {snid for snid, _s in sol_edits}
     gone, retracted = [], []
     for nid in sorted(ledger, key=lambda x: int(x[1:]) if x[1:].isdigit() else 10 ** 9):
         if nid in covered or nid not in nodes:
