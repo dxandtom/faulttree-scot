@@ -205,6 +205,10 @@ def main() -> int:
     ap.add_argument("--map", dest="map_path", default="", help="入口A可选:节点↔zip 对应表(透传 case_gen)")
     ap.add_argument("--out", required=True, help="工作目录(结果/判卷/日志/汇总都落它下面)")
     ap.add_argument("--eval-only", action="store_true", help="入口C:跳过执行,只对既有结果判卷")
+    ap.add_argument("--pending-as-fail", action="store_true",
+                    help="无人值守口径(平台自动化):机械链定不了档的用例不挂起等人裁决,"
+                         "直接按不通过(FAIL)计入准确率分母——人工确认做不了就等于这轮没优化好;"
+                         "默认仍挂起点名、不计分母(有人盯的场合裁决后补判)")
     ap.add_argument("--result-dir", help="入口C:既有结果根目录(--eval-only 时必填)")
     ap.add_argument("--case", action="append", default=[], help="只跑这些用例(可多次;默认=库里全部)")
     a = ap.parse_args()
@@ -301,6 +305,15 @@ def main() -> int:
             code, tail = _run(fin, 300, logs / f"{sfx}-finalize.log")
             if code != 0:
                 # finalize 的硬闸:有候选未机械定档(真冲突要权衡)→ 挂起点名,绝不代裁
+                if a.pending_as_fail:
+                    # 无人值守口径:裁决做不了=这轮没优化好,按不通过计(依旧不代裁——
+                    # 我们没替它定档,只是把"验证不了"如实记为不通过)
+                    row.update(stage="evaluated", verdict="FAIL",
+                               error_category="pending_adjudication",
+                               detail=f"机械链定不了档(待裁决);--pending-as-fail 按不通过计。"
+                                      f"结果目录 {rdir.name};清单见日志 {logs / f'{sfx}-finalize.log'}")
+                    print("  ✗ 待裁决 → 按不通过计(--pending-as-fail 无人值守口径)")
+                    continue
                 row.update(stage="pending_adjudication",
                            detail=f"结果目录 {rdir.name};待裁决清单见日志 {logs / f'{sfx}-finalize.log'}:"
                                   + tail[-500:])
