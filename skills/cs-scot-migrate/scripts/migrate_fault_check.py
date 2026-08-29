@@ -146,10 +146,25 @@ def parse_method_md(pkg: Path):
     if not name:
         m = re.search(r"^#\s*判断方法[::]\s*(\S.*?)\s*$", text, re.M)
         name = m.group(1) if m else cands[0].stem.replace("判断方法_", "")
+    path_txt = (secs.get("节点路径") or "").splitlines()[0].strip() if secs.get("节点路径") else ""
+    path = [seg.strip() for seg in re.split(r"[/\\>→]+", path_txt) if seg.strip()]
     core = secs.get("判断条件") or ""
     if not core:
         print("[warn] 判断方法.md 里没解析到「## 判断条件」——格式不合规范,对号匹配退化为全文比对,建议核对")
-    return {"name": name, "condition": text.strip(), "core": (core or text).strip(), "file": cands[0]}
+    return {"name": name, "path": path, "condition": text.strip(),
+            "core": (core or text).strip(), "file": cands[0]}
+
+
+def _path_pick(nodes, method, exact):
+    """同名多命中时用包内「## 节点路径」消歧(根→节点,/ 分隔;子序列语义与
+    resolve_node_by_path 同):唯一命中且在 exact 内 → 返回 nid,否则 None(照旧交人)。"""
+    path = [s for s in (method.get("path") or []) if s]
+    if not path or len(exact) < 2:
+        return None
+    name = str(method.get("name") or "").strip()
+    full = path if path[-1] == name else path + [name]
+    rnid, _w, _d = resolve_node_by_path(nodes, full)
+    return rnid if rnid in exact else None
 
 
 def find_scripts(pkg: Path, script_arg: str | None, node_name: str | None = None):
@@ -1822,14 +1837,17 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
             continue
         exact = [cnid for cnid, nd in nodes.items()
                  if str(nd.get("name") or "").strip() == method["name"].strip()]
-        if len(exact) != 1:
+        nid = exact[0] if len(exact) == 1 else _path_pick(nodes, method, exact)
+        if nid is not None and len(exact) > 1:
+            print(f"  [路径消歧] 「{method['name']}」同名 {len(exact)} 个,包内「节点路径」指向 {nid}")
+        if nid is None:
             cand = "\n".join(f"         {s:5.3f}  {cnid:>6}  {nm}"
                              for s, cnid, nm in rank_nodes(index, method["name"], method["core"]))
-            why = ((f"树上有 {len(exact)} 个同名节点({exact}),精确匹配不唯一" if exact
+            why = ((f"树上有 {len(exact)} 个同名节点({exact}),精确匹配不唯一"
+                    "(tester 包补「## 节点路径」可自动消歧)" if exact
                     else "无精确同名节点") + ",候选:\n" + cand)
             fails.append((label, why, f'--only "{label}" --node <节点号>'))
             continue
-        nid = exact[0]
         fp = _fingerprint(sub)
         if not a.force and ledger.get(nid, {}).get("fingerprint") == fp:
             skips.append((nid, label))                   # 全量交付里没变的包:跳过(此后的人工调优不被冲)
@@ -2044,9 +2062,15 @@ def main() -> None:
         if nid is None and a.auto and len(exact) == 1:
             nid = exact[0]
             print(f"精确命中:{nid}「{nodes[nid].get('name')}」(节点名与交付包一字不差)——按 --auto 直接落地")
+        elif nid is None and a.auto and len(exact) > 1:
+            nid = _path_pick(nodes, method, exact)
+            if nid is not None:
+                print(f"[路径消歧] 同名 {len(exact)} 个,包内「节点路径」指向"
+                      f" {nid}「{nodes[nid].get('name')}」——按 --auto 落地")
         if nid is None:                                  # 匹配模式:列候选
             if len(exact) > 1:
-                print(f"[warn] 树上有 {len(exact)} 个同名节点({exact})——精确匹配不唯一,必须人工指定")
+                print(f"[warn] 树上有 {len(exact)} 个同名节点({exact})——精确匹配不唯一,"
+                      "必须人工指定(tester 包补「## 节点路径」可自动消歧)")
             print("\n候选节点(相似度=名字 0.6 + 判据正文 0.4;=为一字不差):")
             for score, cnid, name in rank_nodes(index, method["name"], method["core"]):
                 mark = "=" if cnid in exact else " "

@@ -86,6 +86,10 @@ finalize_rca 机械合成 → 判卷。
 fault-tree-rca 法则在该结果目录补 decisions.json、重跑 finalize+render，再用
 `--eval-only`（或 `--case <该用例>`）补判。汇总落 `<工作目录>/regress_summary.json`，
 逐用例日志在 `<工作目录>/logs/`。
+**无人值守口径（平台自动化，做不了人工确认）**：加 `--pending-as-fail`——待裁决用例不再
+挂起等人，直接按不通过（FAIL，error_category=pending_adjudication）计入准确率分母：
+裁决做不了就等于这轮没优化好。依旧不代裁（没有替它定档，只是把"验证不了"如实记为不通过）；
+事后有人了仍可按上面的流程补裁决、重新判卷翻案。
 
 执行器与 RCA 链的来源都**优先用打包技能自带的副本**（`<skill>/scripts/runner.py`、
 `<skill>/assets/fault-tree-rca/`，与产物同代），其次是同门部署的

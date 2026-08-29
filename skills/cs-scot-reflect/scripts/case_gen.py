@@ -165,6 +165,23 @@ def _md_name(md: Path) -> Optional[str]:
     return stem or None
 
 
+def _md_path(md: Path) -> List[str]:
+    """从 判断方法*.md 提可选「## 节点路径」(根→节点,/ 分隔)——同名节点消歧的机械依据。"""
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "gbk", "gb18030"):
+        try:
+            text = md.read_text(encoding=enc)
+            break
+        except (UnicodeDecodeError, OSError):
+            continue
+    if not text:
+        return []
+    m = re.search(r"^##\s*节点路径\s*$\n+([^\n#]+)", text, re.M)
+    if not m:
+        return []
+    return [seg.strip() for seg in re.split(r"[/\\>→]+", m.group(1).strip()) if seg.strip()]
+
+
 def find_test_data(pkg_dir: Path) -> Optional[Path]:
     """包内测试数据目录：目录名含「测试数据」（测试数据/测试数据集/测试数据(新) 都认，
     任意深度取最浅）；退而认平台导出名 formated_result / formatted_result。"""
@@ -190,13 +207,15 @@ def index_packages(root: Path, zip_root: bool = False) -> List[Dict[str, Any]]:
     pkgs: List[Dict[str, Any]] = []
     seen: set = set()
 
-    def _add(pdir: Path, names, title: str = "") -> None:
+    def _add(pdir: Path, names, title: str = "", path=()) -> None:
         if pdir in seen:
             for p in pkgs:
                 if p["dir"] == pdir:
                     p["aliases"].update(_norm(n) for n in names if n)
                     if not p["title"] and title:
                         p["title"] = _norm(title)
+                    if not p["path"] and path:
+                        p["path"] = list(path)
             return
         seen.add(pdir)
         aliases = {_norm(n) for n in names if n}
@@ -211,7 +230,7 @@ def index_packages(root: Path, zip_root: bool = False) -> List[Dict[str, Any]]:
             src = _norm(re.sub(r"~\d+$", "", seg))         # 去掉同名 zip 改名共存加的 ~N 后缀
         # title=包的"正名"(md 标题优先):同名多版本判定的依据——两个候选 title 相同=同包不同批次
         pkgs.append({"dir": pdir, "aliases": aliases, "title": _norm(title),
-                     "src_zip": src, "data": find_test_data(pdir)})
+                     "src_zip": src, "data": find_test_data(pdir), "path": list(path)})
 
     for md in sorted(root.rglob("判断方法*.md")):
         if "规范" in md.name:
@@ -221,7 +240,7 @@ def index_packages(root: Path, zip_root: bool = False) -> List[Dict[str, Any]]:
         names = [primary, re.sub(r"^判断方法[\s_\-::]*", "", md.stem), pdir.name]
         if pdir != root:                                  # 中间层目录名也算别名(多套一层的形态)
             names += [p.name for p in pdir.parents if p != root and root in p.parents]
-        _add(pdir, names, title=primary or "")
+        _add(pdir, names, title=primary or "", path=_md_path(md))
 
     # 没被 md 覆盖的"散数据包"：自身直下有测试数据目录的目录
     for d in sorted(p for p in root.rglob("*") if p.is_dir()):
@@ -415,6 +434,7 @@ def main() -> None:
         print(f"[case_gen] --map 载入 {len(nid_zip)} 条节点↔zip 对应——这些节点按表精确对号,不走名字匹配")
 
     made, skipped, problems = [], [], []
+    dup_reported: set = set()
     if ledgerless:
         # 无台账:逐树节点试配包(名字对号);同名节点数先备好,配上包但名字撞车的不赌
         name_dup: Dict[str, int] = {}
@@ -463,9 +483,39 @@ def main() -> None:
                     problems.append(f"{nid}「{package_node}」：{why}——跳过")
                 continue
         if ledgerless and name_dup.get(package_node, 0) > 1:
-            problems.append(f"包对上节点名「{package_node}」,但树上有多个同名节点——无台账分不清"
-                            "哪一个,不赌,跳过(先对技能跑一次 migrate 即可按台账精确对号)")
-            continue
+            # 同名撞车:包内「## 节点路径」在场就机械消歧(子序列),否则不赌
+            ppath = [s for s in (pkg.get("path") or []) if s]
+            picked = None
+            if ppath:
+                full = ppath if _norm(ppath[-1]) == _norm(package_node) else ppath + [package_node]
+                fulln = [_norm(x) for x in full]
+
+                def _chain(k):
+                    out, cur = [], k
+                    while cur and cur in nodes:
+                        out.append(_norm(str(nodes[cur].get("name") or "")))
+                        cur = nodes[cur].get("parent")
+                    return list(reversed(out))
+
+                def _sub(subseq, fullseq):
+                    it = iter(fullseq)
+                    return all(any(x == y for y in it) for x in subseq)
+
+                same = [k for k, nd2 in nodes.items()
+                        if str(nd2.get("name") or "").strip() == package_node]
+                hits = [k for k in same if _sub(_chain(k), fulln)]
+                if len(hits) == 1:
+                    picked = hits[0]
+            if picked is None:
+                if package_node not in dup_reported:
+                    dup_reported.add(package_node)
+                    problems.append(f"包对上节点名「{package_node}」,但树上有多个同名节点且包内无"
+                                    "「节点路径」可消歧——不赌,跳过(tester 包补 ## 节点路径,"
+                                    "或先对技能跑一次 migrate 按台账精确对号)")
+                continue
+            if picked != nid:
+                continue                                 # 这个同名 nid 不是路径指向的那个:静默让位
+            why = "; ".join(x for x in (f"同名 {name_dup[package_node]} 个,包内节点路径消歧", why) if x)
         if ledgerless:
             why = "; ".join(x for x in ("无台账,按节点名对号", why) if x)
         used_pkg_dirs.add(str(pkg["dir"]))
