@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """case_gen.py - 从 migrate 迁移台账 + tester 交付包机械生成评估用例库
 
+无台账兜底:产物没有 tree/migrations.json(generate 直出、没走过 migrate 的技能)时,
+退回**按名字对号**——包内判断方法的节点名 ↔ 树节点名,配得上且全树唯一才落用例(决不赌;
+同名撞车/对不上的逐包点名)。要零歧义的精确对号,先对技能跑一次 migrate 再建库。
+
 原理：tester 交付包天然就是带标注的用例——每个包 = 单节点判据 + 一份"跑出来就该是
 这个节点"的测试数据（tester 的交付契约）。migrate 对号落地时已在 产物/tree/migrations.json
 台账里机械记下"节点 ↔ 包 ↔ 入口"。本脚本只是把这份已知信息落成 cases/<case_id>/expected.json，
@@ -394,11 +398,12 @@ def main() -> None:
 
     ledger = load_json(product / "tree" / "migrations.json") \
         if (product / "tree" / "migrations.json").exists() else {}
-    if not ledger:
-        raise SystemExit(f"产物没有迁移台账（tree/migrations.json）——"
-                         f"还没做过交付包迁移，无从生成用例：{product}")
-
     nodes, scenario = load_tree(product)
+    ledgerless = not ledger
+    if ledgerless:
+        print("[case_gen] 产物没有迁移台账（tree/migrations.json，技能可能是 generate 直出、"
+              "没走过 migrate）→ 退回**按名字对号**建库：包内判断方法的节点名 ↔ 树节点名，"
+              "对得上且全树唯一才落（决不赌）；要零歧义的台账精确对号，先对技能跑一次 migrate。")
 
     pkg_index = []
     for root in package_roots:
@@ -410,7 +415,22 @@ def main() -> None:
         print(f"[case_gen] --map 载入 {len(nid_zip)} 条节点↔zip 对应——这些节点按表精确对号,不走名字匹配")
 
     made, skipped, problems = [], [], []
-    for nid, entry in sorted(ledger.items()):
+    if ledgerless:
+        # 无台账:逐树节点试配包(名字对号);同名节点数先备好,配上包但名字撞车的不赌
+        name_dup: Dict[str, int] = {}
+        for nd in nodes.values():
+            nm = str(nd.get("name") or "").strip()
+            if nm:
+                name_dup[nm] = name_dup.get(nm, 0) + 1
+        items = [(nid, {"package_node": str(nd.get("name") or "").strip()})
+                 for nid, nd in sorted(nodes.items(),
+                                       key=lambda kv: int(kv[0][1:]) if kv[0][1:].isdigit() else 10 ** 9)
+                 if str(nd.get("name") or "").strip()]
+    else:
+        name_dup = {}
+        items = sorted(ledger.items())
+    used_pkg_dirs = set()
+    for nid, entry in items:
         package_node = entry.get("package_node", "")
         node = nodes.get(nid)
         if node is None:
@@ -439,8 +459,16 @@ def main() -> None:
         else:
             pkg, why = match_package(pkg_index, package_node)
             if pkg is None:
-                problems.append(f"{nid}「{package_node}」：{why}——跳过")
+                if not ledgerless:                         # 无台账模式:树节点没配到包是常态,不点名
+                    problems.append(f"{nid}「{package_node}」：{why}——跳过")
                 continue
+        if ledgerless and name_dup.get(package_node, 0) > 1:
+            problems.append(f"包对上节点名「{package_node}」,但树上有多个同名节点——无台账分不清"
+                            "哪一个,不赌,跳过(先对技能跑一次 migrate 即可按台账精确对号)")
+            continue
+        if ledgerless:
+            why = "; ".join(x for x in ("无台账,按节点名对号", why) if x)
+        used_pkg_dirs.add(str(pkg["dir"]))
         if why:                                            # 对上了但带注记(map 对号/同名多版本取最新)
             print(f"  ⚠ {nid}「{package_node}」：{why}")
         data_dir = pkg["data"]
@@ -474,6 +502,11 @@ def main() -> None:
             json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8")
         made.append(case_id)
 
+    if ledgerless:
+        left = [p for p in pkg_index if str(p["dir"]) not in used_pkg_dirs and p.get("data")]
+        for p in left:
+            problems.append(f"包「{_pkg_label(p)}」在树上找不到同名节点(名字对号失败)——"
+                            "确认该包属于本场景;或先对技能跑一次 migrate,用台账精确对号")
     print(f"[case_gen] 生成 {len(made)} 个用例 → {cases_out}")
     for c in made:
         print(f"  + {c}")

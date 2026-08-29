@@ -142,6 +142,10 @@ python "<本目录>/scripts/case_gen.py" \
 
 每个台账节点生成一个 `cases/<node_id>-<包节点名>/expected.json`（该节点为唯一期望根因）。
 故障树结构调整（node_id 重排）后**重跑一遍即全库刷新**，不存在 node_id 漂移的人工重对。
+**无台账兜底**：产物没有 `tree/migrations.json`（generate 直出、没走过 migrate 的技能）
+不硬停——退回**按名字对号**：包内判断方法的节点名 ↔ 树节点名，配得上且全树唯一才落用例
+（同名撞车/对不上的逐包点名，决不赌）；没配到包的树节点静默跳过不刷屏。要零歧义的台账
+精确对号，先对技能跑一次 migrate 再建库。
 阴性用例（健康数据、期望无根因）无机械来源，人工按 `references/expected_schema.md` 放少量即可。
 
 ```json
