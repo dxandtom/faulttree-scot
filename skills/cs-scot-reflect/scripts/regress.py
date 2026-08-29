@@ -206,9 +206,11 @@ def main() -> int:
     ap.add_argument("--out", required=True, help="工作目录(结果/判卷/日志/汇总都落它下面)")
     ap.add_argument("--eval-only", action="store_true", help="入口C:跳过执行,只对既有结果判卷")
     ap.add_argument("--pending-as-fail", action="store_true",
-                    help="无人值守口径(平台自动化):机械链定不了档的用例不挂起等人裁决,"
-                         "直接按不通过(FAIL)计入准确率分母——人工确认做不了就等于这轮没优化好;"
-                         "默认仍挂起点名、不计分母(有人盯的场合裁决后补判)")
+                    help="(这已是默认口径,参数保留兼容)待裁决用例按不通过(FAIL)计入准确率分母")
+    ap.add_argument("--pending-hold", action="store_true",
+                    help="有人盯的场合用:待裁决用例挂起点名、不计准确率分母,按 fault-tree-rca"
+                         " 法则补 decisions.json 后重跑 finalize+render 再补判。"
+                         "默认不挂起——机械链定不了档=这轮没优化好,直接按不通过计(无人值守口径)")
     ap.add_argument("--result-dir", help="入口C:既有结果根目录(--eval-only 时必填)")
     ap.add_argument("--case", action="append", default=[], help="只跑这些用例(可多次;默认=库里全部)")
     a = ap.parse_args()
@@ -304,15 +306,15 @@ def main() -> int:
                 + (["--solutions", solutions] if solutions.exists() else [])
             code, tail = _run(fin, 300, logs / f"{sfx}-finalize.log")
             if code != 0:
-                # finalize 的硬闸:有候选未机械定档(真冲突要权衡)→ 挂起点名,绝不代裁
-                if a.pending_as_fail:
-                    # 无人值守口径:裁决做不了=这轮没优化好,按不通过计(依旧不代裁——
-                    # 我们没替它定档,只是把"验证不了"如实记为不通过)
+                # finalize 的硬闸:有候选未机械定档(真冲突要权衡)→ 绝不代裁。
+                # 默认(无人值守口径):裁决做不了=这轮没优化好,按不通过计——没替它定档,
+                # 只是把"验证不了"如实记为不通过;--pending-hold 恢复挂起等人的旧口径
+                if not a.pending_hold:
                     row.update(stage="evaluated", verdict="FAIL",
                                error_category="pending_adjudication",
-                               detail=f"机械链定不了档(待裁决);--pending-as-fail 按不通过计。"
+                               detail=f"机械链定不了档(待裁决);无人值守口径按不通过计。"
                                       f"结果目录 {rdir.name};清单见日志 {logs / f'{sfx}-finalize.log'}")
-                    print("  ✗ 待裁决 → 按不通过计(--pending-as-fail 无人值守口径)")
+                    print("  ✗ 待裁决 → 按不通过计(默认无人值守口径;要挂起等人裁决加 --pending-hold)")
                     continue
                 row.update(stage="pending_adjudication",
                            detail=f"结果目录 {rdir.name};待裁决清单见日志 {logs / f'{sfx}-finalize.log'}:"

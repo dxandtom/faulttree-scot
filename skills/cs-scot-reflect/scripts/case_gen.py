@@ -131,7 +131,9 @@ def prepare_packages_root(packages: Path, tmp: Path) -> Tuple[List[Path], bool]:
         raise SystemExit(f"--packages 应是目录或 .zip：{packages}")
     dst = tmp / "packages"
     print(f"[case_gen] --packages 是 zip，解到临时区…")
-    _unzip(packages, dst)
+    # 解进以 zip 名命名的子目录:zip 内容平铺(没有包装目录)时 zip 名就是包的唯一身份,
+    # 丢了它 --map 的 src_zip 对不上、名字匹配也少一条别名(实测单 zip 直喂踩坑)
+    _unzip(packages, dst / sanitize(packages.stem))
     _explode(dst)
     return [dst], True
 
@@ -482,8 +484,9 @@ def main() -> None:
                 if not ledgerless:                         # 无台账模式:树节点没配到包是常态,不点名
                     problems.append(f"{nid}「{package_node}」：{why}——跳过")
                 continue
-        if ledgerless and name_dup.get(package_node, 0) > 1:
-            # 同名撞车:包内「## 节点路径」在场就机械消歧(子序列),否则不赌
+        if ledgerless and want is None and name_dup.get(package_node, 0) > 1:
+            # 同名撞车(--map 显式给了 node_id 的行不进此闸——表是权威通道):
+            # 包内「## 节点路径」在场就机械消歧(子序列),否则不赌
             ppath = [s for s in (pkg.get("path") or []) if s]
             picked = None
             if ppath:
