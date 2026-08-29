@@ -78,9 +78,11 @@ def _read_table(path: Path):
 
 def parse_platform_excel(path: Path):
     """平台表 → [(节点路径名字列表, zip 包名, obs 地址)];Product_Name 空的行(结构行)跳过。
-    列口径与 cs-scot-migrate 的表识别一致:路径取 L{n}_Name_CN,层级动态。"""
+    列口径与 cs-scot-migrate 的表识别一致:路径取 L{n}_Name_CN,层级动态。
+    表带标记列(是否修改/is_modified 等)时,未标记行的 zip 不下载(标记契约:
+    内容动作只对标记行执行,migrate 同口径)。"""
     header, rows = _read_table(path)
-    cn_cols, obs_col, name_col = [], None, None
+    cn_cols, obs_col, name_col, mk_col = [], None, None, None
     for h in header:
         hn = str(h).strip()
         low = hn.lower()
@@ -93,6 +95,10 @@ def parse_platform_excel(path: Path):
             obs_col = h
         elif low == "product_name":
             name_col = h
+        elif ("是否修改" in hn or "是否变更" in hn or "是否优化" in hn or "需要优化" in hn
+              or "修改标记" in hn or "is_modified" in low or "need_optimize" in low
+              or low in ("modified", "changed", "is_update", "update_flag")):
+            mk_col = h
     if not cn_cols or name_col is None:
         raise SystemExit(f"不是平台1 导出表(需要 L*_Name_CN 层级列 + Product_Name 列);"
                          f"实际表头:{header}")
@@ -102,6 +108,9 @@ def parse_platform_excel(path: Path):
         name = str(r.get(name_col) or "").strip()
         if not name:
             continue
+        if mk_col is not None and str(r.get(mk_col) or "").strip().lower() not in (
+                "y", "yes", "1", "true", "是", "要", "需要", "修改"):
+            continue                                     # 未标记行:zip 不下载,migrate 那边也不迁
         names = [v for v in (str(r.get(c) or "").strip() for _l, c in cn_cols) if v]
         obs = str(r.get(obs_col) or "").strip() if obs_col else ""
         out.append((names, name, obs))
@@ -189,13 +198,16 @@ def _parse_migrate_result(out: str):
                for a, b in re.findall(r"= (n\d+)「([^」]+)」 未变化", out)]
     jd_synced = [{"node_id": a, "name": b}
                  for a, b in re.findall(r"~ (n\d+)「([^」]+)」 判据已按对应表更新", out)]
+    sol_synced = [{"node_id": a, "name": b}
+                  for a, b in re.findall(r"≈ (n\d+)「([^」]+)」 解决方案已按对应表更新", out)]
     deleted = [{"node_id": a, "name": b}
                for a, b in re.findall(r"✂ (n\d+)「([^」]+)」 已删除", out)]
     failed = [{"name": a, "excel_row": int(b), "reason": c.strip()[:300]}
               for a, b, c in re.findall(r"✗ 「([^」]+)」\(表第(\d+)行[^)]*\):(.*)", out)]
     r = {"total": int(m.group(2)), "landed": int(m.group(1)),
          "ok": ok, "skipped": skipped, "failed": failed}
-    for k, v in (("added", added), ("jd_synced", jd_synced), ("deleted", deleted)):
+    for k, v in (("added", added), ("jd_synced", jd_synced),
+                 ("sol_synced", sol_synced), ("deleted", deleted)):
         if v:
             r[k] = v
     return r
