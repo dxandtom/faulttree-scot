@@ -129,30 +129,30 @@ def check_env_failure(run_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _sources_absent_in_case_data(missing, expected_data: Dict[str, Any]) -> set:
-    """机械判定:缺的源在**用例自带数据里本来就不存在**的集合。
-
-    依据=用例数据是判定的充分数据(tester 契约:这份数据跑出来就该命中期望)。数据里压根
-    没有某类内容而期望仍要求命中,等于宣告"该根因不需要那个源"——缺它不是数据入口问题,
-    是判据绑定落点问题,不该被类1 截胡(实测:22 个无 LOG 采集的用例全被归 INPUT_GAP,
-    工单开成"使用方补数据"的死指令,而正解是迁移/改绑)。
-    判定=扫用例 data 目录的文件/目录名(上限 5000 个),名字里含源名(cmd/diag 互为同义)
-    即认为该源内容在场;expected 没记 data_source 或目录不存在 → 判不了,返回空集(保守)。"""
+def _case_data_names(expected_data: Dict[str, Any]) -> Optional[set]:
+    """扫用例自带 data 目录的文件/目录名(上限 5000 个),小写集合。
+    expected 没记 data_source 或目录不存在 → None(判不了,调用方保守处理)。"""
     root = str(expected_data.get("data_source") or "").strip()
     if not root or not Path(root).is_dir():
-        return set()
+        return None
     names = set()
     for i, p in enumerate(Path(root).rglob("*")):
         names.add(p.name.lower())
         if i > 5000:
             break
-    syn = {"cmd": ("cmd", "diag"), "diag": ("diag", "cmd")}
-    absent = set()
-    for k in missing:
-        keys = syn.get(str(k).lower(), (str(k).lower(),))
-        if not any(kk in n for n in names for kk in keys):
-            absent.add(k)
-    return absent
+    return names
+
+
+_SRC_SYN = {"cmd": ("cmd", "diag"), "diag": ("diag", "cmd")}
+_TABLE_SUFFIXES = (".csv", ".xlsx", ".xls")
+
+
+def _source_forms(k, names: set):
+    """该源在数据名单里的在场形态 → (有内容, 有表文件)。
+    表文件=名字含源名且以 .csv/.xlsx/.xls 结尾;其余(目录名/txt/log)算 raw 形态。"""
+    keys = _SRC_SYN.get(str(k).lower(), (str(k).lower(),))
+    hit = [n for n in names if any(kk in n for kk in keys)]
+    return bool(hit), any(n.endswith(_TABLE_SUFFIXES) for n in hit)
 
 
 def check_input_gap(run_data: Dict[str, Any], missed_count: int,
@@ -161,23 +161,47 @@ def check_input_gap(run_data: Dict[str, Any], missed_count: int,
 
     条件: missing_inputs非空 且 有期望根因 MISSED（缺数据但全命中不算错，由 verdict 层
     按 PASS_WITH_GAPS 处理；阴性用例假阳与缺数据无因果，也不在这里拦）
-    **且缺的源是本可提供的**——两条机械豁免通道,命中即从缺口里剔除:
-    ① run.json 的 missing_kind 标 collection_absent(runner 认定采集不含该类,非漏传);
-    ② 用例自带数据里本来就没有该类内容(见 _sources_absent_in_case_data)。
-    剔完为空 → 类1 不成立,穿透继续查绑定层(修法在那边:迁移/改绑,不是要数据)。
+    **且缺的源是本可提供的**——三条机械通道,依据都是"用例数据即判定的充分数据"(tester 契约):
+    ① run.json 的 missing_kind 标 collection_absent(runner 认定采集不含该类,非漏传)→ 剔除;
+    ② 用例自带数据里本来就没有该类内容 → 剔除(数据形态天然不含,缺它是绑定落点问题——
+      实测 22 个无 LOG 采集的用例曾被归 INPUT_GAP,开成"使用方补数据"的死指令);
+    ③ 缺的源在用例数据里**只有 raw 形态**(目录/txt 可见,没有表文件)而执行仍缺 → 不是
+      没数据,是现绑定(表类)吃不了在场的 raw——判 **类2 绑定形态不匹配**,修法在绑定层
+      (migrate 重迁换 S 绑定 / zip2csv 转表 + data_map 映射),不是要数据(实测:mpls n33
+      老式 cmd 表绑定,raw 里 CMD 在场,被归类1 让人补数据,正解=用交付包重迁)。
+      注意:**表文件在场**(如 logbuffer.csv)没喂到的仍是类1——修法是喂表/data_map 映射,
+      归 needs_data 没错。
+    ①②剔完为空 → 类1 不成立,穿透继续查绑定层。
     """
     missing = run_data.get("missing_inputs", [])
     if not (missing and missed_count > 0):
         return None
     kind = run_data.get("missing_kind") or {}
     absent = {k for k in missing if kind.get(k) == "collection_absent"}
-    if expected_data is not None:
-        absent |= _sources_absent_in_case_data([k for k in missing if k not in absent], expected_data)
+    names = _case_data_names(expected_data) if expected_data is not None else None
+    if names is not None:
+        absent |= {k for k in missing if k not in absent and not _source_forms(k, names)[0]}
     supportable = [k for k in missing if k not in absent]
     if not supportable:
         print(f"[classify] 缺源 {sorted(absent)} 为数据形态天然不含(用例数据即如此,期望仍要求命中)"
               "→ 不构成 INPUT_GAP,穿透继续查绑定层")
         return None
+    if names is not None:
+        forms = [_source_forms(k, names) for k in supportable]
+        if all(p for p, _t in forms) and not any(t for _p, t in forms):
+            print(f"[classify] 缺源 {supportable} 在用例数据里只有 raw 形态在场(无表文件)"
+                  "→ 绑定形态不匹配,按类2 处置(migrate 重迁/转表映射),不开补数据死指令")
+            return {
+                "class": 2,
+                "error_category": "BINDING_GAP",
+                "verdict": VERDICTS["BINDING_GAP"],
+                "reason": (f"绑定形态不匹配:数据源 {supportable} 的内容在用例数据里以 raw 形态"
+                           "在场(无表文件),执行缺的是表——现绑定(表类)吃不了在场的 raw。"
+                           "有该节点交付包→migrate 重迁(fault_check 脚本直接吃 raw);"
+                           "无包→zip2csv 转表 + data_map.json 映射,或给 tester 出脚本需求单"),
+                "binding_form_mismatch": True,
+                "missing_inputs": supportable
+            }
     reason = f"缺失数据源: {supportable}，且有期望根因漏判"
     if absent:
         reason += f"(另有 {sorted(absent)} 为数据形态天然不含,不计入)"
@@ -398,11 +422,15 @@ def classify(
         name, check_fn = checks[class_num]
         result = check_fn()
         if result:
-            result["error_class"] = class_num
+            # 检测函数可自报更准的类别(如类1 检测发现"raw 在场表未供"改报类2 绑定形态
+            # 不匹配)——尊重它;未自报时按链位归类(既有各检测都自报本位,行为不变)
+            cls = result.get("class", class_num)
+            cat = result.get("error_category") or ERROR_CLASSES.get(cls, name)
+            result["error_class"] = cls
             return {
                 "classified": True,
-                "error_class": class_num,
-                "error_category": name,
+                "error_class": cls,
+                "error_category": cat,
                 "details": result
             }
 

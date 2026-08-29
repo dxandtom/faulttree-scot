@@ -170,7 +170,16 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
 
         if cat == "BINDING_GAP":
             orphans = issue.get("orphan_nodes") or []
-            if orphans or "孤儿绑定" in blob or "孤立节点" in blob:
+            if issue.get("binding_form_mismatch") or "绑定形态不匹配" in blob:
+                # 类1 检测改判来的:缺的源在用例 raw 数据里有内容,现绑定(表类)吃不了
+                pkg = ledger.get(nid, {}).get("package_node", "")
+                add(cat, "绑定形态不匹配", "auto", "migrate(重迁换 S 绑定)",
+                    (f"节点 {nid}「{node.get('name', '')}」的绑定要表源,而用例数据只有 raw 形态"
+                     "(内容在场)。有该节点交付包→migrate 重迁,fault_check 脚本直接吃 raw"
+                     + (f"(台账记过包「{pkg}」,可 --only \"{pkg}\" 重迁)" if pkg else "")
+                     + ";确无包→zip2csv 把 raw 转三表后在用例 data_map.json 映射,"
+                       "或给 tester 出脚本需求单(3 轮内熔断转人工)"), issue)
+            elif orphans or "孤儿绑定" in blob or "孤立节点" in blob:
                 locs = {o: grep_binding_files(product, o) for o in orphans}
                 add(cat, "孤儿绑定", "auto", "调优表+import(产物自带)",
                     "清残留绑定:导出调优表→删这些幽灵节点的绑定引用→import 编译回产物。"
