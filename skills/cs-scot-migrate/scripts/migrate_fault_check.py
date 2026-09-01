@@ -1479,6 +1479,12 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     ledger = _ledger_read(product)
     reg = build_zip_registry(pkg, tmp)
     roots = sorted({str(v) for v in reg.values()})
+    # 不同包名、内容逐字节相同 = 同一份包挂在多个节点名下,必有错位(联调实测:平台把
+    # 5 个对象摊给 16 行)。同名包被多行复用是合法惯例,不在此列——按指纹分组只抓前者
+    _fp_groups: dict[str, list[str]] = {}
+    for _r in roots:
+        _fp_groups.setdefault(_fingerprint(Path(_r)), []).append(_r)
+    tangled = {f for f, rs in _fp_groups.items() if len(rs) > 1}
     print(f"对应表:{len(entries)} 行有 zip 对应"
           + (f",清除行(判据格+zip 格双空){len(clears)} 个" if clears else "")
           + f";合集里可对号的子包 {len(roots)} 个"
@@ -1522,6 +1528,16 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                 jd_edits.append((nid, jd))               # 包没变但界面改了判据:只同步判据(绑定不动)
             skips.append((nid, label))                   # 全量交付里没变的包:跳过(此后的人工调优不被冲)
             seen_nid.setdefault(nid, label)
+            continue
+        if fp in tangled:
+            peers = sorted(Path(r).name for r in _fp_groups[fp] if r != str(sub))
+            try:
+                mdn = parse_method_md(sub)["name"]
+            except SystemExit:
+                mdn = "?"
+            fails.append((label, f"包内容与 {peers} 逐字节相同(内含判断方法「{mdn}」)——"
+                                 "同一份包挂在多个不同 zip 名下,必有错位(上传错了对象,"
+                                 "或表的 zip 列错了行),不赌:核对上传与对应表后重跑", None))
             continue
         try:
             method = parse_method_md(sub)
