@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import shutil
+import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -76,6 +77,16 @@ def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
     if res.get("success") != 1 or not dst.exists():
         raise SystemExit(f"平台下载失败({kind}:{locator}):{res};原因见上方脚本输出"
                          f"(JSON 响应=服务端拒绝,常见是 token 过期或该 obs 路径无权限)")
+    if not zipfile.is_zipfile(dst):
+        # 服务端拒绝时也回 HTTP 200,报错体(JSON/HTML)会被当文件存盘——当场验明,
+        # 别等到迁移解包才炸;坏件改名 .bad 留证,不占正名(重跑会重新下载)
+        head = dst.read_bytes()[:200]
+        bad = dst.with_name(dst.name + ".bad")
+        dst.replace(bad)
+        raise SystemExit(f"下载到的不是 zip({kind}:{locator}):响应体开头 {head!r}——"
+                         f"HTTP 200 但内容是报错体,说明服务端拒了这条 docId"
+                         f"(路径不存在/无权限/token 过期都可能);坏件留在 {bad},"
+                         "把这段输出甩给平台侧查该 docId")
     return dst
 
 

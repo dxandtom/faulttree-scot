@@ -345,9 +345,14 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         return out_zip
     for names, name, obs in rows:
         fname = name if name.lower().endswith(".zip") else name + ".zip"
-        if (bundle / fname).exists():
-            print(f"[下载] {'/'.join(names)} ← {fname}(已在,跳过)")
-            continue
+        have = bundle / fname
+        if have.exists():
+            if zipfile.is_zipfile(have):
+                print(f"[下载] {'/'.join(names)} ← {fname}(已在,跳过)")
+                continue
+            # 上次跑留下的坏件(报错体被当文件存盘)——占着正名会被"已在"跳过,删掉重下
+            print(f"[下载] {fname} 已在但不是合法 zip(上次的坏件)→ 删除重下")
+            have.unlink()
         downloader.download_zip(obs, name, bundle, fake_store=fake_store)
         print(f"[下载] {'/'.join(names)} ← {name}")
     if skill_dir.exists() and any(skill_dir.rglob("tree/migrations.json")):
@@ -378,7 +383,12 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
 
     rc, last_out = _run_migrate(cmd)
     rc, last_out = _fix_tuning(rc, last_out)
-    if rc != 0 and with_model:
+    if rc != 0 and with_model and _parse_migrate_result(last_out) is None:
+        # 没跑到汇总=环境/输入问题(坏 zip、表读不了、参数错),不存在"失败项"清单,
+        # 模型档无从下手——省一轮无头会话,直接走下方硬停
+        print("[模型] 迁移没跑到汇总(环境/输入问题,不是节点失败项)——"
+              "模型档帮不上,跳过;报错看上方迁移输出")
+    elif rc != 0 and with_model:
         # 机械挡吃不下的失败项(语义对号/修管道/补入口)交给模型:起 Claude Code 无头会话
         # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
         prompt = (f"用 cs-scot-migrate 技能处理一次批量迁移的失败项,只改文件,不用跑命令。"

@@ -50,9 +50,15 @@ RAW_TAG = "判据:原文"
 # ---------- 交付包解析 ----------
 def _unzip(zp: Path, dst: Path) -> None:
     try:
-        zf = zipfile.ZipFile(zp, metadata_encoding="gbk")        # Windows 打的包常见 GBK 文件名
-    except TypeError:                                            # 老 Python 无该参数
-        zf = zipfile.ZipFile(zp)
+        try:
+            zf = zipfile.ZipFile(zp, metadata_encoding="gbk")    # Windows 打的包常见 GBK 文件名
+        except TypeError:                                        # 老 Python 无该参数
+            zf = zipfile.ZipFile(zp)
+    except zipfile.BadZipFile:
+        head = zp.read_bytes()[:120]
+        raise SystemExit(f"不是合法 zip:{zp}(开头字节:{head!r})——"
+                         "开头是 { 或 < 说明是下载服务回的 JSON/HTML 报错体被当文件存了盘,"
+                         "删掉该文件重新下载;真损坏则找来源方重传")
     with zf:
         zf.extractall(dst)
 
