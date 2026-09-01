@@ -343,6 +343,19 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         else:
             print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
         return out_zip
+    # 同一个 Product_Obs 摊给多个不同 zip 名 = 同一对象被当成多个节点的包,必是上传/导表
+    # 错位(联调实测:5 个对象摊给 16 行)——下载迁移只会张冠李戴,下载前就停。
+    # 同名 zip 被多行复用(如 dscp/8021p 共用一个包)是合法惯例,不在此列
+    by_obs: dict[str, set[str]] = {}
+    for _names, _name, _obs in rows:
+        _fn = _name if _name.lower().endswith(".zip") else _name + ".zip"
+        by_obs.setdefault(_obs, set()).add(_fn)
+    tangle = {o: sorted(fs) for o, fs in by_obs.items() if len(fs) > 1}
+    if tangle:
+        lines = "\n".join(f"  {o} → {'、'.join(fs)}" for o, fs in sorted(tangle.items()))
+        raise SystemExit("[停] 表里同一个 Product_Obs 指向多个不同的 zip 名——同一个对象"
+                         "不可能同时是多个节点的包,是上传/导表错位:\n" + lines +
+                         "\n请平台侧给每个节点上传自己的包、重新导出表后再跑")
     for names, name, obs in rows:
         fname = name if name.lower().endswith(".zip") else name + ".zip"
         have = bundle / fname
