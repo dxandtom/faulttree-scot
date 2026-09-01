@@ -18,8 +18,10 @@ fake 模式(联调第一步"纯本地跑通"用):给 --fake-store 目录,下载�
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
+import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -62,7 +64,12 @@ def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
     locator=prevObjectkey——同一接口,docId 即 obs 地址。文件落 dst。"""
     mod = _load_platform_module()
     cfg = os.environ.get("PLATFORM1_DL_CONFIG", "") or None
-    dl = mod.OBSDownloader(cfg)
+    try:
+        dl = mod.OBSDownloader(cfg)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"obs_headers_config.json 不是合法 JSON({e})——最常见原因:更新 token "
+                         "时粘贴带进了真实换行/制表符(JSON 字符串里不允许断行)。打开配置文件"
+                         "定位到报错行,把引号里的值并回完整一行再保存重跑。")
     env = os.environ.get("PLATFORM1_ENV", "") or dl.config.get("default", {}).get("env", "dev")
     dst.parent.mkdir(parents=True, exist_ok=True)
     res = dl.download_artifacts([{"docId": locator, "file_name": dst.name}],
@@ -70,6 +77,16 @@ def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
     if res.get("success") != 1 or not dst.exists():
         raise SystemExit(f"平台下载失败({kind}:{locator}):{res};原因见上方脚本输出"
                          f"(JSON 响应=服务端拒绝,常见是 token 过期或该 obs 路径无权限)")
+    if not zipfile.is_zipfile(dst):
+        # 服务端拒绝时也回 HTTP 200,报错体(JSON/HTML)会被当文件存盘——当场验明,
+        # 别等到迁移解包才炸;坏件改名 .bad 留证,不占正名(重跑会重新下载)
+        head = dst.read_bytes()[:200]
+        bad = dst.with_name(dst.name + ".bad")
+        dst.replace(bad)
+        raise SystemExit(f"下载到的不是 zip({kind}:{locator}):响应体开头 {head!r}——"
+                         f"HTTP 200 但内容是报错体,说明服务端拒了这条 docId"
+                         f"(路径不存在/无权限/token 过期都可能);坏件留在 {bad},"
+                         "把这段输出甩给平台侧查该 docId")
     return dst
 
 
