@@ -172,7 +172,18 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
         headers.update(json.loads(extra))   # 例 {"invokeToken": "..."} 或 {"Cookie": "..."}
     req = urllib.request.Request(url, data=body.getvalue(), method="POST", headers=headers)
     with urllib.request.urlopen(req, timeout=60) as resp:
-        print(f"[回调] {url} → HTTP {resp.status}")
+        text = resp.read().decode("utf-8", "replace")
+        print(f"[回调] {url} → HTTP {resp.status} {text[:300]}")
+        # 平台口径:成败在响应 JSON 里(responseCode "0"=成功,"1"=失败),HTTP 200 也可能是
+        # 业务失败——认这个字段;响应不是这格式(本地假平台/旧对端)才退回只看 HTTP 状态
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            data = None
+        if isinstance(data, dict) and "responseCode" in data and str(data["responseCode"]) != "0":
+            raise SystemExit(f"[回调失败] 平台返回 responseCode={data['responseCode']}"
+                             f" message={data.get('message', '')}——产物已在本地 out/ 目录,"
+                             "排查后重跑同一条命令即可重发(续跑不重迁,直接打包回调)")
         return resp.status
 
 
