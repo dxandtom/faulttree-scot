@@ -89,6 +89,9 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 
 - [x] 请求字段:versionId(UUID)/ excelFile(文件流)/ prevObjectkey(首次为 null)
 - [x] 回调字段:versionId + skillFile(zip 文件流);OBS 上传与版本记录更新由平台做
+- [x] 回调响应格式(平台文档已给):JSON {responseCode:"0"成功/"1"失败, message, data}
+      ——driver 已按 responseCode 判成败(HTTP 200 但 responseCode="1" 算失败,打 message
+      并停;产物留在 out/,排查后重跑同一条命令即重发);响应无此字段则退回只看 HTTP 状态
 - [x] 节点选择语义:NONE=空壳表 / MULTI=选中行 / ALL=全部后代行
 - [x] 下载脚本源码(download_fault_tree_artifact.py);skill 下载改造 = 同接口按
       prevObjectkey 单条调用(downloader._platform_fetch)
