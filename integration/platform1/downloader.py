@@ -18,6 +18,7 @@ fake 模式(联调第一步"纯本地跑通"用):给 --fake-store 目录,下载�
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 from pathlib import Path
@@ -62,7 +63,12 @@ def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
     locator=prevObjectkey——同一接口,docId 即 obs 地址。文件落 dst。"""
     mod = _load_platform_module()
     cfg = os.environ.get("PLATFORM1_DL_CONFIG", "") or None
-    dl = mod.OBSDownloader(cfg)
+    try:
+        dl = mod.OBSDownloader(cfg)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"obs_headers_config.json 不是合法 JSON({e})——最常见原因:更新 token "
+                         "时粘贴带进了真实换行/制表符(JSON 字符串里不允许断行)。打开配置文件"
+                         "定位到报错行,把引号里的值并回完整一行再保存重跑。")
     env = os.environ.get("PLATFORM1_ENV", "") or dl.config.get("default", {}).get("env", "dev")
     dst.parent.mkdir(parents=True, exist_ok=True)
     res = dl.download_artifacts([{"docId": locator, "file_name": dst.name}],
