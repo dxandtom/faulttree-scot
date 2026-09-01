@@ -109,9 +109,9 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 
 ## 剩余待确认
 
-- [ ] 下载服务对 skill 所在 bucket(如 netcare-skill)是否放行——代码已就绪(skill 与 zip
-      同接口同格式,都带 file_name),若被拒属平台侧配置;联调第 2 步第一件事拿真
-      prevObjectkey 试一次单条下载
+- [x] 下载服务对 skill 的放行——**实验 B 已实测通过**(2026-09-01,objectKey=
+      skill-wheel/fault-tree/node/…zip,响应 200 文件流,产物逐字节一致);skill 与节点
+      zip 同桶同接口,无需额外配置
 - [x] optimizeType 语义(平台口径已问清):NONE=只刷引擎代码 / MULTI=部分表不动结构 /
       ALL=全量表判据与结构以表为准——驱动与 migrate(--map-mode)已按此实现;
       增强表判据列 judgement_condition_cn/en 已适配(取 cn)
