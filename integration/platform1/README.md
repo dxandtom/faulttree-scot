@@ -68,6 +68,17 @@ request.json 里 excel 指它、prevObjectkey 填一个真实的 skill objectkey
 **去掉 --fake-store** 跑同一条命令——驱动只做"下载 skill→原样打包"一件事。
 下载被拒(响应是 JSON 而非文件流)= 服务端权限没放行,把输出甩给平台侧。
 
+**实验 B' · 回调真发(不等 skill 下载,与 B 无依赖,可先做)**:验证真平台肯收我们的回传。
+回调只要三样:网络可达 + 真实 versionId + zip 文件。
+① 找平台要一个**真实 versionId**(让管理员点一次优化即预生成——我们接口没挂也没关系,
+版本记录已落库,让他们查出来给你;或平台同事手工造一条);
+② 可选的连通性探测:照平台文档的 curl 样例、随便一个 zip、乱填 versionId 打一发,
+预期 HTTP 200 + responseCode="1" + message(说明网络通、字段认识,负向也算通过);
+③ 真回传:拿实验 A 的材料,request 里 versionId 换成真的、callback_url 配真地址、
+excel 用空壳表(走"原样回传"最短路),--fake-store 照旧跑 driver——打印
+「[回调] … responseCode:"0"」即成;④ 平台侧核对:版本记录置 COMPLETED、OBS 出文件,
+下载回来与本地产物一致。responseCode="1" 时 driver 会报失败并留产物,排查后重跑即重发。
+
 **实验 C · 全链真下载**:实验 A 的 request 换真表,去掉 --fake-store 重跑。
 产物 zip 人工抽查(判据进树、绑定换血、migrations.json 台账)。
 
