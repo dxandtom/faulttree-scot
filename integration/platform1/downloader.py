@@ -90,6 +90,16 @@ def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
     return dst
 
 
+def default_env() -> str:
+    """下载配置(obs_headers_config.json)里的 default.env(如 dev/beta);没有配置就 dev。
+    只读 JSON,不加载平台脚本(不需要 psf)。"""
+    cfg = Path(os.environ.get("PLATFORM1_DL_CONFIG", "") or (HERE / "obs_headers_config.json"))
+    try:
+        return str(json.loads(cfg.read_text(encoding="utf-8")).get("default", {}).get("env") or "dev")
+    except Exception:
+        return "dev"
+
+
 def auth_headers():
     """复用平台下载脚本那套鉴权(obs_headers_config.json 的 authType/invokeToken,token 走它的
     加密封装),给回调用——回调接口挂在同一个网关(webot)时鉴权口径一致。

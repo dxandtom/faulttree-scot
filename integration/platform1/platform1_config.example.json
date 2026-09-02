@@ -1,0 +1,10 @@
+{
+  "_说明": "我方工装配置(按环境分节),复制为 platform1_config.json 后填真值;真文件不进仓库。环境名与 obs_headers_config.json 里的一致;不设 default.env 就跟下载配置的 default.env 走",
+  "default": {"env": "dev"},
+  "dev": {
+    "callback_url": "https://<下载服务同一网关主机>/agent/workspace/faultTreeNode/optimizeCallback"
+  },
+  "beta": {
+    "callback_url": ""
+  }
+}

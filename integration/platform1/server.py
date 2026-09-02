@@ -9,7 +9,8 @@
 
 启动(Windows 本机):
   pip install fastapi uvicorn python-multipart
-  set PLATFORM1_CALLBACK_URL=http://<平台1地址>/workspace/faultTreeNode/optimizeCallback
+  回调地址:platform1_config.json 里按环境配 callback_url(样例 .example.json),
+  或 set PLATFORM1_CALLBACK_URL=<完整回调 URL>(环境变量优先)
   python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/platform1
 """
 from __future__ import annotations

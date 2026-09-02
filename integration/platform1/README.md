@@ -103,8 +103,16 @@ excel 用空壳表(走"原样回传"最短路),--fake-store 照旧跑 driver—�
 **实验 C · 全链真下载**:实验 A 的 request 换真表,去掉 --fake-store 重跑。
 产物 zip 人工抽查(判据进树、绑定换血、migrations.json 台账)。
 
-**实验 D · 接真请求(收官)**:`pip install fastapi uvicorn python-multipart`,配
-`PLATFORM1_CALLBACK_URL=http://<平台1>/workspace/faultTreeNode/optimizeCallback`,起:
+**回调地址怎么配**:它是部署配置,不是每单请求的字段(平台真请求里没有)。把
+`platform1_config.example.json` 复制成 `platform1_config.json`(不进仓库),按环境填
+`callback_url`(环境名与 obs_headers_config.json 一致,不设 default.env 就跟下载配置走);
+取值顺序:request.json 的 callback_url(本地实验显式给)→ 环境变量 PLATFORM1_CALLBACK_URL
+→ 配置文件。回调与下载服务同网关时鉴权自动复用下载脚本的 invokeToken(见已定清单)。
+注意端口:网关走默认 443(与下载端点一样不写端口);`:8081` 是平台应用服务器直连口,
+从外面打网关带 8081 会连接超时。
+
+**实验 D · 接真请求(收官)**:`pip install fastapi uvicorn python-multipart`,回调地址按上面
+配好(配置文件或 PLATFORM1_CALLBACK_URL),起:
 ```
 python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/platform1
 ```
