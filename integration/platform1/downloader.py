@@ -90,6 +90,26 @@ def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
     return dst
 
 
+def dl_config():
+    """只读下载配置 obs_headers_config.json(PLATFORM1_DL_CONFIG 可指别处),不加载平台脚本
+    (不需要 psf)。返回 (配置 dict 或 {}, 当前环境名):环境取 PLATFORM1_ENV,没有就取
+    default.env,再没有就 dev。文件不在=({}, env);不是合法 JSON → SystemExit 人话。"""
+    cfg_p = Path(os.environ.get("PLATFORM1_DL_CONFIG", "") or (HERE / "obs_headers_config.json"))
+    cfg = {}
+    if cfg_p.exists():
+        try:
+            cfg = json.loads(cfg_p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise SystemExit(f"{cfg_p} 不是合法 JSON({e})——常见是 token 粘贴带了换行,或多余逗号")
+    env = (os.environ.get("PLATFORM1_ENV", "").strip()
+           or str((cfg.get("default") or {}).get("env") or "").strip() or "dev")
+    return cfg, env
+
+
+def default_env() -> str:
+    return dl_config()[1]
+
+
 def auth_headers():
     """复用平台下载脚本那套鉴权(obs_headers_config.json 的 authType/invokeToken,token 走它的
     加密封装),给回调用——回调接口挂在同一个网关(webot)时鉴权口径一致。

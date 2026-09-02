@@ -6,3 +6,6 @@ __pycache__/
 examples/*/result/
 # 发行打包产物(package_skill.py 生成,随用随打)
 dist/
+# 平台1 联调本机配置(含凭据/地址)与运行日志,不进仓库
+integration/platform1/obs_headers_config.json
+integration/platform1/_runs/

@@ -233,6 +233,30 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
         return resp.status
 
 
+def _resolve_callback_url(req: dict) -> str:
+    """回调地址是**部署配置**,不是每单请求的字段(平台真请求里没有它)。取值顺序:
+    request.json 的 callback_url(本地实验显式给)→ 环境变量 PLATFORM1_CALLBACK_URL
+    → 下载配置 obs_headers_config.json 当前环境那一节的 callback_url(与下载端点、鉴权
+    同一个文件、同一个 default.env 切环境——回调和下载走同一个网关)。都没有=只出产物不回调。"""
+    u = str(req.get("callback_url") or "").strip()
+    if u:
+        print(f"[回调地址] request 指定:{u}")
+        return u
+    u = os.environ.get("PLATFORM1_CALLBACK_URL", "").strip()
+    if u:
+        print(f"[回调地址] 环境变量 PLATFORM1_CALLBACK_URL:{u}")
+        return u
+    cfg, env = downloader.dl_config()
+    if not cfg:
+        return ""
+    u = str(((cfg.get(env) or {}).get("callback_url")) or "").strip()
+    if u:
+        print(f"[回调地址] obs_headers_config.json [{env}].callback_url:{u}")
+    else:
+        print(f"[回调地址] obs_headers_config.json 环境「{env}」那一节没配 callback_url → 只出产物不回调")
+    return u
+
+
 # ---------- 迁移执行(捕获输出供决策,同时转发到终端) ----------
 
 def _run_migrate(cmd):
@@ -325,7 +349,7 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     excel = Path(req["excel"]).resolve()
     obskey = str(req.get("prevObjectkey") or "").strip()
     version_id = str(req.get("versionId") or "").strip()
-    cb_url = str(req.get("callback_url") or "").strip()
+    cb_url = _resolve_callback_url(req)
     # optimizeType(平台口径):NONE=问题不在节点,把 skill 引擎代码刷到当前代;
     # MULTI=部分表,只动列出的节点、不动树结构;ALL=全量表,判据与树结构都以表为准。
     # 缺省(本地实验/老请求)= 老行为:空表原样回传,有行走迁移且不带 --map-mode。
