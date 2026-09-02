@@ -103,12 +103,20 @@ excel 用空壳表(走"原样回传"最短路),--fake-store 照旧跑 driver—�
 **实验 C · 全链真下载**:实验 A 的 request 换真表,去掉 --fake-store 重跑。
 产物 zip 人工抽查(判据进树、绑定换血、migrations.json 台账)。
 
-**回调地址怎么配**:它是部署配置,不是每单请求的字段(平台真请求里没有)。把
-`platform1_config.example.json` 复制成 `platform1_config.json`(不进仓库),按环境填
-`callback_url`(环境名与 obs_headers_config.json 一致,不设 default.env 就跟下载配置走);
+**回调地址怎么配**:它是部署配置,不是每单请求的字段(平台真请求里没有)。回调和下载走
+同一个网关、同一套鉴权、同一个环境切换,所以就配在下载配置 `obs_headers_config.json`
+当前环境那一节里,加一个键(平台脚本不认识这个键,不看也不报错):
+```json
+"beta": {
+  "endpoint": "https://<网关主机>/agent/downloadFaultTreeArtifact.do",
+  "authType": "invokeToken", "invokeToken": "…", "tokenEncrypted": true,
+  "callback_url": "https://<网关主机>/agent/workspace/faultTreeNode/optimizeCallback"
+}
+```
 取值顺序:request.json 的 callback_url(本地实验显式给)→ 环境变量 PLATFORM1_CALLBACK_URL
-→ 配置文件。回调与下载服务同网关时鉴权自动复用下载脚本的 invokeToken(见已定清单)。
-注意端口:网关走默认 443(与下载端点一样不写端口);`:8081` 是平台应用服务器直连口,
+→ 该文件 [default.env 或 PLATFORM1_ENV 指定的环境].callback_url;都没有=只出产物不回调,
+驱动会打印取的是哪一处。回调与下载服务同主机时鉴权自动复用下载脚本的 invokeToken(见已定
+清单)。注意端口:网关走默认 443(与下载端点一样不写端口);`:8081` 是平台应用服务器直连口,
 从外面打网关带 8081 会连接超时。
 
 **实验 D · 接真请求(收官)**:`pip install fastapi uvicorn python-multipart`,回调地址按上面

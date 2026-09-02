@@ -9,7 +9,7 @@
 
 启动(Windows 本机):
   pip install fastapi uvicorn python-multipart
-  回调地址:platform1_config.json 里按环境配 callback_url(样例 .example.json),
+  回调地址:obs_headers_config.json 当前环境那一节加 "callback_url"(与下载端点同文件同环境),
   或 set PLATFORM1_CALLBACK_URL=<完整回调 URL>(环境变量优先)
   python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/platform1
 """
