@@ -59,7 +59,7 @@ def _ev_block(e: dict, indent="  ") -> list:
     return lines
 
 
-def render(doc: dict) -> str:
+def render(doc: dict, tree_text: str | None = None) -> str:
     conf = doc.get("rca_result") or []
     prob = doc.get("probable_causes") or []
     und = doc.get("undetermined") or []
@@ -69,6 +69,8 @@ def render(doc: dict) -> str:
     L = ["# 诊断报告", "",
          f"**确证根因 {len(conf)} 条 · 疑似 {len(prob)} 条 · 待确认 {len(und)} 条**"
          + (f" · 引擎:{eng}" if eng else "") + "。", ""]
+    if tree_text:                                        # 树视图(render_tree.py):只展开有事的路径
+        L += ["## 树视图", "", "```text", tree_text, "```", ""]
 
     if conf:
         L += ["## 确证根因", "", "| # | 根因 | 关键证据(摘要,全文见下) | 推荐解决方案 |",
@@ -161,14 +163,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="rca.json → 诊断报告 md(机械渲染)")
     ap.add_argument("rca")
     ap.add_argument("-o", "--out", help="输出 md 路径(缺省:rca.json 同目录 rca_report.md)")
+    ap.add_argument("--tree", help="tree/<场景>.tree_index.json:带上则报告首节加树视图,并写 rca_tree.txt")
     a = ap.parse_args()
     src = Path(a.rca)
     doc = json.loads(src.read_text(encoding="utf-8"))
-    md = render(doc)
     out = Path(a.out) if a.out else src.parent / "rca_report.md"
+    tree_text = None
+    if a.tree:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from render_tree import _load_tree, render_tree
+        nodes, root = _load_tree(Path(a.tree))
+        tree_text = render_tree(doc, nodes, root)
+        (out.parent / "rca_tree.txt").write_text(tree_text + "\n", encoding="utf-8")
+    md = render(doc, tree_text)
     out.write_text(md, encoding="utf-8")
     print(md)
-    print(f"\n[已写] {out}")
+    print(f"\n[已写] {out}" + (f" 与 {out.parent / 'rca_tree.txt'}" if tree_text else ""))
     return 0
 
 

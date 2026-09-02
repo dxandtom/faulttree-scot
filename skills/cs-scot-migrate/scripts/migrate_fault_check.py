@@ -735,7 +735,8 @@ def refresh_engine(product: Path) -> None:
             cur_draft = rca_dst / "scripts" / "draft_rca.py"
             cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
             if any(c not in cur for c in _rca_caps) \
-                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档+机械报告+四态分型
+                    or not (rca_dst / "scripts" / "render_report.py").exists() \
+                    or not (rca_dst / "scripts" / "render_tree.py").exists():     # 能力标记:自动定档+机械报告+树视图+四态分型
                                                                                   # +S 证据标签这一代(含前代 gap_kind/blocked_at_hint)
                 if rca_ok:
                     bak = rca_dst.with_name("fault-tree-rca.bak")

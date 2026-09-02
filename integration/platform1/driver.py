@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 import uuid
 import zipfile
@@ -171,7 +172,29 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
     if extra:                       # 鉴权口子:回调若要 token,环境变量塞 JSON 请求头
         headers.update(json.loads(extra))   # 例 {"invokeToken": "..."} 或 {"Cookie": "..."}
     req = urllib.request.Request(url, data=body.getvalue(), method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    ctx = None
+    if os.environ.get("PLATFORM1_CB_INSECURE", "").strip().lower() in ("1", "true", "yes"):
+        import ssl                       # 内网自签证书联调用:不校验对端证书(线上别开)
+        ctx = ssl._create_unverified_context()
+        print("[回调] PLATFORM1_CB_INSECURE=1:不校验对端 HTTPS 证书")
+    try:
+        resp_cm = urllib.request.urlopen(req, timeout=60, context=ctx)
+    except urllib.error.HTTPError as e:
+        snippet = e.read().decode("utf-8", "replace")[:200]
+        hint = {404: "——路径或主机不对(找平台要完整回调 URL:协议+主机+端口+路径)",
+                401: "——要鉴权:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头",
+                403: "——要鉴权:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头"}.get(e.code, "")
+        raise SystemExit(f"[回调失败] HTTP {e.code} {url} {snippet}{hint};产物已在本地 out/,修好重跑即重发")
+    except urllib.error.URLError as e:
+        reason = str(getattr(e, "reason", e))
+        if "CERTIFICATE_VERIFY_FAILED" in reason:
+            hint = "——对端 HTTPS 证书本机不信任(内网自签):联调可设 PLATFORM1_CB_INSECURE=1 跳过校验"
+        elif "getaddrinfo" in reason or "Name or service not known" in reason or "resolve" in reason.lower():
+            hint = "——主机名解析不了:本机 nslookup 该域名,不通就找平台要 IP 加 hosts,或确认要不要挂 VPN/代理"
+        else:
+            hint = "——网络不通:确认主机/端口/防火墙"
+        raise SystemExit(f"[回调失败] 连不上 {url}:{reason}{hint};产物已在本地 out/,修好重跑即重发")
+    with resp_cm as resp:
         text = resp.read().decode("utf-8", "replace")
         print(f"[回调] {url} → HTTP {resp.status} {text[:300]}")
         # 平台口径:成败在响应 JSON 里(responseCode "0"=成功,"1"=失败),HTTP 200 也可能是
