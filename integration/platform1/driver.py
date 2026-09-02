@@ -344,12 +344,73 @@ def _model_session(claude_cmd, mlog: Path, timeout: int) -> None:
 
 # ---------- 主流程 ----------
 
+def _attach_report(src_zip: Path, out_zip: Path, report: dict) -> Path:
+    """原样复制上一版 skill zip,只多塞一个 tree/migration_report.json(放在 tree_index 所在目录旁)。
+    失败回传用:不带任何半成品改动,平台拿到的就是"上一版 + 一份失败报告"。"""
+    out_zip.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(src_zip) as zin:
+        names = zin.namelist()
+        ti = next((n for n in names if n.endswith(".tree_index.json")), None)
+        rep_name = (ti.rsplit("/", 1)[0] + "/migration_report.json") if ti and "/" in ti \
+            else "tree/migration_report.json"
+        with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zout:
+            for n in names:
+                if n != rep_name:
+                    zout.writestr(zin.getinfo(n), zin.read(n))
+            zout.writestr(rep_name, json.dumps(report, ensure_ascii=False, indent=1))
+    return out_zip
+
+
+def _on_fail(e: SystemExit, ctx: dict) -> None:
+    """本单失败也回调(用户拍板:版本挂在"优化中"比回传一个没变的包更糟):按平台格式回传
+    **未变化的上一版 skill** + 包内 tree/migration_report.json(status=failed, reason),让版本
+    记录闭环;平台"失败/部分成功"字段定了再改为按字段告知。PLATFORM1_CB_ON_FAIL=0 关。
+    拿不到上一版(首次优化 / skill 也下不来)或回调本身失败的,只能停,不硬凑。"""
+    cb_url, vid = ctx.get("cb_url"), ctx.get("version_id") or ""
+    if not cb_url or ctx.get("cb_done") or os.environ.get("PLATFORM1_CB_ON_FAIL", "1").strip() == "0":
+        return
+    reason = str(ctx.get("reason") or (e.code if not isinstance(e.code, int) else f"退出码 {e.code}"))
+    if reason.startswith("[回调"):
+        return                                           # 回调本身失败:不再套一层回调
+    if not ctx.get("obskey") or not ctx.get("work"):
+        print("[失败回传] 没有上一版 skill 可回传(首次优化)——版本记录需平台侧处理")
+        return
+    skill_zip = ctx.get("skill_zip")
+    if skill_zip is None:
+        try:
+            skill_zip = downloader.download_skill(ctx["obskey"], ctx["work"], fake_store=ctx.get("fake_store"))
+        except SystemExit as e2:
+            print(f"[失败回传] 上一版 skill 也拿不到({e2.code}),无法回传")
+            return
+    report = {"versionId": vid, "status": "failed", "total": 0, "landed": 0, "ok": [], "skipped": [],
+              "failed": [], "reason": reason[:3000],
+              "note": "本单优化失败,回传的是未变化的上一版 skill;原因见 reason"}
+    out_zip = _attach_report(skill_zip, ctx["out_dir"] / f"skill_{vid[:8]}.zip", report)
+    print(f"[失败回传] 本单失败:{reason[:200]}\n  按平台格式回传未变化的上一版 skill + 包内"
+          f" tree/migration_report.json(status=failed),让版本记录闭环;PLATFORM1_CB_ON_FAIL=0 可关")
+    try:
+        post_callback(cb_url, vid, out_zip)
+    except SystemExit as e3:
+        print(f"[失败回传] 回调也失败:{e3.code}")
+
+
 def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         keep: bool = False, with_model: bool = False) -> Path | None:
+    ctx: dict = {"fake_store": fake_store}
+    try:
+        return _run(req, workdir, fake_store, keep, with_model, ctx)
+    except SystemExit as e:
+        _on_fail(e, ctx)
+        raise
+
+
+def _run(req: dict, workdir: Path | None, fake_store: Path | None,
+         keep: bool, with_model: bool, ctx: dict) -> Path | None:
     excel = Path(req["excel"]).resolve()
     obskey = str(req.get("prevObjectkey") or "").strip()
     version_id = str(req.get("versionId") or "").strip()
     cb_url = _resolve_callback_url(req)
+    ctx.update(cb_url=cb_url, version_id=version_id)
     # optimizeType(平台口径):NONE=问题不在节点,把 skill 引擎代码刷到当前代;
     # MULTI=部分表,只动列出的节点、不动树结构;ALL=全量表,判据与树结构都以表为准。
     # 缺省(本地实验/老请求)= 老行为:空表原样回传,有行走迁移且不带 --map-mode。
@@ -362,6 +423,7 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         raise SystemExit("request 里缺 versionId(平台预生成的版本 UUID,回调时原样带回)")
     if obskey.lower() in ("null", "none"):                # 平台首次优化传 null
         obskey = ""
+    ctx["obskey"] = obskey
 
     rows = parse_platform_excel(excel)
     print(f"[表] {excel.name}:{len(rows)} 个待迁移节点"
@@ -377,22 +439,26 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     work.mkdir(parents=True, exist_ok=True)
     bundle, skill_dir, out_dir = work / "bundle", work / "skill", work / "out"
     bundle.mkdir(exist_ok=True)
+    ctx.update(work=work, skill_dir=skill_dir, out_dir=out_dir)
 
     if otype == "none":
         # NONE 单(平台口径):问题不在节点——把 skill 的引擎代码刷到当前代后回传。
         # 引擎的"当前代"取自本机仓库副本:线上跑之前保证联调机器仓库已拉新。
         print("[NONE] 问题不在节点:下载现行 skill → 引擎翻新(--refresh-only)→ 回传。")
         skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+        ctx["skill_zip"] = skill_zip
         product = unpack_skill(skill_zip, skill_dir)
         print(f"[skill] 已解包,产物目录:{product}")
         rc, _out = _run_migrate([sys.executable, str(MIGRATE),
                                  "--refresh-only", "--product", str(product)])
         if rc != 0:
-            print(f"[停] 引擎翻新退出码 {rc}——不回调,工作目录留在 {work} 供排查。")
+            ctx["reason"] = f"[停] 引擎翻新(--refresh-only)退出码 {rc}"
+            print(ctx["reason"] + f"——工作目录留在 {work} 供排查。")
             sys.exit(rc)
         out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
         print(f"[产物] {out_zip}(引擎已刷到当前代,树与绑定未动)")
         if cb_url:
+            ctx["cb_done"] = True
             post_callback(cb_url, version_id, out_zip)
         else:
             print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
@@ -404,11 +470,13 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         # 逐字节一致也正是「skill 真下载」实验的判定标尺
         print("空壳表(未带 optimizeType):无迁移可做,现行 skill 原样返回。")
         skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+        ctx["skill_zip"] = skill_zip
         out_dir.mkdir(exist_ok=True)
         out_zip = out_dir / f"skill_{version_id[:8]}.zip"
         shutil.copy2(skill_zip, out_zip)
         print(f"[产物] {out_zip}(与现行 skill 逐字节相同)")
         if cb_url:
+            ctx["cb_done"] = True
             post_callback(cb_url, version_id, out_zip)
         else:
             print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
@@ -445,6 +513,7 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         print(f"[skill] 续跑:沿用工作目录里已迁移的产物(不重新解包),产物目录:{product}")
     else:
         skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+        ctx["skill_zip"] = skill_zip
         product = unpack_skill(skill_zip, skill_dir)
         print(f"[skill] 上一版已解包,产物目录:{product}")
 
@@ -513,8 +582,10 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         result = _parse_migrate_result(last_out)
         effective = (result["landed"] + len(result["skipped"])) if result else 0
         if not result or effective == 0:
-            print(f"[停] 迁移退出码 {rc},且包里没有任何已生效的迁移内容——"
-                  f"不回调、不打包(回传无变化的包只会误导版本记录);"
+            tail = "\n".join(l for l in last_out.splitlines() if l.strip())[-1500:]
+            ctx["reason"] = (f"[停] 迁移退出码 {rc},包里没有任何已生效的迁移内容(一行都没落地)。"
+                             f"迁移输出末尾:\n{tail}")
+            print(f"[停] 迁移退出码 {rc},且包里没有任何已生效的迁移内容——不打包新版;"
                   f"工作目录留在 {work} 供排查。")
             sys.exit(rc)
         # 部分交付:已落地的节点先生效,成功/失败清单连原因写进包内,平台可解包查看
@@ -530,6 +601,7 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
     out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
     print(f"[产物] {out_zip}")
     if cb_url:
+        ctx["cb_done"] = True
         post_callback(cb_url, version_id, out_zip)
     else:
         print(f"[回调] 未配置 callback_url,只出产物:version_id={version_id},文件见上行")

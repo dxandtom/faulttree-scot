@@ -65,8 +65,12 @@ python integration/platform1/make_full_table.py --product <runC2>/skill/qos-secu
 
 迁移有失败行时按**部分交付**处理(用户拍板):包里有已生效内容(本次落地或此前已迁移)
 就照样打包回调——已落地节点先生效,成功/跳过/失败清单连原因写进包内
-`tree/migration_report.json`;一个生效内容都没有才停下不回调(回传无变化的包只会误导
-版本记录),工作目录保留供排查。
+`tree/migration_report.json`。**整单失败也回调**(用户拍板:版本挂在"优化中"比回传一个没变的包
+更糟):表错位、包下载失败、一行都没落地等,回传**未变化的上一版 skill** + 包内
+`tree/migration_report.json`(status=failed、reason 带原因/迁移输出末尾),让版本记录闭环;
+`PLATFORM1_CB_ON_FAIL=0` 关。拿不到上一版(首次优化、skill 本身下不来)或回调本身失败的才停,
+工作目录保留供排查。平台"失败/部分成功"字段定了再改为按字段告知。
+端到端测试在 `tests/test_platform1_e2e.py`(fake 货架、标准库 + openpyxl,直接 python 跑)。
 
 ## 联调实验(按序,前一个绿了再下一个)
 
