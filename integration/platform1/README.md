@@ -124,7 +124,11 @@ excel 用空壳表(走"原样回传"最短路),--fake-store 照旧跑 driver—�
 ```
 python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/platform1
 ```
-把 `http://<本机IP>:8080/optimize` 给平台配上,让管理员点一次优化。
+先本地自测服务层(不碰网络):起服务前多设 `PLATFORM1_FAKE_STORE=<货架目录>`(可再加
+`PLATFORM1_WITH_MODEL=0` 省模型档),用 curl.exe 照平台口径 POST 一发到
+`http://127.0.0.1:8080/optimize`(multipart:versionId + excelFile + prevObjectkey),立刻回
+`{"result":"success"}`,后台跑完看 `_runs/v<versionId前8>/run.log` 末尾的 [产物]/[回调] 行。
+自测过了去掉这两个变量重启服务,把 `http://<本机IP>:8080/optimize` 给平台配上,让管理员点一次优化。
 服务模式默认带模型档(PLATFORM1_WITH_MODEL=0 可关)。线上口径是**一单一轮**:
 每次点优化只做一轮模型处置就交付(部分交付兜底,已修的管道副本随包带走),
 没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮

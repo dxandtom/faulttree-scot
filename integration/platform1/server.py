@@ -12,6 +12,8 @@
   回调地址:obs_headers_config.json 当前环境那一节加 "callback_url"(与下载端点同文件同环境),
   或 set PLATFORM1_CALLBACK_URL=<完整回调 URL>(环境变量优先)
   python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/platform1
+可选环境变量:PLATFORM1_WITH_MODEL=0 关模型档;PLATFORM1_FAKE_STORE=<货架目录> 本地自测不碰网络;
+  PLATFORM1_WORK=<目录> 每单工作目录根(缺省 _runs/)。每单日志:_runs/v<versionId前8>/run.log
 """
 from __future__ import annotations
 
@@ -43,6 +45,8 @@ def _run_driver(req_file: Path, workdir: Path):
             "--workdir", str(workdir / "work"), "--keep"]
     if os.environ.get("PLATFORM1_WITH_MODEL", "1") != "0":
         args.append("--with-model")
+    if os.environ.get("PLATFORM1_FAKE_STORE", ""):        # 服务模式本地自测:不碰网络,从货架目录取
+        args += ["--fake-store", os.environ["PLATFORM1_FAKE_STORE"]]
     log = workdir / "run.log"
     with log.open("w", encoding="utf-8") as fh:
         subprocess.run(args, stdout=fh, stderr=subprocess.STDOUT, cwd=str(HERE.parents[1]))
