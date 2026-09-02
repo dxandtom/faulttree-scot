@@ -90,6 +90,23 @@ def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
     return dst
 
 
+def auth_headers():
+    """复用平台下载脚本那套鉴权(obs_headers_config.json 的 authType/invokeToken,token 走它的
+    加密封装),给回调用——回调接口挂在同一个网关(webot)时鉴权口径一致。
+    返回 (请求头 dict, 下载端点主机名);配置/依赖不在时抛 SystemExit(调用方决定要不要吞)。"""
+    from urllib.parse import urlparse
+    mod = _load_platform_module()
+    cfg = os.environ.get("PLATFORM1_DL_CONFIG", "") or None
+    try:
+        dl = mod.OBSDownloader(cfg)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"obs_headers_config.json 不是合法 JSON({e})")
+    env = os.environ.get("PLATFORM1_ENV", "") or dl.config.get("default", {}).get("env", "dev")
+    env_cfg = dl.config.get(env, dl.config.get("dev")) or {}
+    host = urlparse(str(env_cfg.get("endpoint") or "")).hostname or ""
+    return dl._get_headers(env), host
+
+
 def download_zip(obs_path: str, name: str, dst_dir: Path, fake_store: Path | None = None) -> Path:
     """下载一个交付 zip 包到 dst_dir,落名为 name(不带 .zip 自动补)。"""
     fname = name if name.lower().endswith(".zip") else name + ".zip"

@@ -735,7 +735,8 @@ def refresh_engine(product: Path) -> None:
             cur_draft = rca_dst / "scripts" / "draft_rca.py"
             cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
             if any(c not in cur for c in _rca_caps) \
-                    or not (rca_dst / "scripts" / "render_report.py").exists():   # 能力标记:自动定档+机械报告+四态分型
+                    or not (rca_dst / "scripts" / "render_report.py").exists() \
+                    or not (rca_dst / "scripts" / "render_tree.py").exists():     # 能力标记:自动定档+机械报告+树视图+四态分型
                                                                                   # +S 证据标签这一代(含前代 gap_kind/blocked_at_hint)
                 if rca_ok:
                     bak = rca_dst.with_name("fault-tree-rca.bak")
@@ -1453,6 +1454,19 @@ def build_zip_registry(pkg: Path, tmp: Path):
     return reg
 
 
+def _pick_for_row(sub: Path, row_name: str, md_name: str):
+    """对应表驱动的脚本对号:多脚本合集里**先按表行的节点名**找同名脚本(表为准 + tester
+    命名规范 fault_check_<节点名>.py),找不到再按包内判断方法的名字——同一份合集被表挂到
+    别的节点名下时(联调实测:平台把一个对象摊给多行),不会把合集里别人的脚本绑过来;
+    单脚本包/同名复用(dscp/8021p 共用一个包)行为不变。"""
+    row_name = (row_name or "").strip()
+    if row_name and row_name != (md_name or "").strip():
+        want = f"fault_check_{row_name}.py"
+        if any(p.name == want for p in sub.rglob("fault_check_*.py")):
+            return find_scripts(sub, None, node_name=row_name)
+    return find_scripts(sub, None, node_name=md_name)
+
+
 def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
     """对应表驱动的全自动批量:每行 zip↔路径,路径定位节点(同名靠全路径消歧),zip 对号子包,
     落地机器与 --auto 批量同一套(一轮手术原子落地);任一行对应不上→进失败清单,退出码 3。
@@ -1541,7 +1555,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
             continue
         try:
             method = parse_method_md(sub)
-            fc, deps = find_scripts(sub, None, node_name=method["name"])
+            fc, deps = _pick_for_row(sub, names[-1], method["name"])
         except SystemExit as e:
             fails.append((label, str(e), None))
             continue
@@ -1574,7 +1588,10 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
             continue
         seen_nid[key], seen_fc[fc.name] = label, (label, fc.read_bytes())
         if method["name"].strip() != names[-1]:
-            note = (note + ";" if note else "") + f"包内节点名「{method['name']}」≠表中「{names[-1]}」,以对应表为准"
+            own = fc.name == f"fault_check_{names[-1]}.py"
+            note = (note + ";" if note else "") + (
+                f"包内判断方法是「{method['name']}」≠表中「{names[-1]}」,脚本已按表行同名命中(判据以表为准)"
+                if own else f"包内节点名「{method['name']}」≠表中「{names[-1]}」,以对应表为准")
         verdict, ginfo = _contract_gate(product, sub, fc, deps, supplied,
                                         entry=entry, per_ne=per_ne, kwargs=kwargs)
         if verdict == "fail":

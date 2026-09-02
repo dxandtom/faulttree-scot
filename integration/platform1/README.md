@@ -37,6 +37,27 @@ optimizeType 三档(平台口径,请求带 `optimizeType` 字段;excel 为增强
 不下载不迁,判据不同只提示。解决方案列(solution_cn/en 等,取 cn)同为以表为准,
 空≠删除。标记列/解决方案列的正式列名等平台定稿,现按常见名宽松识别,对不上改一行即可。
 
+**全量表长什么样(与老表相比多 5 列;`make_full_table.py` 可从现行 skill 直接导出)**:
+
+| 列 | 老表 | 全量表 | 语义 |
+|---|---|---|---|
+| L1_Name_CN/EN … Ln_Name_CN/EN | 有 | 有 | 节点路径,定位靠中文名;层级数动态 |
+| Product_Obs / Product_Name | 有 | 有 | 交付 zip 的 obs 地址 / 包名;结构行留空 |
+| judgement_condition_cn / _en | — | **新** | 判据,取 cn。**空 + 无 zip = 清除该节点判据与绑定**,所以已有节点的判据必须带上 |
+| solution_cn / _en | — | **新(可选)** | 解决方案,取 cn;空≠删除 |
+| 是否修改 | — | **新** | 标记列:是/Y/1 才做内容动作(zip 迁移/判据同步/方案同步);未标记行 zip 不下载 |
+
+行语义(请求带 `optimizeType=ALL`):**树上每个节点一行**(含根与中间结构层);表里没出现的
+节点=删除(有根失踪/超深/过半三道保险);树上没有的行=新增(有 zip 就迁移绑定,只有判据就建
+结构节点);标记行的判据/方案与树不同=同步。本地不等平台样例就能跑实验:
+```
+python integration/platform1/make_full_table.py --product <runC2>/skill/qos-security-issues/assets \
+    --out 全量表.csv --zip-store <货架目录> [--platform-excel 老平台表.xlsx] [--mark 节点甲,节点乙]
+```
+不改直接喂驱动(fake-store,request 加 `"optimizeType": "ALL"`)= 零改动基线,预期零动作;在表上
+改判据/换包/加行/删行/清判据各一格,再跑一遍就是一次真实的树更新(脚本末尾打印了五种改法与
+预期输出符号 ~ ✓ + ✂)。
+
 不带 `optimizeType` 的请求(本地实验/老请求)走老行为:空壳表=现行 skill 原样回传
 (「skill 真下载」实验的判定标尺),有行=迁移且不带 --map-mode(能加不删)。
 `prevObjectkey=null`(首次优化)一律拒绝,退出码 4:首版 skill 线下 generate 生成后录入,
@@ -115,8 +136,14 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 - [x] optimizeType 语义(平台口径已问清):NONE=只刷引擎代码 / MULTI=部分表不动结构 /
       ALL=全量表判据与结构以表为准——驱动与 migrate(--map-mode)已按此实现;
       增强表判据列 judgement_condition_cn/en 已适配(取 cn)
-- [ ] 回调接口要不要鉴权待定——口子已留:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头
-      (例 {"invokeToken": "..."}),不设=不带
+- [x] 回调接口鉴权:回调与下载服务挂同一个网关(webot),鉴权口径一致——driver 回调时
+      **自动复用下载脚本的 invokeToken**(同一份 obs_headers_config.json + token 文件 + 它的加密
+      封装;仅在回调主机 = 下载端点主机时自动带,并同它一样不校验证书)。环境变量:
+      PLATFORM1_CB_AUTH=platform 强制复用 / none 不带;PLATFORM1_CB_HEADERS 塞 JSON 请求头
+      则以它为准(别的鉴权方式兜底)
+- [ ] 回调接口的**完整 URL**(主机+端口+前缀+路径)待平台给准:文档只给了路径
+      /workspace/faultTreeNode/optimizeCallback,直接打网关根下该路径 LB 回 404,应有前缀
+      (下载端点是 /agent/…);同事已调通,拿他用的原始 URL 即可
 - [ ] 回调接口的「部分成功」字段——**平台已口头同意加**(口径也对上了:部分成功也算成功);
       待平台给字段名与格式(建议直接收包内 tree/migration_report.json 的结构:
       total/landed/ok/skipped/failed 带表行号与原因),定了就在 post_callback 里随回调带上;
