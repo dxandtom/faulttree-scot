@@ -248,6 +248,32 @@ rc9, out9 = run_driver({"excel": str(xl), "prevObjectkey": PREV, "versionId": "r
 check("业务码非 0 → 失败退出、带 message、不再套一层失败回传",
       rc9 != 0 and "40040003" in out9 and "does not allow" in out9 and "[失败回传]" not in out9, out9[-500:])
 
+print("\n== ⑨ 平台2 形态:只装发行包 cs-scot-generate-optimize 时,迁移脚本与模型技能名自动定位 ==")
+import importlib.util
+spec = importlib.util.spec_from_file_location("p1driver_mod", DRIVER)
+fake_root = WORK / "installed_skills"
+pkg = fake_root / "cs-scot-generate-optimize"
+(pkg / "migrate" / "scripts").mkdir(parents=True)
+(pkg / "migrate" / "scripts" / "migrate_fault_check.py").write_text("# 发行包内嵌的迁移脚本(占位)\n", encoding="utf-8")
+(pkg / "generate" / "scripts").mkdir(parents=True)
+(pkg / "SKILL.md").write_text("# 前门\n", encoding="utf-8")
+os.environ["SCOT_SKILLS_ROOT"] = str(fake_root)
+drv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(drv)
+check("SCOT_SKILLS_ROOT 指向只装发行包的目录 → 迁移脚本定位到 <包>/migrate/scripts",
+      drv.MIGRATE == pkg / "migrate" / "scripts" / "migrate_fault_check.py", str(drv.MIGRATE))
+check("模型档技能名 → cs-scot-generate-optimize(前门按表形态路由到优化线)",
+      drv._skill_name_for_model() == "cs-scot-generate-optimize")
+os.environ["SCOT_MIGRATE_SCRIPT"] = str(WORK / "x.py")
+check("SCOT_MIGRATE_SCRIPT 显式指定优先", drv._find_migrate() == WORK / "x.py")
+os.environ.pop("SCOT_MIGRATE_SCRIPT")
+os.environ.pop("SCOT_SKILLS_ROOT")
+drv2 = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(drv2)
+check("仓库形态(缺省)→ 本仓库 skills/cs-scot-migrate 的脚本",
+      drv2.MIGRATE == REPO / "skills" / "cs-scot-migrate" / "scripts" / "migrate_fault_check.py", str(drv2.MIGRATE))
+check("仓库形态模型档点名 cs-scot-migrate", drv2._skill_name_for_model() == "cs-scot-migrate")
+
 print(f"\n通过 {n_pass} / {n_pass + n_fail}" + ("  【有失败!】" if n_fail else "  全绿"))
 shutil.rmtree(WORK, ignore_errors=True)
 sys.exit(1 if n_fail else 0)

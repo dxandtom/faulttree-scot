@@ -41,7 +41,61 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-MIGRATE = REPO / "skills" / "cs-scot-migrate" / "scripts" / "migrate_fault_check.py"
+
+
+def _skill_roots():
+    """技能可能装在哪(按序):环境变量 SCOT_SKILLS_ROOT(平台装技能的目录)→ 本仓库 skills/
+    → 用户级 ~/.claude/skills。每个根下既认独立技能 cs-scot-migrate/,也认发行包
+    cs-scot-generate-optimize/(两线内嵌为子目录 migrate/、generate/,平台2 只上这一个包)。"""
+    roots = []
+    env = os.environ.get("SCOT_SKILLS_ROOT", "").strip()
+    if env:
+        roots += [Path(x) for x in env.split(os.pathsep) if x.strip()]
+    roots += [REPO / "skills", Path.home() / ".claude" / "skills"]
+    return roots
+
+
+def _find_skill_file(rel_in_migrate: str, rel_in_generate: str | None = None) -> Path | None:
+    """在各技能根下找 migrate/generate 的某个文件:独立技能形态与发行包内嵌形态都认。"""
+    for root in _skill_roots():
+        cands = [root / "cs-scot-migrate" / rel_in_migrate,
+                 root / "cs-scot-generate-optimize" / "migrate" / rel_in_migrate]
+        if rel_in_generate:
+            cands += [root / "cs-scot-generate" / rel_in_generate,
+                      root / "cs-scot-generate-optimize" / "generate" / rel_in_generate]
+        for c in cands:
+            if c.exists():
+                return c
+    return None
+
+
+def _find_migrate() -> Path:
+    """迁移脚本定位:SCOT_MIGRATE_SCRIPT 显式指定 → 各技能根下的独立技能 / 发行包内嵌形态。
+    平台2 只装 cs-scot-generate-optimize 时,命中的是 <包>/migrate/scripts/migrate_fault_check.py
+    ——机械迁移直接调这个脚本,不经前门;前门只在模型档起会话时参与(按表形态路由到优化线)。"""
+    env = os.environ.get("SCOT_MIGRATE_SCRIPT", "").strip()
+    if env:
+        return Path(env)
+    hit = _find_skill_file("scripts/migrate_fault_check.py")
+    return hit if hit else REPO / "skills" / "cs-scot-migrate" / "scripts" / "migrate_fault_check.py"
+
+
+def _skill_name_for_model() -> str:
+    """模型档点名哪个技能:装了独立 cs-scot-migrate 就点它;只装了发行包就点前门
+    cs-scot-generate-optimize(前门按输入形态机械路由:对应表=有层级列∧有 zip 列 → 优化线)。
+    SCOT_MODEL_SKILL 可显式指定。"""
+    env = os.environ.get("SCOT_MODEL_SKILL", "").strip()
+    if env:
+        return env
+    for root in _skill_roots():
+        if (root / "cs-scot-migrate" / "SKILL.md").exists():
+            return "cs-scot-migrate"
+        if (root / "cs-scot-generate-optimize" / "SKILL.md").exists():
+            return "cs-scot-generate-optimize"
+    return "cs-scot-migrate"
+
+
+MIGRATE = _find_migrate()
 
 sys.path.insert(0, str(HERE))
 import downloader  # noqa: E402
@@ -69,10 +123,9 @@ def _read_table(path: Path):
         reader = _csv.DictReader(io.StringIO(text))
         return list(reader.fieldnames or []), [
             {(k or ""): ("" if v is None else str(v)) for k, v in r.items()} for r in reader]
-    for cand in (REPO / "skills" / "cs-scot-generate" / "scripts",
-                 REPO / "skills" / "cs-scot-migrate" / "engine"):
-        if (cand / "xlsx_reader.py").exists() and str(cand) not in sys.path:
-            sys.path.insert(0, str(cand))
+    xr = _find_skill_file("engine/xlsx_reader.py", "scripts/xlsx_reader.py")
+    if xr is not None and str(xr.parent) not in sys.path:
+        sys.path.insert(0, str(xr.parent))
     import xlsx_reader
     return xlsx_reader.read_xlsx(path)
 
@@ -543,7 +596,10 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
     elif rc != 0 and with_model:
         # 机械挡吃不下的失败项(语义对号/修管道/补入口)交给模型:起 Claude Code 无头会话
         # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
-        prompt = (f"用 cs-scot-migrate 技能处理一次批量迁移的失败项,只改文件,不用跑命令。"
+        skill = _skill_name_for_model()
+        route = ("(前门按输入形态路由:这是对应表批量迁移,走优化线的 migrate 手册)"
+                 if skill == "cs-scot-generate-optimize" else "")
+        prompt = (f"用 {skill} 技能{route}处理一次批量迁移的失败项,只改文件,不用跑命令。"
                   f"失败清单看这条命令上一轮的输出(可以重跑它看,但验证不归你,驱动会自动复跑):"
                   f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约体检 FAIL 的照修法"
                   f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
@@ -572,7 +628,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
             # 一单一轮:点一次优化只做一轮模型处置,复跑验证后就交付(部分交付
             # 兜底),没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
             mlog = work / "model_session.log"
-            print(f"[模型] 起 Claude Code 无头会话处置失败项(cs-scot-migrate 技能),"
+            print(f"[模型] 起 Claude Code 无头会话处置失败项({skill} 技能),"
                   f"每一步动作实时打在下面,事件流落 {mlog}")
             _model_session(claude_cmd, mlog, timeout)
             rc, last_out = _run_migrate(cmd)
