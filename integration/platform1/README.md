@@ -65,8 +65,25 @@ python integration/platform1/make_full_table.py --product <runC2>/skill/qos-secu
 
 迁移有失败行时按**部分交付**处理(用户拍板):包里有已生效内容(本次落地或此前已迁移)
 就照样打包回调——已落地节点先生效,成功/跳过/失败清单连原因写进包内
-`tree/migration_report.json`;一个生效内容都没有才停下不回调(回传无变化的包只会误导
-版本记录),工作目录保留供排查。
+`tree/migration_report.json`。**整单失败也回调**(用户拍板:版本挂在"优化中"比回传一个没变的包
+更糟):表错位、包下载失败、一行都没落地等,回传**未变化的上一版 skill** + 包内
+`tree/migration_report.json`(status=failed、reason 带原因/迁移输出末尾),让版本记录闭环;
+`PLATFORM1_CB_ON_FAIL=0` 关。拿不到上一版(首次优化、skill 本身下不来)或回调本身失败的才停,
+工作目录保留供排查。平台"失败/部分成功"字段定了再改为按字段告知。
+端到端测试在 `tests/test_platform1_e2e.py`(fake 货架、标准库 + openpyxl,直接 python 跑)。
+
+## 技能装在哪都能接(平台2 只上发行包时)
+
+驱动调技能分两层:**机械层**直接起子进程跑迁移脚本 `migrate_fault_check.py`(不经前门);
+**模型层**起 Claude Code 无头会话(`claude -p`)点名一个技能处置失败项。两层都不写死路径:
+- 迁移脚本定位:`SCOT_MIGRATE_SCRIPT` 显式指定 → 各技能根下找,独立技能
+  `cs-scot-migrate/scripts/…` 与发行包内嵌 `cs-scot-generate-optimize/migrate/scripts/…` 都认;
+  技能根按序 = `SCOT_SKILLS_ROOT`(平台装技能的目录,可多个,os.pathsep 分隔)→ 本仓库 `skills/`
+  → `~/.claude/skills`;
+- 模型档点名:装了独立 `cs-scot-migrate` 就点它;只装了发行包就点前门
+  `cs-scot-generate-optimize`——前门按输入形态机械路由(对应表=有层级列∧有 zip 列 → 优化线的
+  migrate 手册,包内路径自动换算),不需要驱动告诉它"去 migrate";`SCOT_MODEL_SKILL` 可显式指定。
+平台2 集成代码照这两条接:装好 `dist/cs-scot-generate-optimize/`,设 `SCOT_SKILLS_ROOT`,其余不变。
 
 ## 联调实验(按序,前一个绿了再下一个)
 
