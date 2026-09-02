@@ -157,9 +157,12 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
       封装;仅在回调主机 = 下载端点主机时自动带,并同它一样不校验证书)。环境变量:
       PLATFORM1_CB_AUTH=platform 强制复用 / none 不带;PLATFORM1_CB_HEADERS 塞 JSON 请求头
       则以它为准(别的鉴权方式兜底)
-- [ ] 回调接口的**完整 URL**(主机+端口+前缀+路径)待平台给准:文档只给了路径
-      /workspace/faultTreeNode/optimizeCallback,直接打网关根下该路径 LB 回 404,应有前缀
-      (下载端点是 /agent/…);同事已调通,拿他用的原始 URL 即可
+- [x] 回调接口的**完整 URL**(实验 B' 2026-09-02 实测):与下载服务同网关同端口(443,不写端口),
+      路径带 `/agent/` 前缀:`https://<网关主机>/agent/workspace/faultTreeNode/optimizeCallback`;
+      直打网关根下无前缀路径 LB 回 404,带 `:8081` 连接超时(那是应用服务器直连口)。
+      鉴权复用下载脚本 invokeToken 已被平台接受。**平台校验版本状态**:只接受"优化中"的
+      versionId,已 COMPLETED 的回 `responseCode=40040003`(平台的 responseCode 是结构化码,
+      非文档所写 "0"/"1";driver 按"非 0 即失败"判,兼容)——成功回调过的版本不能重发
 - [ ] 回调接口的「部分成功」字段——**平台已口头同意加**(口径也对上了:部分成功也算成功);
       待平台给字段名与格式(建议直接收包内 tree/migration_report.json 的结构:
       total/landed/ok/skipped/failed 带表行号与原因),定了就在 post_callback 里随回调带上;
