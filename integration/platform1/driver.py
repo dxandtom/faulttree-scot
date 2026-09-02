@@ -168,15 +168,38 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
          zip_path.read_bytes())
     body.write(f"--{boundary}--\r\n".encode("utf-8"))
     headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    reused = False
     extra = os.environ.get("PLATFORM1_CB_HEADERS", "")
-    if extra:                       # 鉴权口子:回调若要 token,环境变量塞 JSON 请求头
+    mode = os.environ.get("PLATFORM1_CB_AUTH", "auto").strip().lower() or "auto"
+    if extra:                       # 显式鉴权头优先:环境变量塞 JSON 请求头
         headers.update(json.loads(extra))   # 例 {"invokeToken": "..."} 或 {"Cookie": "..."}
+        print("[回调] 鉴权:PLATFORM1_CB_HEADERS 指定的请求头")
+    elif mode != "none":
+        # 回调接口与下载服务同一个网关(webot)时鉴权口径一致:复用下载脚本的 invokeToken
+        # (token 文件 + 它的加密封装,配置就在 obs_headers_config.json)。auto=主机相同才复用;
+        # platform=强制复用;none=不带
+        from urllib.parse import urlparse
+        try:
+            auth, dl_host = downloader.auth_headers()
+        except SystemExit as e:
+            auth, dl_host = None, ""
+            if mode == "platform":
+                raise SystemExit(f"[回调] PLATFORM1_CB_AUTH=platform 但拿不到下载脚本的鉴权:{e}")
+        cb_host = urlparse(url).hostname or ""
+        if auth and (mode == "platform" or (dl_host and cb_host.lower() == dl_host.lower())):
+            headers.update(auth)
+            reused = True
+            print(f"[回调] 鉴权:复用下载脚本的 {'/'.join(auth)}(回调与下载服务同主机 {cb_host})")
+        elif auth and mode == "auto":
+            print(f"[回调] 鉴权:不带(回调主机 {cb_host} ≠ 下载服务 {dl_host};要强制复用设 PLATFORM1_CB_AUTH=platform)")
     req = urllib.request.Request(url, data=body.getvalue(), method="POST", headers=headers)
     ctx = None
-    if os.environ.get("PLATFORM1_CB_INSECURE", "").strip().lower() in ("1", "true", "yes"):
+    if reused or os.environ.get("PLATFORM1_CB_INSECURE", "").strip().lower() in ("1", "true", "yes"):
+        # 复用下载脚本鉴权时同它一样不校验证书(该脚本对这个网关一直 verify=False)
         import ssl                       # 内网自签证书联调用:不校验对端证书(线上别开)
         ctx = ssl._create_unverified_context()
-        print("[回调] PLATFORM1_CB_INSECURE=1:不校验对端 HTTPS 证书")
+        if not reused:
+            print("[回调] PLATFORM1_CB_INSECURE=1:不校验对端 HTTPS 证书")
     try:
         resp_cm = urllib.request.urlopen(req, timeout=60, context=ctx)
     except urllib.error.HTTPError as e:

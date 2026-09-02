@@ -136,8 +136,14 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 - [x] optimizeType 语义(平台口径已问清):NONE=只刷引擎代码 / MULTI=部分表不动结构 /
       ALL=全量表判据与结构以表为准——驱动与 migrate(--map-mode)已按此实现;
       增强表判据列 judgement_condition_cn/en 已适配(取 cn)
-- [ ] 回调接口要不要鉴权待定——口子已留:环境变量 PLATFORM1_CB_HEADERS 塞 JSON 请求头
-      (例 {"invokeToken": "..."}),不设=不带
+- [x] 回调接口鉴权:回调与下载服务挂同一个网关(webot),鉴权口径一致——driver 回调时
+      **自动复用下载脚本的 invokeToken**(同一份 obs_headers_config.json + token 文件 + 它的加密
+      封装;仅在回调主机 = 下载端点主机时自动带,并同它一样不校验证书)。环境变量:
+      PLATFORM1_CB_AUTH=platform 强制复用 / none 不带;PLATFORM1_CB_HEADERS 塞 JSON 请求头
+      则以它为准(别的鉴权方式兜底)
+- [ ] 回调接口的**完整 URL**(主机+端口+前缀+路径)待平台给准:文档只给了路径
+      /workspace/faultTreeNode/optimizeCallback,直接打网关根下该路径 LB 回 404,应有前缀
+      (下载端点是 /agent/…);同事已调通,拿他用的原始 URL 即可
 - [ ] 回调接口的「部分成功」字段——**平台已口头同意加**(口径也对上了:部分成功也算成功);
       待平台给字段名与格式(建议直接收包内 tree/migration_report.json 的结构:
       total/landed/ok/skipped/failed 带表行号与原因),定了就在 post_callback 里随回调带上;
