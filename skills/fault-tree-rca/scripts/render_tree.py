@@ -38,6 +38,24 @@ def _one(s, n=160) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _block(label: str, text, width: int = 72) -> list:
+    """「标签:正文」多行块:正文保留原有换行,每行超宽按 width 折行(中英混排按字符数,
+    中文约占两列,72 字符≈一屏);续行悬挂缩进到冒号之后。不截断——判据/证据全文对专家才有用。"""
+    import textwrap
+    head = f"{label}:"
+    pad = " " * (len(head) + 2)                            # 中文标签宽一点,多留两格
+    out = []
+    paras = [ln.rstrip() for ln in str(text or "").replace("\r", "").split("\n")]
+    paras = [ln for ln in paras if ln.strip()] or [""]
+    first = True
+    for para in paras:
+        segs = textwrap.wrap(para, width=width, break_long_words=True, break_on_hyphens=False) or [""]
+        for seg in segs:
+            out.append((head if first else pad) + seg)
+            first = False
+    return out
+
+
 def _load_tree(path: Path):
     idx = json.loads(Path(path).read_text(encoding="utf-8"))
     nodes = idx.get("nodes") or {}
@@ -127,27 +145,32 @@ def render_tree(doc: dict, nodes: dict, root: str) -> str:
         return s
 
     def details(nid):
+        """标记节点下的详情:判据全文(保留换行)、证据/依据/卡点/注意/方案——不截断,
+        长行按宽度折行,续行悬挂缩进到冒号后。"""
         tag, it = flags[nid]
         e = ev.get(nid) or {}
-        out = []
+        items = []
         cond = e.get("condition") or nodes[nid].get("condition")
         if cond and cond != "(无独立条件)":
-            out.append(f"判据:{_one(cond, 200)}")
+            items.append(("判据", cond))
         if tag == "undetermined":
-            out.append(f"缺:{_one(it.get('reason') or '数据不足', 200)}")
+            items.append(("缺", it.get("reason") or "数据不足"))
         else:
             if e.get("actual"):
-                out.append(f"证据:{_one(e['actual'], 300)}")
+                items.append(("证据", e["actual"]))
             elif it.get("support"):
-                out.append(f"证据:{_one(it['support'], 300)}")
+                items.append(("证据", it["support"]))
             if e.get("how"):
-                out.append(f"依据:{_one(e['how'], 200)}")
+                items.append(("依据", e["how"]))
             if tag == "probable" and it.get("blocked_at"):
-                out.append(f"卡点:{_one(it['blocked_at'], 160)}")
+                items.append(("卡点", it["blocked_at"]))
             if it.get("caveats"):
-                out.append(f"注意:{_one(it['caveats'], 200)}")
+                items.append(("注意", it["caveats"]))
             if it.get("recommend_solution"):
-                out.append(f"方案:{_one(it['recommend_solution'], 300)}")
+                items.append(("方案", it["recommend_solution"]))
+        out = []
+        for label, text in items:
+            out += _block(label, text)
         return out
 
     lines = []
@@ -158,7 +181,7 @@ def render_tree(doc: dict, nodes: dict, root: str) -> str:
         child_prefix = prefix if is_root else prefix + ("   " if is_last else "│  ")
         if nid in flags:
             for d in details(nid):
-                lines.append(child_prefix + "      " + d)
+                lines.append(child_prefix + "    " + d)
         kids = _kids(nodes, nid)
         if not kids:
             return
