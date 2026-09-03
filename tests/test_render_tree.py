@@ -82,17 +82,19 @@ check("缺数据节点:子树折叠计数,不展开", "? 分支C  [缺数据]" i
 check("已知不成立兄弟单列一行(来自排除留痕)", "✗ 分支B" in txt2 and "B叶1" not in txt2)
 check("未涉及兄弟折叠", "…(其余 1 个分支未涉及)" in txt2 and "分支D" not in txt2)
 
-print("\n== ③ 不截断:长判据全文保留、多行续行悬挂缩进 ==")
+print("\n== ③ 详情摘要:多行判据压成一行(去空行/空白),限长指向报告,超宽折行悬挂缩进 ==")
 lines2 = txt2.splitlines()
-jd_i = next(i for i, l in enumerate(lines2) if "判据:需同时满足" in l)
-check("多行判据逐行保留(1、2、3 都在)", "1、接口 GigabitEthernet0/0/1" in txt2
-      and "2、display qos car statistics" in txt2 and "3、vlan 参数缺失" in txt2)
-check("末尾条目一字不少(discard 计数递增)", "discard 计数递增" in txt2)
-cont = lines2[jd_i + 1]
-body = cont.lstrip("│ ")
-check("续行悬挂缩进(续行正文与首行正文对齐,不带标签)",
-      body.startswith("1、") and not body.startswith("判据") and cont.index("1、") > cont.index("│") + 6, repr(cont))
-check("超宽行按宽度折行(单行 ≤ 90 字符)", all(len(l) <= 90 for l in lines2), max(len(l) for l in lines2))
+jd = [l for l in lines2 if "判据:需同时满足" in l]
+check("判据压成一行摘要(编号条目用;连,无空行)", len(jd) == 1 and "需同时满足:1、接口" in jd[0]
+      and ";2、disp" in txt2 and "\n\n" not in txt2.split("\n\n", 1)[1], repr(jd))   # 头行后一个空行,树体内无空行
+check("判据超过 120 字截断并指向报告全文", "…(详见报告全文)" in txt2)
+ev_i = next(i for i, l in enumerate(lines2) if "证据:A 命中 3 条" in l)
+check("证据一行(未超长不截断)", "vlan 缺" in lines2[ev_i] and "…" not in lines2[ev_i], lines2[ev_i])
+long_line = next((l for l in lines2 if len(l) > 90), None)
+check("单行 ≤ 90 字符(超宽已折行)", long_line is None, repr(long_line))
+cont = lines2[lines2.index(jd[0]) + 1]
+check("折行续行悬挂缩进(不带标签、比首行正文起点不早)",
+      "判据" not in cont and cont.startswith("│") and (len(cont) - len(cont.lstrip("│ "))) >= 8, repr(cont))
 
 print("\n== ④ render_report --tree:报告 + rca_tree.txt + rca_reply.md ==")
 rca_p = WORK / "rca.json"

@@ -38,22 +38,23 @@ def _one(s, n=160) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _compact(text, n: int) -> str:
+    """树视图里的详情一律压成一行:去空行、去行首编号后的多余空白、多空格合一,条目之间用「;」
+    连;超过 n 字符截断并指向报告全文——树视图是"结果落在哪"的鸟瞰,全文在 rca_report.md 里。"""
+    lines = [" ".join(ln.split()) for ln in str(text or "").replace("\r", "").split("\n")]
+    lines = [ln for ln in lines if ln]
+    t = ";".join(lines) if len(lines) > 1 else (lines[0] if lines else "")
+    t = t.replace(":;", ":").replace(";;", ";")
+    return t if len(t) <= n else t[: n - 1] + "…(详见报告全文)"     # 标记不含空格,折行拆不开
+
+
 def _block(label: str, text, width: int = 72) -> list:
-    """「标签:正文」多行块:正文保留原有换行,每行超宽按 width 折行(中英混排按字符数,
-    中文约占两列,72 字符≈一屏);续行悬挂缩进到冒号之后。不截断——判据/证据全文对专家才有用。"""
+    """「标签:正文」块:正文已压成一行,超宽按 width 折行(中英混排按字符数),续行悬挂缩进到冒号后。"""
     import textwrap
     head = f"{label}:"
-    pad = " " * (len(head) + 2)                            # 中文标签宽一点,多留两格
-    out = []
-    paras = [ln.rstrip() for ln in str(text or "").replace("\r", "").split("\n")]
-    paras = [ln for ln in paras if ln.strip()] or [""]
-    first = True
-    for para in paras:
-        segs = textwrap.wrap(para, width=width, break_long_words=True, break_on_hyphens=False) or [""]
-        for seg in segs:
-            out.append((head if first else pad) + seg)
-            first = False
-    return out
+    pad = " " * (len(head) + 2)
+    segs = textwrap.wrap(str(text or ""), width=width, break_long_words=True, break_on_hyphens=False) or [""]
+    return [(head if i == 0 else pad) + seg for i, seg in enumerate(segs)]
 
 
 def _load_tree(path: Path):
@@ -145,32 +146,32 @@ def render_tree(doc: dict, nodes: dict, root: str) -> str:
         return s
 
     def details(nid):
-        """标记节点下的详情:判据全文(保留换行)、证据/依据/卡点/注意/方案——不截断,
-        长行按宽度折行,续行悬挂缩进到冒号后。"""
+        """标记节点下的详情:判据/证据/依据/卡点/注意/方案各一行摘要(去空行、压空白、限长,
+        超长指向报告全文),超宽折行、续行悬挂缩进。树视图是鸟瞰,不是全文。"""
         tag, it = flags[nid]
         e = ev.get(nid) or {}
-        items = []
+        items = []                                        # (标签, 文本, 上限):树里只放摘要,全文看报告
         cond = e.get("condition") or nodes[nid].get("condition")
         if cond and cond != "(无独立条件)":
-            items.append(("判据", cond))
+            items.append(("判据", cond, 120))
         if tag == "undetermined":
-            items.append(("缺", it.get("reason") or "数据不足"))
+            items.append(("缺", it.get("reason") or "数据不足", 200))
         else:
             if e.get("actual"):
-                items.append(("证据", e["actual"]))
+                items.append(("证据", e["actual"], 300))
             elif it.get("support"):
-                items.append(("证据", it["support"]))
+                items.append(("证据", it["support"], 300))
             if e.get("how"):
-                items.append(("依据", e["how"]))
+                items.append(("依据", e["how"], 160))
             if tag == "probable" and it.get("blocked_at"):
-                items.append(("卡点", it["blocked_at"]))
+                items.append(("卡点", it["blocked_at"], 160))
             if it.get("caveats"):
-                items.append(("注意", it["caveats"]))
+                items.append(("注意", it["caveats"], 200))
             if it.get("recommend_solution"):
-                items.append(("方案", it["recommend_solution"]))
+                items.append(("方案", it["recommend_solution"], 200))
         out = []
-        for label, text in items:
-            out += _block(label, text)
+        for label, text, n in items:
+            out += _block(label, _compact(text, n))
         return out
 
     lines = []
