@@ -155,6 +155,51 @@ def render(doc: dict, tree_text: str | None = None) -> str:
     return "\n".join(x for x in L if x is not None)
 
 
+def _cell_full(s, n=400) -> str:
+    """回复稿表格单元格:去换行、转义竖线;超长截到 n 并指向报告全文。"""
+    t = " ".join(str(s or "").split()).replace("|", "\\|")
+    return t if len(t) <= n else t[: n - 1] + "…(全文见 rca_report.md)"
+
+
+def render_reply(doc: dict, tree_text: str | None = None) -> str:
+    """聊天框回复稿(机械生成,模型原样贴出):树视图 → 确证根因表 → 疑似表 → 待确认 → 补充说明位。
+    平台上只看得见聊天框,文件没人打开——所以结论必须进回复正文,且每次一样,不靠模型发挥。"""
+    conf = doc.get("rca_result") or []
+    prob = doc.get("probable_causes") or []
+    und = doc.get("undetermined") or []
+    L = [f"**诊断结论:确证根因 {len(conf)} 条 · 疑似 {len(prob)} 条 · 待确认 {len(und)} 条**", ""]
+    if tree_text:
+        L += ["**树视图**(只展开确诊/疑似/缺数据所在路径)", "", "```text", tree_text, "```", ""]
+    if conf:
+        L += ["**确证根因**", "", "| # | 根因 | 根因路径 | 原文匹配(实测 / 依据) | 推荐方案 |", "|---|---|---|---|---|"]
+        for i, c in enumerate(conf, 1):
+            ev = c.get("evidence_path") or []
+            cand = (ev or [{}])[-1]
+            match = " / ".join(x for x in (cand.get("actual"), cand.get("how")) if x) or c.get("support") or "—"
+            L.append(f"| {i} | {_cell_full(c.get('Root_cause'), 80)} | {_cell_full(' → '.join(c.get('Fault_tree_path') or []), 160)} "
+                     f"| {_cell_full(match)} | {_cell_full(c.get('recommend_solution'), 200) or '—'} |")
+        L.append("")
+    if prob:
+        L += ["**疑似根因**(未过确证闸,给出卡点)", "", "| # | 根因 | 卡点 | 证据 | 注意 |", "|---|---|---|---|---|"]
+        for i, c in enumerate(prob, 1):
+            ev = c.get("evidence_path") or []
+            cand = (ev or [{}])[-1]
+            L.append(f"| {i} | {_cell_full(c.get('Root_cause'), 80)} | {_cell_full(c.get('blocked_at'), 160) or '—'} "
+                     f"| {_cell_full(cand.get('actual') or c.get('support'))} | {_cell_full(c.get('caveats'), 300) or '—'} |")
+        L.append("")
+    if und:
+        L += ["**待确认**(数据不足/无法判断)", ""]
+        for c in und[:20]:
+            L.append(f"- {(c.get('Fault_tree_path') or ['?'])[-1]}:{_cell_full(c.get('reason'), 200)}")
+        if len(und) > 20:
+            L.append(f"- …另有 {len(und) - 20} 条,见 rca_report.md")
+        L.append("")
+    if not (conf or prob or und):
+        L += ["本轮无确证/疑似/待确认节点。", ""]
+    L += ["**补充说明**", "", "_(此处由模型填写:同病根归组、处理优先级、需人复核的疑点;数字以上文为准)_", ""]
+    return "\n".join(L)
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -177,8 +222,12 @@ def main() -> int:
         (out.parent / "rca_tree.txt").write_text(tree_text + "\n", encoding="utf-8")
     md = render(doc, tree_text)
     out.write_text(md, encoding="utf-8")
+    reply = render_reply(doc, tree_text)
+    reply_p = out.parent / "rca_reply.md"
+    reply_p.write_text(reply, encoding="utf-8")
     print(md)
     print(f"\n[已写] {out}" + (f" 与 {out.parent / 'rca_tree.txt'}" if tree_text else ""))
+    print(f"[回复稿] {reply_p} ——最终回复把它全文原样贴出(树视图+结论表),只在末尾「补充说明」落笔")
     return 0
 
 

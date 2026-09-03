@@ -751,7 +751,7 @@ def refresh_engine(product: Path) -> None:
                           "且本机没有同门 fault-tree-rca 技能可刷新——RCA 仍走旧口径手工裁决")
         sk = skill_root / "SKILL.md"
         sk_text = sk.read_text(encoding="utf-8", errors="replace")
-        _sk_caps = ("第一个动作就是跑其 draft_rca", "原始散包")   # rca 交接禁区 + 数据入口三种走法这一代
+        _sk_caps = ("第一个动作就是跑其 draft_rca", "原始散包", "rca_reply.md")   # rca 交接禁区 + 数据入口三种走法 + 回复稿这一代
         if any(m not in sk_text for m in _sk_caps):      # SKILL.md 正文过旧(缺任一标记就该换代;
             exe_sk = Path(__file__).resolve().parents[2] / "cs-scot-execute" / "SKILL.md"   # 换正文保身份
             m_old = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", sk_text, re.S)
