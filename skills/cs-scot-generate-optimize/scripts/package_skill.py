@@ -67,12 +67,6 @@ _GEN_SCRIPTS = [
     "mo_config.py", "package_scenario.py", "validate_conditions.py", "xlsx_reader.py",
 ]
 _GEN_REFS = ["condition_binding_schema.md", "datacom_log_adapter.md", "plan_schema.md"]
-_MIG_ENGINE = [
-    "assemble_scenario.py", "check_contract.py", "check_data.py", "condition_kernels.py",
-    "custom_lib.py", "export_tree_excel.py", "import_tree_excel.py", "runner.py",
-    "search_cmd.py", "search_config.py", "search_diag_txt.py", "search_log.py",
-    "tree_prune.py", "xlsx_reader.py",
-]
 _Z2C = ["zip2csv.py", "config2csv.py", "logbuffer2csv.py", "parse_diag_to_csv.py"]
 
 REQUIRED = (
@@ -83,7 +77,6 @@ REQUIRED = (
     ]
     + [f"generate/scripts/{n}" for n in _GEN_SCRIPTS]
     + [f"generate/references/{n}" for n in _GEN_REFS]
-    + [f"migrate/engine/{n}" for n in _MIG_ENGINE]
     + [f"zip2csv/{s}" for s in ["SKILL.md", "vendor/ifilter.py"] + [f"scripts/{n}" for n in _Z2C]]
     + [f"cs-scot-execute/{s}" for s in
        ("SKILL.md", "scripts/runner.py", "scripts/check_data.py")]
@@ -103,6 +96,9 @@ EXCLUDE_SUFFIX = {".pyc", ".pyo"}
 EXCLUDE_NAMES = {".DS_Store", "Thumbs.db"}
 # 前门自己的打包脚本不进发行包(平台侧用不上,也别让包里再套打包器)
 EXCLUDE_REL = {"scripts/package_skill.py"}
+# 按包内位置排除的**顶层目录**:migrate 的 engine/ 是同门脚本的兜底副本,只在 migrate 单独部署时
+# 才用;发行包里 generate/execute/tester 都在包根,副本纯属重复文件(且手工副本会漂移)→ 不进包
+EXCLUDE_TOP_BY_PKG = {"migrate": {"engine"}}
 
 
 def _ignore(src_root: Path, pkg_rel_root: str):
@@ -116,6 +112,8 @@ def _ignore(src_root: Path, pkg_rel_root: str):
             elif n in EXCLUDE_NAMES or p.suffix in EXCLUDE_SUFFIX:
                 skip.add(n)
             elif pkg_rel_root == "." and rel_in_src in EXCLUDE_REL:
+                skip.add(n)
+            elif p.is_dir() and Path(dirpath) == src_root and n in EXCLUDE_TOP_BY_PKG.get(pkg_rel_root, ()):
                 skip.add(n)
         return skip
     return ignore
