@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""维护用:把内置引擎 engine/ 与同仓 cs-scot-generate / cs-scot-execute 的当前版对齐。
-引擎文件(内核/函数库/调优表往返/骨架/runner)在 generate/execute 侧改了之后跑一次本脚本,
-迁移技能就继续自包含。日常使用**不需要**跑它。"""
+"""维护用:把内置引擎 engine/ 与同仓 cs-scot-generate / cs-scot-execute / tester 的当前版对齐。
+engine/ 里全是同门脚本的**副本**,只在 migrate 被单独部署(旁边没有同门)时兜底使用;同门在场时
+migrate 一律先用同门源文件。副本手工维护必然漂移(实测 runner.py 曾落后 4 天),所以副本只能由
+本脚本生成、不许手改:
+    python skills/cs-scot-migrate/scripts/sync_engine.py          # 从源覆盖副本
+    python skills/cs-scot-migrate/scripts/sync_engine.py --check  # 只核对,有漂移/游离文件退出码 1(测试用)
+发行包 cs-scot-generate-optimize 里同门都在包根,engine/ 整个不进包(package_skill 排除),包内零重复文件。
+日常使用**不需要**跑它。"""
 import shutil
 import sys
 from pathlib import Path
@@ -27,17 +32,34 @@ SRC = {
     "search_diag_txt.py": SKILLS / "datacom-fault-tree-tester" / "scripts",
 }
 
-def main() -> None:
-    changed = []
+def main() -> int:
+    check = "--check" in sys.argv
+    changed, drift = [], []
     for name, d in SRC.items():
         src = d / name
         if not src.exists():
             sys.exit(f"源文件缺失:{src}(在技能仓根目录下跑本脚本)")
         dst = ENGINE / name
-        if not dst.exists() or dst.read_text(encoding="utf-8") != src.read_text(encoding="utf-8"):
+        same = dst.exists() and dst.read_bytes() == src.read_bytes()
+        if same:
+            continue
+        if check:
+            drift.append(f"engine/{name}  ≠  {src.relative_to(SKILLS)}")
+        else:
             shutil.copy2(src, dst)
             changed.append(name)
+    extra = sorted(q.name for q in ENGINE.glob("*.py") if q.name not in SRC)
+    if extra:
+        print("engine/ 里有不在同步清单的文件(要么加进 SRC,要么删掉):" + ", ".join(extra))
+    if check:
+        if drift:
+            print("引擎副本漂移(不带 --check 跑同一命令即同步):\n  " + "\n  ".join(drift))
+        else:
+            print(f"引擎副本与源一致({len(SRC)} 个文件)")
+        return 1 if (drift or extra) else 0
     print(f"内置引擎已对齐:{'刷新 ' + ', '.join(changed) if changed else '全部一致,无需动'}")
+    return 1 if extra else 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

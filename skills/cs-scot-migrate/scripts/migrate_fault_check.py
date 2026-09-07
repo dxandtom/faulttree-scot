@@ -753,7 +753,7 @@ def refresh_engine(product: Path) -> None:
         sk_text = sk.read_text(encoding="utf-8", errors="replace")
         _sk_caps = ("第一个动作就是跑其 draft_rca", "原始散包", "rca_reply.md")   # rca 交接禁区 + 数据入口三种走法 + 回复稿这一代
         if any(m not in sk_text for m in _sk_caps):      # SKILL.md 正文过旧(缺任一标记就该换代;
-            exe_sk = Path(__file__).resolve().parents[2] / "cs-scot-execute" / "SKILL.md"   # 换正文保身份
+            exe_sk = _mat("cs-scot-execute") / "SKILL.md"   # 换正文保身份(发行包内同门在包根)
             m_old = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", sk_text, re.S)
             new_txt = exe_sk.read_text(encoding="utf-8", errors="replace") if exe_sk.exists() else ""
             m_new = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", new_txt, re.S)
@@ -776,7 +776,7 @@ def upgrade_cross_scaffold(product: Path) -> None:
     if "raw_dir" in text and "load_all" in text:
         return                                           # 已是新骨架
     asm_p = _engine_src("assemble_scenario.py", ("raw_dir", "_upgrade_cross_scaffold"),
-                        Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts")
+                        _mat("cs-scot-generate") / "scripts")          # 发行包里叫 generate/,走 _mat
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location("asm_for_migrate", asm_p)
@@ -830,7 +830,7 @@ def _missing_shared(fc: Path, deps):
 
 def _shared_lib_src(fname: str):
     """共享模块兜底取源:同门 tester 优先,内置 engine/ 兜底。"""
-    for d in (Path(__file__).resolve().parents[2] / "datacom-fault-tree-tester" / "scripts",
+    for d in (_mat("datacom-fault-tree-tester") / "scripts",
               Path(__file__).resolve().parents[1] / "engine"):
         if (d / fname).exists():
             return d / fname
@@ -917,7 +917,7 @@ def _contract_mod():
     if not _CC_CACHE:
         import importlib.util
         p = _engine_src("check_contract.py", ("def check_script",),
-                        Path(__file__).resolve().parents[2] / "datacom-fault-tree-tester" / "scripts")
+                        _mat("datacom-fault-tree-tester") / "scripts")
         mod = None
         if p is not None:
             try:
@@ -1312,7 +1312,7 @@ def _read_table(path: Path):
         reader = _csv.DictReader(_io.StringIO(text))
         header = list(reader.fieldnames or [])
         return header, [{(k or ""): ("" if v is None else str(v)) for k, v in r.items()} for r in reader]
-    for cand in (Path(__file__).resolve().parents[2] / "cs-scot-generate" / "scripts",
+    for cand in (_mat("cs-scot-generate") / "scripts",            # 发行包里叫 generate/,走 _mat
                  Path(__file__).resolve().parents[1] / "engine"):
         if (cand / "xlsx_reader.py").exists() and str(cand) not in sys.path:
             sys.path.insert(0, str(cand))
