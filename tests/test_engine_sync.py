@@ -5,7 +5,8 @@
 ② package_skill 打出的发行包里不含 migrate/engine/,且全包内没有内容完全相同的重复文件;
 ③ 发行包内的 migrate(无 engine/)真跑一单迁移,csv/xlsx 表都过;
 ④ 单独部署的 migrate(旁边没有任何同门)靠 engine/ 里的整目录副本,把旧打包技能的
-   assets/fault-tree-rca(补上树视图 render_tree.py)与 SKILL.md 正文(带 rca_reply.md 指引)刷新到当前代。"""
+   assets/fault-tree-rca(补上树视图 render_tree.py)与 SKILL.md 正文(带 rca_reply.md 指引)刷新到当前代;
+⑤ 发行包里的 migrate(无 engine/)靠包根同门做同一件事,结果与 ④ 相同——两种形态没有能力差。"""
 import hashlib
 import shutil
 import subprocess
@@ -140,41 +141,62 @@ check("engine/ 里带着 fault-tree-rca 整目录(含 render_tree.py)、zip2csv 
       (solo / "engine" / "fault-tree-rca" / "scripts" / "render_tree.py").exists()
       and (solo / "engine" / "zip2csv" / "vendor" / "ifilter.py").exists()
       and (solo / "engine" / "cs-scot-execute" / "SKILL.md").exists())
-# 旧打包技能:正文没有 rca_reply.md 指引;assets/fault-tree-rca 是上一代(没有 render_tree.py)
-old_skill = S / "old-scenario-skill"
-(old_skill / "scripts").mkdir(parents=True)
-(old_skill / "SKILL.md").write_text("---\nname: old-scenario-skill\ndescription: 旧场景技能(保留身份)\n---\n# 旧正文\n\n只有一句。\n",
-                                    encoding="utf-8")
-shutil.copy2(REPO / "skills" / "cs-scot-execute" / "scripts" / "runner.py", old_skill / "scripts" / "runner.py")
-assets = old_skill / "assets"
-mk_product(assets)
-shutil.copytree(REPO / "skills" / "fault-tree-rca", assets / "fault-tree-rca",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-(assets / "fault-tree-rca" / "scripts" / "render_tree.py").unlink()
-shutil.copytree(REPO / "skills" / "zip2csv", assets / "zip2csv", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-store4 = S / "store"
-store4.mkdir()
-mk_pkg(store4, "干扰导致")
-tbl4 = S / "map.csv"
-tbl4.write_text(HDR + ",".join(["接入失败示例", "Root", "QoS建立失败", "Qos", "干扰导致", "Intf",
-                                 "obs://b/x.zip", "干扰导致.zip"]) + "\n", encoding="utf-8-sig")
-r4 = subprocess.run([sys.executable, str(solo / "scripts" / "migrate_fault_check.py"), "--package", str(store4),
-                     "--product", str(assets), "--auto", "--map", str(tbl4), "--map-mode", "multi"],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(S))
-o4 = (r4.stdout or "") + (r4.stderr or "")
-check("单独 migrate 跑通一单:退出码 0 且落地 ✓ n3", r4.returncode == 0 and "✓ n3「干扰导致」" in o4, o4[-700:])
-check("assets/fault-tree-rca 整目录已刷新,补上了 render_tree.py,旧副本备份 fault-tree-rca.bak",
-      "assets/fault-tree-rca 已刷新" in o4 and (assets / "fault-tree-rca" / "scripts" / "render_tree.py").exists()
-      and (assets / "fault-tree-rca.bak").is_dir(), o4[-700:])
-check("刷新后的 render_tree.py 与仓库 fault-tree-rca 当前版逐字节相同",
-      (assets / "fault-tree-rca" / "scripts" / "render_tree.py").read_bytes()
-      == (REPO / "skills" / "fault-tree-rca" / "scripts" / "render_tree.py").read_bytes())
-sk4 = (old_skill / "SKILL.md").read_text(encoding="utf-8")
-check("SKILL.md 正文已刷新到带 rca_reply.md 的执行指引,frontmatter 身份保留",
-      "SKILL.md 正文已刷新" in o4 and "rca_reply.md" in sk4 and "--tree" in sk4
-      and sk4.startswith("---\nname: old-scenario-skill\ndescription: 旧场景技能(保留身份)\n---\n"), o4[-700:])
-check("全程没有一句“本机没有同门 … 可刷新/可拷”的告警", "没有同门" not in o4, o4[-700:])
+
+
+def refresh_old_skill(base: Path, migrate_py: Path, tag: str):
+    """造一个旧打包技能(正文没有 rca_reply.md 指引;assets/fault-tree-rca 是上一代,没有 render_tree.py),
+    用指定的 migrate 脚本跑一单,断言两处都刷到当前代。④⑤ 共用。"""
+    old_skill = base / "old-scenario-skill"
+    (old_skill / "scripts").mkdir(parents=True)
+    (old_skill / "SKILL.md").write_text("---\nname: old-scenario-skill\ndescription: 旧场景技能(保留身份)\n---\n# 旧正文\n\n只有一句。\n",
+                                        encoding="utf-8")
+    shutil.copy2(REPO / "skills" / "cs-scot-execute" / "scripts" / "runner.py", old_skill / "scripts" / "runner.py")
+    assets = old_skill / "assets"
+    mk_product(assets)
+    shutil.copytree(REPO / "skills" / "fault-tree-rca", assets / "fault-tree-rca",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    (assets / "fault-tree-rca" / "scripts" / "render_tree.py").unlink()
+    shutil.copytree(REPO / "skills" / "zip2csv", assets / "zip2csv", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    store = base / "store"
+    store.mkdir()
+    mk_pkg(store, "干扰导致")
+    tbl = base / "map.csv"
+    tbl.write_text(HDR + ",".join(["接入失败示例", "Root", "QoS建立失败", "Qos", "干扰导致", "Intf",
+                                    "obs://b/x.zip", "干扰导致.zip"]) + "\n", encoding="utf-8-sig")
+    r = subprocess.run([sys.executable, str(migrate_py), "--package", str(store),
+                        "--product", str(assets), "--auto", "--map", str(tbl), "--map-mode", "multi"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(base))
+    o = (r.stdout or "") + (r.stderr or "")
+    check(f"{tag}跑通一单:退出码 0 且落地 ✓ n3", r.returncode == 0 and "✓ n3「干扰导致」" in o, o[-700:])
+    check(f"{tag}assets/fault-tree-rca 整目录已刷新,补上了 render_tree.py,旧副本备份 fault-tree-rca.bak",
+          "assets/fault-tree-rca 已刷新" in o and (assets / "fault-tree-rca" / "scripts" / "render_tree.py").exists()
+          and (assets / "fault-tree-rca.bak").is_dir(), o[-700:])
+    check(f"{tag}刷新后的 render_tree.py 与仓库 fault-tree-rca 当前版逐字节相同",
+          (assets / "fault-tree-rca" / "scripts" / "render_tree.py").read_bytes()
+          == (REPO / "skills" / "fault-tree-rca" / "scripts" / "render_tree.py").read_bytes())
+    sk = (old_skill / "SKILL.md").read_text(encoding="utf-8")
+    check(f"{tag}SKILL.md 正文已刷新到带 rca_reply.md 的执行指引,frontmatter 身份保留",
+          "SKILL.md 正文已刷新" in o and "rca_reply.md" in sk and "--tree" in sk
+          and sk.startswith("---\nname: old-scenario-skill\ndescription: 旧场景技能(保留身份)\n---\n"), o[-700:])
+    check(f"{tag}全程没有一句“本机没有同门 … 可刷新/可拷”的告警", "没有同门" not in o, o[-700:])
+    return sk
+
+
+sk4 = refresh_old_skill(S, solo / "scripts" / "migrate_fault_check.py", "单独 migrate:")
 shutil.rmtree(S, ignore_errors=True)
+
+print("\n== ⑤ 发行包形态:包内 migrate(无 engine/)靠包根同门做同一件事,结果与 ④ 相同 ==")
+P5 = Path(tempfile.mkdtemp(prefix="pkgrefresh-"))
+out5 = P5 / "dist"
+subprocess.run([sys.executable, str(REPO / "skills/cs-scot-generate-optimize/scripts/package_skill.py"),
+                "--out", str(out5), "--no-zip"], capture_output=True, text=True, cwd=str(REPO))
+pkg5 = out5 / "cs-scot-generate-optimize"
+check("包根有 fault-tree-rca/、zip2csv/、cs-scot-execute/SKILL.md,migrate/ 下没有 engine/",
+      (pkg5 / "fault-tree-rca" / "scripts" / "render_tree.py").exists() and (pkg5 / "zip2csv" / "vendor" / "ifilter.py").exists()
+      and (pkg5 / "cs-scot-execute" / "SKILL.md").exists() and not (pkg5 / "migrate" / "engine").exists())
+sk5 = refresh_old_skill(P5, pkg5 / "migrate" / "scripts" / "migrate_fault_check.py", "发行包 migrate:")
+check("两种形态刷出来的 SKILL.md 逐字节相同(能力无差)", sk4 == sk5)
+shutil.rmtree(P5, ignore_errors=True)
 
 print(f"\n通过 {PASSED} / {PASSED + FAILED}" + ("  全绿" if not FAILED else "  【有失败!】"))
 sys.exit(1 if FAILED else 0)
