@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""rca.json → 诊断报告 md(机械渲染,零模型参与)。
+
+病根:让模型把 rca.json 总结成表,证据被压成"S脚本matched=true"、内部字段名
+(absent=True+matched=0)直接漏给业务同事——总结这活模型也做砸。本脚本把证据栏
+从 evidence_path 逐字拼出(命中原文/网元/来源/实测值全保留),模型只在报告末尾
+「补充说明」段写机械给不了的东西(同病根归组/处理优先级/复核提示),数字不许改。
+
+手工 RCA 与 debate 的 rca.json 同契约,本渲染器通吃。
+用法:python render_report.py <rca.json> [-o <rca_report.md>]   # 缺省写在输入同目录
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+# 注意匹配序:「不成立」含「成立」子串,必须先查(先长后短)
+_SYM = (("不成立", "✗"), ("数据不足", "?"), ("冲突", "⚠"), ("无独立条件", "·"), ("成立", "✓"))
+
+
+def _sym(j: str) -> str:
+    for k, v in _SYM:
+        if k in (j or ""):
+            return v
+    return "~"                                           # 存疑/语义近似/评分制等
+
+
+def _path_line(ev: list) -> str:
+    return " → ".join(f"{e.get('node')}{_sym(str(e.get('judgment') or ''))}" for e in ev)
+
+
+def _one(s, n=160) -> str:
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _cell(s, n=160) -> str:
+    """表格单元格:竖线转义——设备回显命中原文常含 |(接口表等),不转义会把 md 表格串列。"""
+    return _one(s, n).replace("|", "\\|")
+
+
+def _ev_block(e: dict, indent="  ") -> list:
+    """一条 evidence 条目 → 详情行(逐字来自 rca.json,只排版不改写)。"""
+    lines = [f"{indent}- 判定:{e.get('judgment')}"]
+    if e.get("condition") and e["condition"] != "(无独立判据)":
+        lines.append(f"{indent}- 判据:{_one(e['condition'], 300)}")
+    if e.get("actual"):
+        lines.append(f"{indent}- 实测:{_one(e['actual'], 500)}")
+    if e.get("how"):
+        lines.append(f"{indent}- 依据:{_one(e['how'], 400)}")
+    if e.get("conflict_actual"):
+        lines.append(f"{indent}- ⚠反证:{_one(e['conflict_actual'], 300)}"
+                     + (f"(依据:{_one(e.get('conflict_how'), 200)})" if e.get("conflict_how") else ""))
+    if e.get("other_source_note"):
+        lines.append(f"{indent}- 注:{_one(e['other_source_note'], 200)}")
+    return lines
+
+
+def render(doc: dict, tree_text: str | None = None) -> str:
+    conf = doc.get("rca_result") or []
+    prob = doc.get("probable_causes") or []
+    und = doc.get("undetermined") or []
+    ti = doc.get("tree_issues") or {}
+    eng = next((c.get("_engine", {}).get("name") for c in conf + prob if isinstance(c, dict) and c.get("_engine")), None)
+
+    L = ["# 诊断报告", "",
+         f"**确证根因 {len(conf)} 条 · 疑似 {len(prob)} 条 · 待确认 {len(und)} 条**"
+         + (f" · 引擎:{eng}" if eng else "") + "。", ""]
+    if tree_text:                                        # 树视图(render_tree.py):只展开有事的路径
+        L += ["## 树视图", "", "```text", tree_text, "```", ""]
+
+    if conf:
+        L += ["## 确证根因", "", "| # | 根因 | 关键证据(摘要,全文见下) | 推荐解决方案 |",
+              "|---|---|---|---|"]
+        for i, c in enumerate(conf, 1):
+            ev = c.get("evidence_path") or []
+            cand = (ev or [{}])[-1]
+            brief = _cell(cand.get("actual") or cand.get("how") or c.get("support"), 120)
+            L.append(f"| {i} | {_cell(c.get('Root_cause'), 80)} | {brief} | {_cell(c.get('recommend_solution'), 90) or '—'} |")
+        L.append("")
+        for i, c in enumerate(conf, 1):
+            ev = c.get("evidence_path") or []
+            L += [f"### {i}. {c.get('Root_cause')} ✅", "",
+                  f"- 路径:{_path_line(ev)}(✓成立 ✗不成立 ?数据不足 ⚠冲突 ·无独立条件)"]
+            if ev:
+                L.append("- 候选证据:")
+                L += _ev_block(ev[-1], "    ")
+            # 未验证的上级(无绑定/数据不足)提示出来:默认放行≠验证过,此处没有做判断
+            unv = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) == "?"]
+            if unv:
+                L.append("- ℹ 未验证上级(无绑定/数据不足,默认放行——此处没有做判断):"
+                         + "、".join(f"「{u.get('node')}」" for u in unv[:5])
+                         + ("…" if len(unv) > 5 else ""))
+            if c.get("caveats"):
+                L.append(f"- 注意:{_one(c['caveats'], 500)}")
+            if c.get("recommend_solution"):
+                L.append(f"- 建议方案:{_one(c['recommend_solution'], 400)}")
+            L.append("")
+
+    if prob:
+        L += ["## 疑似根因(未过确证闸,逐条给出卡点)", ""]
+        for i, c in enumerate(prob, 1):
+            ev = c.get("evidence_path") or []
+            L += [f"### {i}. {c.get('Root_cause')} ⚠(confidence={c.get('confidence', '?')})", "",
+                  f"- 卡点:{_one(c.get('blocked_at'), 300) or '(未标)'}",
+                  f"- 路径:{_path_line(ev)}"]
+            if c.get("caveats"):
+                L.append(f"- 原因/注意:{_one(c['caveats'], 600)}")
+            if ev:
+                L.append("- 候选证据:")
+                L += _ev_block(ev[-1], "    ")
+                bad = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) in "✗⚠"]
+                for b in bad[:3]:
+                    L.append(f"- 矛盾上级「{b.get('node')}」:")
+                    L += _ev_block(b, "    ")
+            L.append("")
+
+    if und:
+        # 四态分型:优先按结构化 gap_kind 计数,老产物无字段时按 reason 文本兜底
+        def _gk(c):
+            gk = c.get("gap_kind")
+            if gk in ("no_data", "cannot_judge", "mixed"):
+                return gk
+            r = str(c.get("reason") or "")
+            if r.startswith("部分缺"):
+                return "mixed"
+            return "cannot_judge" if r.startswith("数据在,无法判断") else "no_data"
+        ks = [_gk(c) for c in und]
+        cj, mx = ks.count("cannot_judge"), ks.count("mixed")
+        split = (f"(其中 数据不足 {len(und) - cj - mx} 条 · 数据在但无法判断 {cj} 条"
+                 + (f" · 混合 {mx} 条" if mx else ") ").rstrip() .rstrip(")") + ")") if (cj or mx) else ""
+        L += [f"## 待确认{split}(数据不足的补齐后重跑可闭环;无法判断的属判据/脚本问题,补数据无用)", ""]
+        for c in und[:30]:
+            L.append(f"- {(c.get('Fault_tree_path') or ['?'])[-1]}:{_one(c.get('reason'), 200)}")
+        if len(und) > 30:
+            L.append(f"- …另有 {len(und) - 30} 条,见 rca.json")
+        L.append("")
+
+    if doc.get("excluded_note"):
+        L += ["## 排除留痕", "", _one(doc["excluded_note"], 1500), ""]
+
+    unc = ti.get("uncovered_condition_nodes") or []
+    orp = ti.get("orphan_node_ids") or []
+    if unc or orp:
+        L += ["## 树面问题", "",
+              f"- 本轮无事实节点 {len(unc)} 个(没人绑/缺数据)" if unc else "",
+              f"- 孤儿节点 {len(orp)} 个" if orp else "", ""]
+
+    L += ["## 补充说明(模型撰写)", "",
+          "_(待补:同病根归组、处理优先级建议、需人复核的疑点——只解读,数字以上文为准;"
+          "本节以上全部由 render_report.py 从 rca.json 机械生成,禁止改写)_", ""]
+    return "\n".join(x for x in L if x is not None)
+
+
+def _cell_full(s, n=400) -> str:
+    """回复稿表格单元格:去换行、转义竖线;超长截到 n 并指向报告全文。"""
+    t = " ".join(str(s or "").split()).replace("|", "\\|")
+    return t if len(t) <= n else t[: n - 1] + "…(全文见 rca_report.md)"
+
+
+def render_reply(doc: dict, tree_text: str | None = None) -> str:
+    """聊天框回复稿(机械生成,模型原样贴出):树视图 → 确证根因表 → 疑似表 → 待确认 → 补充说明位。
+    平台上只看得见聊天框,文件没人打开——所以结论必须进回复正文,且每次一样,不靠模型发挥。"""
+    conf = doc.get("rca_result") or []
+    prob = doc.get("probable_causes") or []
+    und = doc.get("undetermined") or []
+    L = [f"**诊断结论:确证根因 {len(conf)} 条 · 疑似 {len(prob)} 条 · 待确认 {len(und)} 条**", ""]
+    if tree_text:
+        L += ["**树视图**(只展开确诊/疑似/缺数据所在路径)", "", "```text", tree_text, "```", ""]
+    if conf:
+        L += ["**确证根因**", "", "| # | 根因 | 根因路径 | 原文匹配(实测 / 依据) | 推荐方案 |", "|---|---|---|---|---|"]
+        for i, c in enumerate(conf, 1):
+            ev = c.get("evidence_path") or []
+            cand = (ev or [{}])[-1]
+            match = " / ".join(x for x in (cand.get("actual"), cand.get("how")) if x) or c.get("support") or "—"
+            L.append(f"| {i} | {_cell_full(c.get('Root_cause'), 80)} | {_cell_full(' → '.join(c.get('Fault_tree_path') or []), 160)} "
+                     f"| {_cell_full(match)} | {_cell_full(c.get('recommend_solution'), 200) or '—'} |")
+        L.append("")
+    if prob:
+        L += ["**疑似根因**(未过确证闸,给出卡点)", "", "| # | 根因 | 卡点 | 证据 | 注意 |", "|---|---|---|---|---|"]
+        for i, c in enumerate(prob, 1):
+            ev = c.get("evidence_path") or []
+            cand = (ev or [{}])[-1]
+            L.append(f"| {i} | {_cell_full(c.get('Root_cause'), 80)} | {_cell_full(c.get('blocked_at'), 160) or '—'} "
+                     f"| {_cell_full(cand.get('actual') or c.get('support'))} | {_cell_full(c.get('caveats'), 300) or '—'} |")
+        L.append("")
+    if und:
+        L += ["**待确认**(数据不足/无法判断)", ""]
+        for c in und[:20]:
+            L.append(f"- {(c.get('Fault_tree_path') or ['?'])[-1]}:{_cell_full(c.get('reason'), 200)}")
+        if len(und) > 20:
+            L.append(f"- …另有 {len(und) - 20} 条,见 rca_report.md")
+        L.append("")
+    if not (conf or prob or und):
+        L += ["本轮无确证/疑似/待确认节点。", ""]
+    L += ["**补充说明**", "", "_(此处由模型填写:同病根归组、处理优先级、需人复核的疑点;数字以上文为准)_", ""]
+    return "\n".join(L)
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    ap = argparse.ArgumentParser(description="rca.json → 诊断报告 md(机械渲染)")
+    ap.add_argument("rca")
+    ap.add_argument("-o", "--out", help="输出 md 路径(缺省:rca.json 同目录 rca_report.md)")
+    ap.add_argument("--tree", help="tree/<场景>.tree_index.json:带上则报告首节加树视图,并写 rca_tree.txt")
+    a = ap.parse_args()
+    src = Path(a.rca)
+    doc = json.loads(src.read_text(encoding="utf-8"))
+    out = Path(a.out) if a.out else src.parent / "rca_report.md"
+    tree_text = None
+    if a.tree:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from render_tree import _load_tree, render_tree
+        nodes, root = _load_tree(Path(a.tree))
+        tree_text = render_tree(doc, nodes, root)
+        (out.parent / "rca_tree.txt").write_text(tree_text + "\n", encoding="utf-8")
+    md = render(doc, tree_text)
+    out.write_text(md, encoding="utf-8")
+    reply = render_reply(doc, tree_text)
+    reply_p = out.parent / "rca_reply.md"
+    reply_p.write_text(reply, encoding="utf-8")
+    print(md)
+    print(f"\n[已写] {out}" + (f" 与 {out.parent / 'rca_tree.txt'}" if tree_text else ""))
+    print(f"[回复稿] {reply_p} ——最终回复把它全文原样贴出(树视图+结论表),只在末尾「补充说明」落笔")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
