@@ -585,10 +585,13 @@ TREE_PRUNE_CAP = "matched_nes"                           # 剪枝放行 S 证据
 
 def _mat(name: str) -> Path:
     """素材/同门目录查找:①同门 skills/<name>(仓库开发态)②发行包形态——素材收进生成线
-    目录下(generate/<name>;cs-scot-generate 本身在发行包里就叫 generate)。都没有返回同门路径。"""
+    目录下(generate/<name>;cs-scot-generate 本身在发行包里就叫 generate)③本技能单独部署、
+    旁边没有同门时,用内置 engine/<name> 副本(fault-tree-rca、zip2csv 整目录,cs-scot-execute
+    只有 SKILL.md;副本由 sync_engine.py 生成)。都没有返回同门路径。"""
     base = Path(__file__).resolve().parents[2]
-    cands = (base / name, base / "generate") if name == "cs-scot-generate" \
-        else (base / name, base / "generate" / name)
+    engine = Path(__file__).resolve().parents[1] / "engine"
+    cands = (base / name, base / "generate", engine / name) if name == "cs-scot-generate" \
+        else (base / name, base / "generate" / name, engine / name)
     for c in cands:
         if c.is_dir():
             return c

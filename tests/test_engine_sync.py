@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 """引擎副本与发行包重复文件测试:
 ① migrate/engine/ 副本与同门源文件逐字节一致(sync_engine.py --check);
-② package_skill 打出的发行包里不含 migrate/engine/,且全包内没有内容完全相同的重复文件。"""
+② package_skill 打出的发行包里不含 migrate/engine/,且全包内没有内容完全相同的重复文件;
+③ 发行包内的 migrate(无 engine/)真跑一单迁移,csv/xlsx 表都过;
+④ 单独部署的 migrate(旁边没有任何同门)靠 engine/ 里的整目录副本,把旧打包技能的
+   assets/fault-tree-rca(补上树视图 render_tree.py)与 SKILL.md 正文(带 rca_reply.md 指引)刷新到当前代。"""
 import hashlib
 import shutil
 import subprocess
@@ -126,6 +129,52 @@ for form in ("csv", "xlsx"):
     check(f"{form}:引擎补全走的是包内同门源(无 [warn] 拿不出可信版本)", "拿不出可信版本" not in o and "无法自动升级" not in o, o[-500:])
 shutil.rmtree(W, ignore_errors=True)
 shutil.rmtree(out, ignore_errors=True)
+
+print("\n== ④ 单独部署形态:只装 cs-scot-migrate(无同门),靠 engine/ 刷新 assets/fault-tree-rca 树视图与 SKILL.md 正文 ==")
+S = Path(tempfile.mkdtemp(prefix="solo-"))
+solo = S / "skills" / "cs-scot-migrate"                  # 只拷 migrate 自己,旁边什么同门都没有
+shutil.copytree(REPO / "skills" / "cs-scot-migrate", solo, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+check("单独部署目录里只有 cs-scot-migrate(没有 fault-tree-rca/zip2csv/cs-scot-execute)",
+      sorted(p.name for p in (S / "skills").iterdir()) == ["cs-scot-migrate"])
+check("engine/ 里带着 fault-tree-rca 整目录(含 render_tree.py)、zip2csv 整目录、cs-scot-execute/SKILL.md",
+      (solo / "engine" / "fault-tree-rca" / "scripts" / "render_tree.py").exists()
+      and (solo / "engine" / "zip2csv" / "vendor" / "ifilter.py").exists()
+      and (solo / "engine" / "cs-scot-execute" / "SKILL.md").exists())
+# 旧打包技能:正文没有 rca_reply.md 指引;assets/fault-tree-rca 是上一代(没有 render_tree.py)
+old_skill = S / "old-scenario-skill"
+(old_skill / "scripts").mkdir(parents=True)
+(old_skill / "SKILL.md").write_text("---\nname: old-scenario-skill\ndescription: 旧场景技能(保留身份)\n---\n# 旧正文\n\n只有一句。\n",
+                                    encoding="utf-8")
+shutil.copy2(REPO / "skills" / "cs-scot-execute" / "scripts" / "runner.py", old_skill / "scripts" / "runner.py")
+assets = old_skill / "assets"
+mk_product(assets)
+shutil.copytree(REPO / "skills" / "fault-tree-rca", assets / "fault-tree-rca",
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+(assets / "fault-tree-rca" / "scripts" / "render_tree.py").unlink()
+shutil.copytree(REPO / "skills" / "zip2csv", assets / "zip2csv", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+store4 = S / "store"
+store4.mkdir()
+mk_pkg(store4, "干扰导致")
+tbl4 = S / "map.csv"
+tbl4.write_text(HDR + ",".join(["接入失败示例", "Root", "QoS建立失败", "Qos", "干扰导致", "Intf",
+                                 "obs://b/x.zip", "干扰导致.zip"]) + "\n", encoding="utf-8-sig")
+r4 = subprocess.run([sys.executable, str(solo / "scripts" / "migrate_fault_check.py"), "--package", str(store4),
+                     "--product", str(assets), "--auto", "--map", str(tbl4), "--map-mode", "multi"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(S))
+o4 = (r4.stdout or "") + (r4.stderr or "")
+check("单独 migrate 跑通一单:退出码 0 且落地 ✓ n3", r4.returncode == 0 and "✓ n3「干扰导致」" in o4, o4[-700:])
+check("assets/fault-tree-rca 整目录已刷新,补上了 render_tree.py,旧副本备份 fault-tree-rca.bak",
+      "assets/fault-tree-rca 已刷新" in o4 and (assets / "fault-tree-rca" / "scripts" / "render_tree.py").exists()
+      and (assets / "fault-tree-rca.bak").is_dir(), o4[-700:])
+check("刷新后的 render_tree.py 与仓库 fault-tree-rca 当前版逐字节相同",
+      (assets / "fault-tree-rca" / "scripts" / "render_tree.py").read_bytes()
+      == (REPO / "skills" / "fault-tree-rca" / "scripts" / "render_tree.py").read_bytes())
+sk4 = (old_skill / "SKILL.md").read_text(encoding="utf-8")
+check("SKILL.md 正文已刷新到带 rca_reply.md 的执行指引,frontmatter 身份保留",
+      "SKILL.md 正文已刷新" in o4 and "rca_reply.md" in sk4 and "--tree" in sk4
+      and sk4.startswith("---\nname: old-scenario-skill\ndescription: 旧场景技能(保留身份)\n---\n"), o4[-700:])
+check("全程没有一句“本机没有同门 … 可刷新/可拷”的告警", "没有同门" not in o4, o4[-700:])
+shutil.rmtree(S, ignore_errors=True)
 
 print(f"\n通过 {PASSED} / {PASSED + FAILED}" + ("  全绿" if not FAILED else "  【有失败!】"))
 sys.exit(1 if FAILED else 0)

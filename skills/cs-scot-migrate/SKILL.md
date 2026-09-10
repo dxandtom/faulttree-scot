@@ -219,6 +219,10 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py --product <产物�
 
 ## 维护(工具链开发者看,业务使用无关)
 
-`engine/` 是内核/函数库/调优表往返/骨架/runner 的内置副本,让本技能不依赖同门技能也能补全
-旧产物。cs-scot-generate / cs-scot-execute 侧改了这些文件后,跑一次
-`python skills/cs-scot-migrate/scripts/sync_engine.py` 对齐。
+`engine/` 是同门文件的内置副本,让本技能单独安装(旁边没有同门技能)时也能把旧产物补全到当前代:
+- 平铺脚本:内核/函数库/调优表往返/骨架/runner/契约体检/共享解析库(补全产物 `scripts/`);
+- 整目录素材:`engine/fault-tree-rca/`(含树视图 `render_tree.py`)、`engine/zip2csv/`、
+  `engine/cs-scot-execute/SKILL.md`(刷新打包技能的 `assets/fault-tree-rca`、`assets/zip2csv`、SKILL.md 正文)。
+同门在场时一律先用同门源;发行包 cs-scot-generate-optimize 里同门都在包根,`engine/` 整个不进包。
+副本只能由脚本生成、不许手改:同门改了文件后跑一次
+`python skills/cs-scot-migrate/scripts/sync_engine.py` 对齐,`--check` 只核对(有漂移退出码 1)。
