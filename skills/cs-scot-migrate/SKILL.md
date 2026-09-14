@@ -147,8 +147,10 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 
 脚本自动完成:**引擎体检+补全**(旧产物/打包技能里的 condition_kernels、custom_lib、
 import 校验、runner 不认 S 类 → 从引擎源刷新并 .bak 备份——同事拿旧 execute 打的包也能收。
-按**能力标记**只补缺、不追平:文件能力齐全就一律不碰,绝不把更新的产物降级。引擎源自包含:
-优先本机同门 cs-scot-generate/execute,没有就用本技能自带的 `engine/` 目录,单装本技能也能迁)
+**标准件与本机同门逐文件比对,内容不同就刷新**(行尾差异不算),旧文件留 .bak——以本机安装的
+工具链为准;源须先通过能力标记核验,坏源不用。custom_lib.py 含手工 @register 函数时只按标记补缺、
+不整体覆盖并点名。引擎源自包含:优先本机同门 cs-scot-generate/execute,没有就用本技能自带的
+`engine/` 目录,单装本技能也能迁)
 → **契约体检+补库**(两档处置,见下节)→ 拷脚本进 `scripts/custom/` → 调优表手术(判据/绑定)
 → import 编译回产物 → 调优表回导同步 → cross 骨架过旧则就地升级 → 写迁移台账。
 
@@ -196,15 +198,25 @@ import 校验、runner 不认 S 类 → 从引擎源刷新并 .bak 备份——�
 
 ## 无包翻新(--refresh-only)
 
-手头没有交付包、只想把旧产物/旧打包技能刷到当前代(custom_lib/内核/导入导出/runner/
-check_data/zip2csv/**fault-tree-rca 规则副本**〔自动定档+机械报告这一代,整目录刷新,
-旧副本备份 fault-tree-rca.bak〕/SKILL 正文〔含机械渲染报告指引〕)时:
+手头没有交付包、只想把旧产物/旧打包技能刷到当前代时:
 
 ```bash
 python skills/cs-scot-migrate/scripts/migrate_fault_check.py --product <产物或技能目录> --refresh-only
 ```
 
-全部按能力标记**只补缺不降级**,动过的文件都有 .bak 备份,技能名/描述等身份信息不动。
+**同步规则**:标准件(工具链所有、与场景无关的文件)逐文件与本机同门比对,内容不同就刷新,
+旧文件留 .bak;场景件一概不碰。
+
+| 标准件(会同步) | 场景件(不碰) |
+|---|---|
+| `assets/scripts/` 引擎脚本:condition_kernels、xlsx_reader、custom_lib(无手工注册函数时)、import/export_tree_excel | `assets/tree/`、`assets/plan.json`、knowledge.md |
+| 技能根 `scripts/runner.py`、`check_data.py`、`tree_prune.py`,`references/` | `assets/scripts/*_analyzer.py`(各指标脚本) |
+| `assets/zip2csv/` 逐文件 | `assets/scripts/cross_analyzer.py`(绑定;只做骨架升级) |
+| `assets/fault-tree-rca/`(有文件不同即整目录刷新,旧副本 fault-tree-rca.bak) | `assets/scripts/custom/`(节点脚本与随包共享库) |
+| `SKILL.md` 正文(换正文保身份:技能名/描述不动,旧文 SKILL.md.bak) | custom_lib.py 里手工 @register 的函数 |
+
+脚本结束时**逐项打印本次动了哪些文件**(或"没有文件需要刷新");**汇报只许原样列出这份清单**,
+不许自行总结成"已刷新 xx"。
 
 ## 迁移后
 
