@@ -117,11 +117,27 @@ rca_input 下发)、`assets/fault-tree-rca/`(根因分析规则副本,rca 步骤
      证据会被压成"S脚本matched=true"、内部字段名(absent=True 之类)直接漏给用户,所以这些节不许自己写、不许改写。
    - **最终回复的正文 = `rca_reply.md` 全文原样贴出**(用 Read 读出来整段复制,树视图保持在 ```text 代码块里,
      表格一行不删、一格不改)。平台上用户只看得见聊天框,文件没人打开——树视图和结论表不进回复正文等于没做。
-   - **用户用英文提问时的兜底**(树与回复稿目前只有中文素材):仍先照上面机械生成三份文件,再把
-     `rca_reply.md` **逐段翻译成英文**作为回复正文。翻译只换文字、不动结构:树的缩进、符号、节点顺序、
-     折叠计数、表格的行列与格数一律照原样;证据行(设备回显、实测值、来源文件名)**原文保留不翻**;
-     节点名译成英文后**括注中文原名**(业务专家要对回树和调优表);数字与判定档位不许变。正文第一行写
-     "Translated by the model from the mechanical Chinese output; Chinese original: <result>/rca_reply.md"。
+   - **用户用英文提问时的兜底**(树与回复稿目前只有中文素材;正式英文支持见仓库 docs/遗留任务.md):
+     仍先照上面机械生成三份文件,再把 `rca_reply.md` **逐行翻译成英文**作为回复正文。这不是自由发挥,
+     是按下面六条硬规矩做文字替换:
+     ① **结构逐一对应**:段落的顺序与数量、每段的标题、树视图所在的 ```text 代码块、表格的行列与格数、
+        待确认列表的条数,都与 rca_reply.md 一致;树视图**一行对一行**,缩进、连线(├─ └─ │)、符号
+        (✅ ⚠ ? ✓ ✗ ·)、折叠计数一个不改。不许增删段落或行,不许在段落之间插自己的话。
+     ② **固定文案按对照表翻**,不许换说法:诊断结论→Diagnosis;确证根因→Confirmed root causes;
+        疑似根因→Probable root causes;待确认→To be confirmed;补充说明→Notes;树视图→Tree view;
+        确诊→Confirmed;疑似→Probable;缺数据→Missing data;成立→Holds;不成立→Does not hold;
+        未判定→Not evaluated;判据→Criterion;证据→Evidence;依据→Basis;卡点→Blocked at;注意→Caveat;
+        方案→Solution;缺→Missing;根因→Root cause;根因路径→Path;原文匹配(实测 / 依据)→Match (observed / basis);
+        推荐方案→Recommended solution;未过确证闸,给出卡点→did not pass the confirmation gate; blocked at is given;
+        数据不足/无法判断→insufficient data / cannot judge;…(详见报告全文)→… (see full report);
+        …(子树 N 个节点未判定,数据补齐后重跑)→… (N nodes in subtree not evaluated; rerun after data is supplied);
+        …(本轮无确诊/疑似/缺数据节点,树未展开)→… (no confirmed/probable/missing-data node this round; tree not expanded)。
+     ③ **节点名**译成英文后括注中文原名,如 `Interference (干扰导致)`;判据、卡点、注意、方案这类自由文本
+        逐句直译,不概括、不补充、不解释;拿不准的词保留中文并括注。
+     ④ **不翻的**:证据行(设备回显、实测值、来源文件名、命令名)、数字、节点编号、判定档位、表格分隔线。
+     ⑤ 正文第一行固定写 "Translated by the model from the mechanical Chinese output; Chinese original:
+        <result>/rca_reply.md";「补充说明」照旧只在末尾落笔,用英文写,仍只解读不改数字。
+     ⑥ 启用条件:用户本轮提问整段是英文;中英混杂按中文处理,不翻。
      这是英文素材接入树之前的过渡做法,不是许可改写结论。
      回复稿前面加**执行过程**(每步一行:脚本输出要点,含 draft/finalize 的候选与合成统计,
      另加数据缺口与被跳过的文件——plan 缺的源、没匹配上的文件,结论只代表已提供数据能看到的部分),
