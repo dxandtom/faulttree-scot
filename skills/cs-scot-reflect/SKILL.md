@@ -84,8 +84,8 @@ python "<本目录>/scripts/eval_run.py" \
 finalize_rca 机械合成 → 判卷。
 **finalize 拦下需权衡的真冲突时，该用例记「挂起待裁决」并点名，脚本绝不代裁**——由你按
 fault-tree-rca 法则在该结果目录补 decisions.json、重跑 finalize+render，再用
-`--eval-only`（或 `--case <该用例>`）补判。整批汇总落 `<工作目录>/eval/quality_score.json`（平台/业务取数的
-唯一文件，见下文「整批 quality_score.json」），回归自己的明细（挂起、异常清单）落 `<工作目录>/regress_summary.json`，
+`--eval-only`（或 `--case <该用例>`）补判。整批汇总落 `<工作目录>/eval/quality_score_batch.json`（平台/业务取整批数的
+文件，见下文「整批 quality_score_batch.json」），回归自己的明细（挂起、异常清单）落 `<工作目录>/regress_summary.json`，
 逐用例日志在 `<工作目录>/logs/`。
 **默认即无人值守口径**：待裁决用例不挂起等人，直接按不通过（FAIL，
 error_category=pending_adjudication）计入准确率分母——裁决做不了就等于这轮没优化好。
@@ -243,7 +243,7 @@ Step 3: 综合裁定 verdict
 
 ```
 <out>/                                # 默认 <result-dir 父目录>/<scenario>-eval/
-├── quality_score.json            # 整批汇总：pass_rate/total_score/六维通过比例（平台/业务取数的唯一文件，见下文）
+├── quality_score_batch.json      # 整批汇总：pass_rate/total_score/六维通过比例（见下文）
 ├── feedback_to_generate.json     # 反馈（仅有问题时生成）
 ├── failure_signatures.json       # 全部失败签名（仅有问题时生成）
 ├── fuse_history.jsonl            # 熔断历史（跨轮累计，同case同节点同类计数）
@@ -323,10 +323,10 @@ Step 3: 综合裁定 verdict
 > 三态按 classify 的 error_class 链条机械推导——旧版把没评到的关写成 `passed:true`,
 > 下游一读就是"通过",语义错,v11 起修正。
 
-### 整批 quality_score.json(评估输出根目录;平台/业务取数的唯一文件)
+### 整批 quality_score_batch.json(评估输出根目录)
 
-**两级同名同骨架**:每个用例目录里的 `quality_score.json` 是单用例的(六维 true/false/null,见下一节);
-评估输出**根目录**的 `quality_score.json` 是整批的。一键回归(regress.py,落在 `<工作目录>/eval/`)与
+**两级两个文件**:每个用例目录里的 `quality_score.json` 是单用例的(六维 true/false/null,见下一节,格式不变);
+评估输出**根目录**的 `quality_score_batch.json` 是整批的,文件名不同,解析时不会混。一键回归(regress.py,落在 `<工作目录>/eval/`)与
 批量判卷(eval_run.py,落在 `--out` 目录)写的是同一份格式,由 `scripts/batch_summary.py` 统一计算:
 
 ```json
@@ -342,7 +342,7 @@ Step 3: 综合裁定 verdict
     "…五个同形…": {}
   },
   "meta": {"evaluation_time": "…", "value_type": "RATIO"},
-  "cases": [{"case_id": "…", "verdict": "…", "quality_score": 100, "dimensions": {"env_failure": true, "…": null}}]
+  "cases": [{"case_id": "…", "verdict": "…", "quality_score": 100, "dimensions": {"env_failure": true, "…": null}, "report_path": "…"}]
 }
 ```
 

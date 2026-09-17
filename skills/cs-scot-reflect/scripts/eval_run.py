@@ -933,9 +933,9 @@ def generate_report(
             "report_path": str(report_path.relative_to(out_dir))
         })
 
-    # 根目录 quality_score.json(整批):与一键回归同一口径(batch_summary.py),平台读这一份
+    # 根目录 quality_score_batch.json(整批):与一键回归同一口径(batch_summary.py),平台读这一份
     summary_report = write_batch_score(out_dir, all_case_summaries, evaluation_time)
-    print(f"[eval_run] 整批汇总已写入 {out_dir / 'quality_score.json'}")
+    print(f"[eval_run] 整批汇总已写入 {out_dir / 'quality_score_batch.json'}")
 
     # 写入 failure_signatures.json
     if all_failure_signatures:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""批量评估汇总——评估输出根目录的 quality_score.json(与单用例目录里的 quality_score.json 同名同骨架,
-平台只认一种文件):一键回归(regress.py)与批量判卷(eval_run.py)都写这一份,算法只有这一处。
+"""批量评估汇总——评估输出根目录的 quality_score_batch.json(整批;单用例目录里的 quality_score.json
+不动):一键回归(regress.py)与批量判卷(eval_run.py)都写这一份,算法只有这一处。
 
 口径:
 - 通过 = verdict 为 PASS 或 PASS_WITH_GAPS(期望根因全命中;缺部分数据不扣通过);
@@ -72,7 +72,7 @@ def build_batch_score(cases: list, evaluation_time: str) -> dict:
 def write_batch_score(out_dir: Path, cases: list, evaluation_time: str) -> dict:
     score = build_batch_score(cases, evaluation_time)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    (Path(out_dir) / "quality_score.json").write_text(json.dumps(score, ensure_ascii=False, indent=2), encoding="utf-8")
+    (Path(out_dir) / "quality_score_batch.json").write_text(json.dumps(score, ensure_ascii=False, indent=2), encoding="utf-8")
     return score
 
 
