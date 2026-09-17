@@ -22,7 +22,7 @@
 ```
 
 optimizeType 三档(平台口径,请求带 `optimizeType` 字段;excel 为增强表:
-`L*_Name_CN/EN + judgement_condition_cn/en + Product_Obs/Name`,判据列取 cn):
+`Node_ID + L*_Name_CN/EN + Diagnosis_Method_CN/EN + Solution_CN/EN + Product_Obs/Name + Need_Optimize`,判据列取 CN):
 - **NONE** = 问题不在节点:下载现行 skill → migrate `--refresh-only` 把引擎代码刷到当前代
   (树与绑定不动)→ 回传。引擎的"当前代"来自本机仓库,联调机器记得先拉新;
 - **MULTI** = 部分表:只动列出的节点、**不动树结构**——迁移(zip)、清判据(双空行)、
@@ -31,11 +31,11 @@ optimizeType 三档(平台口径,请求带 `optimizeType` 字段;excel 为增强
   表里踪影全无的节点自动删(调优表 .bak 可回退、台账 deleted_at 留痕、两道防误删保险),
   migrate `--map-mode all`。
 
-**标记契约(平台已确认方向:每次全量表 + 标记哪些节点改了)**:表带标记列
-(是否修改/is_modified 等,取值 是/Y/1 算要改)即启用——结构增删看行的出现/消失,
-内容动作(zip 迁移/判据同步/双空清除/解决方案同步)只对标记行执行;未标记行的 zip
-不下载不迁,判据不同只提示。解决方案列(solution_cn/en 等,取 cn)同为以表为准,
-空≠删除。标记列/解决方案列的正式列名等平台定稿,现按常见名宽松识别,对不上改一行即可。
+**标记契约(平台已定:每次都给全量表,Need_Optimize 标记用户选了哪些节点)**:标记列
+`Need_Optimize`(TRUE/FALSE)在场即启用——结构增删看行的出现/消失,内容动作(zip 迁移/判据同步/
+双空清除/解决方案同步)只对 TRUE 行执行;FALSE 行的 zip 不下载不迁,判据不同只提示。解决方案列
+(`Solution_CN/EN`,取 CN)同为以表为准,空≠删除。全部 FALSE 且表与树一致 = 只刷新标准件(等于"刷新技能");
+表里少了的节点照删(三道保险)。`Node_ID`(平台的节点 UUID)整列忽略,节点定位靠路径名字。
 
 **全量表长什么样(与老表相比多 5 列;`make_full_table.py` 可从现行 skill 直接导出)**:
 
@@ -43,9 +43,10 @@ optimizeType 三档(平台口径,请求带 `optimizeType` 字段;excel 为增强
 |---|---|---|---|
 | L1_Name_CN/EN … Ln_Name_CN/EN | 有 | 有 | 节点路径,定位靠中文名;层级数动态 |
 | Product_Obs / Product_Name | 有 | 有 | 交付 zip 的 obs 地址 / 包名;结构行留空 |
-| judgement_condition_cn / _en | — | **新** | 判据,取 cn。**空 + 无 zip = 清除该节点判据与绑定**,所以已有节点的判据必须带上 |
-| solution_cn / _en | — | **新(可选)** | 解决方案,取 cn;空≠删除 |
-| 是否修改 | — | **新** | 标记列:是/Y/1 才做内容动作(zip 迁移/判据同步/方案同步);未标记行 zip 不下载 |
+| Node_ID | — | **新** | 平台的节点 UUID,整列忽略 |
+| Diagnosis_Method_CN / _EN | — | **新** | 判据,取 CN。**空 + 无 zip = 清除该节点判据与绑定**,所以已有节点的判据必须带上 |
+| Solution_CN / _EN | — | **新** | 解决方案,取 CN;空≠删除 |
+| Need_Optimize | — | **新** | 标记列:TRUE 才做内容动作(zip 迁移/判据同步/方案同步);FALSE 行 zip 不下载 |
 
 行语义(请求带 `optimizeType=ALL`):**树上每个节点一行**(含根与中间结构层);表里没出现的
 节点=删除(有根失踪/超深/过半三道保险);树上没有的行=新增(有 zip 就迁移绑定,只有判据就建
@@ -172,7 +173,7 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
       zip 同桶同接口,无需额外配置
 - [x] optimizeType 语义(平台口径已问清):NONE=只刷引擎代码 / MULTI=部分表不动结构 /
       ALL=全量表判据与结构以表为准——驱动与 migrate(--map-mode)已按此实现;
-      增强表判据列 judgement_condition_cn/en 已适配(取 cn)
+      正式全量表(Node_ID/Diagnosis_Method_CN/Solution_CN/Need_Optimize)已适配
 - [x] 回调接口鉴权:回调与下载服务挂同一个网关(webot),鉴权口径一致——driver 回调时
       **自动复用下载脚本的 invokeToken**(同一份 obs_headers_config.json + token 文件 + 它的加密
       封装;仅在回调主机 = 下载端点主机时自动带,并同它一样不校验证书)。环境变量:
