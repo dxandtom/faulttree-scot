@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import re
 import subprocess
@@ -35,6 +36,8 @@ import sys
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPTS_DIR))
+from batch_summary import format_line, write_index  # noqa: E402  批量汇总的唯一口径
 SKILLS_ROOT = SCRIPTS_DIR.parents[1]                     # .../skills/
 
 
@@ -340,28 +343,32 @@ def main() -> int:
               + (f" / quality_score={qs}" if qs is not None else ""))
 
     done = [r for r in rows if r["stage"] == "evaluated"]
-    passed = [r for r in done if str(r.get("verdict", "")).startswith("PASS")]
     pending = [r for r in rows if r["stage"] == "pending_adjudication"]
     broken = [r for r in rows if r["stage"] in ("exec_fail", "eval_error")]
-    acc = (len(passed) / len(done)) if done else None
-    summary = {"total": len(rows), "evaluated": len(done), "passed": len(passed),
-               "accuracy": acc,
+    # 批量汇总 index.json:与 eval_run 批量判卷同一口径(batch_summary.py),平台读这一份;
+    # 没判卷的用例(挂起/执行失败/判卷异常)verdict 记 NOT_EVALUATED,计入分母
+    index = write_index(eval_out, [{"case_id": r["case_id"], "verdict": r.get("verdict") if r["stage"] == "evaluated" else None,
+                                    "quality_score": r.get("quality_score"), "stage": r["stage"],
+                                    "error_category": r.get("error_category"), "report_dir": r.get("report_dir", "")}
+                                   for r in rows], datetime.datetime.now().isoformat(timespec="seconds"))
+    passed = index["passed"]
+    summary = {"total": len(rows), "evaluated": len(done), "passed": passed,
+               "pass_rate": index["pass_rate"], "score_avg": index["score_avg"],
                "pending_adjudication": [r["case_id"] for r in pending],
                "exec_or_eval_failed": [r["case_id"] for r in broken], "cases": rows}
     sp = out / "regress_summary.json"
     sp.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n[regress] 汇总:{len(rows)} 用例 | 已判卷 {len(done)}(通过 {len(passed)})"
+    print(f"\n[regress] 汇总:{len(rows)} 用例 | 已判卷 {len(done)}(通过 {passed})"
           f" | 挂起待裁决 {len(pending)} | 执行/判卷异常 {len(broken)}")
-    if acc is not None:
-        print(f"  准确率:{len(passed)}/{len(done)} = {acc:.1%}(口径:通过/已判卷;"
-              f"挂起与异常用例不计入分母,清完它们数字才算完整)")
+    print(f"  {format_line(index)}")
+    print(f"  平台/业务取数:{eval_out / 'index.json'}(pass_rate、score_avg)")
     if pending:
         print("  ⏸ 挂起用例(裁决后重跑 finalize+render,再 `--eval-only` 或 --case 补判):"
               + "、".join(r["case_id"] for r in pending))
     if broken:
         print("  ✗ 异常用例(看 logs/ 对应日志):" + "、".join(r["case_id"] for r in broken))
     print(f"  明细:{sp}")
-    return 0 if not (pending or broken) and len(passed) == len(done) else 1
+    return 0 if not (pending or broken) and passed == len(done) else 1
 
 
 if __name__ == "__main__":

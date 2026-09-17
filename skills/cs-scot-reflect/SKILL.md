@@ -84,7 +84,8 @@ python "<本目录>/scripts/eval_run.py" \
 finalize_rca 机械合成 → 判卷。
 **finalize 拦下需权衡的真冲突时，该用例记「挂起待裁决」并点名，脚本绝不代裁**——由你按
 fault-tree-rca 法则在该结果目录补 decisions.json、重跑 finalize+render，再用
-`--eval-only`（或 `--case <该用例>`）补判。汇总落 `<工作目录>/regress_summary.json`，
+`--eval-only`（或 `--case <该用例>`）补判。批量汇总落 `<工作目录>/eval/index.json`（平台/业务取数的
+唯一文件，见下文「批量汇总 index.json」），回归自己的明细（挂起、异常清单）落 `<工作目录>/regress_summary.json`，
 逐用例日志在 `<工作目录>/logs/`。
 **默认即无人值守口径**：待裁决用例不挂起等人，直接按不通过（FAIL，
 error_category=pending_adjudication）计入准确率分母——裁决做不了就等于这轮没优化好。
@@ -242,7 +243,7 @@ Step 3: 综合裁定 verdict
 
 ```
 <out>/                                # 默认 <result-dir 父目录>/<scenario>-eval/
-├── index.json                    # 全部用例汇总（verdict 统计+各报告路径）
+├── index.json                    # 批量汇总：通过数/总数/pass_rate/score_avg（平台/业务取数的唯一文件，见下文）
 ├── feedback_to_generate.json     # 反馈（仅有问题时生成）
 ├── failure_signatures.json       # 全部失败签名（仅有问题时生成）
 ├── fuse_history.jsonl            # 熔断历史（跨轮累计，同case同节点同类计数）
@@ -321,6 +322,29 @@ Step 3: 综合裁定 verdict
 > (整场唯一,链条停在这,detail 附机械原料);**`null`=没评到**(前序命中,按序评估已终止)。
 > 三态按 classify 的 error_class 链条机械推导——旧版把没评到的关写成 `passed:true`,
 > 下游一读就是"通过",语义错,v11 起修正。
+
+### 批量汇总 index.json(平台/业务取数的唯一文件)
+
+一键回归(regress.py)与批量判卷(eval_run.py)**都写同一份格式**的 `index.json`(回归落在
+`<工作目录>/eval/`,批量判卷落在 `--out` 目录),由 `scripts/batch_summary.py` 统一计算,口径只有一套:
+
+```json
+{
+  "evaluation_time": "…",
+  "total_cases": 8,          // 用例总数(含执行失败、判卷异常、待裁决)
+  "passed": 5,               // 通过数 = verdict 为 PASS 或 PASS_WITH_GAPS
+  "pass_rate": 0.625,        // 通过数 ÷ 用例总数  ← 业务要的"准确率"
+  "score_avg": 71.3,         // 各用例 quality_score.total_score 的算术平均,没评出分的按 0
+  "verdicts": {"PASS": 4, "PASS_WITH_GAPS": 1, "PARTIAL_PASS": 0, "FAIL": 2, "EVAL_ERROR": 0, "NOT_EVALUATED": 1},
+  "cases": [{"case_id": "…", "verdict": "…", "quality_score": 100, "…": "…"}]
+}
+```
+
+- **准确率取 `pass_rate`**:分子 PASS 加 PASS_WITH_GAPS(期望根因全命中,缺部分数据不扣通过),
+  分母是全部用例——执行失败、判卷异常、待裁决都算不通过;
+- **多用例的总得分取 `score_avg`**:每个用例的 total_score 是"六关过了几关"(0~100),批量就是它们的
+  算术平均,没评出分的用例按 0 计——一个用例挂在环境关(0 分)会把平均拉低,这是有意的;
+- 单用例的六维得分仍看各用例目录下的 `quality_score.json`(下一节)。
 
 ### quality_score.json(平台展示评分,机械转换自报告)
 
