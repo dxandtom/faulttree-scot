@@ -62,13 +62,14 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 - **表头怎么写都认**(格式没跟交付方钉死,宽进):层级列裸 `L1`/`L2`…、`L1(Chinese)`、`L1(中文)`、
   全角括号、大小写、带空格都行;**没有 node_id**(有 node_id 的会被当成我们的调优表拒收);
   zip 列叫 `zip`(或唯一一个列名含 zip 的);zip 值带/不带 `.zip` 都行;
-  **平台1 导出表直接给也认**(`L1_Name_CN`/`L1_Name_EN` 成对 + `Product_Obs` + `Product_Name`,
-  层级动态):节点定位取 `_Name_CN` 列,`_Name_EN` 与 `Product_Obs`(obs 下载地址,工装层的事)
-  整列忽略,`Product_Name` 当 zip 列——zip 包本身先由联调驱动按 `Product_Obs` 下载到位
-  (见 `integration/platform1/`);
-  **判据列可选**(表头含 判据/判断方法/判断条件/judgment/judgement 的列;平台1 增强表的
-  `judgement_condition_cn`/`_en` 成对时取 cn 弃 en)——在场即启用下面的清除行与判据同步语义,
-  老表没有此列行为一切照旧;
+  **平台全量表直接给也认**(正式列名:`Node_ID | L1_Name_CN | L1_Name_EN | … | Ln_Name_CN | Ln_Name_EN
+  | Diagnosis_Method_CN | Diagnosis_Method_EN | Solution_CN | Solution_EN | Product_Obs | Product_Name
+  | Need_Optimize`,层级动态):节点定位取 `_Name_CN` 列;`Node_ID`(平台的节点 UUID)、`_Name_EN`、
+  `Product_Obs`(obs 下载地址,工装层的事)整列忽略;`Product_Name` 当 zip 列——zip 包本身先由联调驱动
+  按 `Product_Obs` 下载到位(见 `integration/platform1/`)。认表靠"层级列 + Product_Name",带 `Need_Optimize`
+  列的一律按平台表处理(即使带 Node_ID 也不会误当成我们的调优表);
+  **判据列可选**(平台的 `Diagnosis_Method_CN`/`_EN` 成对取 CN;老口径 判据/判断方法/判断条件/
+  judgment/judgement 也认)——在场即启用下面的清除行与判据同步语义,老表没有此列行为一切照旧;
 - **行语义三种**(全量表口径,机械分类):
   | 判据格 | zip 格 | 含义 | 动作 |
   |---|---|---|---|
@@ -94,11 +95,13 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 - **全量对账**:台账里迁移过、这次表里**已无该节点**的(上游可能删了)/节点还在但**没配 zip** 的
   (优化包撤了?)——结尾分别点名,默认**不自动删树**(减法必须人确认);确认真要删,
   调优表删掉该行再 import 即生效,或直接用下面的 `--map-mode all`;
-- **标记列(平台契约)**:表头含 是否修改/是否变更/需要优化/is_modified 等的列,在场即启用
-  **标记契约**——结构(增删)仍看行的出现/消失,内容动作(zip 迁移/判据同步/双空清除/
-  解决方案同步)**只对标记行执行**;未标记行只当结构参照:zip 不迁不下载(点名提示)、
-  判据与树不同也不动(info 点名,确要改就标记后重跑)。取值 是/要/需要/Y/yes/1/true 算
-  "要改",其余含空算"不改";无标记列=全部行视同已标记(老口径);
+- **标记列(平台契约)**:平台正式名 `Need_Optimize`(取值 TRUE/FALSE;老口径 是否修改/is_modified
+  等也认,是/要/需要/Y/yes/1/true 算"要改",其余含空算"不改"),在场即启用**标记契约**——结构(增删)
+  仍看行的出现/消失,内容动作(zip 迁移/判据同步/双空清除/解决方案同步)**只对标记行执行**;未标记行
+  只当结构参照:zip 不迁不下载(汇总一行提示)、判据与树不同也不动(info 点名,确要改就标记后重跑)。
+  无标记列=全部行视同已标记(老口径)。**平台每次都给全量表(ALL 口径)**:全部 FALSE 且表与树一致
+  = 零结构动作,只刷新标准件(等于"刷新技能");表里少了的节点照删(三道保险);有 TRUE 行才做内容动作;
+- **每次收表/收包都先刷新标准件**(与本机同门对齐,见「无包翻新」),汇总行带"标准件刷新 N 处";
 - **解决方案列**:表头含 解决方案/solution 的列(成对取 cn 弃 en;调优表的
   Recommend Solution(Chinese) 也认),在场即启用**解决方案以表为准**——标记行的非空
   解决方案与产物 solutions.json 不同就同步(汇总单列 `≈`;判据/绑定一格不碰);

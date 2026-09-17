@@ -5,19 +5,20 @@
 本脚本把现行 skill 的树原样导成这张表,作为"零改动基线"——不动它直接喂驱动,预期零动作;
 在上面改几格(改判据/加一行/删一行/标记"是"),就是一次真实的树更新实验,不用等平台样例。
 
-表的样子(层级列数按树深度动态,其余列名与平台增强表一致):
-  L1_Name_CN | L1_Name_EN | … | Ln_Name_CN | Ln_Name_EN
-  | judgement_condition_cn | judgement_condition_en          判据(取 cn;空+无 zip=清除该节点判据与绑定)
-  | solution_cn | solution_en                                解决方案(取 cn;空≠删除)
+表的样子(层级列数按树深度动态,列名与平台正式全量表一致):
+  Node_ID                                                    平台的节点 UUID(本地导出留空;技能整列忽略)
+  | L1_Name_CN | L1_Name_EN | … | Ln_Name_CN | Ln_Name_EN
+  | Diagnosis_Method_CN | Diagnosis_Method_EN                判据(取 CN;空+无 zip=清除该节点判据与绑定)
+  | Solution_CN | Solution_EN                                解决方案(取 CN;空≠删除)
   | Product_Obs | Product_Name                               交付 zip(obs 地址 / 包名;结构行留空)
-  | 是否修改                                                 标记列:是/Y/1 才做内容动作(迁移/判据同步/方案同步)
+  | Need_Optimize                                            标记列:TRUE 才做内容动作(迁移/判据同步/方案同步)
 行语义(ALL):树上每个节点一行(含根与中间结构层);表里没出现的节点=删除;树上没有的行=新增。
 
 用法:
   python integration/platform1/make_full_table.py --product <skill 的 assets 目录> --out 全量表.csv
       [--platform-excel 老平台表.xlsx]   按路径把老表的 Product_Obs/Product_Name 抄进来
       [--zip-store <目录>]               本地货架:目录里有 <节点名>.zip 的行填 Product_Name
-      [--mark 节点甲,节点乙 | --mark-all] 标记列填"是"(缺省全"否"=零改动基线)
+      [--mark 节点甲,节点乙 | --mark-all] 标记列填 TRUE(缺省全 FALSE=零改动基线)
 输出 .csv(utf-8-sig)或 .xlsx(需 openpyxl);驱动与 migrate 两种都认。
 """
 from __future__ import annotations
@@ -131,27 +132,27 @@ def build_rows(product: Path, platform_excel: Path | None, zip_store: Path | Non
     depth = max(len(c) for c in chains.values())
     sols = load_solutions(product)
     pz = load_platform_zips(platform_excel) if platform_excel else {}
-    header = []
+    header = ["Node_ID"]
     for i in range(1, depth + 1):
         header += [f"L{i}_Name_CN", f"L{i}_Name_EN"]
-    header += ["judgement_condition_cn", "judgement_condition_en", "solution_cn", "solution_en",
-               "Product_Obs", "Product_Name", "是否修改"]
+    header += ["Diagnosis_Method_CN", "Diagnosis_Method_EN", "Solution_CN", "Solution_EN",
+               "Product_Obs", "Product_Name", "Need_Optimize"]
     rows, n_zip, n_mark = [], 0, 0
     for nid in order:
         n = nodes[nid]
         names = chains[nid]
-        row = []
+        row = [""]                                       # Node_ID:本地没有平台 UUID,留空
         for i in range(depth):
             row += [names[i] if i < len(names) else "", ""]
         en = str(n.get("name_en") or n.get("en") or "")
         if en and len(names) <= depth:
-            row[(len(names) - 1) * 2 + 1] = en
+            row[(len(names) - 1) * 2 + 2] = en
         obs, zname = pz.get(tuple(names), ("", ""))
         if not zname and zip_store is not None and (zip_store / f"{names[-1]}.zip").exists():
             obs, zname = f"fake://store/{names[-1]}.zip", f"{names[-1]}.zip"
-        mark = "是" if (mark_all or names[-1] in marks) else "否"
+        mark = "TRUE" if (mark_all or names[-1] in marks) else "FALSE"
         n_zip += bool(zname)
-        n_mark += mark == "是"
+        n_mark += mark == "TRUE"
         row += [str(n.get("condition") or ""), "", sols.get(nid, ""), "", obs, zname, mark]
         rows.append(row)
     return header, rows, {"nodes": len(order), "depth": depth, "zip_rows": n_zip, "marked": n_mark}
@@ -196,13 +197,14 @@ def main() -> int:
     out = write_table(Path(a.out).expanduser().resolve(), header, rows)
     print(f"[全量表] {out}")
     print(f"  节点 {st['nodes']} 行(含根与结构层),层级 {st['depth']},带 zip {st['zip_rows']} 行,"
-          f"标记「是」{st['marked']} 行")
+          f"标记 TRUE {st['marked']} 行")
     print("  不改直接喂驱动(optimizeType=ALL)= 零改动基线,预期零动作;要做实验就在表上改:")
-    print("    改判据 → 该行 judgement_condition_cn 改文字 + 是否修改=是      (预期 ~ 判据同步)")
-    print("    换包   → 该行 Product_Name 指向货架上新 zip + 是否修改=是      (预期 ✓ 迁移落地)")
+    print("    改判据 → 该行 Diagnosis_Method_CN 改文字 + Need_Optimize=TRUE     (预期 ~ 判据同步)")
+    print("    换包   → 该行 Product_Name 指向货架上新 zip + Need_Optimize=TRUE   (预期 ✓ 迁移落地)")
     print("    加节点 → 新增一行,上级各层照抄,填判据,zip 留空                  (预期 + 新增)")
     print("    删节点 → 整行删掉(含其子孙行)                                    (预期 ✂ 删除)")
-    print("    清判据 → judgement 与 Product_Name 都清空 + 是否修改=是           (预期 清除行执行)")
+    print("    清判据 → Diagnosis_Method_CN 与 Product_Name 都清空 + Need_Optimize=TRUE (预期 清除行执行)")
+    print("    全 FALSE 且没改 → 结构对账零动作,只刷新标准件(等于刷新技能)")
     return 0
 
 

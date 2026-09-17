@@ -784,6 +784,13 @@ def refresh_engine(product: Path) -> list:
     return touched
 
 
+def _refresh_standard(product: Path) -> int:
+    """每次收表/收包都先把标准件与本机同门对齐(见 refresh_engine),打一行结果;返回动了几处。"""
+    touched = refresh_engine(product)
+    print(f"  标准件刷新 {len(touched)} 处" if touched else "  标准件与本机同门一致,无需刷新")
+    return len(touched)
+
+
 def upgrade_cross_scaffold(product: Path) -> None:
     """产物 cross_analyzer.py 骨架过旧(无 S 全量喂源/raw 通道)→ 借 generate 的手术就地升级。"""
     ca = product / "scripts" / "cross_analyzer.py"
@@ -1250,9 +1257,41 @@ _MAP_LVL_CN_RE = re.compile(r"^L(\d+)_Name_CN$", re.IGNORECASE)
 _MAP_LVL_EN_RE = re.compile(r"^L(\d+)_Name_EN$", re.IGNORECASE)
 
 
+_MARK_KEYS = ("是否修改", "是否变更", "是否优化", "需要优化", "修改标记", "is_modified", "need_optimize")
+_MARK_EXACT = ("modified", "changed", "is_update", "update_flag")
+_JD_KEYS = ("判据", "判断方法", "判断条件", "judgment", "judgement", "diagnosis_method", "diagnosismethod")
+_TUNING_COL_PREFIXES = ("判据:", "绑定:", "meta")
+
+
+def _norm_header(h) -> str:
+    return str(h).strip().replace("（", "(").replace("）", ")").replace(" ", "")
+
+
+def _is_marker_col(hn: str) -> bool:
+    """标记列(平台正式名 Need_Optimize;老口径 是否修改/is_modified 等)。"""
+    low = hn.lower()
+    return any(k in low for k in _MARK_KEYS) or low in _MARK_EXACT
+
+
+def _is_judgment_col(hn: str) -> bool:
+    """判据列(平台正式名 Diagnosis_Method_CN/EN;老口径 判据/判断方法/judgement_condition 等)。"""
+    low = hn.lower()
+    return any(k in low for k in _JD_KEYS)
+
+
+def _is_tuning_header(names) -> bool:
+    """是不是我们自己的调优表:有 node_id 列且带 判据:/绑定:/meta 列。带标记列的一律不算——
+    平台表带 Node_ID(节点 UUID)与 Need_Optimize,认对应表靠"层级列+Product_Name",标记列是兜底。"""
+    lows = [n.lower() for n in names]
+    if "node_id" not in lows or any(_is_marker_col(n) for n in names):
+        return False
+    return any(n.startswith(_TUNING_COL_PREFIXES) for n in names)
+
+
 def _parse_map_header(header):
-    """表头 → (层级列升序 [(层,原列名)…], zip 列名, 判据列名|None);不像对应表(缺层级列/
-    缺 zip 列/带 node_id——那是我们的调优表)→ (None, None, None)。
+    """表头 → (层级列升序 [(层,原列名)…], zip 列名, 判据列名|None, 标记列名|None, 解决方案列名|None);
+    不像对应表(缺层级列/缺 zip 列)或是我们自己的调优表 → 五个 None。
+    平台表的 Node_ID 列(节点 UUID)整列忽略:节点定位靠路径名字,不依赖平台编号。
     zip 列:先认整格就叫 zip 的,没有再认 Product_Name(平台1 表:值=交付 zip 包名),
     再认唯一含 zip 的列名。
     平台1 表的 L{n}_Name_CN 当层级列(定位靠中文名),L{n}_Name_EN 与 Product_Obs 整列忽略。
@@ -1266,10 +1305,12 @@ def _parse_map_header(header):
     在场即启用"解决方案以表为准"同步(空不清除:很多节点本无解决方案,空≠删除)。"""
     lvls, zip_col, pname_col, zipish, jd_cands, mk_col, sol_cands = \
         [], None, None, [], [], None, []
-    for h in header:
-        hn = str(h).strip().replace("（", "(").replace("）", ")").replace(" ", "")
+    names = [_norm_header(h) for h in header]
+    if _is_tuning_header(names):
+        return None, None, None, None, None
+    for h, hn in zip(header, names):
         if hn.lower() == "node_id":
-            return None, None, None, None, None          # 有 node_id 的是调优表,不是对应表
+            continue                                     # 平台表的节点 UUID:整列忽略
         m = _MAP_LVL_RE.match(hn) or _MAP_LVL_CN_RE.match(hn)
         if m:
             lvls.append((int(m.group(1)), h))
@@ -1281,14 +1322,11 @@ def _parse_map_header(header):
             pname_col = h                                # 平台1 表:zip 包名列
         elif "zip" in hn.lower():
             zipish.append(h)
-        elif ("是否修改" in hn or "是否变更" in hn or "是否优化" in hn or "需要优化" in hn
-              or "修改标记" in hn or "is_modified" in hn.lower() or "need_optimize" in hn.lower()
-              or hn.lower() in ("modified", "changed", "is_update", "update_flag")):
+        elif _is_marker_col(hn):
             mk_col = h                                   # 标记列:在判据列之前认,防"判据是否修改"误吸
         elif "解决方案" in hn or "solution" in hn.lower():
             sol_cands.append(h)                          # 解决方案列(平台名或调优表 Recommend Solution)
-        elif ("判据" in hn or "判断方法" in hn or "判断条件" in hn
-              or "judgment" in hn.lower() or "judgement" in hn.lower()):
+        elif _is_judgment_col(hn):
             jd_cands.append(h)
     if zip_col is None:
         zip_col = pname_col
@@ -1358,7 +1396,7 @@ def load_map_excel(path: Path):
         raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名/带 (Chinese) 后缀/平台1 的"
                          f" L1_Name_CN 都认)+「zip」列(或平台1 的 Product_Name 列),"
                          f"且不该有 node_id 列;实际表头:{header}")
-    out, zipless, clears, sols = [], [], [], {}
+    out, zipless, clears, sols, unmarked_zip = [], [], [], {}, []
     for i, r in enumerate(rows, start=2):
         z = str(r.get(zip_col) or "").strip()
         jd = str(r.get(jd_col) or "").strip() if jd_col is not None else ""
@@ -1377,11 +1415,13 @@ def load_map_excel(path: Path):
         if not names:
             raise SystemExit(f"对应表第 {i} 行填了 zip「{z}」但层级列全空——没有节点路径,对应不了")
         if not marked:
-            print(f"  [标记] 第 {i} 行「{names[-1]}」填了 zip 但未标记变更——按标记契约不迁移,"
-                  "只当结构参照")
+            unmarked_zip.append(names[-1])
             zipless.append((names, jd, marked))
             continue
         out.append((names, z, i, jd))
+    if unmarked_zip:
+        print(f"  [标记] {len(unmarked_zip)} 行填了 zip 但未标记变更——按标记契约不迁移,只当结构参照:"
+              + "、".join(unmarked_zip[:6]) + ("…" if len(unmarked_zip) > 6 else ""))
     if not out and not clears and not sols and not (jd_col is not None and zipless):
         raise SystemExit("对应表里没有任何一行填了 zip 列,也没有清除行(双空)或可同步的"
                          "判据/解决方案行——没有要执行的对应关系")
@@ -1482,6 +1522,19 @@ def _pick_for_row(sub: Path, row_name: str, md_name: str):
         if any(p.name == want for p in sub.rglob("fault_check_*.py")):
             return find_scripts(sub, None, node_name=row_name)
     return find_scripts(sub, None, node_name=md_name)
+
+
+def _print_map_summary(n_rows, n_ok, n_add, n_refreshed, has_fails, counted) -> None:
+    """对应表批量迁移的汇总行:落地数 + 各类动作计数(为 0 的不显示)+ 标准件刷新;
+    表里没有标记行、结构也没变时,说清楚这一单到底做了什么。"""
+    head = f"落地 {n_ok + n_add}/{n_rows} 行" + (f"(其中新增节点 {n_add} 个)" if n_add else "")
+    parts = [text.format(n=n) for n, text in counted if n]
+    if n_refreshed:
+        parts.append(f"标准件刷新 {n_refreshed} 处")
+    print("\n对应表批量迁移汇总:" + ",".join([head] + parts))
+    if not (n_rows or n_add or has_fails or any(n for n, _t in counted[1:6])):
+        print("  表里没有标记行,结构与树一致——本次"
+              + ("只做了标准件刷新" if n_refreshed else "没有任何改动(标准件也已是最新)"))
 
 
 def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
@@ -1707,9 +1760,9 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         else:
             dels, too_deep = res
 
+    n_refreshed = _refresh_standard(product)             # 收表必刷:全 FALSE 的全量表也等于"刷新技能"
     added_report = []
     if oks or adds or sadds or jd_edits or sol_edits or dels:
-        refresh_engine(product)
         for _sub, _m, fc, deps, *_rest in oks + adds:
             _copy_scripts(product, fc, deps)
         _surgery(product,
@@ -1776,15 +1829,15 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                     json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
             cleared_report = c_edits
 
-    print(f"\n对应表批量迁移汇总:落地 {len(oks) + len(adds)}/{len(entries)} 行"
-          + (f"(其中新增节点 {len(adds)} 个)" if adds else "")
-          + (f",跳过 {len(skips)} 行(内容与上次迁移一致;--force 强制重迁)" if skips else "")
-          + (f",判据同步 {len(jd_edits)} 个(绑定不动)" if jd_edits else "")
-          + (f",解决方案同步 {len(sol_edits)} 个" if sol_edits else "")
-          + (f",纯判据新增 {len(sadds)} 个" if sadds else "")
-          + (f",删除节点 {len(dels)} 个(全量表口径)" if dels else "")
-          + (f",清除 {len(cleared_report)} 个节点(判据+绑定)" if cleared_report else "")
-          + (f",清除行已是空跳过 {len(clear_already)} 个(幂等)" if clear_already else ""))
+    _print_map_summary(len(entries), len(oks), len(adds), n_refreshed, bool(fails), [
+        (len(skips), "跳过 {n} 行(内容与上次迁移一致;--force 强制重迁)"),
+        (len(jd_edits), "判据同步 {n} 个(绑定不动)"),
+        (len(sol_edits), "解决方案同步 {n} 个"),
+        (len(sadds), "纯判据新增 {n} 个"),
+        (len(dels), "删除节点 {n} 个(全量表口径)"),
+        (len(cleared_report), "清除 {n} 个节点(判据+绑定)"),
+        (len(clear_already), "清除行已是空跳过 {n} 个(幂等)"),
+    ])
     for _sub, m, fc, _deps, entry, per_ne, kwargs, nid, note, _fp, _cond in oks:
         print(f"  ✓ {nid}「{nodes[nid].get('name')}」 ← {fc.name}:{entry}"
               + ("/单网元" if per_ne else "") + (f"  ⚠ {note}" if note else ""))
@@ -1945,8 +1998,8 @@ def migrate_batch(a, pkg: Path, product: Path) -> None:
                 note = (note + ";" if note else "") + f"契约WARN {','.join(ginfo['warns'])}(转接头兜,详见返厂清单)"
         oks.append((sub, method, fc, deps, entry, per_ne, kwargs, nid, note, fp))
 
+    _refresh_standard(product)
     if oks:
-        refresh_engine(product)
         for _sub, _m, fc, deps, *_rest in oks:
             _copy_scripts(product, fc, deps)
         _surgery(product, [(nid, m["condition"], _binding(fc.name, entry, per_ne, kwargs, m["name"]))
