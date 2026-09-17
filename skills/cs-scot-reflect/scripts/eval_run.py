@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from batch_summary import format_line, write_index  # noqa: E402  批量汇总的唯一口径
+from batch_summary import format_line, read_case_score, write_batch_score  # noqa: E402  批量汇总的唯一口径
 
 # 脚本所在目录（相对于本文件位置推导）
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -882,7 +882,7 @@ def generate_report(
         # 平台展示适配:同目录机械产出 quality_score.json(六维 BOOLEAN 计分,短路后未评维度
         # 记 null/N-A,总分=通过关数/6×100;口径与实现见 score_report.py)。EVAL_ERROR 无有效
         # 评分主动跳过;生成失败不拖垮评估——报告仍是权威,可手跑 score_report.py 补出。
-        case_score = None
+        case_score, case_dims = None, {}
         try:
             import importlib.util as _ilu
             _spec = _ilu.spec_from_file_location(
@@ -890,7 +890,7 @@ def generate_report(
             _sr = _ilu.module_from_spec(_spec)
             _spec.loader.exec_module(_sr)
             _score_path = _sr.write_score(report_path)
-            case_score = json.loads(Path(_score_path).read_text(encoding="utf-8")).get("total_score")
+            case_score, case_dims = read_case_score(_score_path)
             print(f"[eval_run] {case_id}: 平台评分已写入 {_score_path}")
         except ValueError as e:
             print(f"[eval_run] {case_id}: 不产 quality_score({e})")
@@ -928,13 +928,14 @@ def generate_report(
             "case_id": case_id,
             "verdict": verdict,
             "quality_score": case_score,
+            "dimensions": case_dims,
             "round": round_num,
             "report_path": str(report_path.relative_to(out_dir))
         })
 
-    # 根目录汇总 index.json:与一键回归同一口径(batch_summary.py),平台读这一份
-    summary_report = write_index(out_dir, all_case_summaries, evaluation_time)
-    print(f"[eval_run] 汇总已写入 {out_dir / 'index.json'}")
+    # 根目录 quality_score.json(整批):与一键回归同一口径(batch_summary.py),平台读这一份
+    summary_report = write_batch_score(out_dir, all_case_summaries, evaluation_time)
+    print(f"[eval_run] 整批汇总已写入 {out_dir / 'quality_score.json'}")
 
     # 写入 failure_signatures.json
     if all_failure_signatures:

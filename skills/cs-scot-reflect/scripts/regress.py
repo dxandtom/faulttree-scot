@@ -37,7 +37,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
-from batch_summary import format_line, write_index  # noqa: E402  批量汇总的唯一口径
+from batch_summary import format_line, read_case_score, write_batch_score  # noqa: E402  批量汇总的唯一口径
 SKILLS_ROOT = SCRIPTS_DIR.parents[1]                     # .../skills/
 
 
@@ -183,17 +183,11 @@ def find_eval_report(eval_out: Path, case_id: str):
         rep = json.loads((latest / "evaluation_report.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
-    qs = None
-    qp = latest / "quality_score.json"
-    if qp.exists():
-        try:
-            qs = json.loads(qp.read_text(encoding="utf-8")).get("total_score")
-        except Exception:  # noqa: BLE001
-            pass
+    qs, dims = read_case_score(latest / "quality_score.json")
     vd = rep.get("verdict_detail") or {}
     return {"report_dir": str(latest), "verdict": (rep.get("meta") or {}).get("verdict") or vd.get("verdict"),
             "error_class": vd.get("error_class"), "error_category": vd.get("error_category"),
-            "quality_score": qs}
+            "quality_score": qs, "dimensions": dims}
 
 
 def main() -> int:
@@ -345,15 +339,17 @@ def main() -> int:
     done = [r for r in rows if r["stage"] == "evaluated"]
     pending = [r for r in rows if r["stage"] == "pending_adjudication"]
     broken = [r for r in rows if r["stage"] in ("exec_fail", "eval_error")]
-    # 批量汇总 index.json:与 eval_run 批量判卷同一口径(batch_summary.py),平台读这一份;
+    # 整批 quality_score.json:与 eval_run 批量判卷同一口径(batch_summary.py),平台读这一份;
     # 没判卷的用例(挂起/执行失败/判卷异常)verdict 记 NOT_EVALUATED,计入分母
-    index = write_index(eval_out, [{"case_id": r["case_id"], "verdict": r.get("verdict") if r["stage"] == "evaluated" else None,
-                                    "quality_score": r.get("quality_score"), "stage": r["stage"],
-                                    "error_category": r.get("error_category"), "report_dir": r.get("report_dir", "")}
-                                   for r in rows], datetime.datetime.now().isoformat(timespec="seconds"))
+    index = write_batch_score(eval_out, [{"case_id": r["case_id"],
+                                          "verdict": r.get("verdict") if r["stage"] == "evaluated" else None,
+                                          "quality_score": r.get("quality_score"), "dimensions": r.get("dimensions") or {},
+                                          "stage": r["stage"], "error_category": r.get("error_category"),
+                                          "report_dir": r.get("report_dir", "")}
+                                         for r in rows], datetime.datetime.now().isoformat(timespec="seconds"))
     passed = index["passed"]
     summary = {"total": len(rows), "evaluated": len(done), "passed": passed,
-               "pass_rate": index["pass_rate"], "score_avg": index["score_avg"],
+               "pass_rate": index["pass_rate"], "total_score": index["total_score"],
                "pending_adjudication": [r["case_id"] for r in pending],
                "exec_or_eval_failed": [r["case_id"] for r in broken], "cases": rows}
     sp = out / "regress_summary.json"
@@ -361,7 +357,7 @@ def main() -> int:
     print(f"\n[regress] 汇总:{len(rows)} 用例 | 已判卷 {len(done)}(通过 {passed})"
           f" | 挂起待裁决 {len(pending)} | 执行/判卷异常 {len(broken)}")
     print(f"  {format_line(index)}")
-    print(f"  平台/业务取数:{eval_out / 'index.json'}(pass_rate、score_avg)")
+    print(f"  平台/业务取数:{eval_out / 'quality_score.json'}(整批:pass_rate、total_score、六维通过比例)")
     if pending:
         print("  ⏸ 挂起用例(裁决后重跑 finalize+render,再 `--eval-only` 或 --case 补判):"
               + "、".join(r["case_id"] for r in pending))

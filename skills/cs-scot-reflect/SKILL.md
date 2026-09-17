@@ -84,8 +84,8 @@ python "<本目录>/scripts/eval_run.py" \
 finalize_rca 机械合成 → 判卷。
 **finalize 拦下需权衡的真冲突时，该用例记「挂起待裁决」并点名，脚本绝不代裁**——由你按
 fault-tree-rca 法则在该结果目录补 decisions.json、重跑 finalize+render，再用
-`--eval-only`（或 `--case <该用例>`）补判。批量汇总落 `<工作目录>/eval/index.json`（平台/业务取数的
-唯一文件，见下文「批量汇总 index.json」），回归自己的明细（挂起、异常清单）落 `<工作目录>/regress_summary.json`，
+`--eval-only`（或 `--case <该用例>`）补判。整批汇总落 `<工作目录>/eval/quality_score.json`（平台/业务取数的
+唯一文件，见下文「整批 quality_score.json」），回归自己的明细（挂起、异常清单）落 `<工作目录>/regress_summary.json`，
 逐用例日志在 `<工作目录>/logs/`。
 **默认即无人值守口径**：待裁决用例不挂起等人，直接按不通过（FAIL，
 error_category=pending_adjudication）计入准确率分母——裁决做不了就等于这轮没优化好。
@@ -243,7 +243,7 @@ Step 3: 综合裁定 verdict
 
 ```
 <out>/                                # 默认 <result-dir 父目录>/<scenario>-eval/
-├── index.json                    # 批量汇总：通过数/总数/pass_rate/score_avg（平台/业务取数的唯一文件，见下文）
+├── quality_score.json            # 整批汇总：pass_rate/total_score/六维通过比例（平台/业务取数的唯一文件，见下文）
 ├── feedback_to_generate.json     # 反馈（仅有问题时生成）
 ├── failure_signatures.json       # 全部失败签名（仅有问题时生成）
 ├── fuse_history.jsonl            # 熔断历史（跨轮累计，同case同节点同类计数）
@@ -323,28 +323,35 @@ Step 3: 综合裁定 verdict
 > 三态按 classify 的 error_class 链条机械推导——旧版把没评到的关写成 `passed:true`,
 > 下游一读就是"通过",语义错,v11 起修正。
 
-### 批量汇总 index.json(平台/业务取数的唯一文件)
+### 整批 quality_score.json(评估输出根目录;平台/业务取数的唯一文件)
 
-一键回归(regress.py)与批量判卷(eval_run.py)**都写同一份格式**的 `index.json`(回归落在
-`<工作目录>/eval/`,批量判卷落在 `--out` 目录),由 `scripts/batch_summary.py` 统一计算,口径只有一套:
+**两级同名同骨架**:每个用例目录里的 `quality_score.json` 是单用例的(六维 true/false/null,见下一节);
+评估输出**根目录**的 `quality_score.json` 是整批的。一键回归(regress.py,落在 `<工作目录>/eval/`)与
+批量判卷(eval_run.py,落在 `--out` 目录)写的是同一份格式,由 `scripts/batch_summary.py` 统一计算:
 
 ```json
 {
-  "evaluation_time": "…",
-  "total_cases": 8,          // 用例总数(含执行失败、判卷异常、待裁决)
-  "passed": 5,               // 通过数 = verdict 为 PASS 或 PASS_WITH_GAPS
-  "pass_rate": 0.625,        // 通过数 ÷ 用例总数  ← 业务要的"准确率"
-  "score_avg": 71.3,         // 各用例 quality_score.total_score 的算术平均,没评出分的按 0
-  "verdicts": {"PASS": 4, "PASS_WITH_GAPS": 1, "PARTIAL_PASS": 0, "FAIL": 2, "EVAL_ERROR": 0, "NOT_EVALUATED": 1},
-  "cases": [{"case_id": "…", "verdict": "…", "quality_score": 100, "…": "…"}]
+  "level": "batch",
+  "total_score": 46.2,       // 各用例 total_score 的算术平均,没评出分的按 0 —— 多用例的总得分
+  "pass_rate": 0.1111,       // 通过数 ÷ 用例总数 —— 业务要的"准确率"
+  "total_cases": 9,          // 含执行失败、判卷异常、待裁决
+  "passed": 1,               // verdict 为 PASS 或 PASS_WITH_GAPS
+  "verdicts": {"PASS": 0, "PASS_WITH_GAPS": 1, "PARTIAL_PASS": 0, "FAIL": 8, "EVAL_ERROR": 0, "NOT_EVALUATED": 0},
+  "dimensions": {
+    "env_failure": {"value": 0.8889, "score": 89, "passed_cases": 8, "dimension_name": {"default": "执行环境", "zh_CN": "执行环境", "en_US": "Execution Environment"}},
+    "…五个同形…": {}
+  },
+  "meta": {"evaluation_time": "…", "value_type": "RATIO"},
+  "cases": [{"case_id": "…", "verdict": "…", "quality_score": 100, "dimensions": {"env_failure": true, "…": null}}]
 }
 ```
 
 - **准确率取 `pass_rate`**:分子 PASS 加 PASS_WITH_GAPS(期望根因全命中,缺部分数据不扣通过),
   分母是全部用例——执行失败、判卷异常、待裁决都算不通过;
-- **多用例的总得分取 `score_avg`**:每个用例的 total_score 是"六关过了几关"(0~100),批量就是它们的
-  算术平均,没评出分的用例按 0 计——一个用例挂在环境关(0 分)会把平均拉低,这是有意的;
-- 单用例的六维得分仍看各用例目录下的 `quality_score.json`(下一节)。
+- **多用例总得分取 `total_score`**:单用例的 total_score 是"六关过了几关"(0~100),整批是它们的算术平均,
+  没评出分的用例按 0——挂在第一关的用例把平均拉低是有意的;
+- **整批六维**:各维 = 通过该关的用例数 ÷ 用例总数(没评到的关按不通过),所以 total_score 也等于六个维度分的平均,
+  平台展示可以和单用例用同一套六维界面,只是单用例是布尔、整批是比例(`meta.value_type`)。
 
 ### quality_score.json(平台展示评分,机械转换自报告)
 
