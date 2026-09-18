@@ -1,8 +1,8 @@
 # quality_score.json 维度对照表(平台置信度配置用)
 
-评估反思的平台评分六维度 = 错误分类六类(`SKILL.md`「错误分类」表),顺序即评估顺序。
+评估反思的平台评分六维度 = 错误分类六类(`SKILL.md`「评估怎么判」一节的表),顺序即评估顺序。
 平台侧配置置信度(confidence)时照此表填;我方输出文件 `quality_score.json` 的
-`dimensions` 键名 = 本表 `dimension_key`,格式见 `SKILL.md`「quality_score.json」节。
+`dimensions` 键名 = 本表 `dimension_key`,格式见 `output_files.md` 第 3 节。
 
 计分口径:六关按序、命中即停,不做程度打分——`value_type` 一律 **BOOLEAN**
 (通过 `value:true`→`score:100`;命中 `value:false`→`score:0`;前序命中导致没评到
