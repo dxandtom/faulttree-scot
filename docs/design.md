@@ -87,4 +87,4 @@ docs/                          本文、交接文档、遗留任务
 
 - 六个技能与两个辅助部件已实现并在平台联调；发行包由 `cs-scot-generate-optimize/scripts/package_skill.py` 打出。
 - 已讨论、尚未动手的改动记录在 `docs/遗留任务.md`（如英文树视图）。
-- 三技能的逐文件交接说明见 `docs/handoff-三技能交接.md`；平台接入见 `integration/platform1/README.md` 与交接说明。
+- 平台接入见 `integration/platform1/README.md` 与同目录的交接说明。
