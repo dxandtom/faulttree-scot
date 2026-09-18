@@ -82,7 +82,7 @@ def find_runner(skill_dir: Path) -> Path:
         hits = sorted(bundle.glob("*/scripts/runner.py"))
         if hits:
             return hits[0]
-    raise SystemExit("找不到执行器 runner.py(技能自带 scripts/、同门 cs-scot-execute、"
+    raise SystemExit("找不到执行器 runner.py(技能自带 scripts/、同一 skills 目录下的 cs-scot-execute、"
                      f"聚合技能 {_BUNDLE} 里都没有)——用最新打包重出技能,或部署 cs-scot-execute")
 
 
@@ -98,7 +98,7 @@ def find_rca_scripts(assets: Path) -> Path:
             print(f"[regress] 产物内挂 fault-tree-rca 缺 draft_rca.py(旧代副本)→ 用 {d}"
                   "(建议跑一次 migrate 刷新产物副本,保持版本同代)")
             return d
-    raise SystemExit("找不到 draft_rca.py(产物 assets/fault-tree-rca、同门 fault-tree-rca、"
+    raise SystemExit("找不到 draft_rca.py(产物 assets/fault-tree-rca、同一 skills 目录下的 fault-tree-rca、"
                      f"聚合技能 {_BUNDLE} 里都没有)——先用 migrate 刷新产物或补全部署")
 
 
@@ -203,11 +203,11 @@ def main() -> int:
     ap.add_argument("--out", required=True, help="工作目录(结果/判卷/日志/汇总都落它下面)")
     ap.add_argument("--eval-only", action="store_true", help="入口C:跳过执行,只对既有结果判卷")
     ap.add_argument("--pending-as-fail", action="store_true",
-                    help="(这已是默认口径,参数保留兼容)待裁决用例按不通过(FAIL)计入准确率分母")
+                    help="(这已是默认规则,参数保留兼容)待裁决用例按不通过(FAIL)计入准确率分母")
     ap.add_argument("--pending-hold", action="store_true",
                     help="有人盯的场合用:待裁决用例挂起点名、不计准确率分母,按 fault-tree-rca"
                          " 法则补 decisions.json 后重跑 finalize+render 再补判。"
-                         "默认不挂起——机械链定不了档=这轮没优化好,直接按不通过计(无人值守口径)")
+                         "默认不挂起——机械链定不了档=这轮没优化好,直接按不通过计(无人值守规则)")
     ap.add_argument("--result-dir", help="入口C:既有结果根目录(--eval-only 时必填)")
     ap.add_argument("--case", action="append", default=[], help="只跑这些用例(可多次;默认=库里全部)")
     a = ap.parse_args()
@@ -309,9 +309,9 @@ def main() -> int:
                 if not a.pending_hold:
                     row.update(stage="evaluated", verdict="FAIL",
                                error_category="pending_adjudication",
-                               detail=f"机械链定不了档(待裁决);无人值守口径按不通过计。"
+                               detail=f"机械链定不了档(待裁决);无人值守规则按不通过计。"
                                       f"结果目录 {rdir.name};清单见日志 {logs / f'{sfx}-finalize.log'}")
-                    print("  ✗ 待裁决 → 按不通过计(默认无人值守口径;要挂起等人裁决加 --pending-hold)")
+                    print("  ✗ 待裁决 → 按不通过计(默认无人值守规则;要挂起等人裁决加 --pending-hold)")
                     continue
                 row.update(stage="pending_adjudication",
                            detail=f"结果目录 {rdir.name};待裁决清单见日志 {logs / f'{sfx}-finalize.log'}:"

@@ -168,7 +168,7 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")         # Windows GBK 控制台打 ✓/✗ 不再炸编码
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="生成/优化前门发行打包")
+    ap = argparse.ArgumentParser(description="生成/优化统一入口发行打包")
     ap.add_argument("--out", default=None, help="输出根目录(默认 <仓库>/dist)")
     ap.add_argument("--no-zip", action="store_true", help="只出目录,不打 zip")
     args = ap.parse_args()
@@ -240,7 +240,7 @@ def main() -> int:
                     # 明确自解释,不留裸 traceback——traceback 会诱导弱模型拿 dirs_exist_ok
                     # 之类的静默合并去"修"(实测发生过),那会把两份来源的文件混进包里。
                     raise SystemExit(
-                        f"✗ 包内目标已存在:{dst}(复制 {src_name} 时撞车)。\n"
+                        f"✗ 包内目标已存在:{dst}(复制 {src_name} 时冲突)。\n"
                         "  这不该发生——说明本脚本被改动过或本地版本新旧混装。处置:\n"
                         "  1) 用仓库最新的 package_skill.py 整文件覆盖本脚本(勿手改);\n"
                         "  2) 删掉输出目录 dist/ 后重跑。\n"
@@ -295,7 +295,7 @@ def main() -> int:
     if zip_path:
         print(f"✓ zip: {zip_path}  (sha256 前16位 {digest};同一提交重打可复现)")
     print("  交付平台:给整个包目录,或给 zip(平台认哪种给哪种)。")
-    print("  公共素材(execute/fault-tree-rca/zip2csv)平铺包根(同门容器)——生成线直出的技能即完整可执行成品。")
+    print("  公共素材(execute/fault-tree-rca/zip2csv)平铺包根(扮演 skills 目录的角色)——生成线直接生成的技能即完整可执行成品。")
     return 0
 
 

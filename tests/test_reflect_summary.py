@@ -43,7 +43,7 @@ def run(args):
 
 KEYS = ("total_cases", "passed", "pass_rate", "total_score", "verdicts", "dimensions")
 
-print("\n== ① build_batch_score 口径 ==")
+print("\n== ① build_batch_score 算法 ==")
 bs = load("batch_summary")
 ALL_T = {k: True for k in ("env_failure", "input_gap", "binding_gap", "knowledge_gap", "criteria_gap", "verdict_gap")}
 idx = bs.build_batch_score([
@@ -63,9 +63,9 @@ check("verdicts 计数:没判卷记 NOT_EVALUATED,合计等于总数",
       idx["verdicts"]["NOT_EVALUATED"] == 1 and idx["verdicts"]["EVAL_ERROR"] == 1
       and sum(idx["verdicts"].values()) == idx["total_cases"] == 5, idx["verdicts"])
 check("空批次不除零", bs.build_batch_score([], "t")["pass_rate"] == 0.0 and bs.build_batch_score([], "t")["total_score"] == 0.0)
-check("format_line 带通过数与口径说明", "2/5" in bs.format_line(idx) and "PASS_WITH_GAPS" in bs.format_line(idx))
+check("format_line 带通过数与算法说明", "2/5" in bs.format_line(idx) and "PASS_WITH_GAPS" in bs.format_line(idx))
 
-print("\n== ② 演练场:两条入口写出同一份口径的整批 quality_score_batch.json ==")
+print("\n== ② 演练场:两条入口写出同一算法的整批 quality_score_batch.json ==")
 W = Path(tempfile.mkdtemp(prefix="reflect-idx-"))
 rc, o = run([SCRIPTS / "make_drill.py", "--out", W / "drill"])
 check("演练场生成", rc == 0, o[-300:])
@@ -93,7 +93,7 @@ check("total_score ≈ 六个维度分的平均(算法一致,只差取整)",
       (a.get("total_score"), [d["score"] for d in a.get("dimensions", {}).values()]))
 check("演练场里挂在执行环境关的只有 1 个用例:env_failure 通过 8/9",
       a and a["dimensions"]["env_failure"]["passed_cases"] == n - 1, a.get("dimensions", {}).get("env_failure"))
-check("regress 终端打印与 index 同一口径", f"通过 {a.get('passed')}/{n}" in o2 and "平台/业务取数" in o2, o2[-400:])
+check("regress 终端打印与 index 同一算法", f"通过 {a.get('passed')}/{n}" in o2 and "平台/业务取数" in o2, o2[-400:])
 check("regress_summary.json 带同样的 pass_rate / total_score",
       (lambda s: s.get("pass_rate") == a.get("pass_rate") and s.get("total_score") == a.get("total_score"))(
           json.loads((W / "regress-out" / "regress_summary.json").read_text(encoding="utf-8"))))

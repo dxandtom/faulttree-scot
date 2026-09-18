@@ -276,10 +276,10 @@ def _fc_prepare_data(load, tmp_root):
             header, rows = t
             miss = "缺 NEName 列" if "NEName" not in (header or []) else ("0 行数据" if not rows else "列不合预期")
             detail.append(f"{nm} 表 {len(rows)} 行({miss})")
-        return None, (f"数据两路都不通:{raw_note};三表兜底重建也失败"
+        return None, (f"数据两路都不通:{raw_note};从三张表重建的备用做法也失败"
                       f"({';'.join(detail) or '表载入异常'}——缺 NEName 列常见于**裸日志文件被当表喂**,"
                       "先用 zip2csv 转)")
-    return root, f"三表兜底重建({raw_note})"
+    return root, f"从三张表重建({raw_note})"
 
 
 def _fc_no_judgment(ne_map) -> bool:
@@ -436,7 +436,7 @@ def fault_check(table, args, load):
                         retry = _per_ne_map()            # 吃不了网元层根目录——逐网元重调一次,
                         if not _fc_no_judgment(retry):   # 不改判断逻辑只换喂法;重调也空转就维持原判(数据不足)
                             ne_map = retry
-                            convention_note = ("(调用口径:脚本不认多网元根目录,已按逐网元重调"
+                            convention_note = ("(调用方式:脚本不认多网元根目录,已按逐网元重调"
                                                "——脚本未做规范要求的多网元探测,请交付方补)")
         finally:
             _sys.argv = argv_bak

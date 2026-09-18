@@ -377,7 +377,7 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
         comp = in_path.parent / "_compression.txt"
         comp.write_text(tree_note.strip() + "\n", encoding="utf-8")
         print(tree_note)
-        print(f"  ↑ 压缩统计已落盘 → {comp}(终端把它折叠了也能去这文件看)")
+        print(f"  ↑ 压缩统计已写入 → {comp}(终端把它折叠了也能去这文件看)")
     # 备用做法**始终给出**:技能没有注册成 skill(Skill(name) 报 Unknown)时,改为读取其 SKILL.md 手工产出——
     # fault-tree-rca 是 prompt-only 技能,规则全在文件里,注册与否都能执行。优先用产物目录内的技能副本;找不到就给出
     # 标准候选位置(不要再因为"产物目录里本来就没有 fault-tree-rca"而静默省略这条备用做法——能力最弱的 harness 恰恰需要它)。
@@ -415,8 +415,8 @@ def main() -> None:
     ap.add_argument("--result-suffix", help="可选的结果目录标签:result-<标签>-<运行号>/(只认字母数字-_)。"
                                             "隔离不靠它(每轮目录天然独立),纯粹为了好认——如多份数据并行时"
                                             "用站点名/数据文件夹名,一眼分清哪轮是谁的")
-    ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」,并发/重跑都不撞)。每轮结果落"
-                                     "独立目录 result-[标签-]<运行号>/,与已有轮次重名会硬报错")
+    ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」,并发/重跑都不会重名)。每轮结果写入"
+                                     "独立目录 result-[标签-]<运行号>/,与已有轮次重名会报错")
     ap.add_argument("--new-run", action="store_true",
                     help="(已默认:每轮独立目录)保留仅为兼容,无额外效果")
     args = ap.parse_args()
@@ -482,7 +482,7 @@ def main() -> None:
             print(f"[warn] 缺少数据源: {', '.join(missing)} —— 相应解析步骤将跳过,"
                   "其判据本轮无事实(RCA 按「数据不足」对待);结尾有缺口汇总。")
     if has_star and "raw" not in provided:                # 迁移进来的 S 类脚本直接读原始目录,忘传 raw 是高频事故
-        print("[warn] 未提供 --data raw=<原始数据目录>:迁移的脚本节点(S 类)只能从三表兜底重建,"
+        print("[warn] 未提供 --data raw=<原始数据目录>:迁移的脚本节点(S 类)只能从三张表重建(备用做法),"
               "数据不齐会整体「数据不足」——有原始采集目录就带上(层级给**网元层的父目录**,"
               "拿不准先跑 scripts/check_data.py)。")
 

@@ -95,8 +95,8 @@ def main() -> None:
     except Exception:
         pass
     here = Path(__file__).resolve().parent
-    ap = argparse.ArgumentParser(description="场景技能打包(execute 骨架 + 诊断产物 + rca 规则副本)")
-    ap.add_argument("--out", required=True, help="场景产物目录(assemble 归集过、且已跑完绑定的那个)")
+    ap = argparse.ArgumentParser(description="场景技能打包(执行器脚本 + 诊断产物 + rca 规则副本)")
+    ap.add_argument("--out", required=True, help="场景产物目录(assemble 组装过、且已跑完绑定的那个)")
     ap.add_argument("--dest", help="技能放到哪个目录下;默认=产物目录的父目录")
     ap.add_argument("--name", help="技能名覆盖(英文小写连字符);默认用产物的英文短名(slug)")
     ap.add_argument("--execute-skill", default=str(find_material("cs-scot-execute")))
@@ -109,7 +109,7 @@ def main() -> None:
 
     out = Path(args.out).expanduser().resolve()
     if not (out / "plan.json").exists():
-        print(f"不合格:{out} 下没有 plan.json——先走完 generate 流程(assemble 归集+绑定)再打包,"
+        print(f"不合格:{out} 下没有 plan.json——先走完 generate 流程(assemble 组装+绑定)再打包,"
               "没有计划的技能包上传了也跑不了。", file=sys.stderr)
         sys.exit(1)
 

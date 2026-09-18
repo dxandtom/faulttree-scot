@@ -106,11 +106,11 @@ p = subprocess.run([sys.executable, str(RR), str(rca_p), "--tree", str(tree_p)],
 md = (WORK / "rca_report.md").read_text(encoding="utf-8") if (WORK / "rca_report.md").exists() else ""
 check("退出码 0", p.returncode == 0, p.stderr[-400:])
 check("报告含树视图节且在确证节之前", "## 树视图" in md and md.index("## 树视图") < md.index("## 确证根因"))
-check("rca_tree.txt 落盘", (WORK / "rca_tree.txt").exists()
+check("rca_tree.txt 已写出", (WORK / "rca_tree.txt").exists()
       and "✅ 分支A  [确诊]" in (WORK / "rca_tree.txt").read_text(encoding="utf-8"))
 rp = (WORK / "rca_reply.md").read_text(encoding="utf-8") if (WORK / "rca_reply.md").exists() else ""
 print(rp)
-check("回复稿落盘且头行有计数", rp.startswith("**诊断结论:确证根因 1 条 · 疑似 0 条 · 待确认 1 条**"))
+check("回复稿已写出且头行有计数", rp.startswith("**诊断结论:确证根因 1 条 · 疑似 0 条 · 待确认 1 条**"))
 check("回复稿:树视图在 text 代码块里", (FENCE + "text") in rp and "✅ 分支A  [确诊]" in rp)
 check("回复稿:确证根因表(根因/路径/原文匹配/方案)",
       "| # | 根因 | 根因路径 | 原文匹配(实测 / 依据) | 推荐方案 |" in rp

@@ -151,7 +151,7 @@ check("Diagnosis_Method_CN 当判据列(弃 EN)、Need_Optimize 当标记列、S
 tuning = ["node_id", "L1(Chinese)", "L2(Chinese)", "判据:原文", "绑定:kpi", "Recommend Solution(Chinese)", "meta(勿改)"]
 check("我们自己的调优表仍被拒(不当对应表)", mod._parse_map_header(tuning)[0] is None)
 fallback = ["node_id", "L1_Name_CN", "L2_Name_CN", "判据:原文", "Product_Name", "Need_Optimize"]
-check("兜底:带 Need_Optimize 的表即使像调优表也按平台表认", mod._parse_map_header(fallback)[0] is not None)
+check("备用规则:带 Need_Optimize 的表即使像调优表也按平台表认", mod._parse_map_header(fallback)[0] is not None)
 
 W = Path(tempfile.mkdtemp(prefix="ptable-"))
 product, store = W / "prod", W / "store"
@@ -161,7 +161,7 @@ mk_pkg(store, "干扰导致")
 mk_pkg(store, "新增节点甲")
 table = W / "full.csv"
 
-print("\n== ② 全 FALSE、表与树一致:零结构动作,只刷标准件 ==")
+print("\n== ② 全 FALSE、表与树一致:零结构动作,只刷新工具链公共文件 ==")
 nodes0 = load_tree(product)
 rows = rows_from_tree(nodes0)
 rows[("接入失败示例", "QoS建立失败", "干扰导致")]["Product_Name"] = "干扰导致.zip"      # 有包但 FALSE
@@ -169,12 +169,12 @@ rows[("接入失败示例", "QoS建立失败", "干扰导致")]["Product_Obs"] =
 write_table(table, rows.values())
 rc, o = run_all(store, product, table)
 check("退出码 0", rc == 0, o[-800:])
-check("首轮标准件刷新(compression-demo 引擎脚本旧代)并说明“只做了标准件刷新”",
-      "标准件刷新" in o and "只做了标准件刷新" in o, o[-800:])
+check("首轮刷新工具链公共文件(compression-demo 引擎脚本旧代)并说明“只刷新了工具链公共文件”",
+      "工具链公共文件刷新" in o and "只刷新了工具链公共文件" in o, o[-800:])
 check("未标记的 zip 行只汇总一行,不逐行刷屏", o.count("[标记]") == 1 and "干扰导致" in o.split("[标记]")[1].split("\n")[0], o[-800:])
 check("没有 ✓ / + / ✂ / ~ 动作,节点数不变", not any(s in o for s in ("✓ n", "✂ n", "+ n")) and len(load_tree(product)) == len(nodes0), o[-800:])
 rc, o = run_all(store, product, table)
-check("再跑一遍:标准件已一致,汇报“没有任何改动”", rc == 0 and "没有任何改动" in o, o[-600:])
+check("再跑一遍:工具链公共文件已一致,汇报“没有任何改动”", rc == 0 and "没有任何改动" in o, o[-600:])
 
 print("\n== ③ 全 FALSE、表里少了 License受限 → 删除 ==")
 nodes1 = load_tree(product)

@@ -415,7 +415,7 @@ def k_match(table, b, cls="C"):
     total = sum(dist.values())                          # 纳入统计的非空行数 = 占比分母
     if b.get("absent") and total == 0:
         # 「不存在」判据(故障=「没配置X」)靠"缺行即证据",但整列无值时缺的可能是导出内容而非配置——不判成立
-        return _insuf(cls, "列全空/表为空,「不存在」无从证明(absent 需列里有实际取值兜底)",
+        return _insuf(cls, "列全空/表为空,「不存在」无从证明(absent 需要列里有实际取值作为依据)",
                       resolved_column=col)
     fact = {"class": cls, "status": "ok", "resolved_column": col, "resolve": how,
             "match": mode, "targets": targets, "matched": matched, "total": total,
@@ -919,7 +919,7 @@ def k_script(table, b, sources):
     except SystemExit as e:                              # CLI 型脚本把"出错"写成 print+sys.exit:SystemExit
         return _insuf("S", f"S 脚本调用了 sys.exit({e.code})——库调用不该退出进程"    # 不是 Exception 子类,
                            "(脚本把错误当命令行处理了,如'目录不存在就 exit');"       # 不拦会让整个 cross 中止
-                           "按数据不足处理,绝不冒充'不成立'", script=label)
+                           "按数据不足处理,绝不当作'不成立'", script=label)
     except Exception as e:  # noqa: BLE001
         import traceback
         frames = traceback.extract_tb(e.__traceback__)
@@ -929,7 +929,7 @@ def k_script(table, b, sources):
         where = " ← ".join(f"{Path(f.filename).name}:{f.lineno}({f.name})"
                            for f in reversed((ours or frames)[-3:])) or "?"
         return _insuf("S", f"S 脚本异常({label}):{type(e).__name__}: {e}【位置 {where}】"
-                           "——异常一律按数据不足,绝不冒充'不成立'", script=label)
+                           "——异常一律按数据不足,绝不当作'不成立'", script=label)
     if isinstance(fact, dict) and fact.get("status") == "insufficient_data":
         out = dict(fact)
         out.setdefault("class", "S")

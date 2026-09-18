@@ -193,22 +193,22 @@ def default_out(anchor: Path, stem: str, slug, scenario: str):
         import package_scenario                          # 单文件部署(只带 v1/v2/xlsx_reader 三件套)
     except ImportError:                                  # 没有打包脚本:不许崩,退回产物形态照常出树
         return None, scenario_out_dir(anchor, stem), \
-            "打包脚本 package_scenario.py 不在(单文件部署)——退回产物形态;要直出技能请带全 scripts/ 目录"
+            "打包脚本 package_scenario.py 不在(单文件部署)——只生成产物目录;要直接生成技能请带全 scripts/ 目录"
     exe = package_scenario.find_material("cs-scot-execute")          # ①技能内嵌 ②同一 skills 目录下
     rca = package_scenario.find_material("fault-tree-rca")
     if not slug:
         return None, scenario_out_dir(anchor, stem), \
-            "未取到英文短名(技能名需英文)——退回产物形态;加 --slug 重跑可直出技能,或最后跑 package_scenario.py"
+            "未取到英文短名(技能名需英文)——只生成产物目录;加 --slug 重跑可直接生成技能,或最后跑 package_scenario.py"
     if not (exe / "SKILL.md").exists() or not (rca / "SKILL.md").exists():
         return None, scenario_out_dir(anchor, stem), \
-            ("找不到打包素材 cs-scot-execute / fault-tree-rca(技能内嵌与同门 skills/ 都没有)"
+            ("找不到打包素材 cs-scot-execute / fault-tree-rca(技能内嵌与同一 skills/ 目录下都没有)"
              "——退回产物形态,最后跑 package_scenario.py")
     if skill_dir.exists():
         return None, scenario_out_dir(anchor, stem), \
-            f"{skill_dir} 已存在但不是完整技能(缺 SKILL.md 或 assets/)——不动它,退回产物形态;人工清理后重跑可直出"
+            f"{skill_dir} 已存在但不是完整技能(缺 SKILL.md 或 assets/)——不动它,只生成产物目录;人工清理后重跑可直接生成技能"
     import package_scenario
     package_scenario.scaffold_skill(skill_dir, scenario, stem, exe, rca)
-    return skill_dir, skill_dir / "assets", "已搭好技能骨架(execute 骨架+rca 副本+zip2csv)"
+    return skill_dir, skill_dir / "assets", "已搭好技能目录框架(执行器脚本+rca 副本+zip2csv)"
 
 
 def read_sheets(path: str):
@@ -499,7 +499,7 @@ def main() -> None:
             print("  已是打包技能形态:后续步骤 --out 一律用上面的产物目录(=技能的 assets/),"
                   "流水线跑完技能即成品,**无需再跑 package_scenario 打包**。")
         else:
-            print(f"⚠ 未直出技能形态:{skill_note}", file=sys.stderr)
+            print(f"⚠ 未直接生成技能形态:{skill_note}", file=sys.stderr)
 
 
 if __name__ == "__main__":

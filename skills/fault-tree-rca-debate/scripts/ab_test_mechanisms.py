@@ -100,7 +100,7 @@ def main() -> int:
     proc, desc = _load_processor(vendor_dir, cfg_path, a.engine == "mock")
     print(f"引擎 = {desc};场景 {len(scens)} 个;k={a.k}")
     if a.engine == "mock":
-        print("⚠ MOCK 引擎:以下数字只验证管线与指标口径,机制优劣以真引擎结果为准。\n")
+        print("⚠ MOCK 引擎:以下数字只验证流程与指标定义,机制优劣以真引擎结果为准。\n")
 
     rows, gap_rows = [], []
     for sd in scens:

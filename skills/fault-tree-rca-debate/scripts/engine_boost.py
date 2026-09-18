@@ -504,9 +504,9 @@ def apply(proc, parallel: int = 1, match_cache: bool = True, debate_cache: bool 
     if agent_kit is not None:
         w = _wrap_agent_questions(eng)
         if w:
-            applied.append("角色卷宗(" + "+".join(w) + ")")
+            applied.append("角色材料(" + "+".join(w) + ")")
         else:
-            print("[boost] ⚠ 角色卷宗一个角色都没接上(引擎类名/签名全对不上?)——辩论仍用原 question,"
+            print("[boost] ⚠ 角色材料一个角色都没接上(引擎类名/签名全对不上?)——辩论仍用原 question,"
                   "审计字段会如实记 False")
     if parallel and parallel > 1:
         _wrap_post_adaptive(eng, parallel)   # HTTP 层自适应并发限制:429/503 减半,连续成功回升

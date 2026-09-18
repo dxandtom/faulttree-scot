@@ -160,7 +160,7 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
                 "额外参数一律具名+字面量默认值——下游只传 data_dir,缺省必须能跑(规范附录5)"))
         elif entry_name != "fault_check":
             items.append(_warn(
-                "S1", f"入口名是 {entry_name},不是契约钉死的 fault_check(转接头认旧名,兜得住)",
+                "S1", f"入口名是 {entry_name},不是契约规定的 fault_check(适配函数认旧名,可以处理)",
                 "改名为 fault_check(data_dir),与文件名前缀同名(规范附录5)"))
         else:
             note = "" if pos[0].arg == "data_dir" else f"(首参名是 {pos[0].arg},下游按位置传,能跑)"
@@ -202,12 +202,12 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
     bads = [f"{k}×{v}" for k, v in hits.items() if v]
     if bads:
         items.append(_warn(
-            "S2", f"__main__ 守卫外发现 {'、'.join(bads)}(入口可达路径/模块级;转接头隔离 argv、"
+            "S2", f"__main__ 守卫外发现 {'、'.join(bads)}(入口可达路径/模块级;适配函数隔离 argv、"
                   "收走 stdout、拦 SystemExit,兜得住)",
             "sys.argv/print/sys.exit 全部挪进 if __name__ == '__main__' 分支;"
             "库调用出错走 undetermined(规范附录5)"))
     else:
-        items.append(_pass("S2", "argv/print/exit 纪律合规(守卫外无)"))
+        items.append(_pass("S2", "argv/print/exit 规则合规(守卫外无)"))
 
     # S3 文件发现 .txt/.log 双吃
     low = src.lower()
@@ -228,7 +228,7 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
     else:
         items.append(_warn(
             "S4", "未见目录遍历调用(iterdir/listdir/scandir/walk/glob)——多网元根目录喂进来"
-                  "可能零判定(转接头会逐网元重调兜底)",
+                  "可能零判定(适配函数会改为逐网元重调)",
             "入口自带多网元/单网元自动探测:data_dir 下有网元子目录→逐网元;"
             "直接是 CONFIG/CMD/LOG→单网元(规范附录5)"))
 
@@ -251,7 +251,7 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
     if third:
         items.append(_fail(
             "S5", f"import 了第三方库/包外模块:{sorted(set(third))}——三方件平台装不上,"
-                  "包外模块下游收不进,落地即 ImportError",
+                  "包外模块下游收不进,迁入后即 ImportError",
             "只许标准库+包内共享模块;解析用 re/csv/json/zipfile/xml.etree 等标准库实现,"
             "自写的帮手模块要么并进主脚本要么按 search_*.py 命名随包(规范附录7/8)"))
     else:
@@ -259,9 +259,9 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
     if missing_local:
         where = "交付包" if pkg_files else "脚本同目录"
         items.append(_fail(
-            "S6", f"import 的共享模块 {sorted(set(missing_local))} 不在{where}里——落地后 import 崩",
+            "S6", f"import 的共享模块 {sorted(set(missing_local))} 不在{where}里——迁入后 import 失败",
             "把脚本 import 的每个 search_*.py 打进交付包(不管改没改;规范附录8);"
-            "cs-scot-migrate 收编时可自动补库,但正本必须自包含"))
+            "cs-scot-migrate 导入时可自动补库,但正本必须自包含"))
     elif pkg_files is not None:
         items.append(_pass("S6", "自包含合规(本地 import 的模块都在包里)"))
 
@@ -373,18 +373,18 @@ def _shape_items(iid, result, expect_undetermined, label):
         return [_fail(iid, f"{label}:返回 dict 形态认不出(无 matched/results,值也不是网元结果)",
                       "按规范附录6 的全局形态返回")]
     if shape == "empty":
-        return [_warn(iid, f"{label}:返回空 dict(没有 matched 键;转接头按无判定处理)",
+        return [_warn(iid, f"{label}:返回空 dict(没有 matched 键;适配函数按无判定处理)",
                       '哪怕无数据也要返回 {"matched":"insufficient_data","details":{"reason":…}}(规范附录6)')]
     if shape.startswith(("per-ne", "wrapped", "devices")):
         kind = {"p": "按网元字典", "w": "results 信封", "d": "details.devices 包裹"}[shape[0]]
-        items.append(_warn(iid + "s", f"{label}:返回{kind}形态(契约要求全局形态;转接头兜得住)",
+        items.append(_warn(iid + "s", f"{label}:返回{kind}形态(契约要求全局形态;适配函数可以处理)",
                            "顶层改成一个 matched+evidence,网元写进 evidence 的 type/id(规范附录6)"))
     if "+bool" in shape:
-        items.append(_warn(iid + "b", f"{label}:matched 是布尔值(契约要求字符串四态;转接头兜得住)",
+        items.append(_warn(iid + "b", f"{label}:matched 是布尔值(契约要求字符串四态;适配函数可以处理)",
                            'matched 用 "true"/"false"/"undetermined"/"insufficient_data" 字符串(规范附录6)'))
     if expect_undetermined and tri in ("true", "false"):
         items.append(_fail(
-            iid, f'{label}:空数据判成 "{tri}"——缺数据冒充结论,下游会把"没数据"当"排除/坐实"(实测事故)',
+            iid, f'{label}:空数据判成 "{tri}"——缺数据当作结论,下游会把"没数据"当"排除/坐实"(实测事故)',
             '判定所需数据缺失时必须 matched:"insufficient_data"(旧三态包 undetermined 也认)'
             '+details.reason 写明缺什么(规范附录4)'))
     elif not items:
@@ -508,7 +508,7 @@ def check_package(pkg: Path, data_dir=None, timeout=120):
                 "P1", f"没有 fault_check_*.py 命名的脚本,但 {stray} 里有入口——命名不合契约,下游收不到",
                 "脚本改名为 fault_check_<节点名>.py(SKILL.md 步骤5)").to_dict())
         else:
-            report["notes"].append("包里没有诊断脚本(纯文档包):只体检判断方法文档")
+            report["notes"].append("包里没有诊断脚本(纯文档包):只检查判断方法文档")
     for p in sorted(pkg.rglob("verify_*.py")):
         report["notes"].append(f"调试遗留 {p.name} 混在包里(下游忽略它,建议打包时清掉)")
 
@@ -570,7 +570,7 @@ def _summarize(report):
 
 
 def _print_report(report):
-    print(f"契约体检:{report['target']}")
+    print(f"契约检查:{report['target']}")
     for blk in report["scripts"]:
         print(f"\n== {blk['script']} ==")
         for i in blk["items"]:
@@ -588,12 +588,12 @@ def _print_report(report):
     for n in report["notes"]:
         print(f"[note] {n}")
     verdict = "通过" if report["pass"] else "不通过"
-    strict = "" if report["strict_pass"] else "(--strict 口径:不通过)" if report["pass"] else ""
+    strict = "" if report["strict_pass"] else "(--strict 标准:不通过)" if report["pass"] else ""
     print(f"\n== 汇总 == FAIL {report['fail']} 项 / WARN {report['warn']} 项 → {verdict}{strict}")
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="交付脚本契约体检(详见文件头)")
+    ap = argparse.ArgumentParser(description="交付脚本契约检查(详见文件头)")
     ap.add_argument("target", help="交付包目录 | 交付包.zip | 单个 fault_check_*.py")
     ap.add_argument("--strict", action="store_true", help="WARN 也算不过(新脚本/打包前用)")
     ap.add_argument("--json", action="store_true", help="输出 JSON 报告(机器读)")

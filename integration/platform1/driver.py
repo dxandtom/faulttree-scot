@@ -522,7 +522,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
         # 空表且没带 optimizeType(本地实验/老请求):现行 skill 原样返回,
         # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING);
         # 逐字节一致也正是「skill 真下载」实验的判定标尺
-        print("空壳表(未带 optimizeType):无迁移可做,现行 skill 原样返回。")
+        print("空表(未带 optimizeType):无迁移可做,现行 skill 原样返回。")
         skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
         ctx["skill_zip"] = skill_zip
         out_dir.mkdir(exist_ok=True)
@@ -598,17 +598,17 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
         # 机械档处理不了的失败项(语义匹配/修输入输出契约/补入口)交给模型:起 Claude Code 无头会话
         # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
         skill = _skill_name_for_model()
-        route = ("(前门按输入形态路由:这是对应表批量迁移,走优化线的 migrate 手册)"
+        route = ("(统一入口按输入形态路由:这是对应表批量迁移,走优化线的 migrate 手册)"
                  if skill == "cs-scot-generate-optimize" else "")
         prompt = (f"用 {skill} 技能{route}处理一次批量迁移的失败项,只改文件,不用跑命令。"
                   f"失败清单看这条命令上一轮的输出(可以重跑它看,但验证不归你,驱动会自动复跑):"
-                  f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约体检 FAIL 的照修法"
+                  f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约检查 FAIL 的照修法"
                   f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
                   f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
-                  f"改逻辑就跳过并在最后列入返厂清单,绝不赌。三条实测经验:S3 这类文件过滤"
+                  f"改逻辑就跳过并在最后列入退回清单,绝不猜。三条实测经验:S3 这类文件过滤"
                   f"在同一脚本里常有多处(不同函数各扫一遍目录),要全文搜 .txt 过滤逐处改净;"
                   f"S5 第三方库(如 chardet)属管道,按修法换标准库实现(编码探测退化为"
-                  f" utf-8/gbk 依次尝试 + errors='replace');缺入口的脚本补完入口前体检"
+                  f" utf-8/gbk 依次尝试 + errors='replace');缺入口的脚本先补完入口再检查"
                   f"跑不了,清单上只看得见缺入口——补完薄封装后顺手把同一脚本的 S3"
                   f"(.txt/.log 双后缀)与 D3(缺数据判 insufficient_data 而非 false)"
                   f"查一遍修净,免得复跑才暴露、又拖到下一单。"
@@ -653,7 +653,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
               f" + 此前已迁移 {len(result['skipped'])}),失败 {len(result['failed'])} 个"
               f"——节点清单与原因已写入包内 tree/migration_report.json。"
               f"已修的管道副本也随包带走,下一次点优化在这版基础上续迁。"
-              f"注意:回调接口暂无「部分成功」字段,需与平台定口径(见 README 待确认)。")
+              f"注意:回调接口暂无「部分成功」字段,需与平台约定(见 README 待确认)。")
 
     out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
     print(f"[产物] {out_zip}")
@@ -675,7 +675,7 @@ def main():
     ap.add_argument("--keep", action="store_true", help="保留工作目录(排查用)")
     ap.add_argument("--with-model", action="store_true",
                     help="机械迁移有失败行时,起 Claude Code 无头会话按 cs-scot-migrate 技能"
-                         "处置(语义对号/修管道/补入口),完了复跑机械迁移;命令可用环境变量"
+                         "处置(语义匹配/修输入输出契约/补入口),完了复跑机械迁移;命令可用环境变量"
                          " PLATFORM1_CLAUDE_CMD 覆盖(默认 claude --permission-mode acceptEdits -p)")
     a = ap.parse_args()
     req = json.loads(Path(a.request).read_text(encoding="utf-8"))

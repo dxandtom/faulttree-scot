@@ -105,7 +105,7 @@ def main() -> None:
          "FAIL·类0 ENV_FAILURE(脚本运行崩溃)→工单:自动迭代档,migrate 重迁+限定范围修复"),
         ("drill-1-input", _exp("drill-1-input", "n7", "链路震荡"),
          _run(missing=["log"]), RCA_INPUT, RCA_EMPTY,
-         "FAIL·类1 INPUT_GAP(数据缺失且漏判)→工单:人工兜底档,补数据清单"),
+         "FAIL·类1 INPUT_GAP(数据缺失且漏判)→工单:人工档,补数据清单"),
         ("drill-2-form", _exp("drill-2-form", "n7", "链路震荡"),
          _run(missing=["cmd"]), RCA_INPUT, RCA_EMPTY,
          "FAIL·类2 BINDING_GAP(绑定形态不匹配:cmd raw 在场、表未供)→工单:自动迭代档,"
@@ -116,17 +116,17 @@ def main() -> None:
          "FAIL·类2 BINDING_GAP(孤儿绑定 n88)→工单:自动迭代档,调优表清残留绑定"),
         ("drill-2-binding", _exp("drill-2-binding", "n9", "清绑定节点"),
          _run(), RCA_INPUT, RCA_EMPTY,
-         "FAIL·类2 BINDING_GAP(绑定清除冲突:台账有迁移记录+绑定为空)→工单:人工兜底档,二选一(恢复绑定/修订期望)"),
+         "FAIL·类2 BINDING_GAP(绑定清除冲突:台账有迁移记录+绑定为空)→工单:人工档,二选一(恢复绑定/修订期望)"),
         ("drill-3-knowledge", _exp("drill-3-knowledge", "n999", "幽灵节点"),
          _run(), RCA_INPUT, RCA_EMPTY,
-         "FAIL·类3 KNOWLEDGE_GAP(树上没有 n999)→工单:人工兜底档,故障树缺节点→tester 需求单"),
+         "FAIL·类3 KNOWLEDGE_GAP(树上没有 n999)→工单:人工档,故障树缺节点→tester 需求单"),
         ("drill-4-criteria", _exp("drill-4-criteria", "n7", "链路震荡",
                                   facts={"n7": {"predicate_satisfied": True}}),
          _run(), RCA_INPUT, RCA_EMPTY,
          "FAIL·类4 CRITERIA_GAP(期望成立实测不成立)→工单:自动迭代档,判定偏差修复(按证据修到与判据文档一致)"),
         ("drill-5-verdict", _exp("drill-5-verdict", "n7", "链路震荡"),
          _run(), RCA_INPUT, RCA_EMPTY,
-         "FAIL·类5 VERDICT_GAP(事实无冲突仍漏判)→工单:人工兜底档,结论归档争议(+辩论引擎可选)"),
+         "FAIL·类5 VERDICT_GAP(事实无冲突仍漏判)→工单:人工档,结论归档争议(+辩论引擎可选)"),
     ]
     for cid, exp, run_doc, ri, rca, note in drills:
         data_dir = out / "cases" / cid / "data"

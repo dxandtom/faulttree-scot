@@ -189,7 +189,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
             worst = (refuted_nodes or conflict_anc)[-1]
             kind = "实测不成立" if refuted_nodes else "证据冲突(成立与强反证并存)"
             hier = (f"⚠ 层级矛盾:候选自身实测成立,但上级「{worst}」{kind}——可能该上级绑定假阴,"
-                    "或候选命中系背景;与手工闸同口径不升确证,需人工复核"
+                    "或候选命中系背景;与手工路径同一规则不升确证,需人工复核"
                     "(该上级判断方法确认写错的,调优表清其绑定→未绑定默认放行)")
         conflict = ([f"⚠ 与证据引擎冲突:「{'、'.join(refuted_nodes)}」的判据实测不成立(已被数据排除),"
                      f"本条仅为评分排序结果"] if refuted_nodes and leaf_st != "held" else [])
@@ -236,7 +236,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
                     e2["judgment"] = "成立(证据引擎实测)"   # 只有实测成立的节点配用保留字
                 ev2.append(e2)
             closure = ("事实闭环:路径上所有带判据节点均经证据引擎实测成立" if path_closed
-                       else "候选自身经证据引擎实测成立(与手工 RCA 确证闸同口径,祖先状态见 caveats)")
+                       else "候选自身经证据引擎实测成立(与手工 RCA 的确证条件同一规则,祖先状态见 caveats)")
             confirmed.append({
                 "Root_cause": leaf_name,
                 "Fault_tree_path": entry["Fault_tree_path"],
@@ -266,7 +266,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
               f"降入 undetermined(评分制引擎的弃权垫片,防止无据硬报根因)")
     if confirmed:
         print(f"  [升档|机制={mechanism}] {len(confirmed)} 条路径的候选经证据引擎实测成立"
-              f"(与手工确证闸同口径,祖先状态落 caveats)→ 进入确证档 rca_result")
+              f"(与手工路径的确证条件同一规则,祖先状态记入 caveats)→ 进入确证档 rca_result")
 
     tree_issues = {}
     if rca_input:

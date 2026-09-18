@@ -257,7 +257,7 @@ def main() -> int:
     # 覆盖度对账(软告警,始终显示):分类列里出现却没被任何绑定认领的取值 → 多半有一整支故障没人绑、记录被漏诊
     for col, tot, lst in _coverage_warnings(doc.get("conditions", [])):
         print(f"⚠ 覆盖度:列「{col}」有 {tot} 条记录的取值未被任何绑定覆盖:{lst}")
-        print("   → 确认这些取值是否该各自路由到某个节点(或归入树里'非典型场景/其他'兜底节点),别让记录悄悄漏诊。")
+        print("   → 确认这些取值是否该各自路由到某个节点(或归入树里'非典型场景/其他'节点),别让记录悄悄漏诊。")
 
     if problems:
         print(f"不合格:发现 {len(problems)} 处问题:")

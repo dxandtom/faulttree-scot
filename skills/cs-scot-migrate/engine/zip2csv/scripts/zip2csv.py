@@ -66,8 +66,8 @@ def run_ifilter(raw_dir):
     以 _result 结尾的目录、_merged_temp_*;Linux 下还会波及输入目录旁同名的 _result 兄弟目录。
     调用前先检查这些目录——遇到疑似用户数据的目录必须停下,不许静默删除。"""
     if not os.path.isfile(VENDOR_IFILTER):
-        print("  [err] 找不到 vendor/ifilter.py——原始散包解析不了。"
-              "请提供分类目录形态(网元/CMD|CONFIG|LOG 下裸 txt)或已转好的 csv")
+        print("  [err] 找不到 vendor/ifilter.py——原始散文件解析不了。"
+              "请提供分类目录形态(网元/CMD|CONFIG|LOG 下的原始 txt)或已转好的 csv")
         return None
     hazards = []
     for r, dirs, _fs in os.walk(raw_dir):
@@ -78,13 +78,13 @@ def run_ifilter(raw_dir):
     if os.path.isdir(sib):
         hazards.append(sib)
     if hazards:
-        print("  [err] ifilter 归类前避让:它的清场行为会删掉下列目录(*_result/_merged_temp_*,"
+        print("  [err] ifilter 归类前避让:它的清理行为会删掉下列目录(*_result/_merged_temp_*,"
               "含输入目录的 _result 兄弟目录),为防误删用户数据先停手:")
         for h in hazards[:10]:
             print(f"        {h}")
         print("        请把这些目录移走/改名,或把原始数据放进一个干净目录后重跑")
         return None
-    print(f"[2b/7] 调用 ifilter 归类原始散包: {raw_dir}")
+    print(f"[2b/7] 调用 ifilter 归类原始散文件: {raw_dir}")
     print("  (ifilter 依赖三方件 rarfile/chardet/olefile/oletools/pandas,首跑会自动 pip 安装)")
     try:
         r = subprocess.run([sys.executable, VENDOR_IFILTER, raw_dir])
@@ -491,7 +491,7 @@ def main():
     pack_csv_to_zip(csv_dir, output_dir, zip_basename)
 
     # S 类脚本直接读原始日志文件时,--data raw= 应指向哪里:经过或复用过 ifilter 归类就指向 formated_result,否则保持原目录
-    print(f"\nraw 通道建议(runner 的 --data raw=): {raw_hint}")
+    print(f"\n原始日志目录建议(填给 runner 的 --data raw=): {raw_hint}")
     print("\n全部完成！")
 
 

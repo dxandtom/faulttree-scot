@@ -81,7 +81,7 @@ python "skills/zip2csv/scripts/zip2csv.py" <zip或目录> -o <output_dir>
 └── <输入名>_csv.zip     # 全部 csv 打包
 ```
 
-目录输入时没有 `extracted/`（就地扫描）；散文件目录输入时，ifilter 的 `formated_result/` 落在输入目录内。脚本结束时打印"raw 通道建议"，执行器的 `--data raw=` 就填它。
+目录输入时没有 `extracted/`（就地扫描）；散文件目录输入时，ifilter 的 `formated_result/` 落在输入目录内。脚本结束时打印"原始日志目录建议"，执行器的 `--data raw=` 就填它。
 
 各类 CSV 的列定义见 `references/csv_columns.md`；只有下游要核对表头时才需要读。
 
@@ -111,4 +111,4 @@ python "skills/zip2csv/scripts/zip2csv.py" <zip或目录> -o <output_dir>
 python "skills/zip2csv/scripts/zip2csv.py" "D:/采集/站点A.zip" -o "D:/采集/站点A_csv"
 ```
 
-预期输出：`[1/7]` 解压完成并报文件数；`[2/7]` 扫描到各类目录的数量；`[3/7]` 到 `[6/7]` 逐类报转换个数；`[7/7]` 打包完成；最后一行"raw 通道建议"给出 `D:/采集/站点A_csv/extracted`。向用户汇报这些数字，并告知转出的 csv 在 `D:/采集/站点A_csv/csv/<网元>/` 下。
+预期输出：`[1/7]` 解压完成并报文件数；`[2/7]` 扫描到各类目录的数量；`[3/7]` 到 `[6/7]` 逐类报转换个数；`[7/7]` 打包完成；最后一行"原始日志目录建议"给出 `D:/采集/站点A_csv/extracted`。向用户汇报这些数字，并告知转出的 csv 在 `D:/采集/站点A_csv/csv/<网元>/` 下。

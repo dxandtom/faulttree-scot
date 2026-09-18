@@ -200,11 +200,11 @@ def main() -> int:
           f"标记 TRUE {st['marked']} 行")
     print("  不改直接喂驱动(optimizeType=ALL)= 零改动基线,预期零动作;要做实验就在表上改:")
     print("    改判据 → 该行 Diagnosis_Method_CN 改文字 + Need_Optimize=TRUE     (预期 ~ 判据同步)")
-    print("    换包   → 该行 Product_Name 指向货架上新 zip + Need_Optimize=TRUE   (预期 ✓ 迁移落地)")
+    print("    换包   → 该行 Product_Name 指向货架上新 zip + Need_Optimize=TRUE   (预期 ✓ 迁移生效)")
     print("    加节点 → 新增一行,上级各层照抄,填判据,zip 留空                  (预期 + 新增)")
     print("    删节点 → 整行删掉(含其子孙行)                                    (预期 ✂ 删除)")
-    print("    清判据 → Diagnosis_Method_CN 与 Product_Name 都清空 + Need_Optimize=TRUE (预期 清除行执行)")
-    print("    全 FALSE 且没改 → 结构对账零动作,只刷新标准件(等于刷新技能)")
+    print("    清判据 → Diagnosis_Method_CN 与 Product_Name 都清空 + Need_Optimize=TRUE (预期 清除判据的行执行)")
+    print("    全 FALSE 且没改 → 结构对账零动作,只刷新工具链公共文件(等于刷新技能)")
     return 0
 
 

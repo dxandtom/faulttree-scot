@@ -466,7 +466,7 @@ def main() -> int:
                 why = ("blocked_at 为空" if not ba
                        else f"blocked_at「{ba[:40]}」未指向任何真实阻塞节点(散文式理由不算阻塞)")
                 problems.append(
-                    f"[口径不符] 疑似「{name}」evidence_path 全'成立'且 {why}"
+                    f"[规则不符] 疑似「{name}」evidence_path 全'成立'且 {why}"
                     f"——全成立该进 rca_result;确有怀疑就写实:存疑节点 judgment 改'语义近似/存疑'(有数据)或'数据不足'(真缺数),"
                     f"blocked_at 指向具体阻塞节点。'单源/保险起见/匹配率低'都不是降档理由")
         _check_fabrication(rc, "疑似", hold_map, problems)
@@ -482,7 +482,7 @@ def main() -> int:
         nb = _probables_without_block(probables, sys.argv[2])
         soft_hints += len(nb)
         if nb:
-            print(f"⚠ 疑似档体检:以下 {len(nb)} 条疑似的 evidence_path 里没有任何「有真判据且缺数据」的实际阻塞点:")
+            print(f"⚠ 疑似档检查:以下 {len(nb)} 条疑似的 evidence_path 里没有任何「有真判据且缺数据」的实际阻塞点:")
             for nm, ba in nb[:10]:
                 print(f"  - 「{nm}」(blocked_at: {ba or '未写'})")
             if len(nb) > 10:
@@ -495,7 +495,7 @@ def main() -> int:
         uh = _undet_holds_check(undet, sys.argv[2])
         soft_hints += len(uh)
         if uh:
-            print(f"⚠ 待确认档体检:以下 {len(uh)} 处把**有'成立'事实且无反证**的节点当成了待确认的阻塞点/理由:")
+            print(f"⚠ 待确认档检查:以下 {len(uh)} 处把**有'成立'事实且无反证**的节点当成了待确认的阻塞点/理由:")
             for label, nid, nm in uh[:10]:
                 print(f"  - 待确认「{label}」← {nid} 「{nm}」(有成立事实,不是'待查')")
             if len(uh) > 10:
@@ -509,12 +509,12 @@ def main() -> int:
         eh = _erased_holds_check(doc, sys.argv[2])
         soft_hints += len(eh)
         if eh:
-            print(f"⚠ 抹掉成立体检:以下 {len(eh)} 处节点**有 ok+成立 事实且无反证**,evidence 却写'数据不足/证据不足'类判断:")
+            print(f"⚠ 抹掉成立的检查:以下 {len(eh)} 处节点**有 ok+成立 事实且无反证**,evidence 却写'数据不足/证据不足'类判断:")
             for tier, name, nid, nname in eh[:10]:
                 print(f"  - {tier}「{name}」/节点 {nid}「{nname}」")
             if len(eh) > 10:
                 print(f"  …(还有 {len(eh) - 10} 处)")
-            print("  → 数据是有的,'数据不足'字面为假:按事实改'成立';确有语义怀疑(代理证据/口径近似)"
+            print("  → 数据是有的,'数据不足'字面为假:按事实改'成立';确有语义怀疑(代理证据/定义近似)"
                   "→ judgment 写'语义近似/存疑'并在 caveats 说明,别拿'数据不足'当降档托词。")
 
     # 排除核对(软提示,不改退出码):被排除/仅观察的"成立且无反证"候选逐条晾出来。

@@ -56,7 +56,7 @@ description: 帮业务同事把一个故障树节点的判断方法整理成规�
 python skills/zip2csv/scripts/zip2csv.py <原始目录或包> -o <输出目录>
 ```
 
-它会自动调用内置的 ifilter 归类，结束时打印的"raw 通道建议"路径（`formated_result/<网元>/<CMD、CONFIG、LOG>/`）就是本技能要的测试数据目录，直接当数据目录用；顺带转出的 csv 本技能用不上。两条禁令：不直接拿单个包或散文件去跑 `vendor/ifilter.py`（它会把所在的整个父目录连带无关文件卷进来，还会清删其中的 `*_result` 目录，zip2csv 的暂存分支就是防这个的）；ifilter 依赖第三方库、装不上时 zip2csv 会明确报错，此时向用户要已分类的数据，不手工归类。
+它会自动调用内置的 ifilter 归类，结束时打印的"原始日志目录建议"路径（`formated_result/<网元>/<CMD、CONFIG、LOG>/`）就是本技能要的测试数据目录，直接当数据目录用；顺带转出的 csv 本技能用不上。两条禁令：不直接拿单个包或散文件去跑 `vendor/ifilter.py`（它会把所在的整个父目录连带无关文件卷进来，还会清删其中的 `*_result` 目录，zip2csv 的暂存分支就是防这个的）；ifilter 依赖第三方库、装不上时 zip2csv 会明确报错，此时向用户要已分类的数据，不手工归类。
 
 ## 流程
 

@@ -89,7 +89,7 @@ def main() -> int:
             print(f"  [{name}] HTTP {r.status_code};片段:{body}")
             if r.status_code == 200:
                 print(f"结论:LLM 可达,路由器认「{name}」这种调用格式。"
-                      "若引擎仍 0 辩论/毫秒级完成 → 问题在引擎内部没走到 LLM(工作目录/静默兜底),不在网络。")
+                      "若引擎仍 0 辩论/毫秒级完成 → 问题在引擎内部没走到 LLM(工作目录/静默回退),不在网络。")
                 return 0
         except Exception as e:
             emsg = str(e)

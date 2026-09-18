@@ -85,9 +85,9 @@ assets = mk_skill(root)
 print("\n== 首轮:引擎脚本(compression-demo 旧代)刷新,其余一致 ==")
 rc, o = refresh(root)
 check("退出码 0", rc == 0, o[-600:])
-check("旧代引擎脚本被刷新(condition_kernels.py 留 .bak),缺的引擎文件补挂",
-      (assets / "scripts" / "condition_kernels.py.bak").exists() and "scripts/custom_lib.py(补挂)" in o, o[-600:])
-check("check_data / runner / tree_prune 与同门一致,没动(无 .bak)",
+check("旧代引擎脚本被刷新(condition_kernels.py 留 .bak),缺的引擎文件补齐",
+      (assets / "scripts" / "condition_kernels.py.bak").exists() and "scripts/custom_lib.py(补齐)" in o, o[-600:])
+check("check_data / runner / tree_prune 与源一致,没动(无 .bak)",
       not any((root / "scripts" / f"{n}.bak").exists() for n in ("runner.py", "check_data.py", "tree_prune.py")), o[-600:])
 
 print("\n== ① 全部一致再跑一遍:没有文件需要刷新,不产生新的 .bak ==")
@@ -113,16 +113,16 @@ rules = assets / "fault-tree-rca" / "references" / "rca_rules.md"
 rules.write_text(rules.read_text(encoding="utf-8") + "\n旧规则多一行\n", encoding="utf-8")
 rc, o = refresh(root)
 check("退出码 0", rc == 0, o[-800:])
-check("② check_data.py 刷新到同门版并留 .py.bak", same(cd, SK / "cs-scot-execute" / "scripts" / "check_data.py")
+check("② check_data.py 刷新到源版本并留 .py.bak", same(cd, SK / "cs-scot-execute" / "scripts" / "check_data.py")
       and (root / "scripts" / "check_data.py.bak").exists() and "scripts/check_data.py(已刷新" in o, o[-800:])
-check("② references/plan_schema.md 补挂", (root / "references" / "plan_schema.md").exists() and "references/plan_schema.md(补挂)" in o, o[-800:])
+check("② references/plan_schema.md 补齐", (root / "references" / "plan_schema.md").exists() and "references/plan_schema.md(补齐)" in o, o[-800:])
 check("③ 只有行尾差异的 tree_prune.py 不动(无 .bak,仍是 CRLF)",
       not (root / "scripts" / "tree_prune.py.bak").exists() and b"\r\n" in tp.read_bytes(), o[-800:])
 check("④ custom_lib.py 含手工注册函数:不覆盖、点名", "my_manual_fn" in cl.read_text(encoding="utf-8")
       and md5(assets / "scripts" / "custom_lib.py.bak") == cl_bak_before and "含手工注册的函数" in o, o[-800:])
 new_sk = sk.read_text(encoding="utf-8")
 src_body = re.sub(r"^---\r?\n.*?\r?\n---\r?\n", "", (SK / "cs-scot-execute" / "SKILL.md").read_text(encoding="utf-8"), count=1, flags=re.S)
-check("⑤ SKILL.md 正文换成同门当前版,frontmatter 身份保留,留 SKILL.md.bak",
+check("⑤ SKILL.md 正文换成源的当前版,frontmatter 身份保留,留 SKILL.md.bak",
       new_sk.startswith("---\nname: demo-scenario\ndescription: 演示场景(身份要保住)\n---\n")
       and new_sk.split("---\n", 2)[2] == src_body and (root / "SKILL.md.bak").exists() and "SKILL.md 正文已刷新" in o, o[-800:])
 check("⑥ zip2csv 只刷新变了的 config2csv.py(留 .bak),zip2csv.py 没动",

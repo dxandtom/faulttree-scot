@@ -386,7 +386,7 @@ def main() -> None:
             before = len(_read_conditions_text(src_text))
         elif s == "cross":                                # cross 脚本的框架形态特殊,不能克隆普通 analyzer 充数
             raise SystemExit("不合格(未改动任何文件):表有「绑定:cross」列,但产物没有"
-                             " scripts/cross_analyzer.py 骨架——先跑 assemble_scenario 补齐再导入")
+                             " scripts/cross_analyzer.py 脚本框架——先跑 assemble_scenario 补齐再导入")
         else:                                             # 新增数据源:克隆现有 analyzer 换 INDICATOR
             src_text = existing_aps[0].read_text(encoding="utf-8")
             src_text = re.sub(r'(?m)^INDICATOR = .*$', f'INDICATOR = "{s}"', src_text, count=1)

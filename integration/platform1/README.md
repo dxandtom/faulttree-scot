@@ -34,7 +34,7 @@ optimizeType 三档(平台口径,请求带 `optimizeType` 字段;excel 为增强
 **标记契约(平台已定:每次都给全量表,Need_Optimize 标记用户选了哪些节点)**:标记列
 `Need_Optimize`(TRUE/FALSE)在场即启用——结构增删看行的出现/消失,内容动作(zip 迁移/判据同步/
 双空清除/解决方案同步)只对 TRUE 行执行;FALSE 行的 zip 不下载不迁,判据不同只提示。解决方案列
-(`Solution_CN/EN`,取 CN)同为以表为准,空≠删除。全部 FALSE 且表与树一致 = 只刷新标准件(等于"刷新技能");
+(`Solution_CN/EN`,取 CN)同为以表为准,空≠删除。全部 FALSE 且表与树一致 = 只刷新工具链公共文件(等于"刷新技能");
 表里少了的节点照删(三道保险)。`Node_ID`(平台的节点 UUID)整列忽略,节点定位靠路径名字。
 
 **全量表长什么样(与老表相比多 5 列;`make_full_table.py` 可从现行 skill 直接导出)**:

@@ -51,7 +51,7 @@ def _record_batch_timings(out: Path, ddir: Path, plan: dict) -> None:
             added.append((ind, n, dt))
     if added:
         p.write_text(_json.dumps(recs, ensure_ascii=False, indent=1), encoding="utf-8")
-        print("绑定批次耗时(简报生成→结果落盘,取自文件时间):"
+        print("绑定批次耗时(任务说明生成→结果写入,取自文件时间):"
               + "、".join(f"{i} 批{n} {d / 60:.1f}分" for i, n, d in added) + " → timing.json")
 
 
@@ -116,7 +116,7 @@ def write_conditions(analyzer: Path, entries) -> str | None:
             span = (node.lineno, node.end_lineno)
             break
     if span is None:
-        return "找不到 CONDITIONS 赋值块(不是 assemble 产的骨架?)"
+        return "找不到 CONDITIONS 赋值块(不是 assemble 生成的脚本框架?)"
     block = "CONDITIONS = [\n" + "".join(f"    {e!r},\n" for e in entries) + "]"
     lines = src.splitlines(keepends=True)
     new_src = "".join(lines[:span[0] - 1]) + block + "\n" + "".join(lines[span[1]:])
@@ -134,9 +134,9 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="机械合并批次绑定结果进 <ind>_analyzer.py(验收/去重/格式守卫/落盘)")
+    ap = argparse.ArgumentParser(description="机械合并批次绑定结果进 <ind>_analyzer.py(验收/去重/格式守卫/写入)")
     ap.add_argument("--out", required=True, help="场景产物目录 <OUT>")
-    ap.add_argument("--indicators", default="", help="逗号分隔;缺省=按 dispatch/ 里的简报自动发现")
+    ap.add_argument("--indicators", default="", help="逗号分隔;缺省=按 dispatch/ 里的任务说明自动发现")
     args = ap.parse_args()
     out = Path(args.out)
     ddir = out / "dispatch"
@@ -153,7 +153,7 @@ def main() -> int:
         keep = {x.strip() for x in args.indicators.split(",") if x.strip()}
         plan = {k: v for k, v in plan.items() if k in keep}
     if not plan:
-        print("✗ dispatch/ 里没有任何简报(或 --indicators 全滤掉了)", file=sys.stderr)
+        print("✗ dispatch/ 里没有任何任务说明(或 --indicators 全滤掉了)", file=sys.stderr)
         return 2
     require_marker = False                              # 老 dispatch 目录没有派发标记文件 → 不启用标记检查(向后兼容)
     mf = ddir / "manifest.json"
@@ -192,7 +192,7 @@ def main() -> int:
                 jp.rename(rp)                           # → 机械代收改名,验收流程一字不松
                 print(f"⚠ {ind} 批{n}:结果写成了 .json,已代收为 {rp.name}(规约是 _result.py,验收照常)")
             if not rp.exists():
-                pending.append(f"{ind} 批{n}:结果文件未到({rp.name})——等子代理/同简报重派")
+                pending.append(f"{ind} 批{n}:结果文件未到({rp.name})——等子代理/用同一份任务说明重派")
                 pending_inds.add(ind)
                 continue
             entries, err = parse_result(rp, require_marker)
@@ -206,10 +206,10 @@ def main() -> int:
                     if bp_.exists() else set()
                 if not err2 and exp and exp <= {str(x.get("node_id")) for x in e2 if isinstance(x, dict)}:
                     print(f"⚠ cross 批{n}:缺完成标记,但本批 {len(exp)} 条候选已逐条表态(机械核对齐全)——代收。"
-                          "禁止手工往结果文件补 # BATCH_COMPLETE(那会废掉截断闸)")
+                          "禁止手工往结果文件补 # BATCH_COMPLETE(那会让截断检查失效)")
                     entries, err = e2, None
             if err:
-                pending.append(f"{ind} 批{n}:{err}——同简报重派该批")
+                pending.append(f"{ind} 批{n}:{err}——用同一份任务说明重派该批")
                 pending_inds.add(ind)
                 continue
             s_ids = [str(e.get("node_id") or "?") for e in entries
@@ -298,7 +298,7 @@ def main() -> int:
         cp.write_text(_json.dumps(sorted(cross_cands.values(), key=lambda c: c["node_id"]),
                                   ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\n跨源判据候选 {len(cross_cands)} 条(子代理标记 cross_source)→ {cp}")
-        print("  下一步:python make_dispatch.py --out \"<OUT>\" --cross 生成跨源补绑简报,"
+        print("  下一步:python make_dispatch.py --out \"<OUT>\" --cross 生成跨源补绑任务说明,"
               "派一个子代理填 param_from 绑定,再跑本脚本合并进 cross_analyzer.py。")
     else:
         noncross = [i for i in plan if i != "cross"]
@@ -319,7 +319,7 @@ def main() -> int:
         for x in pending:
             print("  - " + x, file=sys.stderr)
         print("⛔ 禁止自己写脚本硬合批次结果(会丢 cross_source 标记/去重/守卫/机械回填,实测产出孤儿绑定)。"
-              "处置只有两种:照单同简报重派该批;或主会话自己按简报绑、把结果写成该批 _result.py 再重跑本脚本。",
+              "处置只有两种:用同一份任务说明重派该批;或主会话自己按任务说明绑定、把结果写成该批 _result.py 再重跑本脚本。",
               file=sys.stderr)
         return 1
     print(f"\n✓ 全部批次到齐并合并完成({', '.join(wrote)})。接着跑步骤 3 三件套。")

@@ -399,7 +399,7 @@ def main() -> None:
                     help="已存在的用例目录默认跳过（幂等、不冲人工修改）；加本参数强制重生成")
     ap.add_argument("--map", dest="map_path", default="",
                     help="节点↔zip 对应表(xlsx/csv,须含 node_id 列 + zip 文件名列,如调优表导出的"
-                         "「产物文件名」)。给了它,台账节点优先按表精确对号——治「互补」变体/多时间戳"
+                         "「产物文件名」)。给了它,台账节点优先按表精确匹配——治「互补」变体/多时间戳"
                          "版本/改名 zip 造成的名字匹配歧义;表里没有的节点回落名字匹配")
     a = ap.parse_args()
 
@@ -422,9 +422,9 @@ def main() -> None:
     nodes, scenario = load_tree(product)
     ledgerless = not ledger
     if ledgerless:
-        print("[case_gen] 产物没有迁移台账（tree/migrations.json，技能可能是 generate 直出、"
-              "没走过 migrate）→ 退回**按名字对号**建库：包内判断方法的节点名 ↔ 树节点名，"
-              "对得上且全树唯一才落（决不赌）；要零歧义的台账精确对号，先对技能跑一次 migrate。")
+        print("[case_gen] 产物没有迁移台账（tree/migrations.json，技能可能是 generate 直接生成、"
+              "没走过 migrate）→ 退回**按名字匹配**建库：包内判断方法的节点名 ↔ 树节点名，"
+              "对得上且全树唯一才生成（绝不猜）；要零歧义的台账精确匹配，先对技能跑一次 migrate。")
 
     pkg_index = []
     for root in package_roots:
@@ -433,7 +433,7 @@ def main() -> None:
           f"（身份以包内 判断方法*.md 为准，目录名只是别名之一）")
     nid_zip = load_node_zip_map(Path(a.map_path).expanduser().resolve()) if a.map_path else {}
     if nid_zip:
-        print(f"[case_gen] --map 载入 {len(nid_zip)} 条节点↔zip 对应——这些节点按表精确对号,不走名字匹配")
+        print(f"[case_gen] --map 载入 {len(nid_zip)} 条节点↔zip 对应——这些节点按表精确匹配,不走名字匹配")
 
     made, skipped, problems = [], [], []
     dup_reported: set = set()
@@ -477,7 +477,7 @@ def main() -> None:
                     problems.append(f"{nid}「{package_node}」：--map 的 zip「{want}」里有多个子包"
                                     f"且分不开({why})——跳过")
                     continue
-            why = "; ".join(x for x in (f"按 --map 对号 zip「{want}」", why) if x)
+            why = "; ".join(x for x in (f"按 --map 匹配 zip「{want}」", why) if x)
         else:
             pkg, why = match_package(pkg_index, package_node)
             if pkg is None:
@@ -513,14 +513,14 @@ def main() -> None:
                 if package_node not in dup_reported:
                     dup_reported.add(package_node)
                     problems.append(f"包对上节点名「{package_node}」,但树上有多个同名节点且包内无"
-                                    "「节点路径」可消歧——不赌,跳过(tester 包补 ## 节点路径,"
-                                    "或先对技能跑一次 migrate 按台账精确对号)")
+                                    "「节点路径」可消歧——不猜,跳过(交付包补 ## 节点路径,"
+                                    "或先对技能跑一次 migrate 按台账精确匹配)")
                 continue
             if picked != nid:
                 continue                                 # 这个同名 nid 不是路径指向的那个:静默让位
             why = "; ".join(x for x in (f"同名 {name_dup[package_node]} 个,包内节点路径消歧", why) if x)
         if ledgerless:
-            why = "; ".join(x for x in ("无台账,按节点名对号", why) if x)
+            why = "; ".join(x for x in ("无台账,按节点名匹配", why) if x)
         used_pkg_dirs.add(str(pkg["dir"]))
         if why:                                            # 匹配上了但带注记(按 map 匹配/同名多版本取最新)
             print(f"  ⚠ {nid}「{package_node}」：{why}")
@@ -558,8 +558,8 @@ def main() -> None:
     if ledgerless:
         left = [p for p in pkg_index if str(p["dir"]) not in used_pkg_dirs and p.get("data")]
         for p in left:
-            problems.append(f"包「{_pkg_label(p)}」在树上找不到同名节点(名字对号失败)——"
-                            "确认该包属于本场景;或先对技能跑一次 migrate,用台账精确对号")
+            problems.append(f"包「{_pkg_label(p)}」在树上找不到同名节点(按名字匹配失败)——"
+                            "确认该包属于本场景;或先对技能跑一次 migrate,用台账精确匹配")
     print(f"[case_gen] 生成 {len(made)} 个用例 → {cases_out}")
     for c in made:
         print(f"  + {c}")

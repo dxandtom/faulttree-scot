@@ -52,7 +52,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 
 ### 1. 数据入口
 
-数据以用户给的形式为准：目录或散文件直接用，压缩包先解开。第 0 步必做：跑数据体检 `python "<本目录>/scripts/check_data.py" <数据路径>`，按它给的建议喂法继续；退出码 2 就把报告原样给用户，不强行继续。数据有三种形态：已解析的表直接喂；原始日志目录（网元目录下有 CONFIG、CMD、LOG 子目录）先用 `assets/zip2csv/scripts/zip2csv.py` 转成三张表，再连同原始目录 `--data raw=<目录>` 一起喂；零散的原始文件同样喂给 zip2csv，它会先归类。三种形态的判定、转换命令、失败时怎么办、缺口怎么向用户措辞，见 `references/data_entry.md`。数据转换只用 `assets/zip2csv/` 里的脚本，不去环境里找别的技能。
+数据以用户给的形式为准：目录或散文件直接用，压缩包先解开。第 0 步必做：跑数据入口检查 `python "<本目录>/scripts/check_data.py" <数据路径>`，按它给的建议喂法继续；退出码 2 就把报告原样给用户，不强行继续。数据有三种形态：已解析的表直接喂；原始日志目录（网元目录下有 CONFIG、CMD、LOG 子目录）先用 `assets/zip2csv/scripts/zip2csv.py` 转成三张表，再连同原始目录 `--data raw=<目录>` 一起喂；零散的原始文件同样喂给 zip2csv，它会先归类。三种形态的判定、转换命令、失败时怎么办、缺口怎么向用户措辞，见 `references/data_entry.md`。数据转换只用 `assets/zip2csv/` 里的脚本，不去环境里找别的技能。
 
 ### 2. 数据与指标匹配
 

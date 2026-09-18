@@ -52,7 +52,7 @@ def _load(path: Path):
         try:
             return ast.literal_eval(text)
         except (ValueError, SyntaxError) as e:
-            raise SystemExit(f"裁决单/骨架解析失败({path}): {e} —— 修文件格式,别绕过本脚本手写 rca.json")
+            raise SystemExit(f"裁决单/候选清单解析失败({path}): {e} —— 修文件格式,别绕过本脚本手写 rca.json")
 
 
 def _ev_final(entry, overrides):
@@ -118,7 +118,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="裁决单 → rca.json 机械合成(模型只交判定,拼装归代码)")
     ap.add_argument("draft")
     ap.add_argument("decisions", nargs="?", default=None,
-                    help="模型裁决单(只需含骨架没定档的条目;骨架全自动定档时可省略)")
+                    help="模型裁决单(只需含候选清单里没定档的条目;全自动定档时可省略)")
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--rca-input", help="抄 tree_issues 用;不给则输出空 tree_issues")
     ap.add_argument("--solutions", help="tree/solutions.json,按根因节点点查 recommend_solution")
@@ -156,7 +156,7 @@ def main() -> int:
         if nid in decisions:
             if decisions[nid]["_v"] != av:
                 raise SystemExit(
-                    f"不合格:候选 {nid}「{e.get('node')}」已由骨架机械定档为 {av}"
+                    f"不合格:候选 {nid}「{e.get('node')}」已由候选清单机械定档为 {av}"
                     f"(定档条件全是机械可判的),裁决单不得改写成 {decisions[nid]['_v']}——"
                     "对机械档有异议:修数据/绑定后重跑,或在报告补充说明里点名请人复核")
             continue                                     # 同档:模型补充的 caveats/support 照收
@@ -164,13 +164,13 @@ def main() -> int:
         auto_cnt += 1
     missing = [f"{nid}「{e.get('node')}」" for nid, e in adjudicables.items() if nid not in decisions]
     if missing:
-        raise SystemExit("不合格:以下候选没有裁决(骨架未机械定档,需要权衡;候选不许无声消失,"
+        raise SystemExit("不合格:以下候选没有裁决(候选清单未机械定档,需要权衡;候选不许无声消失,"
                          "逐条给 verdict;不采纳=excluded+reason):\n  - " + "\n  - ".join(missing))
     skel_ids = {str(e.get("node_id")) for e in draft.get("undetermined_skeleton", [])}
     excl_ids = {str(e.get("node_id")) for e in draft.get("excluded_candidates", [])}
     unknown = [nid for nid in decisions if nid not in adjudicables and nid not in skel_ids and nid not in excl_ids]
     if unknown:
-        raise SystemExit(f"不合格:裁决单里的节点不在骨架中:{', '.join(unknown)}(别编节点)")
+        raise SystemExit(f"不合格:裁决单里的节点不在候选清单中:{', '.join(unknown)}(别编节点)")
 
     rca_result, probable, undetermined, excl_notes = [], [], [], []
     hold_ids = set(adjudicables)                          # 这些都有成立事实(候选/冲突)
@@ -192,7 +192,7 @@ def main() -> int:
             if bad_anc:
                 raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但路径上级 "
                                  + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad_anc[:3])
-                                 + " —— 口径 v4:层级矛盾(候选成立+上级实测不成立/冲突)只收 probable"
+                                 + " —— 规则:层级矛盾(候选成立+上级实测不成立/冲突)只收 probable"
                                    "(blocked_at=该上级,note 写清矛盾);上级判断方法确认写错的,"
                                    "调优表清其绑定(未绑定默认放行)后重跑")
             item = {"Root_cause": e.get("node"), "Fault_tree_path": path,
@@ -269,7 +269,7 @@ def main() -> int:
     out.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已机械合成 → {out}")
     print(f"  确证 {len(rca_result)} 条、疑似 {len(probable)} 条、待确认 {len(undetermined)} 条"
-          f"、排除留痕 {len(excl_notes)} 条(其中 {auto_cnt} 条由骨架机械定档,零模型裁决)。")
+          f"、排除留痕 {len(excl_notes)} 条(其中 {auto_cnt} 条由候选清单机械定档,零模型裁决)。")
     print("  下一步:python render_report.py <本 rca.json> 机械渲染报告(证据/命中原文/卡点全从"
           " rca.json 拼,模型只在报告末尾追加「补充说明」段,数字不许改)。")
     return 0

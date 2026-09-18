@@ -130,7 +130,7 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="树驱动的叶子覆盖度闸门")
+    ap = argparse.ArgumentParser(description="树驱动的叶子覆盖度检查")
     ap.add_argument("tree_index")
     ap.add_argument("--analyzer", action="append", default=[], help="<ind>_analyzer.py(可多次,跨源合并)")
     ap.add_argument("--facts", action="append", default=[], help="<ind>_facts.json(可多次,跨源合并)")
@@ -156,7 +156,7 @@ def main() -> int:
     if cross_ap.exists() and cross_ap.resolve() not in {Path(a).resolve() for a in args.analyzer}:
         n_cx = sum(_claims_from_analyzer(cross_ap).values())
         if n_cx:
-            print(f"⚠ {cross_ap.name} 带 {n_cx} 个绑定单元却没传给本闸——已绑数会虚低、整支未触达会虚高。"
+            print(f"⚠ {cross_ap.name} 带 {n_cx} 个绑定单元却没传给本检查——已绑数会虚低、整支未触达会虚高。"
                   f"把它也加上再跑:--analyzer \"{cross_ap}\"(有 cross_facts 再加 --facts)。")
 
     per_source = {}                                     # 源标签 → {node_id: 绑定单元数}(跨源认领对账用)
@@ -207,7 +207,7 @@ def main() -> int:
     # 诊断节点集:优先"带条件的叶子";若该树把判据挂在中间节点(没有带条件的叶子)→ 退而用全部带条件节点。
     cond_nodes = {nid: n for nid, n in nodes.items() if _diagnostic(n)}
     if not cond_nodes:
-        print("⚠ 闸门无法判定:该 tree_index 没有任何「带 condition 的非 pass_through 节点」——"
+        print("⚠ 无法判定:该 tree_index 没有任何「带 condition 的非 pass_through 节点」——"
               "判据可能没导出到 tree_index,或这棵树结构特殊。请核对建树产物,别把本次当'已全覆盖'。")
         return 2
     leaf_diag = {nid: n for nid, n in cond_nodes.items() if not n.get("children")}
@@ -265,8 +265,8 @@ def main() -> int:
           f"= 漏绑(条件提到已喂列){len(miss_answerable)} + 分支已入未细绑{len(leaf_only)} + 整支未触达{len(miss_branch)}。")
     if n_pending:
         print(f"ℹ 未绑{unit}中 {n_pending} 个已进跨源候选(dispatch/cross_candidates.json,下面逐项标"
-              f"[跨源候选中])——它们在 cross 补绑流程中,不是终态;**先把 --cross 简报派完、"
-              f"merge 合并进 cross_analyzer.py,再跑本闸收口**(中途跑,未绑数会虚高)。")
+              f"[跨源候选中])——它们在 cross 补绑流程中,不是终态;**先把 --cross 任务说明派完、"
+              f"merge 合并进 cross_analyzer.py,再跑本检查收口**(中途跑,未绑数会虚高)。")
 
     def _xc(nid):
         return " [跨源候选中]" if nid in cross_ids else ""
@@ -337,7 +337,7 @@ def main() -> int:
 
     print("\n要点:绑定要**树驱动**——遍历每个叶子按树条件要的值绑(C 类 contains 那个码),"
           "不管这次数据出没出现;值没出现=matched=0(确定排除),不是 insufficient_data。"
-          "本源真answer不了的(缺信令/配置源)才 decision:insufficient_data 或归'非典型/其他'兜底。")
+          "本源真answer不了的(缺信令/配置源)才 decision:insufficient_data 或归'非典型/其他'节点。")
     # 漏绑(条件提到已喂列却没绑)= 硬不合格;缺源/分支级未细绑不阻断(那是没喂数据,不是没绑对)
     return 1 if miss_answerable else 0
 

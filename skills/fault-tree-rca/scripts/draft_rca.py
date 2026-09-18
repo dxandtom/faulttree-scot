@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 _README = (
-    "本骨架由代码从 rca_input 机械枚举:候选=有'成立'事实的节点(路径+证据已预填,how 逐字来自 explain)。"
+    "本候选清单由代码从 rca_input 机械枚举:候选=有'成立'事实的节点(路径+证据已预填,how 逐字来自 explain)。"
     "**带 auto_verdict 的条目已由代码机械定档,不需要也不许改写**(finalize 自动收;确证=候选自身成立"
     "且有判定的上级无不成立/冲突——未绑定/数据不足上级默认放行落 caveats;层级矛盾=机械降 probable,"
     "blocked_at/note 已预填;**候选是中间节点且下级无一成立**同样机械确证——叶子因待定见 "
@@ -34,7 +34,7 @@ _README = (
     "逐条裁决 holding_candidates。语义复核仍是你的责任:发现 mapping_reason 与判据不真等,"
     "在报告补充说明里点名请人复核——不改机械档。**任何候选不许无声消失**:冲突条目不采纳就 "
     "excluded+reason。数据是有的就不许写'数据不足/证据不足'。裁决写成小 decisions.json"
-    "(只含需要你裁的条目;全自动时可不写),然后跑 finalize_rca.py <本骨架> [裁决单] 机械合成 "
+    "(只含需要你裁的条目;全自动时可不写),然后跑 finalize_rca.py <本清单> [裁决单] 机械合成 "
     "rca.json——不要手写 rca.json。"
 )
 
@@ -202,7 +202,7 @@ def draft_pruned(data: dict) -> dict:
             entry["ancestor_insufficient"] = (
                 "祖先节点未验证(无绑定/数据不足/无法判断):"
                 + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in anc_insuf[:5])
-                + "——默认放行(零信息不冒充反证),由本节点成立事实自下而上蕴含;"
+                + "——默认放行(零信息不当作反证),由本节点成立事实自下而上蕴含;"
                   "finalize 落 caveats,报告提示'此处无判断'")
         if refutes:
             entry["ancestor_refuted"] = (
@@ -302,7 +302,7 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="RCA 诊断骨架机械生成(候选枚举交给代码,模型只裁决)")
+    ap = argparse.ArgumentParser(description="RCA 候选清单机械生成(候选枚举交给代码,模型只裁决)")
     ap.add_argument("rca_input")
     ap.add_argument("-o", "--out", help="输出路径,缺省=输入同目录 rca_draft.json")
     a = ap.parse_args()
@@ -316,19 +316,19 @@ def main() -> int:
     draft = draft_pruned(data) if isinstance(ft, dict) and ft.get("pruned_nodes") else draft_md(data)
     out = Path(a.out) if a.out else src.parent / "rca_draft.json"
     out.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"骨架已生成 → {out}")
+    print(f"候选清单已生成 → {out}")
     if "holding_candidates" in draft:                    # md 形态:无路径,只有三态分拣
         print(f"  成立候选 {len(draft['holding_candidates'])} 条、冲突 {len(draft.get('conflict_nodes', []))} 条、"
               f"排除候选 {len(draft.get('excluded_candidates', []))} 条、"
-              f"待确认骨架 {len(draft.get('undetermined_skeleton', []))} 条(md 形态:路径按 fault_tree_md 回溯)。")
+              f"待确认条目 {len(draft.get('undetermined_skeleton', []))} 条(md 形态:路径按 fault_tree_md 回溯)。")
     else:
         print(f"  确证候选 {len(draft.get('confirmed_candidates', []))} 条、"
               f"疑似候选 {len(draft.get('probable_candidates', []))} 条、"
               f"冲突 {len(draft.get('conflict_nodes', []))} 条、排除候选 {len(draft.get('excluded_candidates', []))} 条、"
-              f"待确认骨架 {len(draft.get('undetermined_skeleton', []))} 条。")
+              f"待确认条目 {len(draft.get('undetermined_skeleton', []))} 条。")
     print("  逐条裁决(确认/降档都要落字理由,候选不许无声消失):写一份小裁决单 decisions.json"
-          "(格式见骨架 _readme 或 finalize_rca.py 文件头),然后"
-          "python finalize_rca.py <本骨架> <裁决单> -o <结果目录>/rca.json 机械合成——**不要手写 rca.json**。")
+          "(格式见候选清单的 _readme 或 finalize_rca.py 文件头),然后"
+          "python finalize_rca.py <本清单> <裁决单> -o <结果目录>/rca.json 机械合成——**不要手写 rca.json**。")
     return 0
 
 

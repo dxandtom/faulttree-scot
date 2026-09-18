@@ -132,7 +132,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
 
         # 熔断一票否决:自动迭代到此为止
         if "熔断" in blob or int(issue.get("previous_attempts") or 0) >= 3:
-            add(cat, "熔断", "fallback", "人工兜底(迭代上限)",
+            add(cat, "熔断", "fallback", "人工处理(迭代上限)",
                 "该节点同类错误已连续3轮未修复,停止自动迭代。**第一步由模型定性**(对照判断"
                 "方法文档原文与三轮修复记录,这是机械分类测不出、必须模型判断的环节):"
                 "①判据描述不充足,脚本怎么写都判不对→转 KNOWLEDGE_GAP,给 tester 出重写"
@@ -148,12 +148,12 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
                               if v.get("script", "") and Path(v["script"]).name in txt), "")
                 pkg = ledger.get(owner, {}).get("package_node", "")
                 add(cat, "脚本运行崩溃", "auto", "migrate(重迁+限定范围修复)",
-                    (f"重迁该节点交付包(体检+有界管道修复随迁自动跑):migrate --only \"{pkg}\""
+                    (f"重迁该节点交付包(契约检查与限定范围的修复随迁自动跑):migrate --only \"{pkg}\""
                      f" --node {owner}" if owner else
                      "按 traceback 定位 custom/ 脚本,重迁其交付包(管道修复随迁);清单外的实现"
-                     "问题记返厂单退 tester"), issue)
+                     "问题记退回单,退回 tester"), issue)
             else:
-                add(cat, "环境故障", "fallback", "人工兜底",
+                add(cat, "环境故障", "fallback", "人工处理",
                     "环境级失败(依赖/权限/数据损坏),修复后重跑 execute;报错原文见 reason", issue)
             continue
 
@@ -163,7 +163,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
             for m in missing:
                 impact[m] = sum(1 for n in nodes.values()
                                 if m in str(n.get("data_source") or ""))
-            add(cat, "数据缺失", "fallback", "人工兜底(使用方补数据)",
+            add(cat, "数据缺失", "fallback", "人工处理(使用方补数据)",
                 "补齐后重跑 execute,不动任何资产。缺口影响(按 tree_index data_source 统计):"
                 + ", ".join(f"{m}(约{c}个节点)" for m, c in impact.items()), issue)
             continue
@@ -186,7 +186,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
                     f"绑定所在脚本:{json.dumps(locs, ensure_ascii=False)}", issue)
             elif nid in ledger:
                 pkg = ledger[nid].get("package_node", "")
-                add(cat, "绑定清除冲突", "fallback", "人工兜底(二选一,无默认)",
+                add(cat, "绑定清除冲突", "fallback", "人工处理(二选一,无默认)",
                     f"该节点曾由包「{pkg}」迁入(台账有记录),现在绑定为空=人清过;而用例期望它是"
                     f"根因。二选一:①恢复绑定:migrate --only \"{pkg}\" --node {nid} 重迁;"
                     "②改用例期望(该节点确实该跳过)", issue)
@@ -204,11 +204,11 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
             if by_name:
                 add(cat, "用例库过期", "auto", "case_gen 重新生成",
                     f"节点「{name}」在树上(现 node_id={by_name[0]},用例记的 {nid} 已过期"
-                    "——结构调整后 id 重排)。重跑 case_gen 全库刷新即可,别惊动 tester", issue)
+                    "——结构调整后 id 重排)。重跑 case_gen 全库刷新即可,不用麻烦 tester", issue)
             else:
-                add(cat, "故障树缺节点", "fallback", "人工兜底(tester 需求单)",
+                add(cat, "故障树缺节点", "fallback", "人工处理(tester 需求单)",
                     f"树上确实没有「{name or nid}」。给 tester 出增节点需求单(节点名/建议父路径/"
-                    "来源用例/期望证据),产出判断方法后走优化线收编或结构手术线增节点", issue)
+                    "来源用例/期望证据),产出判断方法后走优化线导入,或走增删节点线增节点", issue)
             continue
 
         if cat == "CRITERIA_GAP":
@@ -217,18 +217,18 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
                 f"{issue.get('expected_predicate')} vs 实测={issue.get('actual_predicate')}。"
                 f"判据原文:{str(node.get('condition') or '')[:160]}。自动修复范围="
                 "使实现与判断方法文档一致:①绑定/列映射错→调优表改行→import;"
-                "②脚本实现偏离文档→migrate 限定范围修复,清单外记返厂。判定标准本身不许改;"
+                "②脚本实现偏离文档→migrate 限定范围修复,清单外记退回。判定标准本身不许改;"
                 "若疑为用例期望标错,票面备注留证——连续修不过由熔断转人工复核", issue)
             continue
 
         if cat == "VERDICT_GAP":
-            add(cat, "结论归档争议", "fallback", "人工兜底(+辩论引擎可选)",
-                "0~4 全排除仍漏判/假阳=纯裁决口径争议。出争议单交人;绝不自动改 RCA 引擎口径"
-                "(两引擎同步的核心资产)。SCOT_DEBATE=auto 时可对争议候选跑辩论引擎出对抗卷宗"
+            add(cat, "结论归档争议", "fallback", "人工处理(可加辩论引擎)",
+                "0~4 全排除仍漏判/假阳=纯裁决规则争议。出争议单交人;绝不自动改 RCA 引擎的判定规则"
+                "(两引擎同步的核心资产)。SCOT_DEBATE=auto 时可对争议候选跑辩论引擎出辩论记录"
                 "辅助裁决", issue)
             continue
 
-        add(cat or "UNKNOWN", "未识别", "fallback", "人工兜底",
+        add(cat or "UNKNOWN", "未识别", "fallback", "人工处理",
             f"未识别的错误类别,原样转人工。原始条目:{blob[:300]}", issue)
 
     return tickets
@@ -253,7 +253,7 @@ def record_execution(tickets_path: Path, done: str, product: Path, by: str) -> N
     })
     log_p.parent.mkdir(parents=True, exist_ok=True)
     log_p.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[route_feedback] 已记账 {len(done_ids)} 张票 → {log_p}")
+    print(f"[route_feedback] 已记录 {len(done_ids)} 张票 → {log_p}")
 
 
 def main() -> None:
@@ -261,7 +261,7 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="回流分拣:评估输出→处置票(只开票不执行)")
+    ap = argparse.ArgumentParser(description="反馈分拣:评估输出→处置票(只开票不执行)")
     ap.add_argument("--feedback", help="evaluation_report.json 或 feedback_to_generate.json")
     ap.add_argument("--product", required=True, help="场景产物目录(或打包技能目录)")
     ap.add_argument("--out", help="票单输出路径(默认与 feedback 同目录 feedback_tickets.json)")
@@ -299,7 +299,7 @@ def main() -> None:
          "feedback_file": str(fb_path), "product": str(product), "tickets": tickets},
         ensure_ascii=False, indent=2), encoding="utf-8")
 
-    by_level = {"auto": "自动迭代", "fallback": "人工兜底"}
+    by_level = {"auto": "自动迭代", "fallback": "人工处理"}
     print(f"[route_feedback] 开出 {len(tickets)} 张处置票 → {out_p}\n")
     for t in tickets:
         print(f"  [{t['id']}] 类{t['error_category']}·{t['branch']}"
@@ -309,7 +309,7 @@ def main() -> None:
     n_auto = sum(1 for t_ in tickets if t_["level"] == "auto")
     n_fb = len(tickets) - n_auto
     print(f"自动迭代档 {n_auto} 张:循环内直接照单执行(同节点同类 3 轮不过自动熔断转人工);"
-          f"人工兜底档 {n_fb} 张:汇总交人处理。执行完记账:"
+          f"人工档 {n_fb} 张:汇总交人处理。执行完记录:"
           f"\n  python {Path(__file__).name} --record \"{out_p}\" --done <票号|all> --product \"{product}\"")
 
 

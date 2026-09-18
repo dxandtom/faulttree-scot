@@ -190,7 +190,7 @@ with zipfile.ZipFile(oz3) as zf, zipfile.ZipFile(store / "skill_v1.zip") as z0:
     same = all(zf.read(n) == z0.read(n) for n in z0.namelist())
 check("除报告外内容与上一版逐字节一致", same)
 
-print("\n== ④ 失败也回传:一行都没落地(体检不过)→ 回传未变化上一版 ==")
+print("\n== ④ 失败也回传:一行都没落地(契约检查不过)→ 回传未变化上一版 ==")
 xb = WORK / "bad.csv"
 xb.write_text(HDR + "接入失败示例,Root,QoS建立失败,Qos,弱覆盖,Weak,obs://b/乙.zip,弱覆盖.zip\n", encoding="utf-8-sig")
 CB.hits.clear()
@@ -262,7 +262,7 @@ drv = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(drv)
 check("SCOT_SKILLS_ROOT 指向只装发行包的目录 → 迁移脚本定位到 <包>/migrate/scripts",
       drv.MIGRATE == pkg / "migrate" / "scripts" / "migrate_fault_check.py", str(drv.MIGRATE))
-check("模型档技能名 → cs-scot-generate-optimize(前门按表形态路由到优化线)",
+check("模型档技能名 → cs-scot-generate-optimize(统一入口按表形态路由到优化线)",
       drv._skill_name_for_model() == "cs-scot-generate-optimize")
 os.environ["SCOT_MIGRATE_SCRIPT"] = str(WORK / "x.py")
 check("SCOT_MIGRATE_SCRIPT 显式指定优先", drv._find_migrate() == WORK / "x.py")

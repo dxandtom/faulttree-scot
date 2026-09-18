@@ -46,7 +46,7 @@ def _fact_screen(rca_input_path: Path, out_dir: Path):
     import subprocess
     draft_py = _rca_scripts() / "draft_rca.py"
     if not draft_py.exists():
-        print("[筛] 未找到同门 fault-tree-rca/draft_rca.py,跳过事实短路筛(全树辩论)")
+        print("[筛] 未找到同一 skills 目录下的 fault-tree-rca/draft_rca.py,跳过预筛(全树辩论)")
         return None
     draft_path = out_dir / "rca_draft.screen.json"       # 别叫 rca_draft.json:手工路径用那个名字
     r = subprocess.run([sys.executable, str(draft_py), str(rca_input_path), "-o", str(draft_path)],
@@ -114,7 +114,7 @@ def _short_circuit(screen: dict, rca_input_path: Path, out_dir: Path) -> int:
         "mode": "fact_short_circuit", "topics": [],
         "clean_confirmed": screen["clean_confirmed"], "contested": [],
         "note": "全部候选自身成立且路径无实测不成立/冲突——代码机械确证,辩论引擎跳过"
-                "(0 次 LLM 调用),结果与手工 RCA 引擎同口径;强制全树辩论:--no-screen"},
+                "(0 次 LLM 调用),结果与手工 RCA 同一规则;强制全树辩论:--no-screen"},
         ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[短路] 事实短路生效:{len(screen['clean_confirmed'])} 条候选全部机械闭环,"
           f"辩论引擎跳过(0 次 LLM 调用)→ {out_dir / 'rca.json'};审计 → debate_screen.json")
@@ -181,8 +181,8 @@ def _focus_note(contested: list, topic_ids: list, tree_index: dict) -> str:
     if len(topic_ids) > len(contested):
         return (f"【辩题聚焦】本案候选 {len(topic_ids)} 个({tnames})均有实测支撑、并存竞争——"
                 "辩论目标是分主次/并发/连锁并给出排序;候选真伪以证据引擎实测为准,"
-                "实测成立的不辩真伪,实测排除的背景节点不得翻案(翻案线索写复核提示)。")
-    return (f"【辩题聚焦】本案争点为 {tnames};实测排除的节点不得翻案(翻案线索写复核提示),"
+                "实测成立的不辩真伪,实测排除的背景节点不得推翻(推翻的线索写进复核提示)。")
+    return (f"【辩题聚焦】本案争点为 {tnames};实测排除的节点不得推翻(推翻的线索写进复核提示),"
             "未验证/数据不足的节点如实标注,勿当已排除。")
 
 
@@ -277,7 +277,7 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
                 clamped[k] = f"{v}→{cap}"
                 flat[k] = cap
         if clamped:
-            print(f"[retry收敛] 外层加固已接管重试,引擎内层重试参数已收敛:{clamped}"
+            print(f"[retry收敛] 外层调用保护已接管重试,引擎内层重试参数已收敛:{clamped}"
                   f"(要保留 config 原值请 --set 显式指定,或 --no-llm-shield)")
 
     # 硬性检查:LLM 关键字段一个都没映射到 → 引擎会拿空配置"静默降级"成不调 LLM 的回退模式,
@@ -341,7 +341,7 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="辩论式 RCA 执行壳(rca_input → rca.json)")
+    ap = argparse.ArgumentParser(description="辩论式 RCA 执行脚本(rca_input → rca.json)")
     ap.add_argument("--rca-input", "--input", dest="rca_input", required=True,
                     help="本轮结果目录的 rca_input.json(--input 是别名,写错参数名的容错)")
     ap.add_argument("--tree-index",
@@ -362,7 +362,7 @@ def main() -> int:
                     help="临时覆盖引擎参数(盖在 config.yaml 之上,可多次),如 "
                          "--set num_judging_agents=2 --set llm_temperature=0.2")
     ap.add_argument("--no-llm-shield", action="store_true",
-                    help="关闭壳层 LLM 传输加固(默认开:外层重试+成功撤销降级标记,防一阵 502 毁全程)")
+                    help="关闭 LLM 调用保护(默认开:外层重试+成功撤销降级标记,防一阵 502 毁全程)")
     ap.add_argument("--parallel", type=int, default=4, metavar="N",
                     help="并发 LLM 调用数(默认 4;--parallel 1 退回纯串行;评分公式零改动,"
                          "过高易压垮网关吃 502)")
@@ -372,8 +372,8 @@ def main() -> int:
     ap.add_argument("--no-debate-cache", action="store_true",
                     help="关闭辩护记忆化(默认开:同一辩论组里同(节点,组,question)的辩护只生成一次)")
     ap.add_argument("--no-agent-question", action="store_true",
-                    help="关闭辩论侧角色卷宗(默认开:辩护/攻击/回应/一致性/评委收到的 question "
-                         "换成分层卷宗——判据原文全员必读(含被证伪/缺数节点)+实测与反证+按角色任务框架;"
+                    help="关闭辩论侧角色材料(默认开:辩护/攻击/回应/一致性/评委收到的 question "
+                         "换成分层材料——判据原文全员必读(含被证伪/缺数节点)+实测与反证+按角色任务框架;"
                          "机械匹配器不受影响,仍吃回声安全版防误配)")
     ap.add_argument("--no-match-cache", action="store_true",
                     help="关闭匹配记忆化缓存(默认开:同一节点判据只问一次 LLM,辩论里的重复兄弟检查全走缓存)")
@@ -499,7 +499,7 @@ def main() -> int:
                                      shield=not a.no_llm_shield)
         if not a.mock and not a.no_llm_shield:
             if _shield_llm(proc):
-                print("[llm加固] 已启用外层重试(×3,退避 2s/4s):瞬时 502/超时不再让引擎永久降级"
+                print("[LLM 调用保护] 已启用外层重试(×3,退避 2s/4s):瞬时 502/超时不再让引擎永久降级"
                       "关键词匹配;--no-llm-shield 可关闭")
         boost_applied = []
         if not a.mock:
@@ -598,7 +598,7 @@ def main() -> int:
     # (单条判据关键词匹配/辩护缺席/评委默认分)。计数>0 就要知道,多了该重跑。
     n_fail = getattr(getattr(ev, "llm_client", None), "_boost_fail_count", 0)
     if n_fail and not degraded:
-        print(f"⚠ [瞬时失败] 运行期间 {n_fail} 次 LLM 调用重试耗尽(相应判据/辩护/评委走了兜底,"
+        print(f"⚠ [瞬时失败] 运行期间 {n_fail} 次 LLM 调用重试耗尽(相应判据/辩护/评委走了回退,"
               f"受影响的匹配结果已拒绝入缓存);整体未降级,失败数偏多时建议重跑。")
 
     # 引擎的 debate_records 是 dataclass(DebateRecord),直接 json.dumps 会 TypeError——转 dict。
@@ -619,7 +619,7 @@ def main() -> int:
     full = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "question": question, "k": a.k, "llm_degraded": degraded,
             # 落"实际生效"不落"意图":包装被守卫跳过时这里必须如实为 False(审计不许被骗)
-            "agent_question_dossier": any(s.startswith("角色卷宗") for s in boost_applied),
+            "agent_question_dossier": any(s.startswith("角色材料") for s in boost_applied),
             "boost_applied": boost_applied,
             "llm_call_failures": n_fail,
             "top_k_paths_original": top_orig, "top_k_paths_softmax": top_soft,

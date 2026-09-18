@@ -225,12 +225,12 @@ def find_case_result_dir(result_dir: Path, case_id: str,
     if by_sfx:
         if len(by_sfx) > 1:
             print(f"[warn] {case_id}: 短后缀命中 {len(by_sfx)} 个目录,取最新 {by_sfx[0].name}"
-                  f"(旧轮次确不该参与对号就改名加 -superseded 后缀移出)")
+                  f"(旧轮次确不该参与匹配就改名加 -superseded 后缀移出)")
         return by_sfx[0]
 
     by_inputs = [d for d in with_rca if _run_inputs_match(d, data_anchors or [])]
     if by_inputs:
-        print(f"[info] {case_id}: 按 run.json 记录的输入数据路径对号 → {by_inputs[0].name}")
+        print(f"[info] {case_id}: 按 run.json 记录的输入数据路径匹配 → {by_inputs[0].name}")
         return by_inputs[0]
 
     if len(with_rca) == 1:
@@ -316,7 +316,7 @@ def _generate_suggestion(error_category: str, details: Dict[str, Any]) -> Dict[s
             "action": "SUPPLY_DATA",
             "target_script": None,
             "target_node": None,
-            "detail": f"数据源缺失：{details.get('missing_inputs', [])}。使用方补充数据后重跑 execute，不需要回流 generate。{fuse_warning}",
+            "detail": f"数据源缺失：{details.get('missing_inputs', [])}。使用方补充数据后重跑 execute，不需要反馈给 generate。{fuse_warning}",
             "template": None
         },
         "BINDING_GAP": {
@@ -1156,7 +1156,7 @@ def main() -> None:
         # 执行一次 check_binding.py
         skill_scripts_dir = find_skill_scripts_dir(skill_dir, tree_index)
         if not skill_scripts_dir.is_dir():
-            print(f"[warn] 找不到 analyzer 脚本目录（按 {skill_scripts_dir} 兜底）——"
+            print(f"[warn] 找不到 analyzer 脚本目录（改用 {skill_scripts_dir}）——"
                   "绑定检查将把全树当未绑定，BINDING_GAP 归因不可信，先核对 --skill-dir")
         binding_out = temp_dir / "shared_binding_check.json"
         binding_args = [

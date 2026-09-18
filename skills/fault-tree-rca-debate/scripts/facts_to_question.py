@@ -297,7 +297,7 @@ class DossierKit:
                     f"({f['fail'] or '另一源硬性未命中'})并存——存疑,确证前须人审")
         if f["st"] == "refuted":
             return ("已被数据证伪" + (f"(反证:{f['fail']})" if f["fail"] else "")
-                    + "——除非质疑数据本身,不可仅凭辩词翻案")
+                    + "——除非质疑数据本身,不可仅凭辩词推翻")
         return "数据不足" + (f"(缺:{f['insuf']})" if f["insuf"] else "") + ",既未证实也未证伪"
 
     def group_text(self, vnodes) -> str:
@@ -336,7 +336,7 @@ class DossierKit:
             parts = [f"场景:{self.scenario}。以下事实均由代码在数据上算出(非人工主诉、非模型判断)。",
                      cap(held, "实测成立的节点(判据+实测)"),
                      cap(confl, "证据冲突的节点(成立与强反证并存——存疑,确证须人审)"),
-                     cap(refuted, "已被数据证伪的节点(判据+反证;不可仅凭辩词翻案)"),
+                     cap(refuted, "已被数据证伪的节点(判据+反证;不可仅凭辩词推翻)"),
                      cap(insuf, "数据不足的节点(判据+缺口;既未证实也未证伪)")]
             mi = self.rca_input.get("missing_indicators") or {}
             if mi:

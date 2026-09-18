@@ -102,16 +102,16 @@ def main() -> int:
     if not root.exists():
         print(f"✗ 路径不存在:{root}")
         return 2
-    print(f"数据入口体检:{root}\n")
+    print(f"数据入口检查:{root}\n")
     usable, problems, suggest = [], [], []
 
     if root.is_file():
         if root.suffix.lower() == ".zip":
             print("• 输入是 zip 压缩包 → 直接交给 zip2csv 转三表(它吃 zip 也吃目录),转完把")
-            print("  extracted/ 当原始目录再跑一次本体检拿 raw= 的正确层。")
+            print("  extracted/ 当原始目录再跑一次本检查拿 raw= 的正确层。")
             return 0
         root_dir = root.parent
-        print(f"• 输入是单个文件,按它所在目录体检:{root_dir}\n")
+        print(f"• 输入是单个文件,按它所在目录检查:{root_dir}\n")
         root = root_dir
 
     # A. 原始采集结构
@@ -181,7 +181,7 @@ def main() -> int:
         for s in suggest:
             print(f"  → {s}")
         if "raw" in usable:
-            print("  → 裸 txt 还要转三表喂原有绑定:python <assets>/zip2csv/scripts/zip2csv.py <上面 raw= 的目录> -o <输出>")
+            print("  → 原始日志文件还要转成三张表供原有绑定使用:python <assets>/zip2csv/scripts/zip2csv.py <上面 raw= 的目录> -o <输出>")
         return 0
     print("✗ 认不出可用的数据形态:既没有 <网元>/CONFIG|CMD|LOG 结构,也没有表头能对上号的数据表。")
     # 原始散文件(零散的 log/txt/rar/嵌套 zip,连分类目录都没有)是可以自动补救的:zip2csv 会调内置
@@ -189,11 +189,11 @@ def main() -> int:
     raw_loose = next((p for p in root.rglob("*") if p.is_file()
                       and p.suffix.lower() in (".txt", ".log", ".zip", ".rar")), None)
     if raw_loose:
-        print("  目录里有散落的 log/txt/zip/rar → 疑似**原始散包**:先跑"
+        print("  目录里有散落的 log/txt/zip/rar → 疑似**原始散文件**:先跑"
               " python <assets>/zip2csv/scripts/zip2csv.py <本目录> -o <输出>(它自动调 ifilter 归类),")
-        print("  再对它打印的 formated_result/ 路径重跑本体检;zip2csv 若报 ifilter 依赖装不上,把报错原样给用户。")
+        print("  再对它打印的 formated_result/ 路径重跑本检查;zip2csv 若报 ifilter 依赖装不上,把报错原样给用户。")
         return 2
-    print("  把本报告原样给用户:请确认数据目录给对了没(常见错:给了外层目录/给了采集清单)。**不许硬闯**。")
+    print("  把本报告原样给用户:请确认数据目录给对了没(常见错:给了外层目录/给了采集清单)。**不要强行继续**。")
     return 2
 
 

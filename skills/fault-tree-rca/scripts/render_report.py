@@ -101,7 +101,7 @@ def render(doc: dict, tree_text: str | None = None) -> str:
             L.append("")
 
     if prob:
-        L += ["## 疑似根因(未过确证闸,逐条给出卡点)", ""]
+        L += ["## 疑似根因(未满足确证条件,逐条给出卡点)", ""]
         for i, c in enumerate(prob, 1):
             ev = c.get("evidence_path") or []
             L += [f"### {i}. {c.get('Root_cause')} ⚠(confidence={c.get('confidence', '?')})", "",
@@ -180,7 +180,7 @@ def render_reply(doc: dict, tree_text: str | None = None) -> str:
                      f"| {_cell_full(match)} | {_cell_full(c.get('recommend_solution'), 200) or '—'} |")
         L.append("")
     if prob:
-        L += ["**疑似根因**(未过确证闸,给出卡点)", "", "| # | 根因 | 卡点 | 证据 | 注意 |", "|---|---|---|---|---|"]
+        L += ["**疑似根因**(未满足确证条件,给出卡点)", "", "| # | 根因 | 卡点 | 证据 | 注意 |", "|---|---|---|---|---|"]
         for i, c in enumerate(prob, 1):
             ev = c.get("evidence_path") or []
             cand = (ev or [{}])[-1]

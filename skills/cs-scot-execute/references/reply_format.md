@@ -46,7 +46,7 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
    | 判据 / 证据 / 依据 / 卡点 / 注意 / 方案 / 缺 | Criterion / Evidence / Basis / Blocked at / Caveat / Solution / Missing |
    | 根因 / 根因路径 / 推荐方案 | Root cause / Path / Recommended solution |
    | 原文匹配（实测 / 依据） | Match (observed / basis) |
-   | 未过确证闸，给出卡点 | did not pass the confirmation gate; blocked at is given |
+   | 未满足确证条件，给出卡点 | did not meet the confirmation criteria; blocked-at is given |
    | 数据不足/无法判断 | insufficient data / cannot judge |
    | …（详见报告全文） | … (see full report) |
    | …（子树 N 个节点未判定，数据补齐后重跑） | … (N nodes in subtree not evaluated; rerun after data is supplied) |

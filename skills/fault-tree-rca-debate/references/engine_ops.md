@@ -35,7 +35,7 @@
    - N 别贪:与 harness 共用网关时并发越高越容易 502,推荐 4;`--no-match-cache` 关缓存。
 1. **`--set K=V` 临时调参(盖在 config.yaml 之上,不动配置文件)**:最实惠的是
    `--set num_judging_agents=2`(每组省 1/3 评委轮);评委 JSON 不稳可降 llm_temperature。
-   内层重试不用再手调:llm加固(见 4)开启时,config 里过猛的 max_retries/retry_delay
+   内层重试不用再手调:LLM 调用保护(见 4)开启时,config 里过猛的 max_retries/retry_delay
    (如 30 次/15s——重试间隔按次数递增,光睡眠就 >100 分钟/调用)会**自动收敛**为
    快失败(2 次/1s),重试全权交给外层退避;--set 显式指定则尊重原值。
    引擎单请求超时 180s 写死改不了;`num_debate_agents` **调了没用**——引擎按兄弟组
@@ -53,7 +53,7 @@
    大树必被 SIGTERM(exit 143)拦腰杀掉,症状:进程消失、无 rca 产物、输出停在某个 Debate 中途。
    要么单开终端手动跑,要么在 `settings.json` 加
    `{"env": {"BASH_DEFAULT_TIMEOUT_MS": "3600000", "BASH_MAX_TIMEOUT_MS": "3600000"}}`(改完重启)。
-4. **瞬时 502 不再毁全程(llm加固,默认开)**:引擎原设计"一次调用把内层重试耗尽 → 置
+4. **瞬时 502 不再毁全程(LLM 调用保护,默认开)**:引擎原设计"一次调用把内层重试耗尽 → 置
    connection_failed → 整程永久降级关键词匹配"。壳给 LLMClient.chat 套了外层重试
    (×3、退避 2s/4s,成功即撤销降级标记)——只包运输、零碰评分算法;`--no-llm-shield` 可关。
    根因还得治:harness 与引擎共用同一 LLM 网关时,两边并发挤兑就容易 502,
