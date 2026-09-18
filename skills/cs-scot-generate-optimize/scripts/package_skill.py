@@ -66,7 +66,8 @@ _GEN_SCRIPTS = [
     "import_tree_excel.py", "kernel_selftest.py", "make_dispatch.py", "merge_conditions.py",
     "mo_config.py", "package_scenario.py", "validate_conditions.py", "xlsx_reader.py",
 ]
-_GEN_REFS = ["condition_binding_schema.md", "datacom_log_adapter.md", "plan_schema.md"]
+_GEN_REFS = ["condition_binding_schema.md", "datacom_log_adapter.md", "plan_schema.md",
+             "binding_dispatch.md", "binding_rules.md"]
 _Z2C = ["zip2csv.py", "config2csv.py", "logbuffer2csv.py", "parse_diag_to_csv.py"]
 
 REQUIRED = (
