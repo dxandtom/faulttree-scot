@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""route_feedback.py - 反馈分拣:评估反思的输出 → 按类开处置票(只开票,不执行)
+"""route_feedback.py - 反馈分类:评估反思的输出 → 按类给出每条问题的处理方式(只给出处理方式,不执行)
 
 职责边界(与反馈处理线设计一致):
 - 判断交代码:六类错误的真因分支全部机械判定(台账反查/名字匹配/orphan 定位/证据拼装);
-- 执行交既有通道:票上只写"该走哪条通道+命令/草稿",真正动手的是 migrate、调优表+import、
+- 执行交既有工具:处理项上只写"用哪个工具+命令/草稿",真正动手的是 migrate、调优表+import、
   tester、人工——本脚本不改任何资产;
-- 两档执行:自动迭代档(auto)在优化循环内**直接照票执行**,同节点同类 3 轮不过由熔断
+- 两档执行:自动迭代档(auto)在优化循环内**直接按处理项执行**,同节点同类 3 轮不过由熔断
   自动转人工;人工档(fallback)=自动化本来就无能为力的情况(环境故障/缺数据/
-  绑定清除冲突/缺节点/结论争议/熔断),汇总交人。模型照票办事,禁止越票发挥。
+  绑定清除冲突/缺节点/结论争议/熔断),汇总交人。模型按处理项办事,不自行发挥。
 
 用法:
-    分拣开票:
+    分类并给出处理方式:
       python route_feedback.py --feedback <evaluation_report.json 或 feedback_to_generate.json>
                                --product <产物目录或打包技能目录> [--out <tickets.json>]
-    执行留痕(人确认并照票执行后记录):
+    执行留痕(人确认并按处理项执行后记录):
       python route_feedback.py --record <tickets.json> --done all|t1,t2,...
                                --product <产物目录> [--by <谁点的头>]
       → 追加到 产物/tree/feedback_log.json(评估反思的"改了什么"历史,与评估目录的
@@ -60,7 +60,7 @@ def load_tree(product: Path) -> Dict[str, Any]:
 
 def extract_issues(feedback: Any) -> List[Dict[str, Any]]:
     """把两种输入统一成 issue 列表:
-    - evaluation_report.json:取 failure_signatures(空则按 verdict 无票);
+    - evaluation_report.json:取 failure_signatures(空则按 verdict 没有待处理项);
     - feedback_to_generate.json:单对象或列表,取各自 issues。"""
     if isinstance(feedback, list):                       # feedback 列表(批量)
         out = []
@@ -148,7 +148,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
                               if v.get("script", "") and Path(v["script"]).name in txt), "")
                 pkg = ledger.get(owner, {}).get("package_node", "")
                 add(cat, "脚本运行崩溃", "auto", "migrate(重迁+限定范围修复)",
-                    (f"重迁该节点交付包(契约检查与限定范围的修复随迁自动跑):migrate --only \"{pkg}\""
+                    (f"重迁该节点交付包(格式检查与限定范围的修复随迁自动跑):migrate --only \"{pkg}\""
                      f" --node {owner}" if owner else
                      "按 traceback 定位 custom/ 脚本,重迁其交付包(管道修复随迁);清单外的实现"
                      "问题记退回单,退回 tester"), issue)
@@ -218,7 +218,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
                 f"判据原文:{str(node.get('condition') or '')[:160]}。自动修复范围="
                 "使实现与判断方法文档一致:①绑定/列映射错→调优表改行→import;"
                 "②脚本实现偏离文档→migrate 限定范围修复,清单外记退回。判定标准本身不许改;"
-                "若疑为用例期望标错,票面备注留证——连续修不过由熔断转人工复核", issue)
+                "若疑为用例期望标错,在处理项备注里留证——连续修不过由熔断转人工复核", issue)
             continue
 
         if cat == "VERDICT_GAP":
@@ -241,7 +241,7 @@ def record_execution(tickets_path: Path, done: str, product: Path, by: str) -> N
         else [x.strip() for x in done.split(",") if x.strip()]
     unknown = [d for d in done_ids if d not in {t["id"] for t in items}]
     if unknown:
-        raise SystemExit(f"--done 里有票号不在票单里:{unknown}")
+        raise SystemExit(f"--done 里有编号不在处理清单里:{unknown}")
     log_p = product / "tree" / "feedback_log.json"
     log = load_json(log_p) if log_p.exists() else {"entries": []}
     log["entries"].append({
@@ -253,7 +253,7 @@ def record_execution(tickets_path: Path, done: str, product: Path, by: str) -> N
     })
     log_p.parent.mkdir(parents=True, exist_ok=True)
     log_p.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[route_feedback] 已记录 {len(done_ids)} 张票 → {log_p}")
+    print(f"[route_feedback] 已记录 {len(done_ids)} 条处理项 → {log_p}")
 
 
 def main() -> None:
@@ -261,12 +261,12 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="反馈分拣:评估输出→处置票(只开票不执行)")
+    ap = argparse.ArgumentParser(description="反馈分类:评估输出→每条问题的处理方式(只给出处理方式,不执行)")
     ap.add_argument("--feedback", help="evaluation_report.json 或 feedback_to_generate.json")
     ap.add_argument("--product", required=True, help="场景产物目录(或打包技能目录)")
-    ap.add_argument("--out", help="票单输出路径(默认与 feedback 同目录 feedback_tickets.json)")
-    ap.add_argument("--record", help="执行留痕模式:票单 json 路径")
-    ap.add_argument("--done", help="执行留痕模式:已执行票号,逗号分隔或 all")
+    ap.add_argument("--out", help="处理清单输出路径(默认与 feedback 同目录 feedback_tickets.json)")
+    ap.add_argument("--record", help="执行留痕模式:处理清单 json 路径")
+    ap.add_argument("--done", help="执行留痕模式:已执行的处理项编号,逗号分隔或 all")
     ap.add_argument("--by", default="user", help="执行留痕模式:谁点的头(默认 user)")
     a = ap.parse_args()
 
@@ -274,12 +274,12 @@ def main() -> None:
 
     if a.record:
         if not a.done:
-            raise SystemExit("--record 需要配 --done(票号列表或 all)")
+            raise SystemExit("--record 需要配 --done(处理项编号列表或 all)")
         record_execution(Path(a.record).expanduser().resolve(), a.done, product, a.by)
         return
 
     if not a.feedback:
-        raise SystemExit("给 --feedback(分拣开票)或 --record(执行留痕),二选一")
+        raise SystemExit("给 --feedback(分类并给出处理方式)或 --record(执行留痕),二选一")
     fb_path = Path(a.feedback).expanduser().resolve()
     feedback = load_json(fb_path)
     nodes = load_tree(product)
@@ -288,7 +288,7 @@ def main() -> None:
 
     issues = extract_issues(feedback)
     if not issues:
-        print("[route_feedback] 无待处置条目(PASS/PASS_WITH_GAPS 或空反馈)——无票,收工")
+        print("[route_feedback] 没有需要处理的条目(PASS/PASS_WITH_GAPS 或空反馈)")
         return
 
     tickets = build_tickets(issues, product, nodes, ledger)
@@ -300,7 +300,7 @@ def main() -> None:
         ensure_ascii=False, indent=2), encoding="utf-8")
 
     by_level = {"auto": "自动迭代", "fallback": "人工处理"}
-    print(f"[route_feedback] 开出 {len(tickets)} 张处置票 → {out_p}\n")
+    print(f"[route_feedback] 生成 {len(tickets)} 条处理项 → {out_p}\n")
     for t in tickets:
         print(f"  [{t['id']}] 类{t['error_category']}·{t['branch']}"
               f"({by_level.get(t['level'], t['level'])}) → {t['channel']}")
@@ -308,9 +308,9 @@ def main() -> None:
         print(f"      动作:{t['action']}\n")
     n_auto = sum(1 for t_ in tickets if t_["level"] == "auto")
     n_fb = len(tickets) - n_auto
-    print(f"自动迭代档 {n_auto} 张:循环内直接照单执行(同节点同类 3 轮不过自动熔断转人工);"
-          f"人工档 {n_fb} 张:汇总交人处理。执行完记录:"
-          f"\n  python {Path(__file__).name} --record \"{out_p}\" --done <票号|all> --product \"{product}\"")
+    print(f"自动迭代档 {n_auto} 条:循环内直接执行(同节点同类 3 轮不过自动熔断转人工);"
+          f"人工档 {n_fb} 条:汇总交人处理。执行完记录:"
+          f"\n  python {Path(__file__).name} --record \"{out_p}\" --done <处理项编号|all> --product \"{product}\"")
 
 
 if __name__ == "__main__":

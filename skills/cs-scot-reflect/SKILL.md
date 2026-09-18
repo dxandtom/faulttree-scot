@@ -15,7 +15,7 @@ description: 评估反思。把 cs-scot-execute 的执行结果与用例库里�
 |---|---|---|
 | 交付包，还没有用例库 | `case_gen.py` | 从迁移台账与包内测试数据机械生成用例库 |
 | 用例库加已跑好的执行结果 | `eval_run.py` | 判卷：单用例或批量 |
-| 场景技能加用例库（或交付包），想直接看回归结果 | `regress.py` | 一键回归：逐用例执行、判卷、汇总 |
+| 场景技能加用例库（或交付包），想直接看回归结果 | `regress.py` | 一键回归：一条命令把用例库里的用例逐个执行诊断并判卷，最后汇总通过率 |
 
 ## 术语
 
@@ -29,6 +29,7 @@ description: 评估反思。把 cs-scot-execute 的执行结果与用例库里�
 | verdict | 一个用例的评级：PASS、PASS_WITH_GAPS、PARTIAL_PASS、FAIL、EVAL_ERROR，只回答"这次跑完要不要管" |
 | 轮次 round | 同一用例第几次评估；通过 `--prev-evaluation` 传上一轮报告来接续 |
 | 熔断 | 同一用例、同一节点、同一类错误连续三轮没修好，标记转人工深查 |
+| 一键回归 | 用一条命令把用例库里的每个用例依次执行诊断、判卷并汇总。"回归"指改动之后重跑同一批用例，确认原来通过的没有被改坏 |
 | 待裁决 | 一键回归里 finalize 拦下需要权衡的真冲突候选，脚本不代为裁决 |
 | 单用例评分 `quality_score.json` | 每个用例目录里的六维布尔评分 |
 | 整批汇总 `quality_score_batch.json` | 评估输出根目录里整批的通过率与平均分，业务取数用 |
@@ -53,7 +54,7 @@ python "<本目录>/scripts/case_gen.py" \
 用例库不靠人手写：交付包天然是带标注的用例（单节点判据加"跑出来就该是该节点"的测试数据），migrate 的迁移台账 `tree/migrations.json` 已记录"节点对应哪个包"。脚本按台账为每个节点生成一个 `cases/<node_id>-<包节点名>/expected.json`。
 
 - `--packages` 的处理方式与 migrate 一致：zip 解到临时区，嵌套 zip 递归解，纯目录不拷贝；来自 zip 的测试数据自动拷入用例的 `data/`。
-- 包与节点的匹配以包内 `判断方法*.md` 的标题为准，目录名、大小写、空格与下划线、多套一层批次目录都不影响；多个候选都像时点名歧义交人，不猜。
+- 包与节点的匹配以包内 `判断方法*.md` 的标题为准，目录名、大小写、空格与下划线、多套一层批次目录都不影响；多个候选都像时点名歧义交人，不自行猜测。
 - 产物没有迁移台账时（generate 直接生成、没走过 migrate 的技能）不停下，退回按名字匹配：判断方法里的节点名与树节点名相等且全树唯一才生成用例；同名或对不上的逐包点名。要零歧义就先对技能跑一次 migrate 再建库。
 - 故障树结构调整（node_id 重排）后重跑一遍即全库刷新。
 - 阴性用例没有机械来源，人工按 `references/expected_schema.md` 放少量即可。
@@ -94,7 +95,7 @@ python "<本目录>/scripts/eval_run.py" \
 
 ## 入口三：一键回归
 
-用户给的是场景技能加用例材料、想直接看回归结果时，不必手工串执行与判卷：
+一键回归指用一条命令把用例库里的每个用例依次执行诊断、判卷并汇总通过率，用来确认技能改动后原来通过的用例没有被改坏。用户给的是场景技能加用例材料、想直接看回归结果时，不必手工串执行与判卷：
 
 | 手上有 | 命令 |
 |---|---|
@@ -104,9 +105,9 @@ python "<本目录>/scripts/eval_run.py" \
 
 可加 `--case <case_id>`（可多次）只跑部分用例。
 
-它逐用例只跑确定性链：runner（自动带 `--data raw=<网元层父目录>`，数据外多包一层如 `formated_result/` 时沿唯一子目录链下探定位，有多个分叉不猜；用例目录下有 `data_map.json`，如 `{"cmd": "相对 data 的路径"}`，则逐条追加表映射）→ draft_rca 机械起草 → finalize_rca 机械合成 → 判卷。
+它逐用例只跑确定性链：runner（自动带 `--data raw=<网元层父目录>`，数据外多包一层如 `formated_result/` 时沿唯一子目录链下探定位，有多个分叉时不自行猜测；用例目录下有 `data_map.json`，如 `{"cmd": "相对 data 的路径"}`，则逐条追加表映射）→ draft_rca 机械起草 → finalize_rca 机械合成 → 判卷。
 
-- finalize 拦下需要权衡的真冲突时，该用例记为待裁决并点名，脚本不代为裁决。默认按无人值守口径：待裁决直接按不通过计（FAIL，error_category 为 `pending_adjudication`）进通过率分母，裁决做不了等于这轮没优化好；事后有人了可按 fault-tree-rca 的规则在该结果目录补 `decisions.json`、重跑 finalize 与 render，再用 `--eval-only` 或 `--case <该用例>` 补判。有人盯着的场合加 `--pending-hold`，恢复"挂起点名、不计分母、裁决后补判"。`--pending-as-fail` 已是默认，保留只为兼容。
+- finalize 拦下需要权衡的真冲突时，该用例记为待裁决并点名，脚本不代为裁决。默认按无人值守规则：待裁决直接按不通过计（FAIL，error_category 为 `pending_adjudication`）进通过率分母，裁决做不了等于这轮没优化好；事后有人了可按 fault-tree-rca 的规则在该结果目录补 `decisions.json`、重跑 finalize 与 render，再用 `--eval-only` 或 `--case <该用例>` 补判。有人盯着的场合加 `--pending-hold`，恢复"挂起点名、不计分母、裁决后补判"。`--pending-as-fail` 已是默认，保留只为兼容。
 - 执行器与根因分析链优先用场景技能自带的副本（`<skill>/scripts/runner.py`、`<skill>/assets/fault-tree-rca/`，与产物同代），其次是同一 skills 目录下部署的 cs-scot-execute 与 fault-tree-rca，最后到 cs-scot-generate-optimize 发行包内的组件副本里找。不需要为回归单独部署执行技能。
 - 产出：整批汇总 `<工作目录>/eval/quality_score_batch.json`，回归自己的明细（待裁决、异常清单）`<工作目录>/regress_summary.json`（也带 pass_rate 与 total_score），逐用例日志 `<工作目录>/logs/`。
 - 一键回归供日常回归。要对外发布的量化数字仍按双会话规格跑：诊断会话不读 expected.json。
@@ -128,7 +129,7 @@ python "<本目录>/scripts/eval_run.py" \
    | 4 | CRITERIA_GAP | 判据算出的事实与 expected_facts 不相等 | 自动（按证据修到与判据文档一致，判定标准不动） |
    | 5 | VERDICT_GAP | 事实全对却归错档，含阴性用例假阳 | 人工（结论归档争议） |
 
-   "自动"指优化技能 cs-scot-generate-optimize 的反馈处理线照票执行，同节点同类三轮不过熔断转人工；"人工"指自动化本来做不了的情况，汇总交人。票与通道的完整对照见优化技能的 `references/feedback_routing.md`；各类的检测逻辑与证据字段见 `references/error_classification.md`。
+   "自动"指优化技能 cs-scot-generate-optimize 的反馈处理线按处理清单执行，同节点同类三轮不过熔断转人工；"人工"指自动化本来做不了的情况，汇总交人。各类问题的处理方式见优化技能的 `references/feedback_routing.md`；各类的检测逻辑与证据字段见 `references/error_classification.md`。
 4. 综合评级 verdict：
 
    | verdict | 含义 | 触发反馈 |
@@ -158,12 +159,12 @@ python "<本目录>/scripts/eval_run.py" \
 
 业务取数的两个值都在 `quality_score_batch.json`：准确率取 `pass_rate`（PASS 加 PASS_WITH_GAPS 的用例数除以全部用例数，执行失败、判卷异常、待裁决都算不通过）；多用例总得分取 `total_score`（各用例 total_score 的算术平均，没评出分的按 0）。单用例的 total_score 是"六关过了几关"（通过维度数除以 6 乘 100 取整）；六维与六类错误一一对应，单用例是布尔，整批是比例。
 
-每个文件的完整例子和字段口径见 `references/output_files.md`；六维的键名、三语名称与描述见 `references/score_dimensions.md`；反馈文件的完整结构见 `references/feedback_schema.md`。对任意历史报告可手跑 `python scripts/score_report.py <evaluation_report.json 或其目录>` 补出单用例评分。
+每个文件的完整例子和字段的计算规则见 `references/output_files.md`；六维的键名、三语名称与描述见 `references/score_dimensions.md`；反馈文件的完整结构见 `references/feedback_schema.md`。对任意历史报告可手跑 `python scripts/score_report.py <evaluation_report.json 或其目录>` 补出单用例评分。
 
 ## 与上下游的配合
 
 - 上游 generate 生成场景技能（plan.json、解析脚本、tree_index）；中游 execute 执行诊断，产出 result 目录；本技能读产物与 expected.json 对账，输出反馈。
-- 反馈由 cs-scot-generate-optimize 的反馈处理线承接：跑 route_feedback.py 开票，自动档照票执行后全库重跑重评进入下一轮。
+- 反馈由 cs-scot-generate-optimize 的反馈处理线承接：运行 route_feedback.py 得到每条问题的处理方式，自动档直接执行后全库重跑重评进入下一轮。
 - 轮次通过 evaluation_report.json 传递：第二轮把第一轮的报告作为 `--prev-evaluation` 传入。
 
 ## 完整例子
@@ -204,5 +205,5 @@ python "<本目录>/scripts/regress.py" --skill-dir scot技能/ldp-lsp-is-not-es
 
 - 每轮评估创建独立目录，互不覆盖；中间产物放系统临时目录，不回拷。
 - 所有路径通过参数传入，没有硬编码；默认输出目录由 result-dir 推导。
-- 与具体指标类型无关；rca_input 的剪枝形态（`fault_tree.pruned_nodes`）与完整形态（`indicator_results`）都认。
+- 与具体指标类型无关；rca_input 的剪枝形态（`fault_tree.pruned_nodes`）与完整形态（`indicator_results`）都能识别。
 - 评估失败不冒充通过：子脚本没产出结果就是 EVAL_ERROR，绝不算 PASS。

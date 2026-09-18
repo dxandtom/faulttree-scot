@@ -947,7 +947,7 @@ def k_script(table, b, sources):
         out.setdefault("explain", f"S 脚本({label})判定 → "
                                   f"{'成立' if out['predicate_satisfied'] else '不成立'}")
         return out
-    return _insuf("S", f"S 脚本返回不合契约({label}):须 {{status:'ok', predicate_satisfied:bool, …}} 或 "
+    return _insuf("S", f"S 脚本返回不符合约定格式({label}):须 {{status:'ok', predicate_satisfied:bool, …}} 或 "
                        f"{{status:'insufficient_data', reason:'…'}};实际收到:{str(fact)[:120]}", script=label)
 
 

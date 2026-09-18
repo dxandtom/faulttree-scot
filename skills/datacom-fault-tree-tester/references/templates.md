@@ -149,7 +149,7 @@
    - [OK] 脚本使用 search_config.py 通用解析模块
    - [ERROR] 脚本缺失或未复用通用模块
 
-4. 契约检查（必须全绿）：
+4. 格式检查（必须全绿）：
    - 命令：python scripts/check_contract.py <打包目录> --strict
    - [OK] 全部 PASS
    - [ERROR] 有 FAIL/WARN，按输出的修法逐项修完重跑，绿了才许打包

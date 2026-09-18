@@ -607,7 +607,7 @@ def main() -> None:
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"已组装场景产物: {out}")
-    print(f"  plan.json(SCoT v4.0)+ manifest.json(产物铭牌,格式契约 v{PRODUCT_FORMAT_VERSION})"
+    print(f"  plan.json(SCoT v4.0)+ manifest.json(产物清单,产物格式版本 {PRODUCT_FORMAT_VERSION})"
           f"+ scripts/condition_kernels.py(类别模板库)"
           f"+ scripts/<指标>_analyzer.py(待填写)+ tree/{stem}.md")
     to_fill = scaffolded + regenerated

@@ -39,7 +39,7 @@ def check_product_format(base: Path) -> None:
     """读取产物的 manifest.json,把其中的格式契约版本与执行器期望的版本比对;缺失或不一致时只打告警。"""
     mf = base / "manifest.json"
     if not mf.exists():
-        print(f"[warn] 产物缺 manifest.json(由旧版工具链生成,早于格式契约 v{EXPECTED_PRODUCT_FORMAT})——"
+        print(f"[warn] 产物缺 manifest.json(由旧版工具链生成,早于产物格式版本 {EXPECTED_PRODUCT_FORMAT})——"
               "字段/语义可能与当前执行器对不上;建议用最新 cs-scot-generate 重新生成产物。")
         return
     try:
@@ -52,7 +52,7 @@ def check_product_format(base: Path) -> None:
     hint = ("产物较旧 → 用最新 cs-scot-generate 重新生成"
             if isinstance(ver, int) and ver < EXPECTED_PRODUCT_FORMAT
             else "产物比执行器新 → 升级 cs-scot-* skills 再执行")
-    print(f"[warn] 产物格式契约 v{ver} ≠ 执行器期望 v{EXPECTED_PRODUCT_FORMAT}:{hint}。不阻断,但字段可能对不上。")
+    print(f"[warn] 产物格式版本 {ver} ≠ 执行器期望的版本 {EXPECTED_PRODUCT_FORMAT}:{hint}。不阻断,但字段可能对不上。")
 
 
 def _get_path(obj: Any, path: str) -> Any:
@@ -386,7 +386,7 @@ def run_agent_skill_node(node: dict, ctx: Dict[str, Any], base: Path, result_sub
     _fallback = (f";若 Skill(「{name}」) 报 Unknown(未注册成技能)→ 改读 {_where} "
                  f"按其法则 + 同目录 scripts/rca_query.py 手工产出(技能 prompt-only,法则全在文件里,注册与否都能做)")
     print(f"[agent_skill] 这是模型判断步骤。请用「{name}」技能{_fallback},依据该输入产出结果,"
-          f"写到 {in_path.parent / 'rca.json'}(契约见 fault-tree-rca 技能)。")
+          f"写到 {in_path.parent / 'rca.json'}(格式见 fault-tree-rca 技能)。")
     print(f"  注意:结果目录 {in_path.parent} 已建好,**直接写文件、无需 mkdir**;Windows 路径用正斜杠 /,"
           "且别让带引号的路径以反斜杠结尾(`...\\\"` 会让 shell 一直等闭合引号而卡住)。")
     print("  ⚠ 输入可能很大:**别一次性把整个 rca_input.json 读进上下文**(会超长报错)。"

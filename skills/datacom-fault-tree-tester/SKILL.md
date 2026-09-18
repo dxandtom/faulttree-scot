@@ -1,6 +1,6 @@
 ---
 name: datacom-fault-tree-tester
-description: 帮业务同事把一个故障树节点的判断方法整理成规范文档，生成能在采集数据上运行的判断脚本，用测试数据验证后打成节点交付包（判断方法文档、判断脚本、测试数据），供迁移技能导入场景技能。也用于批量翻新存量交付包，让它们符合当前契约。用户描述某个故障节点怎么判断、给出测试数据要验证判断逻辑、要产出或翻新交付包时使用。
+description: 帮业务同事把一个故障树节点的判断方法整理成规范文档，生成能在采集数据上运行的判断脚本，用测试数据验证后打成节点交付包（判断方法文档、判断脚本、测试数据），供迁移技能导入场景技能。也用于批量翻新存量交付包，让它们符合当前的格式约定。用户描述某个故障节点怎么判断、给出测试数据要验证判断逻辑、要产出或翻新交付包时使用。
 ---
 
 # datacom-fault-tree-tester：判断方法验证与交付包生成
@@ -17,11 +17,11 @@ description: 帮业务同事把一个故障树节点的判断方法整理成规�
 | 判断方法文档 | `判断方法.md`，按 `判断方法_规范.md` 写的节点判据说明；节点名称、故障描述、判断条件、命中条件、输出、数据来源六节必填 |
 | 判断脚本 | `fault_check_<节点名>.py`，入口函数 `fault_check(data_dir)`，读测试数据目录，返回四态结果 |
 | 共享解析库 | `scripts/search_config.py`、`search_log.py`、`search_cmd.py`、`search_diag_txt.py`，配置、日志、命令回显的通用解析函数 |
-| 契约检查 | `scripts/check_contract.py`，对脚本与交付包做机械检查；`--strict` 时警告也算不过 |
+| 格式检查 | `scripts/check_contract.py`，检查脚本与交付包是否符合约定的格式；`--strict` 时警告也算不过 |
 | 四态 | 脚本 `matched` 的四个取值：`true`（查了、确定命中）、`false`（查了、确定没有）、`undetermined`（数据在但判不出来）、`insufficient_data`（没数据可判） |
 | 测试数据目录 | 按"网元/CONFIG、CMD、LOG"组织的原始采集文本 |
-| 回归基线 | 契约检查在有测试数据时打印的 matched 值与证据数，用于修改前后比对，不评对错 |
-| 翻新 | 对存量交付包只修输入输出契约、不动判断逻辑的批量整理 |
+| 回归基线 | 格式检查在有测试数据时打印的 matched 值与证据数，用于修改前后比对，不评对错 |
+| 翻新 | 对存量交付包只修输入输出格式、不动判断逻辑的批量整理 |
 
 ## 输入参数
 
@@ -80,9 +80,9 @@ python skills/zip2csv/scripts/zip2csv.py <原始目录或包> -o <输出目录>
 
 ### 步骤 5：脚本生成
 
-用户确认后必须生成判断脚本 `fault_check_<节点名>.py`，放在本技能 `scripts/` 目录下（与共享解析库同目录，`from search_xxx import …` 才能成立）。脚本要满足十条契约要求，包括：入口函数 `fault_check(data_dir)`；`sys.argv` 与 `print` 只出现在 `if __name__ == '__main__'` 分支；`.txt` 与 `.log` 都要收、大小写不敏感；返回全局形态的四态 JSON；只用标准库与共享解析库；配置解析必须用 `search_config.py` 的函数。十条要求的原文与返回结果的完整格式见 `references/script_contract.md`，写脚本前先读。
+用户确认后必须生成判断脚本 `fault_check_<节点名>.py`，放在本技能 `scripts/` 目录下（与共享解析库同目录，`from search_xxx import …` 才能成立）。脚本要满足十条格式要求，包括：入口函数 `fault_check(data_dir)`；`sys.argv` 与 `print` 只出现在 `if __name__ == '__main__'` 分支；`.txt` 与 `.log` 都要收、大小写不敏感；返回全局形态的四态 JSON；只用标准库与共享解析库；配置解析必须用 `search_config.py` 的函数。十条要求的原文与返回结果的完整格式见 `references/script_contract.md`，写脚本前先读。
 
-生成后必须过契约检查，逐项修到全绿：
+生成后必须过格式检查，逐项修到全绿：
 
 ```bash
 python scripts/check_contract.py <脚本路径> --strict
@@ -108,7 +108,7 @@ python scripts/check_contract.py <脚本路径> --strict
 
 ### 步骤 10：打包前检查
 
-四项必查：测试数据目录存在且有有效文件；判断方法文档已生成且必填字段齐全；判断脚本已生成且复用了 `search_config.py`；契约检查全绿：
+四项必查：测试数据目录存在且有有效文件；判断方法文档已生成且必填字段齐全；判断脚本已生成且复用了 `search_config.py`；格式检查全绿：
 
 ```bash
 python scripts/check_contract.py <打包目录> --strict
@@ -134,11 +134,11 @@ zip 落在 `skills/datacom-fault-tree-tester/output/<节点名>_<yyyyMMdd-HHmmss
 
 ## 批量翻新存量交付包
 
-用户说"批量优化""翻新旧交付包""把历史包对齐规范"时走这里。目标是让存量包都能跑通：格式校验加脚本输入输出对齐。判断方法与判断逻辑的优化不进批量；业务同事点名某节点逻辑有问题时，走单节点流程（步骤 2 到 8）重新生成。
+用户说"批量优化""翻新旧交付包""把历史包对齐规范"时走这里。目标是让存量包都能跑通：格式校验加脚本输入输出格式对齐。判断方法与判断逻辑的优化不进批量；业务同事点名某节点逻辑有问题时，走单节点流程（步骤 2 到 8）重新生成。
 
 输入：一堆交付包 zip，或整个 `output/` 目录（同节点多个时间戳版本自动取最新；用户点名了就按点名的来）。
 
-硬约束：修复必须逐包手改，禁止写脚本批量改源码。脚本只能做搬运与检查（批量解压、批量跑契约检查、汇总统计、重打包）。要动 `.py` 或 `.md` 的内容就必须逐包打开、读懂上下文、手工编辑，原因有四：
+硬约束：修复必须逐包手改，禁止写脚本批量改源码。脚本只能做搬运与检查（批量解压、批量跑格式检查、汇总统计、重打包）。要动 `.py` 或 `.md` 的内容就必须逐包打开、读懂上下文、手工编辑，原因有四：
 
 - `return False` 有的是"空数据"分支、有的是"判定确实不成立"，正则分不出，一律改成 undetermined 就动了判断逻辑。
 - 文件发现、入口签名、多网元探测在各包里写法都不同，没有可安全替换的统一模式。
@@ -149,9 +149,9 @@ zip 落在 `skills/datacom-fault-tree-tester/output/<节点名>_<yyyyMMdd-HHmmss
 
 逐包流程：
 
-1. 检查：解压到临时目录，跑 `python scripts/check_contract.py <解压目录> --strict`。
+1. 格式检查：解压到临时目录，跑 `python scripts/check_contract.py <解压目录> --strict`。
 2. 全绿则跳过：不重打包，汇总记"已达标"。
-3. 有 FAIL 或 WARN 则只修契约：入口签名改成 `fault_check(data_dir)`；补多网元与单网元探测；文件发现改成 `.txt` 与 `.log` 都收；输出改成全局形态的四态字符串（缺数据 insufficient_data 与判不动 undetermined 分开报）；`sys.argv` 与 `print` 挪进 `__main__`；补齐脚本 import 的 `search_*.py`。按检查输出的修法逐项修，判断逻辑一行不动；拿不准某处算不算判断逻辑就停下问用户。
+3. 有 FAIL 或 WARN 则只修输入输出格式：入口签名改成 `fault_check(data_dir)`；补多网元与单网元探测；文件发现改成 `.txt` 与 `.log` 都收；输出改成全局形态的四态字符串（缺数据 insufficient_data 与判不动 undetermined 分开报）；`sys.argv` 与 `print` 挪进 `__main__`；补齐脚本 import 的 `search_*.py`。按检查输出的修法逐项修，判断逻辑一行不动；拿不准某处算不算判断逻辑就停下问用户。
 4. 回归：包里带测试数据的，检查会自动打印回归基线（matched 与证据数）。修完重跑检查必须全绿，且基线 matched 必须与修前一致。唯一例外：三态改四态使 `undetermined` 变成 `insufficient_data`，两者同属"判不了"，下游视为等价。变了就是动到逻辑了，停下问用户。修前就跑不起来的没有基线，只验修后合规。
 5. 重打包：新时间戳 zip 落 `output/`，不覆盖旧包；`执行记录.md` 末尾追加"翻新记录"段（模板见 `references/templates.md`）。
 6. 汇总：结尾按三类列清单：已达标跳过、已翻新（附修项）、修不动点名（附原因）。

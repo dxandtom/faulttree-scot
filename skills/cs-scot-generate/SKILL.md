@@ -74,7 +74,7 @@ description: 把故障树 Excel 与各指标的数据编译成场景诊断技能
 python "<zip2csv.py 路径>" <zip或目录> -o <输出目录>
 ```
 
-- zip2csv 的查找次序：先找本技能目录内的 `zip2csv/scripts/zip2csv.py`（发行包形态内嵌），没有再用同一 skills 目录下独立安装的 `zip2csv/scripts/zip2csv.py`。zip 和目录都可以直接作为输入，LOG 目录下 `.txt` 和 `.log` 都认。
+- zip2csv 的查找次序：先找本技能目录内的 `zip2csv/scripts/zip2csv.py`（发行包形态内嵌），没有再用同一 skills 目录下独立安装的 `zip2csv/scripts/zip2csv.py`。zip 和目录都可以直接作为输入，LOG 目录下 `.txt` 和 `.log` 都能识别。
 - 散乱的原始文件（零散的 log/txt/rar、混杂的 zip，连分类目录都没有）也直接喂给 zip2csv：它会先调用内置的 `vendor/ifilter.py` 归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/`，再转表。ifilter 依赖第三方库，装不上时它会明确报错并给出替代做法，把报错原样给用户，不要强行继续。
 - 转换结果在 `csv/<网元>/LOG|CONFIG|DIAG|CMD/*.csv`，按子目录名对应指标（log、config、cmd；DIAG 与 cmd 是同一类的新旧两种名字）。多个网元的同类 csv 合并成一张再作为该指标的数据：保留第一份的表头，其余文件逐个追加。
 - 四类目录之外的自由格式 txt 转不了表，这类内容走 S 类节点判断脚本（由 cs-scot-migrate 从节点交付包收入）或 `custom` 解析。
@@ -134,7 +134,7 @@ python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
 
-这一步做三件事：把公共脚本复制进 `<OUT>/scripts/`（内核库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览工具 `analyzer.py`、绑定契约文档；这几个文件每次重跑都会刷新）；为每个指标写一份待填写的分析脚本 `<指标>_analyzer.py`（`CONDITIONS` 留空，步骤 2.5 填）；生成 `plan.json`（各 `<指标>_analyzer` 脚本步骤 → 根因分析步骤）。`--out` 用步骤 1 打印的 `<OUT>`。计划格式见 `references/plan_schema.md`。
+这一步做三件事：把公共脚本复制进 `<OUT>/scripts/`（内核库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览工具 `analyzer.py`、绑定格式说明文档；这几个文件每次重跑都会刷新）；为每个指标写一份待填写的分析脚本 `<指标>_analyzer.py`（`CONDITIONS` 留空，步骤 2.5 填）；生成 `plan.json`（各 `<指标>_analyzer` 脚本步骤 → 根因分析步骤）。`--out` 用步骤 1 打印的 `<OUT>`。计划格式见 `references/plan_schema.md`。
 
 **外挂知识分两级。** 知识条目回答"去哪查、怎么查、什么算正常"，每条一段，用 `### 标题` 开头，可选 `阶段:绑定/诊断` 和 `适用:标签`，是判读规则而不是事实：
 
@@ -221,14 +221,14 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 ```
 <OUT>/                                       # 默认 = <故障树目录>/scot技能/<短名>/assets/（退化情形 = scot产物/<场景名>/）
 ├── plan.json                              # SCoT 计划（产物①）
-├── manifest.json                          # 产物标识：格式契约版本与生成时间（执行与评估启动时比对，旧产物只告警）
+├── manifest.json                          # 产物标识：产物格式版本与生成时间（执行与评估启动时比对，旧产物只告警）
 ├── scripts/<ind>_analyzer.py              # 逐条件分析脚本（模型填 CONDITIONS，产物②）
 ├── scripts/condition_kernels.py           # 类别模板库（分析脚本 import 它）
 ├── scripts/mo_config.py                   # 配置拓扑适配器（MO 文本转表，以及 custom 原语）
 ├── scripts/analyzer.py                    # 概览工具（步骤 2.5 看列用）
 ├── overview/                              # 各源概览和枚举，仅绑定期用，含真实数据样本，步骤 4 删
 ├── dispatch/                              # 绑定任务说明（make_dispatch.py 生成），仅绑定期用，步骤 4 删
-├── scripts/condition_binding_schema.md    # 绑定契约副本
+├── scripts/condition_binding_schema.md    # 绑定格式说明副本
 ├── tree/<短名>.md                          # 故障树 Markdown（产物③；短名 = 英文 slug，取不到英文时 = 中文场景名）
 ├── tree/<短名>.tree_index.json            # 权威拓扑：node_id、父子、判据、数据源（绑定与根因分析都依赖它）
 └── tree/solutions.json                    # （可选）节点到推荐解决方案的对照：根因分析报根因时附上，不进裁决上下文
@@ -248,13 +248,13 @@ python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根�
 
 ## 步骤 6（人工调优）：调优表是树和绑定的可编辑事实源
 
-打包时自动产出 `tree/<短名>.tuning.xlsx`：单页签，一行一个节点，含层级、判据、各源绑定 JSON、解决方案；绑定列的写法和类别模板见产物自带的 `scripts/condition_binding_schema.md`，机器契约人也读得懂，不另设第二份文档。人改完表后一条命令编译回产物，零模型参与：
+打包时自动产出 `tree/<短名>.tuning.xlsx`：单页签，一行一个节点，含层级、判据、各源绑定 JSON、解决方案；绑定列的写法和类别模板见产物自带的 `scripts/condition_binding_schema.md`，既是机器读取的格式约定，人也读得懂，不另设第二份文档。人改完表后一条命令编译回产物，零模型参与：
 
 ```bash
 python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或场景技能的 assets/>"
 ```
 
-自动更新 tree_index（`node_id` 只认不改，新行留空自动分配，历史编号不复用）、故障树 Markdown、solutions.json、各 `<指标>_analyzer.py` 的 CONDITIONS、plan.json（新增 `绑定:<新源>` 列会复制一份 analyzer 并接进计划）。先全量校验再写盘：JSON 损坏、编号重复、上级不符都按 Excel 行号报错，一个文件不动；成功后打印变更摘要。导出调优表之后，树与绑定的一切修改只在调优表上做，不要再手改脚本或 tree_index，否则会被下次导入覆盖；改完重新打包分发。重新导出：`python "<产物>/scripts/export_tree_excel.py" --out "<产物>"`。
+自动更新 tree_index（`node_id` 只读不改，新行留空自动分配，历史编号不复用）、故障树 Markdown、solutions.json、各 `<指标>_analyzer.py` 的 CONDITIONS、plan.json（新增 `绑定:<新源>` 列会复制一份 analyzer 并接进计划）。先全量校验再写盘：JSON 损坏、编号重复、上级不符都按 Excel 行号报错，一个文件不动；成功后打印变更摘要。导出调优表之后，树与绑定的一切修改只在调优表上做，不要再手改脚本或 tree_index，否则会被下次导入覆盖；改完重新打包分发。重新导出：`python "<产物>/scripts/export_tree_excel.py" --out "<产物>"`。
 
 ## 完整例子
 

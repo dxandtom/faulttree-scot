@@ -160,7 +160,7 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
                 "额外参数一律具名+字面量默认值——下游只传 data_dir,缺省必须能跑(规范附录5)"))
         elif entry_name != "fault_check":
             items.append(_warn(
-                "S1", f"入口名是 {entry_name},不是契约规定的 fault_check(适配函数认旧名,可以处理)",
+                "S1", f"入口名是 {entry_name},不是约定的 fault_check(适配函数认旧名,可以处理)",
                 "改名为 fault_check(data_dir),与文件名前缀同名(规范附录5)"))
         else:
             note = "" if pos[0].arg == "data_dir" else f"(首参名是 {pos[0].arg},下游按位置传,能跑)"
@@ -377,10 +377,10 @@ def _shape_items(iid, result, expect_undetermined, label):
                       '哪怕无数据也要返回 {"matched":"insufficient_data","details":{"reason":…}}(规范附录6)')]
     if shape.startswith(("per-ne", "wrapped", "devices")):
         kind = {"p": "按网元字典", "w": "results 信封", "d": "details.devices 包裹"}[shape[0]]
-        items.append(_warn(iid + "s", f"{label}:返回{kind}形态(契约要求全局形态;适配函数可以处理)",
+        items.append(_warn(iid + "s", f"{label}:返回{kind}形态(约定要求全局形态;适配函数可以处理)",
                            "顶层改成一个 matched+evidence,网元写进 evidence 的 type/id(规范附录6)"))
     if "+bool" in shape:
-        items.append(_warn(iid + "b", f"{label}:matched 是布尔值(契约要求字符串四态;适配函数可以处理)",
+        items.append(_warn(iid + "b", f"{label}:matched 是布尔值(约定要求字符串四态;适配函数可以处理)",
                            'matched 用 "true"/"false"/"undetermined"/"insufficient_data" 字符串(规范附录6)'))
     if expect_undetermined and tri in ("true", "false"):
         items.append(_fail(
@@ -505,7 +505,7 @@ def check_package(pkg: Path, data_dir=None, timeout=120):
                  if "def fault_check" in p.read_text(encoding="utf-8", errors="replace")]
         if stray:
             report["md"].append(_fail(
-                "P1", f"没有 fault_check_*.py 命名的脚本,但 {stray} 里有入口——命名不合契约,下游收不到",
+                "P1", f"没有 fault_check_*.py 命名的脚本,但 {stray} 里有入口——命名不符合约定,下游收不到",
                 "脚本改名为 fault_check_<节点名>.py(SKILL.md 步骤5)").to_dict())
         else:
             report["notes"].append("包里没有诊断脚本(纯文档包):只检查判断方法文档")
@@ -570,7 +570,7 @@ def _summarize(report):
 
 
 def _print_report(report):
-    print(f"契约检查:{report['target']}")
+    print(f"格式检查:{report['target']}")
     for blk in report["scripts"]:
         print(f"\n== {blk['script']} ==")
         for i in blk["items"]:
@@ -593,7 +593,7 @@ def _print_report(report):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="交付脚本契约检查(详见文件头)")
+    ap = argparse.ArgumentParser(description="交付脚本格式检查(详见文件头)")
     ap.add_argument("target", help="交付包目录 | 交付包.zip | 单个 fault_check_*.py")
     ap.add_argument("--strict", action="store_true", help="WARN 也算不过(新脚本/打包前用)")
     ap.add_argument("--json", action="store_true", help="输出 JSON 报告(机器读)")

@@ -1,6 +1,6 @@
 ---
 name: fault-tree-rca-debate
-description: 辩论式多代理根因分析。读取 cs-scot-execute 备好的 rca_input.json 和 tree_index.json，自行调用 LLM 做条件匹配和多代理辩论评分，产出与 fault-tree-rca 同一契约的四档 rca.json，三种得分机制（original、softmax、ratio）同时输出。与 fault-tree-rca（模型按规则手工判断）接在同一位置、可互换。要用辩论引擎跑根因分析，或对比三种得分机制时使用。
+description: 辩论式多代理根因分析。读取 cs-scot-execute 备好的 rca_input.json 和 tree_index.json，自行调用 LLM 做条件匹配和多代理辩论评分，产出与 fault-tree-rca 同一格式的四档 rca.json，三种得分机制（original、softmax、ratio）同时输出。与 fault-tree-rca（模型按规则手工判断）接在同一位置、可互换。要用辩论引擎跑根因分析，或对比三种得分机制时使用。
 ---
 
 # fault-tree-rca-debate：辩论式根因分析
@@ -21,7 +21,7 @@ runner 跑完 script 节点 → 本轮结果目录 result-<运行号>/rca_input.
 python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_input.json" --mechanism all
 ```
 
-两条路径写同一个结果目录的 `rca.json`，过同一道 `validate_rca.py` 检查，被同一套评估打分。确证档的口径也相同：候选自身被证据实测成立、路径上没有实测"不成立"或"冲突"的上级，才进 `rca_result`；未绑定或数据不足的上级默认放行并记入 caveats；上级实测不成立或冲突是层级矛盾，降为疑似并写卡点。升档凭 execute 的事实，不凭辩论得分。
+两条路径写同一个结果目录的 `rca.json`，过同一道 `validate_rca.py` 检查，被同一套评估打分。确证档的规则也相同：候选自身被证据实测成立、路径上没有实测"不成立"或"冲突"的上级，才进 `rca_result`；未绑定或数据不足的上级默认放行并记入 caveats；上级实测不成立或冲突是层级矛盾，降为疑似并写卡点。升档凭 execute 的事实，不凭辩论得分。
 
 ## 术语
 
@@ -63,8 +63,8 @@ python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_i
 跑引擎前先借 fault-tree-rca 的 draft_rca 做机械分类，按候选情况分四路，判据全部机械、不经模型：
 
 1. 唯一干净候选（自身成立、路径无实测不成立或冲突，且没有其他候选）：引擎整场跳过，0 次 LLM 调用，finalize 直接机械合成 rca.json。此时不写 `rca_debate_full.json`（评估侧靠它区分引擎，机械结果不冒充辩论结果），审计信息写 `debate_screen.json`。
-2. 多候选竞争（候选总数不少于 2 且含干净候选）：全部候选进辩题，引擎辩其所在分支（祖先链与子树的并集，与 `--pruned-only` 取交集），分主次、并发、连锁并排序。确证仍凭机械事实，辩论得分只管排序；引擎 Top-K 漏掉的干净候选由机械合成补在末尾（不占辩论排序，并从疑似档剔重，防止同一节点占两档）。角色材料开头带"辩题聚焦"注记：不辩真伪只辩排序，背景不得翻案。
-3. 纯争议候选（自身冲突或层级矛盾，一个或多个）：引擎只辩争议候选所在的分支（多个取并集），真伪凭辩论质证加人工复核。注记用争议款：点名争点；实测排除的不得翻案，未验证或数据不足的如实标注。
+2. 多候选竞争（候选总数不少于 2 且含干净候选）：全部候选进辩题，引擎辩其所在分支（祖先链与子树的并集，与 `--pruned-only` 取交集），分主次、并发、连锁并排序。确证仍凭机械事实，辩论得分只管排序；引擎 Top-K 漏掉的干净候选由机械合成补在末尾（不占辩论排序，并从疑似档剔重，防止同一节点占两档）。角色材料开头带"辩题聚焦"注记：不辩真伪只辩排序，背景节点已实测排除的结论不得推翻。
+3. 纯争议候选（自身冲突或层级矛盾，一个或多个）：引擎只辩争议候选所在的分支（多个取并集），真伪凭辩论质证加人工复核。注记用争议款：点名争点；实测排除的结论不得推翻，未验证或数据不足的如实标注。
 4. 没有成立候选、rca_input 是 md 形态、或找不到 fault-tree-rca：自动退回全树辩论。
 
 这就是"1 个根因对 100 个节点"的解法：100 个节点里通常只剩几个真要辩，唯一明确根因时 0 轮辩论。
@@ -92,7 +92,7 @@ python "<本目录>/scripts/run_debate_rca.py" --rca-input "<结果目录>/rca_i
 3. 不加没让加的开关，不改配置。默认值已按最优配好（并行 4、匹配缓存、LLM 调用保护、重试收敛，开跑头几行会打印这些状态）。`--pruned-only` 在标准全绑定流水线上没有效果，不要主动加；任何情况下不修改 `vendor/config.yaml`。
 4. 结果合格线。输出出现 `检测到API连接失败,自动切换到fallback模式`（引擎原话）或结尾的 ⚠ 降级警告，本次结果作废，如实报告，不拿它下结论。`rca_debate_full.json` 里 `llm_call_failures` 占总调用比例超过 10% 也要报告并建议错峰重跑；零星几次属正常，外层重试已自愈。
 5. LLM 连续 5xx 或超时的处置。开跑就成串报 500、502、超时时停下（不要硬跑到降级出废结果），跑一次 `python <本目录>/scripts/probe_llm.py` 定位：探针也 5xx 是网关侧故障或过载，报告用户、建议错峰（会话与引擎共用网关，会话干重活时尤其容易挤兑）；探针通则是瞬时抖动，直接重跑（脚本会自动归档上一轮产物）。这是探针的正确用途：诊断，不是每次跑前的仪式。
-6. 汇报口径。validate_rca 的结果，加 `rca.original.json`、`rca.softmax.json`、`rca.ratio.json` 三份的 Top-K 根因路径并排对比（三种机制的分数横向不可比，只比各自的排序；详见 `references/engine_ops.md`）。
+6. 汇报内容。validate_rca 的结果，加 `rca.original.json`、`rca.softmax.json`、`rca.ratio.json` 三份的 Top-K 根因路径并排对比（三种机制的分数横向不可比，只比各自的排序；详见 `references/engine_ops.md`）。
 
 ## 默认开着的优化
 

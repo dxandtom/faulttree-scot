@@ -15,7 +15,7 @@ disable-model-invocation: false
 3. 处理 `LOG/`：遍历全部 `.txt` 和 `.log` 文件（大小写不敏感，现场常见 log.log），用 `logbuffer2csv.convert_file()` 转成 CSV。
 4. 处理 `CONFIG/`：遍历全部 `.txt`，用 `config2csv.parse_config_to_csv()` 转成 CSV。
 5. 处理 `DIAG/`：遍历全部 `.txt`，用 `parse_diag_to_csv.parse_diag_to_csv()` 转成 CSV。
-6. 处理 `CMD/`：CMD 是 DIAG 的新名字，两个名字都认，处理方式相同；输出到 `csv/<网元>/CMD/`，列为 NEName、CmdName、ObjContent（下游把 ObjContent 与 CmdResult 视为同义）。
+6. 处理 `CMD/`：CMD 是 DIAG 的新名字，两个名字都能识别，处理方式相同；输出到 `csv/<网元>/CMD/`，列为 NEName、CmdName、ObjContent（下游把 ObjContent 与 CmdResult 视为同义）。
 7. 生成命令汇总表：基于 DIAG 转出的 CSV，在 `csv/<网元>/CMD/` 下生成汇总 CSV，列为 NEName、CmdName、OriginCmd、CmdResult。
 8. 把全部 CSV 打成一个 zip。
 

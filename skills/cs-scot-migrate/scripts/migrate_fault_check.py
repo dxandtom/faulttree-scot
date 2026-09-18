@@ -273,7 +273,7 @@ def detect_entry(script: Path):
             continue
         entry = c
         break
-    note = (f"({'/'.join(skipped)}() 不接收数据目录参数——脚本从 sys.argv 自取路径,不符合入口契约,已跳过)"
+    note = (f"({'/'.join(skipped)}() 不接收数据目录参数——脚本从 sys.argv 自取路径,不符合入口格式约定,已跳过)"
             if skipped else "")
     if entry is None:
         return None, False, {}, sorted(defs), argc, note
@@ -361,7 +361,7 @@ def arbitrate_entry(fc: Path, deps, entry: str, per_ne: bool, kwargs: dict, expl
         if ok:
             return entry, per_ne, kwargs, ""
         if explicit:
-            print(f"  ⚠ 烟测:--entry 指定的「{entry}」空目录调用不合契约({why})——按人工指定继续;"
+            print(f"  ⚠ 试跑:--entry 指定的「{entry}」空目录调用不符合约定格式({why})——按人工指定继续;"
                   "运行期该节点若判不了,先查这里")
             return entry, per_ne, kwargs, ""
         tree = ast.parse(fc.read_text(encoding="utf-8", errors="replace"))
@@ -373,13 +373,13 @@ def arbitrate_entry(fc: Path, deps, entry: str, per_ne: bool, kwargs: dict, expl
             k2 = _required_kwargs(defs[c])
             ok2, why2 = _smoke_call(stage, fc.name, c, k2)
             if ok2:
-                note = f"烟测仲裁:「{entry}」不合契约({why}),换用「{c}」(空目录调用返回契约形状)"
+                note = f"试跑仲裁:「{entry}」不符合约定格式({why}),换用「{c}」(空目录调用返回约定的形态)"
                 print(f"  {note}")
                 return c, c in ("check_ne", "diagnose_ne"), k2, note
             tried.append((c, why2))
-        raise SystemExit("烟测:所有候选入口空目录调用都不合契约:\n  "
+        raise SystemExit("试跑:所有候选入口空目录调用都不符合约定格式:\n  "
                          + "\n  ".join(f"{n}(): {w}" for n, w in tried)
-                         + "\n——契约要求:入口吃数据根目录,返回 {matched,evidence,details}"
+                         + "\n——约定的格式:入口接收数据根目录,返回 {matched,evidence,details}"
                            "(空数据=insufficient_data,旧三态 undetermined 也认)。确认真入口后用 --entry 指定强推(只警告不拦),"
                            "或把问题反馈交付方按规范改脚本。")
 
@@ -921,7 +921,7 @@ def _stage_no_entry(product: Path, fc: Path, deps) -> str:
     side.write_text(json.dumps({
         "status": "pending_repair", "reason": "no_entry",
         "fix": "在副本里补一个 fault_check(data_dir) 薄封装入口:接收数据目录参数,"
-               "调用原有判断逻辑并返回契约结果(matched/evidence/details);"
+               "调用原有判断逻辑并返回约定格式的结果(matched/evidence/details);"
                "判断逻辑一行不动,拿不准算不算逻辑就停下问人",
     }, ensure_ascii=False, indent=1), encoding="utf-8")
     return (f"脚本副本已落 scripts/custom/{fc.name},照 {fc.name}.contract.json 的修法"
@@ -949,7 +949,7 @@ def _contract_mod():
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
             except Exception:                            # noqa: BLE001 检查组件坏了不拦迁移,明确说明
-                print(f"  [warn] 契约检查组件加载失败({p})——本次跳过检查")
+                print(f"  [warn] 格式检查组件加载失败({p})——本次跳过检查")
                 mod = None
         _CC_CACHE.append(mod)
     return _CC_CACHE[0]
@@ -991,7 +991,7 @@ def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
     for i in items:
         if i["tier"] == "FAIL" and i["id"] in _ABSORBED:
             warns.append(dict(i, tier="WARN",
-                              msg=i["msg"] + "(试跑仲裁已确认适配函数能驱动——可以处理,正本仍须按契约改)"))
+                              msg=i["msg"] + "(试跑仲裁已确认适配函数能驱动——可以处理,正本仍须按约定格式改)"))
         elif i["tier"] == "FAIL":
             fails.append(i)
         elif i["tier"] == "WARN":
@@ -1012,7 +1012,7 @@ def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
                 and dst.read_bytes() != fc.read_bytes())
     now = datetime.datetime.now().isoformat(timespec="seconds")
     if fails and explicit:                               # 人工 --entry 强推:人>名单,只警告不拦(与仲裁同款)
-        print(f"  ⚠ 契约检查 {len(fails)} 项 FAIL({','.join(i['id'] for i in fails)})"
+        print(f"  ⚠ 格式检查 {len(fails)} 项 FAIL({','.join(i['id'] for i in fails)})"
               "——按人工 --entry 指定放行;运行期该节点判不了先查这些项")
         warns = warns + [dict(i, tier="WARN") for i in fails]
         fails = []
@@ -1025,7 +1025,7 @@ def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
         side.write_text(json.dumps(
             {"status": "pending_repair", "fails": fails, "warns": warns,
              "baseline": baseline, "at": now}, ensure_ascii=False, indent=1), encoding="utf-8")
-        lines = [f"契约检查不过({len(fails)} 项适配函数处理不了,绑定不写入):"]
+        lines = [f"格式检查不过({len(fails)} 项适配函数处理不了,绑定不写入):"]
         for i in fails:
             lines.append(f"    [FAIL] {i['id']} {i['msg']}")
             if i.get("fix"):
@@ -1420,7 +1420,7 @@ def load_map_excel(path: Path):
             continue
         out.append((names, z, i, jd))
     if unmarked_zip:
-        print(f"  [标记] {len(unmarked_zip)} 行填了 zip 但未标记变更——按标记契约不迁移,只当结构参照:"
+        print(f"  [标记] {len(unmarked_zip)} 行填了 zip 但未标记变更——按标记列的规则不迁移,只当结构参照:"
               + "、".join(unmarked_zip[:6]) + ("…" if len(unmarked_zip) > 6 else ""))
     if not out and not clears and not sols and not (jd_col is not None and zipless):
         raise SystemExit("对应表里没有任何一行填了 zip 列,也没有清除判据的行(判据与包名都空)或可同步的"
@@ -1868,7 +1868,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         for snames, swhy in struct_miss[:6]:
             print(f"  - {'/'.join(snames)}:{swhy}")
     if unmarked_diff:
-        print(f"\n  [info] {len(unmarked_diff)} 个未标记行的判据与树不同(按标记契约未动,"
+        print(f"\n  [info] {len(unmarked_diff)} 个未标记行的判据与树不同(按标记列的规则未动,"
               "确要改就在表里标记后重跑):"
               + "、".join(f"{n}「{nm}」" for n, nm in unmarked_diff[:6]))
     if fails:
@@ -2223,7 +2223,7 @@ def main() -> None:
         if ginfo and ginfo["repairs"]:
             print(f"  [管道已修] {','.join(ginfo['repairs'])}(修复副本生效,基准 .orig 保留)")
         if ginfo and ginfo["warns"]:
-            print(f"  [契约WARN] {','.join(ginfo['warns'])}(适配函数可处理;详见结尾的退回清单)")
+            print(f"  [格式WARN] {','.join(ginfo['warns'])}(适配函数可处理;详见结尾的退回清单)")
 
         # 0. 引擎检查+补全(旧产物的内核/函数库/导入校验不认 S 类,先刷新再改)
         refresh_engine(product)

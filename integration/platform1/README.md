@@ -1,7 +1,7 @@
 # 平台1 本地联调工装
 
 把平台1 的"优化按钮"请求翻成技能的本地输入,跑完迁移后回调。**这一层是工装,不进技能**:
-技能(cs-scot-migrate / cs-scot-generate)只认本地已摆好的文件;下载、回调、状态这些平台概念
+技能(cs-scot-migrate / cs-scot-generate)只接受本地已摆好的文件;下载、回调、状态这些平台概念
 都停在这层。上平台2 时本目录整体由开发的集成代码替换,技能原样上。
 
 ## 链路(字段名与平台接口文档 callDongXuanOptimizeApi 一致)
@@ -31,7 +31,7 @@ optimizeType 三档(平台口径,请求带 `optimizeType` 字段;excel 为增强
   表里踪影全无的节点自动删(调优表 .bak 可回退、台账 deleted_at 留痕、两道防误删保险),
   migrate `--map-mode all`。
 
-**标记契约(平台已定:每次都给全量表,Need_Optimize 标记用户选了哪些节点)**:标记列
+**标记列的规则(平台已定:每次都给全量表,Need_Optimize 标记用户选了哪些节点)**:标记列
 `Need_Optimize`(TRUE/FALSE)在场即启用——结构增删看行的出现/消失,内容动作(zip 迁移/判据同步/
 双空清除/解决方案同步)只对 TRUE 行执行;FALSE 行的 zip 不下载不迁,判据不同只提示。解决方案列
 (`Solution_CN/EN`,取 CN)同为以表为准,空≠删除。全部 FALSE 且表与树一致 = 只刷新工具链公共文件(等于"刷新技能");
@@ -78,7 +78,7 @@ python integration/platform1/make_full_table.py --product <runC2>/skill/qos-secu
 驱动调技能分两层:**机械层**直接起子进程跑迁移脚本 `migrate_fault_check.py`(不经前门);
 **模型层**起 Claude Code 无头会话(`claude -p`)点名一个技能处置失败项。两层都不写死路径:
 - 迁移脚本定位:`SCOT_MIGRATE_SCRIPT` 显式指定 → 各技能根下找,独立技能
-  `cs-scot-migrate/scripts/…` 与发行包内嵌 `cs-scot-generate-optimize/migrate/scripts/…` 都认;
+  `cs-scot-migrate/scripts/…` 与发行包内嵌 `cs-scot-generate-optimize/migrate/scripts/…` 都可以;
   技能根按序 = `SCOT_SKILLS_ROOT`(平台装技能的目录,可多个,os.pathsep 分隔)→ 本仓库 `skills/`
   → `~/.claude/skills`;
 - 模型档点名:装了独立 `cs-scot-migrate` 就点它;只装了发行包就点前门
@@ -148,7 +148,7 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
 `{"result":"success"}`,后台跑完看 `_runs/v<versionId前8>/run.log` 末尾的 [产物]/[回调] 行。
 自测过了去掉这两个变量重启服务,把 `http://<本机IP>:8080/optimize` 给平台配上,让管理员点一次优化。
 服务模式默认带模型档(PLATFORM1_WITH_MODEL=0 可关)。线上口径是**一单一轮**:
-每次点优化只做一轮模型处置就交付(部分交付兜底,已修的管道副本随包带走),
+每次点优化只做一轮模型处置就交付(部分交付作为保底,已修的脚本副本随包带走),
 没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
 (本地实验同理:重跑同一条命令就是下一轮)。每单请求的全程日志在
 `integration/platform1/_runs/v<versionId前8>/run.log`。终端开着服务就在;
@@ -178,7 +178,7 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080 --app-dir integration/pl
       **自动复用下载脚本的 invokeToken**(同一份 obs_headers_config.json + token 文件 + 它的加密
       封装;仅在回调主机 = 下载端点主机时自动带,并同它一样不校验证书)。环境变量:
       PLATFORM1_CB_AUTH=platform 强制复用 / none 不带;PLATFORM1_CB_HEADERS 塞 JSON 请求头
-      则以它为准(别的鉴权方式兜底)
+      则以它为准(其他鉴权方式作为备用)
 - [x] 回调接口的**完整 URL**(实验 B' 2026-09-02 实测):与下载服务同网关同端口(443,不写端口),
       路径带 `/agent/` 前缀:`https://<网关主机>/agent/workspace/faultTreeNode/optimizeCallback`;
       直打网关根下无前缀路径 LB 回 404,带 `:8081` 连接超时(那是应用服务器直连口)。

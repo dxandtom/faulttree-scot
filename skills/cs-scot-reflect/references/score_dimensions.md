@@ -4,7 +4,7 @@
 平台侧配置置信度(confidence)时照此表填;我方输出文件 `quality_score.json` 的
 `dimensions` 键名 = 本表 `dimension_key`,格式见 `output_files.md` 第 3 节。
 
-计分口径:六关按序、命中即停,不做程度打分——`value_type` 一律 **BOOLEAN**
+计分规则:六关按序、命中即停,不做程度打分——`value_type` 一律 **BOOLEAN**
 (通过 `value:true`→`score:100`;命中 `value:false`→`score:0`;前序命中导致没评到
 →`value:null`/`score:null`,展示渲染 N/A)。总分 = 通过维度数 ÷ 6 × 100(取整),
 语义"六关过了几关";权重等权(1/6≈0.1667,平台按需归一),`weight` 仅供平台展示配置,

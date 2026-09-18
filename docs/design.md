@@ -1,175 +1,90 @@
-# FaultTree-SCoT 设计文档
+# FaultTree-SCoT 总体设计
 
-> 状态:**v0 草案**,供讨论迭代 · 2026-06-01
-> 所有 SKILL.md 与提示词均用中文编写。
+> 状态：与仓库当前实现一致 · 2026-09-18。早期的 v0 草案已被本版取代；本文是外人了解项目的第一份文档，细节以各技能的 SKILL.md 为准。
 
-## 0. 一句话
+## 1. 一句话
 
-网络保障(CS)场景下,基于**人工编写的故障子树(规则)** + **多种指标数据**,
-自动**生成**一套场景专属的诊断脚本与计划,并在平台 harness 上**执行**,
-产出**根因路径 + 判断依据**。轻量自研,**不接入** SCoT_A,只借其契约纪律。
+网络保障（CS）场景下，基于业务同事人工编写的故障树和现场采集的数据，自动生成一套场景专属的诊断脚本与执行计划，在平台上执行，产出根因路径和逐节点的判断依据；并用评估反思和优化闭环持续改进。
 
----
+## 2. 六个技能与分工
 
-## 1. 关键决策(已对齐)
+| 技能 | 阶段 | 做什么 | 由谁用 |
+|---|---|---|---|
+| cs-scot-generate | 生成 | 把故障树 Excel 和各数据源的表头编译成场景产物：故障树索引、执行计划 `plan.json`、每个数据源一份"逐条件分析脚本"，并直接生成可运行的场景技能 | 工具链开发者，一个场景生成一次 |
+| cs-scot-execute | 执行 | 场景技能的执行指引：读计划，顺序运行各数据源的分析脚本得到事实，交给根因分析 | 平台上的用户，每来一批数据跑一次 |
+| fault-tree-rca | 执行 | 根因分析：候选清单由脚本枚举并自动定档，模型只裁决冲突候选，脚本合成结果并渲染报告 | 由 cs-scot-execute 调用 |
+| datacom-fault-tree-tester | 优化 | 业务同事把一个节点的判断方法写成规范文档，生成并验证判断脚本，打成节点交付包 | 业务同事 |
+| cs-scot-migrate | 优化 | 把节点交付包迁移进场景技能：判据替换、绑定换成直接运行交付脚本；也按平台全量表增删节点、刷新工具链公共文件 | 工具链开发者或平台 |
+| cs-scot-reflect | 评估 | 用用例库评估执行结果：对账、六类错误归因、通过率与得分；输出反馈 | 工具链开发者或平台 |
+| cs-scot-generate-optimize | 入口 | 生成与优化的统一入口：按输入判断走生成、导入优化、增删节点还是反馈处理 | 平台 |
 
-1. **不接入完整 SCoT_A**(太重);借鉴其概念(结构化 plan / 节点 kind / 引用传参),自研极小实现。
-2. **一个场景 = 一个故障子树**(一个 excel → md)。
-3. **运行时 = 顺序跑 N 个指标解析脚本 + 1 次综合根因分析**。N = 该场景要查的指标数(例:kpi + chr = 2)。
-   计划是**直线**:故障树的分支判断发生在 RCA 内部,不在计划层。
-4. **泛化在"生成器",不在"解析脚本"**:不同场景子树规则差异大、是人写的、不规整(可能有逻辑谬误),
-   所以解析脚本**按场景由 LLM 生成**;能复用/要泛化的是**生成流程 + 生成提示词**(每类指标一份通用模板,适配任意子树)。
-5. **数据输入 xlsx 与 csv 都要支持**(故障树 xlsx;指标数据 xlsx/csv)。
-6. **代码算、LLM 判**:确定性算术进生成的脚本;子树的不规整/逻辑判断交给 RCA 的 LLM。
-7. **交付物 = skill**,平台 harness 负责执行。
+辅助部件：zip2csv（原始采集数据转成三张表，随场景技能内置）、fault-tree-rca-debate（辩论式根因分析引擎，与 fault-tree-rca 接在同一位置、可互换，交付出去的场景技能默认不带）。
 
----
-
-## 2. 两个阶段 + 三个 skill
+## 3. 一次完整的流程
 
 ```
-阶段A 生成(开发态,一次/场景)            阶段B 执行(运行态,多次/数据批次)
-─────────────────────────────           ─────────────────────────────
-故障树 xlsx (+各指标数据样例)            场景资产 + 实际数据(xlsx/csv)
-        │ cs-scot-generate                          │ cs-scot-execute(harness 驱动)
-        ▼                                         ▼
-场景资产:                                顺序跑 parser_1..N → 各指标 JSON
-  子树 md + 各指标解析脚本                         │
-  + 极简 plan + RCA 配置                          ▼ 调 fault-tree-rca
-        │ 打包成可上传的场景 skill         根因路径 + 判断依据
-        ▼
-   上传到平台
+故障树 Excel ──① cs-scot-generate──▶ 场景技能（SKILL.md + assets/：tree_index、plan.json、各源分析脚本）
+                                            │
+现场数据（csv/xlsx，或原始日志经 zip2csv 转表）
+                                            │  ② cs-scot-execute
+                                            ▼
+                               result-<运行号>/rca_input.json    逐节点事实：成立 / 不成立 / 数据不足
+                                            │  ③ fault-tree-rca
+                                            ▼
+                               rca.json（确证 / 疑似 / 待确认 / 树问题）+ rca_report.md + 树视图 + 回复稿
+
+业务同事 ──④ datacom-fault-tree-tester──▶ 节点交付包 ──⑤ cs-scot-migrate──▶ 场景技能（判据与绑定更新）
+用例库 + 场景技能 ──⑥ cs-scot-reflect──▶ 通过率、六类错误、反馈 ──⑦ cs-scot-generate-optimize──▶ 自动处理或交人
 ```
 
-| skill | 阶段 | 角色 | 备注 |
-|-------|------|------|------|
-| **cs-scot-generate** | 生成 | 把任意故障子树编译成场景资产 | 核心难点与价值;泛化的"作坊" |
-| **cs-scot-execute** | 执行 | 读 plan、顺序跑脚本、调 RCA | 通用、薄,harness 驱动 |
-| **fault-tree-rca** | 执行 | 子树 md + 各指标 JSON → 根因 + 依据 | 通用;契约写死;判断在这里 |
+- ①：一个场景生成一次。绑定（每条判据用哪个数据源的哪一列、怎么算）由模型逐条判断后写进脚本，之后不再需要模型。
+- ②③：每批数据跑一次。确定性的统计全在脚本里，模型只在根因分析这一步裁决冲突候选。
+- ④⑤：业务同事的判断方法以脚本形式进入场景技能，判断逻辑由交付方负责，工具链只做格式检查和适配。
+- ⑥⑦：评估把没通过的用例归到六类错误之一，优化入口按类给出处理方式，自动档直接执行，同一问题三轮不过转人工。
 
----
+## 4. 技能之间靠哪些文件交接
 
-## 3. 复用边界(回答"啥时候复用")
+| 文件 | 由谁写 | 由谁读 | 内容 |
+|---|---|---|---|
+| `assets/tree/<短名>.tree_index.json` | generate | execute、rca、migrate、reflect | 故障树结构：节点编号、名称、判据、层级 |
+| `assets/plan.json` | generate | execute | 执行计划：先跑哪些分析脚本，最后做根因分析 |
+| `assets/scripts/<数据源>_analyzer.py` | generate（绑定由模型填） | execute | 每个数据源的逐条件分析脚本 |
+| `assets/tree/<短名>.tuning.xlsx` | generate、migrate | 人工调优、migrate | 调优表：一行一个节点，树和绑定的可编辑事实源 |
+| `result-<运行号>/rca_input.json` | execute | rca、reflect | 逐节点事实 |
+| `result-<运行号>/rca.json` | rca | execute（渲染）、reflect | 四档根因结论 |
+| `tree/migrations.json` | migrate | reflect（建用例库）、optimize | 迁移记录：节点对应哪个交付包 |
+| `cases/<case_id>/expected.json` | reflect（case_gen） | reflect | 用例期望；不传给生成与执行 |
+| `quality_score_batch.json`、`evaluation_report.json` | reflect | 平台、optimize | 整批通过率与得分；单用例评估报告 |
 
-| 东西 | 复用范围 |
-|------|----------|
-| 生成提示词(每类指标一份) | 跨所有场景 ✅ |
-| excel→md 转换、xlsx/csv 加载器 | 跨所有场景 ✅ |
-| cs-scot-execute、fault-tree-rca | 跨所有场景 ✅ |
-| **某场景的解析脚本** | **仅该场景**,但跨该场景**所有数据批次**复用(生成一次,执行多次)✅ |
-| 故障子树 md、plan | 每场景一份 |
+## 5. 设计原则
 
-> 解析脚本不跨场景复用(规则不同),但**生成它的模板跨场景复用**——泛化在这一层。
+1. **代码算，模型判。** 计数、比阈值、匹配这类确定性统计写进生成的脚本；模型只做两处判断：生成时把判据绑定到数据列，执行时裁决有冲突的根因候选。
+2. **一次生成，反复执行。** 绑定依据数据的格式和判据的语义，不依赖某一批数据里碰巧出现的值；同一场景的脚本生成一次，换数据反复跑。
+3. **诚实性由脚本结构保证。** 根因候选由脚本枚举，结果由脚本合成，模型改不了数字；数据拿不到就是"数据不足"，不用相近的量顶替，也不把"没查到"当成"正常"。
+4. **调优表是人机接口。** 树的增删、判据与绑定的修改都通过调优表往返完成，导入时统一校验，写入是原子的。
+5. **判断逻辑归交付方。** 业务同事的判断脚本原样运行，工具链只检查格式、做输入输出适配，问题退回交付方修改。
+6. **文档分层。** 每个技能的 SKILL.md 只写流程，细节放在 references 并说明何时去读；术语先定义，不用项目内部说法。
 
----
+## 6. 目录地图
 
-## 4. 数据格式契约
-
-### 4.1 故障树(输入,xlsx)
-- 列:`L1(Chinese)` … `Ln(Chinese)` 表层级 + `Judgment Condition(Chinese)` 判断条件。
-- 每行 = 根→某节点的路径,判断条件挂最深节点;`不涉及` 跳过;支持正则排除行。
-- → `excel_to_tree.py` → 子树 md(`#/##/###` 表层级,标题下跟判断条件)。
-
-### 4.2 指标数据(输入,xlsx 或 csv)
-- **kpi**:表头 `KpiTreeJson`,每行一个 JSON(`id/kpiIndex/name/formula/parentId/...`);
-  `formula` 内含 `N.`/`L.` 计数器(可能带 `<span`、`&gt;` 等 HTML 污染,需清洗)。
-- **chr**:表头 + 记录行,字段如 `Time`、`DCErrType` …(枚举做分布统计、连续值做区间统计)。
-- 统一加载器:支持 xlsx/csv + 编码自动检测(UTF-8/GBK)。
-
-### 4.3 解析脚本输出(JSON,每指标一份)
-- **只查数据、不下判断**:`summary` + `field_stats`(数据驱动遍历各字段的分布/数值统计)+ `referenced`(子树引用到的计数器/字段的取值/计数,缺失标 `found:false`)。
-- **不含 `conditions`/`hit`/`judgment`** —— 是否成立、根因全部交给 RCA。
-
-### 4.4 RCA 输出(契约)
-```json
-[
-  {
-    "Root_cause": "根因节点名称",
-    "Fault_tree_path": ["父节点1", "父节点2", "根因节点"],
-    "evidence_path": [
-      {"node": "父节点1", "condition": "<逐字判断条件>", "actual": "<实际数值>", "judgment": "<代入比较 → 成立/不成立>"},
-      {"node": "父节点2", "condition": "...", "actual": "...", "judgment": "..."},
-      {"node": "根因节点", "condition": "...", "actual": "...", "judgment": "..."}
-    ]
-  }
-]
 ```
-**evidence_path 规则(正式定)**:与 `Fault_tree_path` 一一对应;每个元素是对象,含 `condition`(逐字摘自故障树正文,可追溯原规则)+ `actual`(实际数值)+ `judgment`(代入比较与结论)。
-**必须把"实际值多少、怎么判断、是否成立"写清楚**,不能只写一句裸条件。`condition` 逐字取自故障树;`actual` 逐字引用解析脚本给的**事实**(取值/计数);`judgment` 由 **RCA 现算**(把真实值代入条件 → 比较 → 成立/不成立)——解析脚本只查数据、不下判断。纯描述性中间节点 `condition`/`actual` 置空串、`judgment` 注明。
-
----
-
-## 5. cs-scot-generate 流水线
-
-1. **excel → 子树 md**(确定性,`excel_to_tree.py`)。
-2. **识别指标**:本子树涉及哪些指标(kpi/chr/…)及各自计数器/字段(LLM + 规则)。
-3. **生成解析脚本**:对每个指标,用**该指标类型的通用生成提示词**,注入(子树 md + 该指标数据样例),
-   LLM 产出该场景的解析脚本(含 xlsx/csv 加载、数据驱动的字段统计 + 子树引用项的**定向取值**;**只查数据、不下判断**)。
-4. **验证闭环**:拿样例数据跑生成的脚本 → 必须产出合法 JSON;失败则自动修正重试,直到通过。
-5. **生成极简 plan**(顺序:parser_1..N → RCA)。
-6. **装配 RCA 提示词**(通用模板 + 本子树)。
-7. **打包**场景资产 / 场景 skill。
-
-> **生成提示词是核心资产**:每类指标一份、**场景无关**(靠 LLM 读子树适配各场景);
-> 新增一种数据类型 = 新写一份生成提示词(一次性),系统即扩展。这是 legacy"提示词写死、不泛化"的反面。
-
----
-
-## 6. cs-scot-execute(薄)
-
-- 读场景 plan → 逐 step:
-  - `script` step:用对应解析脚本跑该指标数据 → 写出中间 JSON;
-  - 末步 `rca` step:把子树 md + 各指标 JSON 交给 `fault-tree-rca`。
-- 无 ACP / 无图引擎,靠 harness;计划直线、无分支/并发(需要时再加)。
-
----
-
-## 7. fault-tree-rca(通用;判断在这里)
-
-- **输入**:子树 md + 各指标解析 JSON(已含确定性条件命中结果)。
-- **职责**:综合多指标 + 遍历子树,判定**所有**成立的故障路径、回溯到根、产出根因 + 逐字依据。
-- **LLM 在这里吸收子树的不规整 / 人为谬误**做稳健判断;确定性算术已在 parser 完成。
-- **契约写死**:SKILL.md 必须讲清"上游喂什么、每个字段什么意思、输出什么、判定标准"。
-
----
-
-## 8. 极简 SCoT plan schema(借 SCoT,直线)
-
-```json
-{
-  "scenario": "xxx场景接入失败",
-  "fault_tree": "tree/xxx.md",
-  "steps": [
-    {"id": "kpi", "kind": "script", "run": "scripts/kpi_analyzer.py", "data": "<运行时传入>", "out": "result/kpi.json"},
-    {"id": "chr", "kind": "script", "run": "scripts/chr_analyzer.py", "data": "<运行时传入>", "out": "result/chr.json"},
-    {"id": "rca", "kind": "rca", "inputs": ["tree/xxx.md", "result/kpi.json", "result/chr.json"], "out": "result/rca.json"}
-  ]
-}
+skills/
+  cs-scot-generate/            生成：SKILL.md、scripts/、references/（绑定格式、派发、绑定规则、数通接入）
+  cs-scot-execute/             执行指引：SKILL.md、scripts/runner.py、check_data.py、references/
+  fault-tree-rca/              根因分析：SKILL.md、scripts/（draft、finalize、render）、references/rca_rules.md
+  fault-tree-rca-debate/       辩论引擎：SKILL.md、scripts/、vendor/、references/engine_ops.md
+  datacom-fault-tree-tester/   业务侧：SKILL.md、判断方法_规范.md、scripts/（共享解析库、格式检查）
+  cs-scot-migrate/             迁移：SKILL.md、scripts/、references/、engine/（公共文件副本，单独安装用）
+  cs-scot-reflect/             评估反思：SKILL.md、scripts/、references/
+  cs-scot-generate-optimize/   统一入口：SKILL.md、scripts/（route_feedback、package_skill）、references/
+  zip2csv/                     原始数据转表：SKILL.md、scripts/、vendor/ifilter.py
+integration/platform1/         与平台联调的驱动、接入服务、交接说明
+tests/                         五套测试；integration/platform1/tests/ 是端到端测试
+docs/                          本文、交接文档、遗留任务
 ```
-- 只保留 SCoT 的"结构化、显式 IO、kind 区分"纪律;砍掉条件/并发/for_each/反射等重型特性。
-- `data` 在执行时由 harness/调用方传入实际文件(xlsx/csv)。
 
----
+## 7. 现状与遗留
 
-## 9. 相比 legacy 修了什么
-
-| legacy 病 | 新设计 |
-|-----------|--------|
-| 生成提示词写死、不泛化 | 生成提示词场景无关,LLM 适配任意子树 |
-| 生成没串进流程、手抄 prompt | 生成全流程自动化 + 验证闭环 |
-| 跟 kpi+chr 两条数据焊死 | N 指标可扩展;加指标 = 加生成一份脚本,不改框架 |
-| 生产/消费路径对不上(真 bug) | 统一 plan 显式声明每个 step 的 in/out |
-| 自造 `#tool` 文本格式 + LLM 解析 | 结构化 plan + 薄执行器 |
-| evidence_path 模糊(被删除线划掉) | 正式契约 + 逐字摘录标准 |
-| 算术靠 LLM 眼算 | 确定性算术进 parser 代码 |
-| 只支持 csv | xlsx + csv |
-
----
-
-## 10. 待定决策(需拍板)
-
-- **A. 判断条件在哪算**:确定性算术进 parser(*推荐*)+ 结构/逻辑判断在 RCA;还是更多交给 RCA 的 LLM?
-- **B. 打包形态**:通用 `cs-scot-execute`+`rca`(上传一次)+ 每场景资产(子树+脚本+plan)作为场景 skill(*推荐,DRY*);
-  还是每个场景 skill 完全自包含(把 execute/rca 逻辑也内联)?——取决于平台是否支持 skill 调 skill。
-- **C. 生成在哪跑**:开发态由你跑出可上传的场景 skill(*推荐*);还是也要能在平台上当 skill 跑?
-- **D. 指标识别**:从子树自动识别(LLM)还是生成时人工指定本场景查哪些指标?
+- 六个技能与两个辅助部件已实现并在平台联调；发行包由 `cs-scot-generate-optimize/scripts/package_skill.py` 打出。
+- 已讨论、尚未动手的改动记录在 `docs/遗留任务.md`（如英文树视图）。
+- 三技能的逐文件交接说明见 `docs/handoff-三技能交接.md`；平台接入见 `integration/platform1/README.md` 与交接说明。
