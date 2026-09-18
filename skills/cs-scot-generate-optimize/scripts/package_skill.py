@@ -75,6 +75,7 @@ REQUIRED = (
         "SKILL.md",
         "generate/SKILL.md", "generate/knowledge.md",
         "migrate/SKILL.md", "migrate/scripts/migrate_fault_check.py", "migrate/scripts/sync_engine.py",
+        "migrate/references/mapping_table.md", "migrate/references/script_check.md",
     ]
     + [f"generate/scripts/{n}" for n in _GEN_SCRIPTS]
     + [f"generate/references/{n}" for n in _GEN_REFS]
