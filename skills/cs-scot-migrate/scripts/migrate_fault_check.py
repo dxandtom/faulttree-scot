@@ -764,7 +764,7 @@ def refresh_engine(product: Path) -> list:
     # ⑤ SKILL.md 正文(执行指引):换正文保身份——frontmatter(技能名/描述)原样,正文取同门当前版
     sk = skill_root / "SKILL.md"
     sk_text = sk.read_text(encoding="utf-8", errors="replace")
-    _sk_caps = ("第一个动作就是跑其 draft_rca", "原始散包", "rca_reply.md")   # 同门源须带齐的能力标记
+    _sk_caps = ("check_data.py", "draft_rca.py", "rca_reply.md")   # 执行指引正文须带齐的三处引用:数据体检、候选清单、回复稿
     exe_sk = exe / "SKILL.md"
     m_old = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", sk_text, re.S)
     new_txt = exe_sk.read_text(encoding="utf-8", errors="replace") if exe_sk.exists() else ""

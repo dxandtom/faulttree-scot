@@ -81,7 +81,8 @@ REQUIRED = (
     + [f"generate/references/{n}" for n in _GEN_REFS]
     + [f"zip2csv/{s}" for s in ["SKILL.md", "vendor/ifilter.py"] + [f"scripts/{n}" for n in _Z2C]]
     + [f"cs-scot-execute/{s}" for s in
-       ("SKILL.md", "scripts/runner.py", "scripts/check_data.py")]
+       ("SKILL.md", "scripts/runner.py", "scripts/check_data.py",
+        "references/data_entry.md", "references/reply_format.md", "references/feedback_fix.md")]
     + [f"fault-tree-rca/{s}" for s in
        ("SKILL.md", "references/rca_rules.md",
         "scripts/draft_rca.py", "scripts/finalize_rca.py", "scripts/render_report.py",
