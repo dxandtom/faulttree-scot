@@ -11,7 +11,7 @@
        python regress.py --skill-dir <技能> --case-dir <用例库> --out <工作目录> \\
                          --eval-only --result-dir <既有结果根>
 
-职责边界(硬性,不是偷懒):
+职责边界(硬性规定):
 - 执行段只跑**确定性链**:runner(自动 --data raw=<用例data>,另认用例内 data_map.json 声明的表)
   → draft_rca 机械起草 → finalize_rca 机械合成(不给裁决单)。
 - finalize 拦下未机械定档的候选(真冲突需权衡)→ 该用例记「pending_adjudication」挂起点名,
@@ -20,10 +20,10 @@
 - 一键回归供日常回归;要对外讲的量化数字仍按 A/B 双会话规格(诊断会话不读 expected.json)。
 
 数据喂法(机械规则):
-- 恒喂 --data raw=<该用例 data 目录>(S 类脚本的原始数据通道,实战高频事故就是漏它);
+- 一律传 --data raw=<该用例 data 目录>(S 类脚本读原始数据的入口,实战高频事故就是漏传它);
 - 用例目录下若有 data_map.json({"cmd": "相对data的路径或绝对路径", ...}),逐条加 --data;
-  没有就只喂 raw——单源表绑定会按「数据不足」对待(runner 有汇总),这是入口 B 的声明边界:
-  表映射属「形态识别」模型步,机械层不猜;需要表的用例请落 data_map.json(一次落地反复复用)。
+  没有就只传 raw——单源表绑定会按「数据不足」对待(runner 有汇总),这是入口 B 的声明边界:
+  表映射属「形态识别」模型步,机械层不猜;需要表的用例请写好 data_map.json(一次写好反复复用)。
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
-from batch_summary import format_line, read_case_score, write_batch_score  # noqa: E402  批量汇总的唯一口径
+from batch_summary import format_line, read_case_score, write_batch_score  # noqa: E402  整批汇总的唯一算法来源
 SKILLS_ROOT = SCRIPTS_DIR.parents[1]                     # .../skills/
 
 
@@ -68,8 +68,8 @@ _BUNDLE = "cs-scot-generate-optimize"                    # 打包发布的聚合
 
 def find_runner(skill_dir: Path) -> Path:
     """执行器解析,按序:①打包技能自带副本(<skill>/scripts/runner.py,随产物同代分发,
-    实战 B 会话用的就是它);②同门 cs-scot-execute;③聚合技能里的副本
-    (cs-scot-generate-optimize 打包发布时内含各组件目录)。都没有才硬停并给修法。"""
+    实战 B 会话用的就是它);②同一 skills 目录下的 cs-scot-execute;③聚合技能里的副本
+    (cs-scot-generate-optimize 打包发布时内含各组件目录)。都没有才停止并报错,给出修法。"""
     bundle = SKILLS_ROOT / _BUNDLE
     cands = [skill_dir / "scripts" / "runner.py",
              SKILLS_ROOT / "cs-scot-execute" / "scripts" / "runner.py",
@@ -78,7 +78,7 @@ def find_runner(skill_dir: Path) -> Path:
     for c in cands:
         if c.exists():
             return c
-    if bundle.is_dir():                                   # 聚合技能的子目录名各版本不一,浅层兜底搜一把
+    if bundle.is_dir():                                   # 聚合技能的子目录名各版本不一,再在浅层目录里搜一遍作为备用
         hits = sorted(bundle.glob("*/scripts/runner.py"))
         if hits:
             return hits[0]
@@ -87,7 +87,7 @@ def find_runner(skill_dir: Path) -> Path:
 
 
 def find_rca_scripts(assets: Path) -> Path:
-    """RCA 机械链脚本目录,按序:①产物内挂副本(与产物同代);②同门 fault-tree-rca;
+    """RCA 机械链脚本目录,按序:①产物内挂副本(与产物同代);②同一 skills 目录下的 fault-tree-rca;
     ③聚合技能 cs-scot-generate-optimize 里的副本。"""
     vend = assets / "fault-tree-rca" / "scripts"
     if (vend / "draft_rca.py").exists():
@@ -104,7 +104,7 @@ def find_rca_scripts(assets: Path) -> Path:
 
 def case_suffix(case_id: str, idx: int) -> str:
     """runner --result-suffix 只认[0-9A-Za-z_-]:取 case_id 首段(nX 惯例);清洗后为空退 c<序号>。
-    对号不靠它兜底——run.json 会记数据路径(eval_run 对号阶梯②出生证明)。"""
+    结果匹配不依赖它——run.json 会记数据路径(eval_run 匹配规则②运行记录)。"""
     seg = case_id.split("-", 1)[0]
     return re.sub(r"[^0-9A-Za-z_-]", "", seg) or f"c{idx}"
 
@@ -303,9 +303,9 @@ def main() -> int:
                 + (["--solutions", solutions] if solutions.exists() else [])
             code, tail = _run(fin, 300, logs / f"{sfx}-finalize.log")
             if code != 0:
-                # finalize 的硬闸:有候选未机械定档(真冲突要权衡)→ 绝不代裁。
-                # 默认(无人值守口径):裁决做不了=这轮没优化好,按不通过计——没替它定档,
-                # 只是把"验证不了"如实记为不通过;--pending-hold 恢复挂起等人的旧口径
+                # finalize 的硬性检查:有候选未机械定档(真冲突要权衡)→ 绝不代裁。
+                # 默认(无人值守规则):裁决做不了=这轮没优化好,按不通过计——没替它定档,
+                # 只是把"验证不了"如实记为不通过;--pending-hold 恢复挂起等人裁决的旧规则
                 if not a.pending_hold:
                     row.update(stage="evaluated", verdict="FAIL",
                                error_category="pending_adjudication",
@@ -339,7 +339,7 @@ def main() -> int:
     done = [r for r in rows if r["stage"] == "evaluated"]
     pending = [r for r in rows if r["stage"] == "pending_adjudication"]
     broken = [r for r in rows if r["stage"] in ("exec_fail", "eval_error")]
-    # 整批 quality_score_batch.json:与 eval_run 批量判卷同一口径(batch_summary.py),平台读这一份;
+    # 整批 quality_score_batch.json:与 eval_run 批量判卷同一算法(batch_summary.py),平台读这一份;
     # 没判卷的用例(挂起/执行失败/判卷异常)verdict 记 NOT_EVALUATED,计入分母
     index = write_batch_score(eval_out, [{"case_id": r["case_id"],
                                           "verdict": r.get("verdict") if r["stage"] == "evaluated" else None,

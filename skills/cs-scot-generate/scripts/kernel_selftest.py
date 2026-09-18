@@ -158,7 +158,7 @@ CASES = [
     {"name": "G 单 target 不输出 matched_by_target", "table": _t(["log"], ["ALM-111 occurred"]),
      "binding": {"class": "G", "column": "log", "contains": ["ALM-111"]},
      "expect": {"status": "ok", "matched": 1, "matched_by_target": None}},
-    # C/G 缺 contains/equals/regex(op/target 等野字段)→ 响亮数据不足,绝不静默 matched=0 变假排除
+    # C/G 缺 contains/equals/regex(op/target 等野字段)→ 明确报数据不足,绝不静默 matched=0 变假排除
     {"name": "C/G 空 targets→数据不足(op/target 野字段不认,防假排除)",
      "table": _t(["Summary"], ["hwLinkHeartbeatDropAlarm_active"]),
      "binding": {"class": "C", "column": "Summary", "op": "contains", "target": "hwLinkHeartbeatDropAlarm"},
@@ -464,7 +464,7 @@ CASES = [
      "binding": {"class": "A", "column": "x", "op": "<", "threshold": 1},
      "expect": {"status": "insufficient_data"}},
 
-    # ---- 封存/未知类别:响亮拒收,绝不静默 ----
+    # ---- 已停用/未知类别:明确拒收,绝不静默 ----
     {"name": "封存类别 F→数据不足并指路(v1 内核在 archive)", "table": _t(["p"], ["ON"]),
      "binding": {"class": "F", "param": "p", "equals": "ON"},
      "expect": {"status": "insufficient_data", "predicate_satisfied": None},

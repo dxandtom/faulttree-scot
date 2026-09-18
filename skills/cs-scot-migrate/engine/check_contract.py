@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""check_contract.py — 交付脚本契约体检(《判断方法_规范.md》附录的机械化检查)
+"""check_contract.py — 交付脚本契约检查(《判断方法_规范.md》附录的机械化检查)
 
 用法:
     python check_contract.py <交付包目录|交付包.zip|fault_check_*.py> [--strict] [--json]
                              [--data <数据目录>] [--timeout N]
 
-体检对象:
-  - 交付包(目录/zip):包内每个 fault_check_*.py 逐个体检 + 判断方法.md 必填字段 +
+检查对象:
+  - 交付包(目录/zip):包内每个 fault_check_*.py 逐个检查 + 判断方法.md 必填字段 +
     包自包含(脚本 import 的 search_*.py 必须在包里);包里带 测试数据/ 时试跑一次,
     把 matched 打出来当回归基线(不评对错;崩了/形态坏了才算 FAIL)
   - 单个 .py:只做脚本级检查(生成阶段自查用)
 
-分级(体检项与规范附录逐条对应,FAIL/WARN 行自带修法):
-  FAIL = 契约红线且执行/结论必受影响,下游转接头兜不住 —— 必须修
-  WARN = 契约不达标,但下游转接头运行时可兜、或静态无法确证 —— 新脚本必须修(--strict);
-         存量收编可放行,但要记台账
+分级(检查项与规范附录逐条对应,FAIL/WARN 行自带修法):
+  FAIL = 违反契约且执行/结论必受影响,下游适配函数处理不了 —— 必须修
+  WARN = 契约不达标,但下游适配函数运行时可处理、或静态无法确证 —— 新脚本必须修(--strict);
+         存量导入可放行,但要记台账
 退出码: 0=通过(默认允许 WARN;--strict 时 WARN 也算不过) 1=不通过 2=用法/输入错误
 
-只用标准库;体检不改任何被检文件。
+只用标准库;检查不改任何被检文件。
 """
 import argparse
 import ast
@@ -32,13 +32,13 @@ import threading
 import zipfile
 from pathlib import Path
 
-# 入口候选:与 cs-scot-migrate 的探测口径一致,但不含 check_ne/diagnose_ne——
-# 那俩是"内部帮手"命名,撞上过入口误对号的实测事故,本体检只认全局入口。
+# 入口候选:与 cs-scot-migrate 的探测规则一致,但不含 check_ne/diagnose_ne——
+# 那俩是"内部帮手"命名,出过被误认为入口的实测事故,本检查只认全局入口。
 ENTRY_OK = ("fault_check", "diagnose", "main", "check")
 TRI = ("true", "false", "undetermined", "insufficient_data")   # 四态契约(规范 v1.2);变量名沿用
 MD_REQUIRED = ("节点名称", "故障描述", "判断条件", "命中条件", "输出", "数据来源")
 
-# py<3.10 没有 sys.stdlib_module_names 时的兜底清单(常用标准库)
+# py<3.10 没有 sys.stdlib_module_names 时的备用清单(常用标准库)
 _STDLIB_FALLBACK = {
     "abc", "argparse", "array", "ast", "atexit", "base64", "binascii", "bisect", "bz2",
     "calendar", "cmath", "codecs", "collections", "configparser", "contextlib", "copy",
@@ -127,8 +127,8 @@ def _find_entry(tree):
 
 
 def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
-    """返回 (items, 烟测入口名)。local_names=同包可 import 的模块名集合;
-    entry_hint=下游仲裁选定的入口(给了就按它烟测/扫可达路径——S1 仍按契约命名评判)。"""
+    """返回 (items, 试跑入口名)。local_names=同包可 import 的模块名集合;
+    entry_hint=下游仲裁选定的入口(给了就按它试跑/扫可达路径——S1 仍按契约命名评判)。"""
     items = []
     src = script.read_text(encoding="utf-8", errors="replace")
     try:
@@ -166,7 +166,7 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
             note = "" if pos[0].arg == "data_dir" else f"(首参名是 {pos[0].arg},下游按位置传,能跑)"
             items.append(_pass("S1", f"入口 fault_check({pos[0].arg}) 签名合规{note}"))
 
-    # S2 argv/print/exit 纪律:入口可达函数 + 模块级(守卫分支外)
+    # S2 argv/print/exit 规则:入口可达函数 + 模块级(守卫分支外)
     smoke_entry = entry_hint if entry_hint and entry_hint in tops else entry_name
     guarded = _guarded_nodes(tree)
     scan_funcs = _reachable_funcs(tree, smoke_entry) if smoke_entry else set()
@@ -232,7 +232,7 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
             "入口自带多网元/单网元自动探测:data_dir 下有网元子目录→逐网元;"
             "直接是 CONFIG/CMD/LOG→单网元(规范附录5)"))
 
-    # S5/S6 依赖:三方件红线 + 自包含
+    # S5/S6 依赖:禁止第三方库 + 自包含
     third, missing_local = [], []
     for node in ast.walk(tree):
         mods = []
@@ -268,10 +268,10 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
     return items, smoke_entry
 
 
-# ---------------- 烟测(动态) ----------------
+# ---------------- 试跑(动态) ----------------
 
 class _Shield:
-    """护现场:argv 换掉、stdout/stderr 收走(烟测期间脚本的输出不许污染体检报告)。"""
+    """保护现场:argv 换掉、stdout/stderr 收走(试跑期间脚本的输出不许污染检查报告)。"""
 
     def __init__(self, name):
         self.name = name
@@ -326,7 +326,7 @@ def _import_script(script: Path, timeout):
 
 
 def _tri_of(result):
-    """把四形态结果压成一个三态字符串 + 形态标签(与转接头 _fc_normalize 同口径:
+    """把四形态结果压成一个三态字符串 + 形态标签(与适配函数 _fc_normalize 同一规则:
     details.devices 包裹 → results 信封 → 全局 matched → 按网元字典;只看不改)。"""
     if not isinstance(result, dict):
         return None, "non-dict"
@@ -482,14 +482,14 @@ def _md_check(md: Path):
 
 
 def check_package(pkg: Path, data_dir=None, timeout=120):
-    """体检一个交付包目录。返回 report dict。"""
+    """检查一个交付包目录。返回 report dict。"""
     report = {"target": str(pkg), "mode": "package", "scripts": [], "md": [],
               "notes": [], "baseline": None}
     fcs = sorted(set(pkg.rglob("fault_check_*.py")))
     other_py = [p for p in pkg.rglob("*.py")
                 if not p.name.startswith(("fault_check_", "search_", "verify_"))]
     # 可 import 的"包内模块"只认契约允许随包的两类(fault_check_*/search_*)——别的 .py
-    # (自写帮手/调试遗留/测试数据里的杂项)下游迁移不收,这里就得当包外模块拦,两端口径一致
+    # (自写帮手/调试遗留/测试数据里的杂项)下游迁移不收,这里就得当包外模块拦,两端规则一致
     pkg_mods = {p.stem for p in pkg.rglob("*.py")
                 if p.name.startswith(("fault_check_", "search_"))}
     mds = [p for p in sorted(pkg.rglob("判断方法*.md")) if "规范" not in p.name]
@@ -536,8 +536,8 @@ def check_package(pkg: Path, data_dir=None, timeout=120):
 
 def check_script(script: Path, data_dir=None, timeout=120, entry=None, per_ne=False,
                  entry_kwargs=None):
-    """体检单个脚本(生成阶段自查/收编闸用):同目录当作共享库所在地。
-    entry/per_ne/entry_kwargs=下游烟测仲裁的裁决——给了就按裁决口径烟测(S1 命名仍照契约评)。"""
+    """检查单个脚本(生成阶段自查/导入检查用):同目录当作共享库所在地。
+    entry/per_ne/entry_kwargs=下游试跑仲裁的裁决——给了就按裁决结果试跑(S1 命名仍照契约评)。"""
     report = {"target": str(script), "mode": "script", "scripts": [], "md": [],
               "notes": [], "baseline": None}
     local = {p.stem for p in script.parent.glob("*.py")

@@ -4,11 +4,11 @@
 
 设计要点(每条都是防"人改坏"的,多条来自隔离评审的实测发现):
 - **node_id 只认不改**:已有 id 原样保留;新增行留空,按 max+1 自动分配(历史 id 不复用);
-  改已有 id、复制 id、**手编一个树里从没有过的 id** = 硬拦。
+  改已有 id、复制 id、**手编一个树里从没有过的 id** = 直接拦下。
 - **先全量校验、全量备料,最后统一写盘**:任何错(JSON 坏/id 问题/上级不符/该有的列被删)都
-  收集全、按 Excel 行号用人话报出来,一个文件都不写;写盘阶段不再有任何可失败的计算。
+  收集全、按 Excel 行号用易懂的话报出来,一个文件都不写;写盘阶段不再有任何可失败的计算。
 - **页签按表头找**(含 node_id 的那页),不吃"活动页"的亏(业务同事复制页签留底是常态);
-  表头的全角冒号/空格自动归一,重复表头、非法源名硬拦。
+  表头的全角冒号/空格自动归一,重复表头、非法源名直接拦下。
 - **判据以「判据:<标签>」列或「判据:原文」列为准**(原文列=老格式 v1 树的逐字判据,优先);
 - 绑定 JSON 里保留的 id/source/condition_text 覆盖默认值(自定义 id/页签路由/逐字子句不丢);
   code 从旧 tree_index 按 node_id 继承(老产物 code 兼容不丢)。
@@ -170,7 +170,7 @@ def main() -> None:
     old_sol_p = out / "tree" / "solutions.json"
     old_solutions = json.loads(old_sol_p.read_text(encoding="utf-8")) if old_sol_p.exists() else {}
     existing_aps = sorted(p for p in (out / "scripts").glob("*_analyzer.py")
-                          if p.name != "cross_analyzer.py")   # cross 骨架形态不同,不能当克隆模板
+                          if p.name != "cross_analyzer.py")   # cross 脚本的框架形态不同,不能当克隆模板
     if not existing_aps:
         raise SystemExit("产物 scripts/ 下没有任何 analyzer,无法落绑定(产物不完整)")
 
@@ -384,7 +384,7 @@ def main() -> None:
         if ap_path.exists():
             src_text = ap_path.read_text(encoding="utf-8")
             before = len(_read_conditions_text(src_text))
-        elif s == "cross":                                # cross 骨架形态特殊,不能克隆普通 analyzer 充数
+        elif s == "cross":                                # cross 脚本的框架形态特殊,不能克隆普通 analyzer 充数
             raise SystemExit("不合格(未改动任何文件):表有「绑定:cross」列,但产物没有"
                              " scripts/cross_analyzer.py 骨架——先跑 assemble_scenario 补齐再导入")
         else:                                             # 新增数据源:克隆现有 analyzer 换 INDICATOR

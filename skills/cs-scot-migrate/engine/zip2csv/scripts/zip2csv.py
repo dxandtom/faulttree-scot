@@ -21,18 +21,18 @@ ZIP 解压 + 自动转换流水线
     <output_dir>/csv/<NEName>/CMD/*.csv
     <output_dir>/<zip_basename>_csv.zip
 
-进料三形态自动识别(数据解析全链路 1→2→3):
-    ①原始散包(单个/一堆 log/txt、rar、混杂 zip,**没有** LOG/CONFIG/DIAG/CMD 分类目录)
-      → 先调 vendor/ifilter.py 归类出 formated_result/<网元>/<CMD|CONFIG|LOG>/ 再走②;
-    ②分类目录(网元/LOG|CONFIG|DIAG|CMD 下裸 txt)→ 本脚本常规转换;
-    ③已是 csv → 不需要本脚本,直接喂绑定/runner。
-ifilter 是同事维护的原样引入件(vendor,不改),依赖三方件(rarfile/chardet/olefile/
-oletools/pandas)且首跑会自动 pip 安装——装不上时①走不了,②③不受影响。
+输入形态自动识别,共三种(数据解析全流程 1→2→3):
+    ①原始散文件(单个或一批 log/txt、rar、混杂 zip,**没有** LOG/CONFIG/DIAG/CMD 分类目录)
+      → 先调用 vendor/ifilter.py 归类为 formated_result/<网元>/<CMD|CONFIG|LOG>/ 再按②处理;
+    ②分类目录(网元/LOG|CONFIG|DIAG|CMD 下的原始日志文件)→ 本脚本常规转换;
+    ③已是 csv → 不需要本脚本,直接交给后续的绑定/runner 环节。
+ifilter 是同事维护的第三方原样引入件(放在 vendor 下,不改),依赖第三方库(rarfile/chardet/olefile/
+oletools/pandas)且首次运行会自动 pip 安装——装不上时①无法处理,②③不受影响。
 
 用法：
     python zip2csv.py <zip包或原始数据目录> [output_dir]     # 目录直接给,无需先压成 zip
     python zip2csv.py <zip包或原始数据目录> -o <output_dir>
-    python zip2csv.py <单个原始log/txt或rar>                 # 散文件也直接吃(自动走 ifilter 归类)
+    python zip2csv.py <单个原始log/txt或rar>                 # 单个原始散文件也可直接输入(自动调用 ifilter 归类)
 """
 
 import argparse
@@ -59,12 +59,12 @@ VENDOR_IFILTER = os.path.join(os.path.dirname(SCRIPT_DIR), 'vendor', 'ifilter.py
 
 
 def run_ifilter(raw_dir):
-    """原始散包形态(没有分类目录)→ 调 vendor/ifilter.py 把散 log/txt/嵌套包归类成
-    formated_result/<网元>/<CMD|CONFIG|LOG>/。成功返回 formated_result 路径,失败返回 None
-    (响亮报原因,绝不静默转出 0 个文件)。
-    ifilter 的既有清场行为(vendor 约定,不改):递归删 raw_dir 下 formated_result*、任意名字
-    以 _result 结尾的目录、_merged_temp_*;Linux 下还会波及输入目录的同名 _result 兄弟目录。
-    调用前先避让——撞上疑似用户数据的目录必须停手,不许静默删。"""
+    """输入是原始散文件形态(没有分类目录)时,调用 vendor/ifilter.py 把零散的 log/txt/嵌套压缩包
+    归类为 formated_result/<网元>/<CMD|CONFIG|LOG>/。成功返回 formated_result 路径,失败返回 None
+    (明确报出原因,绝不静默转出 0 个文件)。
+    ifilter 自带的清理旧产物行为(vendor 约定,不改):递归删除 raw_dir 下的 formated_result*、任意名字
+    以 _result 结尾的目录、_merged_temp_*;Linux 下还会波及输入目录旁同名的 _result 兄弟目录。
+    调用前先检查这些目录——遇到疑似用户数据的目录必须停下,不许静默删除。"""
     if not os.path.isfile(VENDOR_IFILTER):
         print("  [err] 找不到 vendor/ifilter.py——原始散包解析不了。"
               "请提供分类目录形态(网元/CMD|CONFIG|LOG 下裸 txt)或已转好的 csv")
@@ -101,7 +101,7 @@ def run_ifilter(raw_dir):
 
 
 def _formated_root(p):
-    """路径 p 向上找名为 formated_result 的祖先目录;没有返回 None(两平台通用,不做字符串切分)。"""
+    """从路径 p 逐级向上查找名为 formated_result 的祖先目录;找不到返回 None(Windows/Linux 通用,不做字符串切分)。"""
     q = p
     while q:
         if os.path.basename(q) == 'formated_result':
@@ -119,7 +119,7 @@ def find_data_dirs(extract_dir):
     支持 ZIP 内有多层嵌套，如 Switch01/DIAG/ 或直接 DIAG/。
     返回 dict: {'LOG': [path1, ...], 'CONFIG': [path1, ...], 'DIAG': [path1, ...]}
     """
-    result = {'LOG': [], 'CONFIG': [], 'DIAG': [], 'CMD': []}   # 命名迁移:DIAG 更名 CMD(两名并存兼容:新包 CMD、老包 DIAG 都认,同款回显解析)
+    result = {'LOG': [], 'CONFIG': [], 'DIAG': [], 'CMD': []}   # 目录名变更:DIAG 已更名为 CMD(两个名字都识别以兼容:新包用 CMD、老包用 DIAG,命令回显解析方式相同)
     for dirpath, dirnames, filenames in os.walk(extract_dir):
         dirname = os.path.basename(dirpath).upper()
         if dirname in result:
@@ -127,18 +127,18 @@ def find_data_dirs(extract_dir):
     return result
 
 
-DEFAULT_NE = 'NE'   # 平铺形态(数据类型目录直接在根下,没有网元层)的兜底网元名;目录输入时用目录名
+DEFAULT_NE = 'NE'   # 平铺形态(数据类型目录直接在根目录下,没有网元层)时的默认网元名;输入是目录时改用目录名
 
 
 _CATEGORY_NAMES = {'LOG', 'CONFIG', 'DIAG', 'CMD'}
 
 
 def collect_data_files(dir_path):
-    """数据目录里的原始文本文件:**递归收**(现场常按日期子目录存放,只扫一层会整批静默漏掉,
-    实测事故),.txt/.log 都认、大小写不敏(Linux 的 glob 区分大小写,.TXT 会漏)。
-    返回 [(绝对路径, 输出基名)]:子目录文件的基名带子路径前缀(2026-08-11/x.log → 2026-08-11_x),
-    防不同子目录同名文件互相覆盖;不下钻同名类别子目录(LOG 里再套 CMD 属另一类别,
-    由 find_data_dirs 单独发现,这里收了会双算)。"""
+    """收集数据目录里的原始文本文件:**递归收集**(现场常按日期子目录存放,只扫一层会把整批文件
+    静默漏掉,实测出过事故),.txt/.log 都识别、不区分大小写(Linux 的 glob 区分大小写,.TXT 会漏掉)。
+    返回 [(绝对路径, 输出基名)]:子目录里文件的基名带子路径前缀(2026-08-11/x.log → 2026-08-11_x),
+    防止不同子目录的同名文件互相覆盖;不进入与类别同名的子目录(LOG 里再嵌套 CMD 属于另一类别,
+    由 find_data_dirs 单独发现,这里再收就会重复计算)。"""
     out = []
     for dirpath, dirnames, filenames in os.walk(dir_path):
         dirnames[:] = sorted(d for d in dirnames if d.upper() not in _CATEGORY_NAMES)
@@ -153,8 +153,9 @@ def collect_data_files(dir_path):
 
 
 def uniq_csv(ne_output_dir, base, used, label):
-    """输出 csv 落点:同名已占则 _2/_3 顺延并响亮播报(多外层同名网元时,静默覆盖=丢整台设备
-    的数据,实测事故)。used 为本次运行内已占路径集合(跨源目录共享);重跑覆盖旧产物照旧。"""
+    """确定输出 csv 的路径:同名已被占用则依次改为 _2/_3 并明确提示(多个外层目录下有同名网元时,
+    静默覆盖等于丢掉整台设备的数据,实测出过事故)。used 是本次运行内已占用路径的集合(各源目录共享);
+    重跑时覆盖上次的产物照旧不受影响。"""
     csv_file = os.path.join(ne_output_dir, base + '.csv')
     n = 2
     while csv_file in used:
@@ -267,9 +268,9 @@ def process_diag_dirs(diag_dirs, csv_dir, extract_dir):
 
 
 def process_cmd_dirs(cmd_dirs, csv_dir, extract_dir):
-    """遍历所有 CMD/ 目录下 .txt 文件(DIAG 更名 CMD 后的命令回显,解析与 DIAG 同款),
-    调用 parse_diag_to_csv 转换,输出到 csv/<NE>/CMD/(列 NEName/CmdName/ObjContent;
-    下游内核认 ObjContent↔CmdResult 同义,直接当 cmd 表喂)。"""
+    """遍历所有 CMD/ 目录下的 .txt 文件(DIAG 更名为 CMD 后存放的命令回显,解析方式与 DIAG 相同),
+    调用 parse_diag_to_csv 转换,输出到 csv/<NE>/CMD/(列为 NEName/CmdName/ObjContent;
+    下游内核把 ObjContent 与 CmdResult 视为同义列,可直接作为 cmd 表输入)。"""
     if not cmd_dirs:
         print("[5b/7] CMD/ 目录不存在,跳过")
         return []
@@ -317,9 +318,9 @@ def generate_cmd_csv(diag_csvs, csv_dir):
 
         basename = os.path.splitext(os.path.basename(diag_csv_path))[0]
         cmd_csv_path = os.path.join(cmd_output_dir, basename + '.csv')
-        if os.path.exists(cmd_csv_path):                 # 混代输入(DIAG+CMD 并存):真 CMD 转换优先,
+        if os.path.exists(cmd_csv_path):                 # 新旧混合输入(DIAG 与 CMD 并存):真正的 CMD 转换结果优先,
             print(f"  跳过: {ne_name}/CMD/{basename}.csv 已有真实 CMD 转换,"
-                  f"不用 DIAG 派生视图覆盖")             # 派生视图让位(覆盖会连列形状一起换掉)
+                  f"不用 DIAG 派生视图覆盖")             # 由 DIAG 派生的表让位(覆盖会把列结构也一起换掉)
             continue
 
         rows_written = 0
@@ -370,8 +371,8 @@ def main():
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    # argparse 而非裸 sys.argv:实测 `-o <目录>` 被裸解析当成第二个位置参数,输出静默落进
-    # 字面叫 "-o" 的目录——写错要响亮报错,不能静默吞参
+    # 用 argparse 而不是直接解析 sys.argv:实测直接解析时 `-o <目录>` 被当成第二个位置参数,输出静默写进
+    # 名字就叫 "-o" 的目录——参数写错要明确报错,不能静默接收
     ap = argparse.ArgumentParser(
         description="原始采集包 → config/log/cmd 三表 CSV(zip 或目录都行,目录直接给、无需先压 zip)")
     ap.add_argument("src", help="原始数据 zip 包,或原始数据目录(内含 LOG/CONFIG/DIAG/CMD 子目录,可带网元层)")
@@ -387,17 +388,17 @@ def main():
 
     src = os.path.abspath(args.src)
     if os.path.isdir(src):
-        # 目录输入:免解压直接扫描(此前只吃 zip,逼着现场先 make_archive 再转,纯绕路)
+        # 输入是目录:不用解压直接扫描(此前只接受 zip,现场不得不先 make_archive 压包再转,是多余步骤)
         extract_dir = src
         zip_basename = os.path.basename(src.rstrip('/\\')) or 'data'
-        DEFAULT_NE = zip_basename                         # 平铺单网元目录:网元名=目录名,别叫 'NE'
+        DEFAULT_NE = zip_basename                         # 平铺的单网元目录:网元名取目录名,不用默认的 'NE'
         output_dir = os.path.abspath(out_arg) if out_arg else src.rstrip('/\\') + '_csv'
         csv_dir = os.path.join(output_dir, 'csv')
         print(f"[1/7] 目录输入,跳过解压,直接扫描: {src}")
         print(f"  输出目录: {output_dir}")
     elif os.path.isfile(src) and not src.lower().endswith('.zip'):
-        # 单个原始散文件(.log/.txt/.rar 等):拷进输出目录 raw/ 暂存区统一识别——不直接把
-        # 文件所在目录交给 ifilter(它会把整个父目录连带无关文件全部卷进来)
+        # 单个原始散文件(.log/.txt/.rar 等):复制到输出目录下的 raw/ 暂存区再统一识别——不直接把
+        # 文件所在目录交给 ifilter(它会把整个父目录连同无关文件全部处理进去)
         output_dir = os.path.abspath(out_arg) if out_arg else src + '_csv'
         extract_dir = os.path.join(output_dir, 'raw')
         os.makedirs(extract_dir, exist_ok=True)
@@ -431,9 +432,9 @@ def main():
     print(f"[2/7] 扫描结果: LOG={len(data_dirs['LOG'])}, CONFIG={len(data_dirs['CONFIG'])}, "
           f"DIAG={len(data_dirs['DIAG'])}, CMD={len(data_dirs['CMD'])}")
 
-    # Step 2b: 一个分类目录都没有 = 原始散包形态 → 先 ifilter 归类再转
-    # (有分类目录就按分类走,散落的杂文件不再另行归类——混装时以分类目录为准)
-    raw_hint = extract_dir                               # S 脚本 raw 通道该指哪(走过 ifilter 指 formated_result)
+    # Step 2b: 一个分类目录都没有 = 原始散文件形态 → 先用 ifilter 归类再转换
+    # (有分类目录就按分类目录处理,零散的杂文件不再另行归类——两种混在一起时以分类目录为准)
+    raw_hint = extract_dir                               # S 类脚本(直接读原始文本的脚本)的原始日志目录参数(--data raw=)应指向的目录(经 ifilter 归类则指 formated_result)
     if not any(data_dirs.values()):
         formated = run_ifilter(extract_dir)
         if formated is None:
@@ -448,16 +449,16 @@ def main():
             print("  [err] ifilter 跑完仍无分类目录(数据内容识别不出)——检查数据是否为设备采集回显/日志")
             sys.exit(3)
     else:
-        # 分类目录来自上次 ifilter 归类的 formated_result:直接复用,不重新归类——数据有更新时要提醒
+        # 分类目录来自上次 ifilter 归类产生的 formated_result:直接复用,不重新归类——原始数据有更新时要提醒用户
         fr_roots = {r for lst in data_dirs.values() for p in lst
                     for r in [_formated_root(p)] if r}
         if fr_roots:
             print(f"  ⚠ 检测到已有 ifilter 归类产物 formated_result({len(fr_roots)} 处),本次直接复用、"
                   "不重新归类——原始数据有更新时,删掉 formated_result 目录后重跑")
             if len(fr_roots) == 1 and all(_formated_root(p) for lst in data_dirs.values() for p in lst):
-                raw_hint = next(iter(fr_roots))          # 全部类别都在同一份归类产物里:raw 通道指它
+                raw_hint = next(iter(fr_roots))          # 全部类别都在同一份归类产物里:原始日志目录参数指向它
 
-    # 归类产物里可能还有 KPI/LSDB/MOP 等类别——不在三表转换范围,点名播报,别静默装作全转了
+    # 归类产物里可能还有 KPI/LSDB/MOP 等类别——不在三表转换范围,逐个点名提示,不要静默地当作全部转换完成
     known = ('LOG', 'CONFIG', 'DIAG', 'CMD')
     noise = ('extracted', 'csv', 'raw', 'formated_result')
     other_types = set()
@@ -480,7 +481,7 @@ def main():
     # Step 5: 处理 DIAG，收集输出 CSV 路径
     diag_csvs = process_diag_dirs(data_dirs['DIAG'], csv_dir, extract_dir)
 
-    # Step 5b: 处理 CMD(DIAG 更名 CMD;老包的 DIAG 目录上面照旧处理,两名并存兼容)
+    # Step 5b: 处理 CMD(DIAG 已更名为 CMD;老包的 DIAG 目录在上一步照旧处理,两个名字都兼容)
     process_cmd_dirs(data_dirs['CMD'], csv_dir, extract_dir)
 
     # Step 6: 生成 CMD CSV
@@ -489,7 +490,7 @@ def main():
     # Step 7: 打包为 ZIP
     pack_csv_to_zip(csv_dir, output_dir, zip_basename)
 
-    # S 类脚本绑定直读裸 txt 的 raw 通道该指哪:走过/复用过 ifilter 归类就指 formated_result,否则原样
+    # S 类脚本直接读原始日志文件时,--data raw= 应指向哪里:经过或复用过 ifilter 归类就指向 formated_result,否则保持原目录
     print(f"\nraw 通道建议(runner 的 --data raw=): {raw_hint}")
     print("\n全部完成！")
 

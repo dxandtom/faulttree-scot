@@ -13,7 +13,7 @@ Excel(调优的唯一事实源);改完用 import_tree_excel.py 机械编译回�
 - 绑定列:JSON;与默认值一致的自动字段(id=<源>-<nN>、source=<源>、condition_text=节点判据)
   已省略,**不一致的保留**(自定义 id/页签路由 source/逐字 condition_text 往返不丢);
   同一源多条绑定 = JSON 数组;"本源查不了" = {"decision": "insufficient_data", "mapping_reason": "…"}。
-- 覆盖保护:目标调优表已存在且比 tree_index 新(可能有没导入的人工修改)→ 先备份 .bak 再覆盖,响亮提示。
+- 覆盖保护:目标调优表已存在且比 tree_index 新(可能有没导入的人工修改)→ 先备份 .bak 再覆盖,明确提示。
 
 用法:export_tree_excel.py --out <场景产物目录>
 依赖:openpyxl(仅**写** xlsx 用;读表已零依赖走同目录 xlsx_reader.py)。
@@ -56,7 +56,7 @@ def export(out_dir: Path) -> Path:
     sol_p = out_dir / "tree" / "solutions.json"
     solutions = json.loads(sol_p.read_text(encoding="utf-8")) if sol_p.exists() else {}
 
-    # node_id 别名:老产物绑定可能用 code 当 node_id,统一解析回 nN;解析不到的响亮提示,绝不无声丢
+    # node_id 别名:老产物绑定可能用 code 当 node_id,统一解析回 nN;解析不到的明确提示,绝不无声丢
     alias = {nid: nid for nid in nodes}
     for nid, n in nodes.items():
         if n.get("code"):

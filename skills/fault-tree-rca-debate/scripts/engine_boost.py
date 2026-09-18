@@ -35,10 +35,10 @@ def _src_hash(fn) -> str:
 
 
 class _AdaptiveGate:
-    """自适应并发闸(AIMD,本地真跑 429 挤爆网关后引入):
+    """自适应并发限制(AIMD,本地真跑 429 压垮网关后引入):
     - 网关回 429/503 → 并发上限**减半**(乘性降,最低 1);
     - 连续 8 次成功 → 上限 **+1**(加性升,封顶初始值)——错误消失后逐步回升。
-    闸在 HTTP 层(requests.post),重试间隙会释放名额,比 chat 级信号量更不压网关。"""
+    限制在 HTTP 层(requests.post),重试间隙会释放名额,比 chat 级信号量更不压网关。"""
 
     def __init__(self, max_limit: int):
         self.max = max(1, int(max_limit))
@@ -80,12 +80,12 @@ class _AdaptiveGate:
 
 
 def _wrap_post_adaptive(eng, n: int):
-    """把并发闸装在 vendor 模块的 requests.post 上(vendor 文件零改动):
+    """把并发限制装在 vendor 模块的 requests.post 上(vendor 文件零改动):
     比包 chat 更贴近网关——能看见真实状态码(429 才降档,连接错误不降,那不是流控信号),
     且 vendor 内层重试的 sleep 间隙不占名额。"""
     orig_post = eng.requests.post
     if getattr(orig_post, "_boost_adaptive", False):
-        return None                        # 已装过(同进程二次 apply):不叠闸
+        return None                        # 已装过(同进程二次 apply):不重复叠加
     gate = _AdaptiveGate(n)
 
     def post(url, **kw):
@@ -124,7 +124,7 @@ def _wrap_chat_failcounter(client):
 def _wrap_match_cache(matcher, client):
     """实例级记忆化:key=(question, 判据元组, 当前 fallback 态)。线程安全。
 
-    防污染(对抗审查实锤的坑):某次匹配恰逢故障窗口,单条判据会静默走关键词兜底,
+    防污染(对抗审查发现的实际问题):某次匹配恰逢故障窗口,单条判据会静默走关键词回退,
     结果与健康 LLM 不同——若缓存,网络恢复后污染值被永久复用且无降级记录。
     故:计算期间 chat 失败计数只要动过,该结果**只用不缓存**(下次重算)。"""
     orig = matcher.match_conditions
@@ -321,7 +321,7 @@ def _wrap_debate_memo(eng) -> bool:
               "辩护记忆化跳过——按 V2 结构重建记忆化是后续提速项")
         return False
     if getattr(agent_cls.debate, "_boost_memo", False) or getattr(agent_cls.debate, "_boost_aq", False):
-        return True                       # 已处理过(记忆化已挂;或二次 apply 时它在角色卷宗包装内层)
+        return True                       # 已处理过(记忆化已挂;或二次 apply 时它在角色材料包装内层)
     if _src_hash(agent_cls.debate) != _HASH_DEFENSE:
         print("[boost] ⚠ vendor.DebateAgent.debate 源码已变(引擎升级?),辩护记忆化跳过")
         return False
@@ -358,10 +358,10 @@ def _sig_ok(fn, *names) -> bool:
 
 
 def _wrap_agent_questions(eng) -> list:
-    """辩论侧按角色换卷宗:只把传给各 agent 的 question 参数,换成 DossierKit 出的分层卷宗
+    """辩论侧按角色换材料:只把传给各 agent 的 question 参数,换成 DossierKit 出的分层角色材料
     (角色任务框架+本组节点档案+全局案情;**信息全员对称**,判据原文全员必读——含被证伪/
     缺数节点的,附实测与反证。设计见 facts_to_question.DossierKit)。agent 的提示词与算法
-    零改动;机械匹配器不在此列,继续吃回声安全版 question(防误配红线不变)。
+    零改动;机械匹配器不在此列,继续用回声安全版 question(防误配规则不变)。
     kit 从 eng._boost_kit 现取(同进程重复 apply 只换 kit,不叠包装;kit=None 即回退原样);
     类/方法/签名对不上的逐项跳过——引擎再升级,安全退化为原 question。"""
     wrapped = []                                         # 报"生效角色"(新包/已包都算):
@@ -444,7 +444,7 @@ def _wrap_agent_questions(eng) -> list:
         ju.evaluate_nodes = evaluate_nodes
     if ju and getattr(getattr(ju, "evaluate_nodes", None), "_boost_aq", False):
         wrapped.append("评委")
-    v1 = getattr(eng, "DebateAgent", None)                # V1 引擎的辩护角色也认(同一卷宗)
+    v1 = getattr(eng, "DebateAgent", None)                # V1 引擎的辩护角色也认(同一份材料)
     if v1 and _sig_ok(getattr(v1, "debate", None), "self", "my_node", "sibling_nodes", "question") \
             and not getattr(v1.debate, "_boost_aq", False):
         _o6 = v1.debate
@@ -465,7 +465,7 @@ def _wrap_agent_questions(eng) -> list:
 def apply(proc, parallel: int = 1, match_cache: bool = True, debate_cache: bool = True,
           agent_kit=None) -> list:
     """给真引擎实例打加速补丁。形状不符(mock/bridge/新版结构变化)时逐项安全跳过。
-    agent_kit=facts_to_question.DossierKit 实例 → 辩论侧各角色的 question 换分层卷宗;
+    agent_kit=facts_to_question.DossierKit 实例 → 辩论侧各角色的 question 换分层角色材料;
     None=不换(或显式关闭,已包装过的类自动回退原 question)。"""
     ev = getattr(proc, "evaluator", None)
     matcher = getattr(ev, "condition_matcher", None)
@@ -509,7 +509,7 @@ def apply(proc, parallel: int = 1, match_cache: bool = True, debate_cache: bool 
             print("[boost] ⚠ 角色卷宗一个角色都没接上(引擎类名/签名全对不上?)——辩论仍用原 question,"
                   "审计字段会如实记 False")
     if parallel and parallel > 1:
-        _wrap_post_adaptive(eng, parallel)   # HTTP 层自适应闸:429/503 减半,连续成功回升
+        _wrap_post_adaptive(eng, parallel)   # HTTP 层自适应并发限制:429/503 减半,连续成功回升
         applied.append(f"自适应并发≤{parallel}(429 降档/恢复回升)")
     if applied:
         print(f"[boost] 加速补丁已生效:{' + '.join(applied)}(vendor 原件零改动,评分公式逐字保留)")

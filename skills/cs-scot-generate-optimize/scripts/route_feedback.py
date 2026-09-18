@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""route_feedback.py - 回流分拣:评估反思的输出 → 按类开处置票(只开票,不执行)
+"""route_feedback.py - 反馈分拣:评估反思的输出 → 按类开处置票(只开票,不执行)
 
-职责边界(与回流线设计一致):
-- 判断交代码:六类错误的真因分支全部机械判定(台账反查/名字对时/orphan 定位/证据拼装);
+职责边界(与反馈处理线设计一致):
+- 判断交代码:六类错误的真因分支全部机械判定(台账反查/名字匹配/orphan 定位/证据拼装);
 - 执行交既有通道:票上只写"该走哪条通道+命令/草稿",真正动手的是 migrate、调优表+import、
   tester、人工——本脚本不改任何资产;
 - 两档执行:自动迭代档(auto)在优化循环内**直接照票执行**,同节点同类 3 轮不过由熔断
-  自动转人工;人工兜底档(fallback)=自动化本来就无能为力的情况(环境故障/缺数据/
+  自动转人工;人工档(fallback)=自动化本来就无能为力的情况(环境故障/缺数据/
   绑定清除冲突/缺节点/结论争议/熔断),汇总交人。模型照票办事,禁止越票发挥。
 
 用法:
     分拣开票:
       python route_feedback.py --feedback <evaluation_report.json 或 feedback_to_generate.json>
                                --product <产物目录或打包技能目录> [--out <tickets.json>]
-    执行留痕(人点头照单执行后记账):
+    执行留痕(人确认并照票执行后记录):
       python route_feedback.py --record <tickets.json> --done all|t1,t2,...
                                --product <产物目录> [--by <谁点的头>]
       → 追加到 产物/tree/feedback_log.json(评估反思的"改了什么"历史,与评估目录的
@@ -116,7 +116,7 @@ def build_tickets(issues, product: Path, nodes: Dict[str, Any],
             "case_id": issue.get("case_id", ""),
             "error_category": cat,
             "branch": branch,
-            "level": level,              # auto=自动迭代(循环内直接执行) / fallback=人工兜底
+            "level": level,              # auto=自动迭代(循环内直接执行) / fallback=人工处理
             "channel": channel,
             "node_id": issue.get("node_id") or issue.get("expected_node") or "",
             "reason": issue.get("reason", ""),

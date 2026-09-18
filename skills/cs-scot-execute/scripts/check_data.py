@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""数据入口体检:诊断前先看用户给的路径里到底是什么,结构对不对、该怎么喂。零三方依赖。
+"""数据入口检查:诊断前先看用户给的路径里到底是什么,结构对不对、该怎么喂。零三方依赖。
 
 为什么要它(实测两起):①用户给了顶层目录,网元层其实在 <顶层>/formated_result 下——raw= 传错层,
 S 脚本一个网元都找不到,全程"数据不足";②目录里躺着一张采集清单 xlsx(列是 neName/fileType/
@@ -8,14 +8,14 @@ relativePath),弱模型看见"neName"就当数据表喂,42 个判据集体报"�
 
 用法:python check_data.py <用户给的数据路径>
   退出码 0=认得出可用形态(报告里带**建议喂法**,照抄即可);2=结构不认识/只有清单——
-  把报告原样给用户,让用户改目录或确认,**不许硬闯**。
+  把报告原样给用户,让用户改目录或确认,**不要强行继续**。
 
 识别的形态(可并存,逐个报):
   A. 原始采集目录:<网元层父目录>/<网元>/CONFIG|CMD|LOG|DIAG/*.txt(raw= 必须传网元层父目录);
      平铺单网元(路径下直接是 CONFIG/CMD/…)也认,网元名=目录名;
   B. 已解析表:csv/xlsx,表头带 CmdName/ObjContent(cmd)、Summary/Log(log)、level1/CfgType(config);
   C. 采集清单/索引 xlsx(fileType/relativePath/zipFile 这类列)——**是目录不是数据**,点名跳过;
-  D. zip 压缩包——直接交给 zip2csv(它吃 zip 也吃目录)。
+  D. zip 压缩包——直接交给 zip2csv(它既接受 zip 也接受目录)。
 """
 from __future__ import annotations
 
@@ -184,7 +184,7 @@ def main() -> int:
             print("  → 裸 txt 还要转三表喂原有绑定:python <assets>/zip2csv/scripts/zip2csv.py <上面 raw= 的目录> -o <输出>")
         return 0
     print("✗ 认不出可用的数据形态:既没有 <网元>/CONFIG|CMD|LOG 结构,也没有表头能对上号的数据表。")
-    # 原始散包(散 log/txt/rar/嵌套 zip,连分类目录都没有)是可自动补救的:zip2csv 会调内置
+    # 原始散文件(零散的 log/txt/rar/嵌套 zip,连分类目录都没有)是可以自动补救的:zip2csv 会调内置
     # ifilter 归类后再转——这种情况指路,别一律停手问用户
     raw_loose = next((p for p in root.rglob("*") if p.is_file()
                       and p.suffix.lower() in (".txt", ".log", ".zip", ".rar")), None)

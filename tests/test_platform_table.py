@@ -4,8 +4,8 @@
 Node_ID | L1_Name_CN | L1_Name_EN | … | Diagnosis_Method_CN | Diagnosis_Method_EN | Solution_CN | Solution_EN
 | Product_Obs | Product_Name | Need_Optimize
 ① 表头识别:Node_ID 忽略、Diagnosis_Method_CN 当判据列、Need_Optimize 当标记列、Solution_CN 当方案列;
-   我们自己的调优表(node_id + 判据:/绑定: 列)仍被拒;带 Need_Optimize 的一律按平台表认(兜底);
-② 全 FALSE、表与树一致(ALL 口径)→ 零结构动作,标准件刷新照做;未标记的 zip 行只汇总一行;
+   我们自己的调优表(node_id + 判据:/绑定: 列)仍被拒;带 Need_Optimize 的一律按平台表认(备用规则);
+② 全 FALSE、表与树一致(ALL 模式)→ 零结构动作,工具链公共文件刷新照做;未标记的 zip 行只汇总一行;
 ③ 全 FALSE、表里少了一个节点 → 删除;
 ④ TRUE 行:有包 → 迁移;判据改了没包 → 只同步判据;方案改了 → 同步方案;新路径带包 → 新增;
 ⑤ TRUE 行判据与包都空 → 清除判据与绑定,节点保留。"""

@@ -40,7 +40,7 @@ _ID_CANDIDATES = ("CallID", "CALLID", "Call_Id", "id", "ID", "Index",
 
 # ---------- 读取 ----------
 def _decode(raw: bytes) -> str:
-    """字节流按候选编码解码,全失败则忽略错误兜底。"""
+    """字节流按候选编码解码,全失败则忽略错误强行解码。"""
     for enc in _ENCODINGS:
         try:
             return raw.decode(enc)
@@ -95,7 +95,7 @@ def _load(path: str, sheet=None):
             from mo_config import parse_mo_text
             return parse_mo_text(_decode(p.read_bytes()), sheet=sheet)   # sheet=<MO类型>→只取该类,避免同名列污染
         except Exception:
-            pass            # 解析失败 → 落到 csv 兜底,不崩
+            pass            # 解析失败 → 退回按 csv 读,不崩
     if p.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
         import xlsx_reader                               # 同目录零依赖读取器(不需要 openpyxl)
         use = sheet if (sheet is not None and sheet in xlsx_reader.list_sheets(p)) else None

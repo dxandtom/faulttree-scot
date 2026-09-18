@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""辩论式 RCA 的执行壳:吃 rca_input.json + tree_index.json,吐 rca.json(四档契约)。
+"""辩论式 RCA 的执行脚本:读 rca_input.json + tree_index.json,产出 rca.json(四档契约)。
 
-在流水线里的位置 = 原 fault-tree-rca 手工步骤的**平替**(runner/plan/generate 零改动):
+在流水线里的位置 = 原 fault-tree-rca 手工步骤的**等价替代**(runner/plan/generate 零改动):
     runner 备好本轮结果目录的 rca_input.json 后,原来"请用 fault-tree-rca 技能手工产出",
     现在跑本脚本即可(它自己调 LLM,不需要 harness 模型)。
 
-流程:事实短路筛(draft_rca 机械分类:全干净→引擎整场跳过;有争议→只辩争议分支,--no-screen 关)
+流程:预筛与分诊(draft_rca 机械分类:全干净→引擎整场跳过;有争议→只辩争议分支,--no-screen 关)
       → facts_to_question 渲染证据文本 → tree_to_vendor_xlsx 生成引擎格式故障树 →
       调 vendor 引擎(--mock 用假引擎,真引擎见 vendor/README.md)→
       result_adapter 出 rca.json(--mechanism all 时三份都出,便于 A/B/C 评测)→
@@ -35,14 +35,14 @@ from tree_to_vendor_xlsx import enrich_conditions, write_xlsx   # noqa: E402
 
 
 def _rca_scripts() -> Path:
-    """同门 fault-tree-rca 的 scripts 目录(事实短路筛借它的 draft/finalize)。"""
+    """同一 skills 目录下 fault-tree-rca 的 scripts 目录(预筛借它的 draft/finalize)。"""
     return _HERE.parent.parent / "fault-tree-rca" / "scripts"
 
 
 def _fact_screen(rca_input_path: Path, out_dir: Path):
-    """事实短路筛(1根因 vs 100节点):跑同门 draft_rca 机械分类,划分干净/争议候选。
+    """预筛与分诊(1 个根因 vs 100 个节点):跑 fault-tree-rca 的 draft_rca 机械分类,划分干净/争议候选。
     干净候选(自身成立+路径无实测不成立/冲突)代码机械确证,不需要辩论;
-    争议候选(自身冲突/层级矛盾)才值得开辩论庭。同门缺失/md 形态 → None(退回全树辩论)。"""
+    争议候选(自身冲突/层级矛盾)才值得辩论。fault-tree-rca 缺失/md 形态 → None(退回全树辩论)。"""
     import subprocess
     draft_py = _rca_scripts() / "draft_rca.py"
     if not draft_py.exists():
@@ -96,8 +96,8 @@ def _contested_scope(tree_index: dict, contested_ids) -> set:
 
 def _short_circuit(screen: dict, rca_input_path: Path, out_dir: Path) -> int:
     """全部候选机械闭环:finalize 直接合成 rca.json,辩论引擎整场不跑(0 次 LLM 调用)。
-    诚实注记:**不写 rca_debate_full.json**(评估侧靠它分引擎,机械结果不冒充辩论结果);
-    审计落 debate_screen.json。"""
+    诚实注记:**不写 rca_debate_full.json**(评估侧靠它区分引擎,机械结果不当作辩论结果);
+    审计信息写 debate_screen.json。"""
     import subprocess
     cmd = [sys.executable, str(_rca_scripts() / "finalize_rca.py"), screen["draft_path"],
            "-o", str(out_dir / "rca.json"), "--rca-input", str(rca_input_path)]
@@ -157,8 +157,8 @@ def _leaf_id(entry: dict):
 
 
 def _merge_manual(doc: dict, manual_entries: list) -> dict:
-    """机械合成的干净候选并入 rca.json(竞争模式兜底):①只补引擎 top-k 漏掉的候选,
-    **垫尾**——兜底条目未经辩论排序,不许占榜首;②跨档收口:已进确证档的候选从
+    """机械合成的干净候选并入 rca.json(竞争模式的补漏):①只补引擎 top-k 漏掉的候选,
+    **放在末尾**——补漏条目未经辩论排序,不许占榜首;②跨档收口:已进确证档的候选从
     probable_causes 剔除(中间节点候选的引擎路径会因"截断"落疑似,同一节点占两档自相矛盾)。"""
     have = {_leaf_id(e) for e in doc.get("rca_result") or []}
     doc["rca_result"] = (doc.get("rca_result") or []) \
@@ -170,7 +170,7 @@ def _merge_manual(doc: dict, manual_entries: list) -> dict:
 
 
 def _focus_note(contested: list, topic_ids: list, tree_index: dict) -> str:
-    """分诊结果 → 角色卷宗的【辩题聚焦】注记(竞争/争议两款;topic_ids 空返回空串)。
+    """分诊结果 → 角色材料的【辩题聚焦】注记(竞争/争议两款;topic_ids 空返回空串)。
     竞争款只对含干净候选的多候选组合;纯争议候选(可多个)走争议款——冲突候选真伪未定,
     竞争款"不辩真伪"的说法会错误禁掉真伪之辩。"""
     if not topic_ids:
@@ -216,7 +216,7 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
         print(f"[warn] 未读到配置 {cfg_file}(不存在或为空)——引擎参数将全用默认/空。")
 
     # 接口适配钩子:真引擎接口与文档不符时,本地**只新建** vendor/bridge.py 包一层(暴露文档形状的
-    # FaultTreeProcessor(cfg_dict) 三方法),不改本壳、不改引擎原件。有 bridge 就优先走 bridge。
+    # FaultTreeProcessor(cfg_dict) 三方法),不改本脚本、不改引擎原件。有 bridge 就优先走 bridge。
     if (vendor_dir / "bridge.py").exists():
         from bridge import FaultTreeProcessor as BridgeProcessor  # type: ignore
         return BridgeProcessor(cfg), f"vendor 引擎(经 vendor/bridge.py 适配,config={cfg_file})"
@@ -267,7 +267,7 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
         print(f"[override] 命令行覆盖引擎参数:{overrides}")
 
     # 重试收敛:引擎内层重试间隔按 retry_delay×次数 递增,config 常见 30 次/15s 之类的
-    # 豪放配置——光睡眠就 >100 分钟/调用,再叠加壳的外层加固(shield)纯属双重重试。
+    # 过猛的配置——光睡眠就 >100 分钟/调用,再叠加本脚本的外层调用保护(shield)纯属双重重试。
     # shield 开着时把内层收敛成"快失败",重试交给外层退避;--set 显式指定的尊重不动。
     if shield:
         clamped = {}
@@ -280,7 +280,7 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
             print(f"[retry收敛] 外层加固已接管重试,引擎内层重试参数已收敛:{clamped}"
                   f"(要保留 config 原值请 --set 显式指定,或 --no-llm-shield)")
 
-    # 硬门禁:LLM 关键字段一个都没映射到 → 引擎会拿空配置"静默降级"成不调 LLM 的兜底模式,
+    # 硬性检查:LLM 关键字段一个都没映射到 → 引擎会拿空配置"静默降级"成不调 LLM 的回退模式,
     # 跑出看似正常实则无效的结果(实测 0.03s/场景、debate_records 全空)。宁可当场报错。
     llm_fields = [f for f in ("llm_api_key", "llm_base_url", "llm_model_name") if f in known]
     missing = [f for f in llm_fields if not flat.get(f)]
@@ -307,7 +307,7 @@ def _load_processor(vendor_dir: Path, config_path: Path | None, mock: bool,
 
 
 def _shield_llm(proc, outer_retries: int = 3, base_delay: float = 2.0) -> bool:
-    """壳层传输加固(只包运输、不碰评分算法):给 vendor LLMClient.chat 套一层外层重试。
+    """LLM 调用保护(只包传输、不碰评分算法):给 vendor LLMClient.chat 套一层外层重试。
 
     治的是引擎的"永久降级"设计:一次 502/超时把内层重试耗尽后,引擎置 connection_failed、
     下个节点起**整程**切关键词匹配 fallback——一阵网关抖动就毁掉整次运行的匹配语义。
@@ -536,7 +536,7 @@ def main() -> int:
 
             _hb_client.chat = _chat_hb
         # xlsx 落在 out_dir(不用临时目录):真/假引擎都可能持有文件句柄,Windows 上临时目录退出清理
-        # 会 WinError 32;落盘产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
+        # 会 WinError 32;写成文件的产物顺带可审计(引擎实际吃到的树长什么样,一看便知)。
         xlsx = out_dir / "vendor_fault_tree.xlsx"
         n_rows = write_xlsx(tree_index, xlsx, allowed)
         print(f"[2/4] vendor 格式故障树已生成({n_rows} 行 → {xlsx.name});引擎={desc}")
@@ -587,14 +587,14 @@ def main() -> int:
         os.chdir(prev_cwd)
 
     # 降级检测:引擎在 LLM 连接彻底失败一次后会**永久**切到关键词匹配 fallback 静默续跑——
-    # 结果看着正常实则匹配语义已经变了。这里把降级状态显式暴露出来(打印 + 落盘 + rca.json caveat)。
+    # 结果看着正常实则匹配语义已经变了。这里把降级状态显式暴露出来(打印 + 写文件 + rca.json caveat)。
     ev = getattr(proc, "evaluator", None)
     degraded = bool(getattr(ev, "use_fallback", False)
                     or getattr(getattr(ev, "llm_client", None), "connection_failed", False))
     if degraded:
         print("⚠ [降级警告] 运行中 LLM 连接曾失败,引擎已自动退回关键词匹配 fallback 续跑——"
               "本次结果的匹配语义已受损,建议排查网络/服务(probe_llm.py)后重跑。")
-    # 瞬时失败可见化:shield 恢复后"中途失败过"不再触发降级,但个别调用走了兜底
+    # 瞬时失败可见化:shield 恢复后"中途失败过"不再触发降级,但个别调用走了回退
     # (单条判据关键词匹配/辩护缺席/评委默认分)。计数>0 就要知道,多了该重跑。
     n_fail = getattr(getattr(ev, "llm_client", None), "_boost_fail_count", 0)
     if n_fail and not degraded:
@@ -629,9 +629,9 @@ def main() -> int:
     print(f"[3/4] 引擎原始输出 → {out_dir / 'rca_debate_full.json'}"
           f"(路径 {len(top_orig)}/{len(top_soft)}/{len(top_ratio)},辩论 {len(debate_records)} 节点)")
 
-    # 干净候选的机械合成兜底——只有竞争模式会走到(contested_only 时 clean 恒空):引擎照辩
+    # 干净候选的机械合成补漏——只有竞争模式会走到(contested_only 时 clean 恒空):引擎照辩
     # 干净候选、适配层按事实升档,这里只兜"引擎 top-k 漏掉某干净候选"的缺口(_merge_manual:
-    # 垫尾+跨档收口)。审计 debate_screen.json 已在分诊处落盘,此处不再写。
+    # 放末尾+跨档收口)。审计 debate_screen.json 已在分诊处写出,此处不再写。
     manual_entries = []
     if screen and screen["clean_confirmed"]:
         manual_entries = _finalize_clean(screen, ri_path, out_dir)
@@ -648,7 +648,7 @@ def main() -> int:
         (out_dir / f"rca.{chosen}.json").read_text(encoding="utf-8"), encoding="utf-8")
     print(f"[4/4] rca.json(机制={chosen})+ {', '.join('rca.' + m + '.json' for m in mechs)} → {out_dir}/")
 
-    # 顺手机械自检(与老路径同一道闸门;闸门脚本不在预期位置就只提示、不阻断)
+    # 顺手机械自检(与老路径同一道检查;检查脚本不在预期位置就只提示、不阻断)
     if not a.no_validate:
         vr = _HERE.parent.parent / "fault-tree-rca" / "scripts" / "validate_rca.py"
         if vr.exists():

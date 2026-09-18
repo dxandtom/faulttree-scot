@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """check_tree.py - 检查 tree_index 中是否存在指定节点
 
-用于 KNOWLEDGE_GAP 检测：expected.json 中的节点是否在 tree_index 中存在。
+用于 KNOWLEDGE_GAP(故障树缺节点)检测：expected.json 中的节点是否在 tree_index 中存在。
 
 用法:
     python check_tree.py --tree-index <tree_index.json> --node-ids <node_id1,node_id2,...>
@@ -36,7 +36,7 @@ def collect_tree_node_ids(tree_index: Dict[str, Any]) -> Set[str]:
     nodes = tree_index.get("nodes", {})
 
     if isinstance(nodes, dict):
-        # 执行链的 tree_index:nodes 是字典,node_id 就是字典的 key(节点体内没有 node_id 字段)
+        # 执行链生成的 tree_index:nodes 是字典,node_id 就是字典的 key(节点内容里没有 node_id 字段)
         for key, node in nodes.items():
             nid = node.get("node_id") or node.get("id") or key
             if nid:

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """辩论引擎输出(top_k×3 + debate_records)→ 本仓 rca.json 四档契约。
 
-诚实映射(v3:评分排序为体,候选自身事实升档——与手工 fault-tree-rca 确证闸同口径):
+诚实映射(评分排序为主体,候选自身的事实决定升档——与手工 fault-tree-rca 的确证条件同一规则):
 - 辩论引擎产的是**评分排序的假设**,不是证明 → 默认进 `probable_causes`。
-- **升档凭事实,口径=候选自身+有判定的上级(口径 v4,与手工闸同步)**:路径末端的叶子
+- **升档凭事实,规则=候选自身+有判定的上级(与手工路径同步)**:路径末端的叶子
   (候选)被**证据引擎实测「成立」**、是带判据的真叶子、**且路径无实测「不成立/冲突」的
-  上级** → 进 `rca_result`(确证档)。未绑定/数据不足的上级=**默认放行**(零信息不冒充
+  上级** → 进 `rca_result`(确证档)。未绑定/数据不足的上级=**默认放行**(零信息不当作
   反证,caveats 提示"此处无判断";判断方法写错的中间节点走调优表清绑定即归此类);
   上级实测不成立/冲突=层级矛盾 → 降疑似,blocked_at 指认该上级,机械落
   caveats 逐类点名;整条路径全实测成立的在 caveats 注明"全路径实测闭环"(最强成色)。
   升档依据是 execute 算出的事实,**不是辩论得分**(得分只管排序);validate_rca 的
-  新口径(假根因只揪候选自身)天然同闸。叶子非真叶(如 L6 截断)/叶子非成立 → 留在
+  新规则(假根因只查候选自身)天然一致。叶子非真叶(如 L6 截断)/叶子非成立 → 留在
   probable(叶子数据不足的路径由 blocked_at 指认卡点;"叶子待定确证中间节点"那半条
-  手工闸有、本适配层不做——诚实留疑似)。
+  手工路径有、本适配层不做——诚实留疑似)。
 - `confidence` 一律按 **original 路径得分**分档(softmax/ratio 是连乘概率、数值天然极小,
   不适合做绝对阈值);--mechanism 只决定**取哪份 top-k 排序**。
 - evidence_path 的 judgment:升档条目的带判据节点写「成立(证据引擎实测)」(有事实背书,
@@ -38,16 +38,16 @@ _SCORE_KEY = {"original": "original_path_score", "softmax": "softmax_path_score"
 _ST_CN = {"held": "成立", "refuted": "不成立", "insufficient": "数据不足",
           "conflict": "冲突(成立与强反证并存)"}
 # judgment 里按实测态附加的字眼——与 validate_rca 的 NOT_PROVEN 疑虑词表对齐:
-# 疑似档的降档理由必须落在具体节点的 judgment 上,否则"全成立却居疑似"会被硬闸打回(实测)。
+# 疑似档的降档理由必须落在具体节点的 judgment 上,否则"全成立却居疑似"会被硬性检查打回(实测)。
 _J_ST = {"held": ";证据引擎实测成立", "refuted": ";证据引擎实测不成立",
          "insufficient": ";证据引擎实测数据不足",
          "conflict": ";证据引擎实测冲突(成立与强反证并存,存疑)"}
 
 
 def _facts_index(rca_input: dict | None) -> dict:
-    """rca_input → {node_id: {"st": 四态, "obs", "fail", "insuf"}}。四态口径(含 conflict,
+    """rca_input → {node_id: {"st": 四态, "obs", "fail", "insuf"}}。四态规则(含 conflict,
     与手工 draft_rca._tri 同源)统一定义在 facts_to_question.facts_index——回程事实感知的
-    地基:confidence 校准、证伪/冲突旗标、blocked_at 回填、弃权垫片都从这张表读。"""
+    地基:confidence 校准、证伪/冲突旗标、blocked_at 回填、弃权处理都从这张表读。"""
     from facts_to_question import facts_index
     return facts_index(rca_input or {})
 
@@ -69,8 +69,8 @@ def _confidence(orig_score) -> str:
 
 def _judgment(n: dict, f: dict | None = None, unbound: bool = False) -> str:
     """节点 judgment=引擎侧评语 + **实测态字眼**(有 fx 的节点)。实测态不是装饰:
-    validate 对疑似档的硬闸要求降档理由落在具体节点上(不成立/数据不足/未判定这类疑虑词),
-    只写中性词会被当"全成立却居疑似"误杀;有事实背书写实测态,既诚实又与手工口径同词。"""
+    validate 对疑似档的硬性检查要求降档理由落在具体节点上(不成立/数据不足/未判定这类疑虑词),
+    只写中性词会被当"全成立却居疑似"误杀;有事实背书写实测态,既诚实又与手工路径用词一致。"""
     mt, sc = n.get("match_type"), n.get("node_score")
     sc_s = f"{float(sc):.2f}" if isinstance(sc, (int, float)) else "?"
     if mt == "full":
@@ -101,7 +101,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
     abstain = bool(fx) and not any(v["st"] in ("held", "conflict") for v in fx.values())
 
     def _has_cond(ti_n: dict) -> bool:
-        """与 validate_rca._holding_map 同口径:非空判据、且不是"无条件/无判断"占位。"""
+        """与 validate_rca._holding_map 同一规则:非空判据、且不是"无条件/无判断"占位。"""
         c = str(ti_n.get("condition") or "").strip()
         return bool(c) and "无条件" not in c and "无判断" not in c
 
@@ -117,7 +117,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         ev, debate_caveats = [], []
         blocked_node = None                    # 路径上第一个"数据不足"节点 = 最可指认的阻塞点
         refuted_nodes = []
-        conflict_anc = []                      # 实测「冲突」的祖先(口径 v2:与不成立同为层级矛盾,拦升档)
+        conflict_anc = []                      # 实测「冲突」的祖先(与不成立同为层级矛盾,拦升档)
         anc_notes = []                         # 祖先(非候选)事实状态:机械落 caveats
         path_closed = True                     # 全部带判据节点实测成立=全路径闭环(最强成色)
         for n in nodes:
@@ -170,7 +170,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         ti_leaf = nodes_idx.get(leaf.get("code")) or {}
         # 路径末端非真叶/无独立判据(截断):引擎路径在此止步,整支其实没判完——把这一点
         # 落到末端节点的 judgment 上(validate 认"未判定"疑虑词),否则全成立的截断路径会被
-        # "全成立却居疑似"的硬闸误杀
+        # "全成立却居疑似"的硬性检查误杀
         truncated = bool(ti_leaf.get("children")) or not _has_cond(ti_leaf) \
             or bool(ti_leaf.get("pass_through"))
         if truncated and ev:
@@ -184,7 +184,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
         elif leaf_st == "held" and not refuted_nodes and conf == "low":
             conf = "medium"
 
-        hier = None                            # 层级矛盾:候选实测成立、上级实测不成立/冲突(口径 v4 拦升档)
+        hier = None                            # 层级矛盾:候选实测成立、上级实测不成立/冲突(拦升档)
         if leaf_st == "held" and (refuted_nodes or conflict_anc):
             worst = (refuted_nodes or conflict_anc)[-1]
             kind = "实测不成立" if refuted_nodes else "证据冲突(成立与强反证并存)"
@@ -221,7 +221,7 @@ def to_rca_json(vendor_result: dict, mechanism: str, tree_index: dict,
             "evidence_path": ev,
             "_engine": {"name": "fault-tree-rca-debate", "mechanism": mechanism},
         }
-        # 升档(与手工确证闸同口径,口径 v4):候选=路径末端叶子,自身实测成立、
+        # 升档(与手工路径的确证条件同一规则):候选=路径末端叶子,自身实测成立、
         # 且路径无实测「不成立/冲突」上级(层级矛盾降疑似,hier 已写清卡点);
         # 未绑定/数据不足上级默认放行,anc_notes 落 caveats 提示"此处无判断";
         # conflict 候选不升(手工 finalize 对冲突候选同样拒收确证)

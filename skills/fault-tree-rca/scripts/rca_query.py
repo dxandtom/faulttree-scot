@@ -29,7 +29,7 @@ def _fault_tree(data: dict):
 
 
 def _ff(f: dict) -> dict:
-    """取事实体:兼容瘦身后的扁平结构(字段在顶层)和未瘦身的嵌套 {"fact":{...}}。"""
+    """取事实体:兼容精简后的扁平结构(字段在顶层)和未精简的嵌套 {"fact":{...}}。"""
     inner = f.get("fact")
     return inner if isinstance(inner, dict) else f
 

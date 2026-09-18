@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""RCA 诊断骨架(rca_draft.json)机械生成器 —— 枚举是机械活,模型只做裁决。
+"""RCA 候选清单(rca_draft.json)机械生成器 —— 枚举是机械活,模型只做裁决。
 
-实测病根:让模型自己"发现候选"(挨个 rca_query --node 翻),弱模型会把成立的节点整个忘掉
+实测发现的问题:让模型自己"发现候选"(挨个 rca_query --node 翻),弱模型会把成立的节点整个忘掉
 (n25/n26 事实 predicate_satisfied=True 却通篇消失),或把成立写成"binding证据不足"。
 本脚本从 rca_input.json 机械枚举:所有成立节点→候选(根→叶路径+证据全预填),
-不成立→排除候选,数据不足→待确认骨架,成立+不成立并存→冲突条目。
+不成立→排除候选,数据不足→待确认条目,成立+不成立并存→冲突条目。
 
-**自动定档(树形态,口径 v4)**:定档条件全是机械可判的,代码直接写 auto_verdict,模型不参与——
+**自动定档(树形态)**:定档条件全是机械可判的,代码直接写 auto_verdict,模型不参与——
 - 候选自身成立 + 路径上**有判定的**节点无「不成立/冲突」→ auto_verdict=confirmed
-  (**未绑定/数据不足的上级=默认放行**:零信息不冒充反证,落 caveats、报告提示"此处无判断";
+  (**未绑定/数据不足的上级=默认放行**:零信息不当作反证,落 caveats、报告提示"此处无判断";
   判断方法写错的中间节点走调优表**清绑定**即归此类,停验放行);
 - 候选自身成立 + 某上级实测「不成立/冲突」→ auto_verdict=probable(**层级矛盾降疑似**:
   留着绑定又实测不成立=有效反证,blocked_at/note 预填卡点与实际值给人复核);
-- 冲突条目(候选自身成立+强反证并存)→ **唯一交模型权衡的**,骨架不定档。
+- 冲突条目(候选自身成立+强反证并存)→ **唯一交模型权衡的**,清单不定档。
 **模型的工作收窄为:只裁冲突条目**(md 形态无路径信息,退回逐条裁决)。
 
 用法:python draft_rca.py <rca_input.json> [-o <rca_draft.json>]   # 缺省写在输入同目录
@@ -130,8 +130,8 @@ def _ev(nid: str, n: dict) -> dict:
 
 
 def _apply_gap(e: dict, facts) -> None:
-    """四态契约的判不了分型(转接头 gap_kind):缺数据(补采可解) vs 数据在判不动(判据质量信号)。
-    事实 reason 可能已带转接头的分型前缀(字面略长),按前缀族判重,避免双前缀。"""
+    """四态契约里"判不了"的两种分型(通用适配函数的 gap_kind):缺数据(补采可解) vs 数据在判不动(判据质量信号)。
+    事实 reason 可能已带适配函数加的分型前缀(字面略长),按前缀族判重,避免双前缀。"""
     kinds = {f.get("gap_kind") for f in facts if isinstance(f, dict) and f.get("gap_kind")}
     if not kinds:
         return
@@ -168,7 +168,7 @@ def draft_pruned(data: dict) -> dict:
             continue
         facts = n.get("facts") or []
         if not facts:
-            continue                                    # 未覆盖:归 tree_issues,不进骨架
+            continue                                    # 未覆盖:归 tree_issues,不进候选清单
         tri = _tri(facts)
         {"成立": holding, "不成立": refuted, "数据不足": insuf, "冲突": conflict}[tri].append(nid)
 
@@ -184,8 +184,8 @@ def draft_pruned(data: dict) -> dict:
     for nid in sorted(deepest, key=lambda x: int(x[1:]) if x[1:].isdigit() else 10 ** 9):
         n = nodes[nid]
         ev = [_ev(p, nodes[p]) for p in _path(nid, nodes)]
-        # 定档口径 v4(机械,模型不参与):
-        # ①未绑定/数据不足的上级=默认放行(零信息不冒充反证)落 caveats,报告提示"此处无判断"
+        # 定档规则(机械,模型不参与):
+        # ①未绑定/数据不足的上级=默认放行(零信息不当作反证)落 caveats,报告提示"此处无判断"
         #   ——判断方法写错的中间节点,正路是调优表清绑定停验,归到这类;
         # ②上级实测「不成立/冲突」=层级矛盾 → 机械降疑似:留着绑定又实测不成立就是有效反证,
         #   blocked_at/note 预填卡点与实际值,人复核(上级绑定假阴?候选命中系背景?)前不升确证。

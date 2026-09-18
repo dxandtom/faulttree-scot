@@ -6,8 +6,8 @@
   table = 绑定 source 那个源的表,形态 (header, rows):header=列名列表,rows=一行一个 dict;
   args  = 绑定 JSON 里的 args 原样传入(dict);
   load  = 函数:load("config") 取其他源的表(同样 (header, rows)),该源没喂返回 None。
-返回与内核同形的事实(二选一,内核 wrapper 会校验形状、兜异常):
-  {"status": "ok", "predicate_satisfied": True/False, …证据字段…, "explain": "一句人话"}
+返回与内核同形的事实(二选一,内核 wrapper 会校验形状、捕获异常):
+  {"status": "ok", "predicate_satisfied": True/False, …证据字段…, "explain": "一句易懂的说明"}
   {"status": "insufficient_data", "reason": "缺什么"}
 新函数照下面的样子写 + @register("名字") 挂进注册表;别 print、别写文件、别自己读 excel。
 """
@@ -91,12 +91,12 @@ def sum_extracts_vs_threshold(table, args, load):
             "explain": f"{nums[0]:g}+{nums[1]:g}={total:g} {op} {thr:g} → {'成立' if ok else '不成立'}"}
 
 
-# ---------- 收编:datacom-fault-tree-tester 交付的 fault_check_*.py 直接当判据跑 ----------
+# ---------- 导入:datacom-fault-tree-tester 交付的 fault_check_*.py 直接当判据跑 ----------
 # 这些脚本吃「网元目录」(<网元>/CONFIG|CMD|LOG/*.txt 裸文本),吐 {matched, evidence, details}。
-# 下面的通用转接头负责:①备数据(优先 --data raw=<extracted目录> 原始 txt 直读;没有就从
-# config/log/cmd 三表兜底重建临时目录——临时目录写文件是本库的**特批例外**,用完即删,
+# 下面的通用适配函数负责:①备数据(优先 --data raw=<extracted目录> 直接读原始 txt;没有就从
+# config/log/cmd 三张表重建临时目录作为备用做法——临时目录写文件是本库的**特批例外**,用完即删,
 # 节点脚本自己仍然不许写文件)②调脚本入口 ③把结果翻译成内核三态事实。
-# 责任边界(用户拍板):脚本内部判断逻辑照单全收,对错归脚本;本壳只在「数据整体缺失」
+# 责任边界(用户拍板):脚本内部判断逻辑照单全收,对错归脚本;本适配层只在「数据整体缺失」
 # (一个网元都没备出来)时报数据不足——那是我们自己的边界,不是替脚本兜。
 
 class _StrPath(str):
@@ -237,7 +237,7 @@ def _fc_layout_from_raw(raw, tmp_root):
                 shutil.copytree(d / k, ne_dst / k, dirs_exist_ok=True)
         # DIAG/CMD 是同一类数据的两代目录名,脚本两种都可能认:缺哪个补哪个当别名,**绝不改名**。
         # 实测(n4):旧逻辑把 DIAG 改名成 CMD,认 DIAG 的脚本找不到自己的诊断文件——直跑 true、
-        # 经本壳整链跑变判不动,就是这一刀砍掉了原名。
+        # 经本适配层整链跑变成判不动,就是这一处砍掉了原名。
         if (d / "DIAG").is_dir() and not (d / "CMD").is_dir():
             shutil.copytree(d / "DIAG", ne_dst / "CMD", dirs_exist_ok=True)
         if (d / "CMD").is_dir() and not (d / "DIAG").is_dir():
@@ -247,8 +247,8 @@ def _fc_layout_from_raw(raw, tmp_root):
 
 def _fc_prepare_data(load, tmp_root):
     """备出脚本要吃的数据根目录。返回 (根路径|None, 说明)。
-    失败时 reason 必须把 **raw 的下落**说清(未提供/路径不存在/错层)——实测:raw 没吃到时静默
-    滑进三表兜底,兜底再失败,报出来的只有兜底的错,操作者根本定位不到"其实是 raw 没传对"。"""
+    失败时 reason 必须把 **raw 的下落**说清(未提供/路径不存在/错层)——实测:raw 没读到时静默
+    转入三表重建的备用做法,备用做法再失败,报出来的只有备用做法的错,操作者根本定位不到"其实是 raw 没传对"。"""
     raw = load("raw_dir")
     if isinstance(raw, str) and raw.strip() and Path(raw).is_dir():
         root = _fc_layout_from_raw(raw.strip(), tmp_root)
@@ -285,7 +285,7 @@ def _fc_prepare_data(load, tmp_root):
 def _fc_no_judgment(ne_map) -> bool:
     """整张网元 map 一个能用的判定都没有(空/全 error/全 undetermined/形状怪)→ True。
     用于识别"单网元风格脚本吃不了多网元根目录"的空转(实测:脚本没做规范要求的多网元探测,
-    直接在根目录下找 LOG/,找不到就整体 undetermined),识别到就换逐网元口径重调。"""
+    直接在根目录下找 LOG/,找不到就整体 undetermined),识别到就改成逐网元调用。"""
     if not isinstance(ne_map, dict) or not ne_map:
         return True
     return not any(isinstance(r, dict) and _fc_tristate(r.get("matched")) is not None
@@ -317,7 +317,7 @@ def _fc_gap_kind(v) -> str:
 
 
 def _fc_item_str(x) -> str:
-    """matched_items/evidence 条目转人话:tester 契约里条目常是 dict(关键字段+_source_file/
+    """matched_items/evidence 条目转成易懂文字:交付契约里条目常是 dict(关键字段+_source_file/
     _source_line),str() 直转是 Python repr 且截断后不成话——机械拼 k=v,溯源元键单独缀
     「@文件:行」,不许把 repr 漏进报告证据栏。"""
     if isinstance(x, dict):
@@ -352,18 +352,18 @@ def _fc_normalize(result):
 
 @register("fault_check")
 def fault_check(table, args, load):
-    """通用转接头:跑一个 datacom-fault-tree-tester 交付的 fault_check_*.py 判本节点。
+    """通用适配函数:跑一个 datacom-fault-tree-tester 交付的 fault_check_*.py 判本节点。
     args: {"script": "custom/fault_check_xxx.py"(scripts/ 下相对路径,必填),
            "entry": "diagnose"(入口函数名,缺省 diagnose),
-           "per_ne": false(true=入口吃单网元目录,本壳逐网元调用汇总),
+           "per_ne": false(true=入口接受单网元目录,本适配函数逐网元调用汇总),
            "entry_kwargs": {}(入口额外关键字参数,如 judgment_conditions)}
-    数据:优先 load("raw_dir")(runner --data raw=<extracted目录>);没有则三表兜底重建。
+    数据:优先 load("raw_dir")(runner --data raw=<extracted目录>);没有则从三张表重建(备用做法)。
     结果四种形态都认:旧按网元 map(matched 为 bool)/ results 信封 / details.devices 包裹 /
-    tester 契约**全局形态**(顶层一个 matched,字符串四态 "true"/"false"/"undetermined"/
+    交付契约**全局形态**(顶层一个 matched,字符串四态 "true"/"false"/"undetermined"/
     "insufficient_data";旧三态包无 insufficient_data 照收,evidence 为 {type,id,data} 结构体数组)。
-    翻译:任一实体判真 → 成立;全部实体判不了/无实体 → status=insufficient_data(不冒充"正常"),
+    翻译:任一实体判真 → 成立;全部实体判不了/无实体 → status=insufficient_data(不当作"正常"),
     并带 gap_kind 细分 no_data(缺数据,补采可解)/cannot_judge(数据在判不动,判据质量信号)/mixed;
-    否则不成立;matched:false 却带 details.error(缺数据冒充阴性的老毛病)按判不了(no_data)处理。"""
+    否则不成立;matched:false 却带 details.error(缺数据却报成阴性的老问题)按判不了(no_data)处理。"""
     import contextlib
     import importlib.util
     import io as _io
@@ -397,7 +397,7 @@ def fault_check(table, args, load):
             # 同一进程连续调多个交付脚本时,它们 import 的同目录共享模块(search_*.py 等)会被
             # sys.modules 全局缓存:前一个包载入的模块连同其模块级状态(缓存、全局变量)直接
             # 喂给后面的脚本——这些脚本在交付方那里本是各自独立进程跑的,串门会污染判定
-            # (实测:n4 直跑 true、经本壳在 cross 整链里跑变 false)。调用前后都清掉脚本目录
+            # (实测:n4 直跑 true、经本适配层在 cross 整链里跑变 false)。调用前后都清掉脚本目录
             # 下的缓存模块,保证每个脚本冷启动。
             for _n, _m in list(_sys.modules.items()):
                 _f = getattr(_m, "__file__", None)
@@ -411,7 +411,7 @@ def fault_check(table, args, load):
         spec = importlib.util.spec_from_file_location(f"fc_{script.stem}", script)
         mod = importlib.util.module_from_spec(spec)
         sink = _io.StringIO()
-        convention_note = ""                             # 调用口径仲裁的注记(逐网元重调时落 explain)
+        convention_note = ""                             # 调用方式仲裁的注记(逐网元重调时写进 explain)
         argv_bak, _sys.argv = _sys.argv, [str(script)]   # argv 隔离:CLI 型脚本库调用时常仍偷读 sys.argv,
         try:                                             # 会吃到 cross_analyzer 的 -o 临时路径当自己的参数
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):     # (实测:路径当正则炸 \U)
@@ -432,7 +432,7 @@ def fault_check(table, args, load):
                     ne_map = _per_ne_map()
                 else:
                     ne_map = _fc_normalize(fn(_StrPath(root), **kwargs))
-                    if _fc_no_judgment(ne_map):          # 调用口径仲裁:单网元风格脚本(没做多网元探测)
+                    if _fc_no_judgment(ne_map):          # 调用方式仲裁:单网元风格脚本(没做多网元探测)
                         retry = _per_ne_map()            # 吃不了网元层根目录——逐网元重调一次,
                         if not _fc_no_judgment(retry):   # 不改判断逻辑只换喂法;重调也空转就维持原判(数据不足)
                             ne_map = retry
@@ -464,12 +464,12 @@ def fault_check(table, args, load):
         if tri is None:                                  # undetermined/insufficient_data → 该实体判不了
             bad.append((ne, str(reason or err or f"matched={r.get('matched')!r},判不了")[:120]))
             bad_kinds.add(_fc_gap_kind(r.get("matched")))
-        elif tri is False and err:                       # 缺数据却报 false+error(冒充阴性的老毛病)→ 按判不了
+        elif tri is False and err:                       # 缺数据却报 false+error(报成阴性的老问题)→ 按判不了
             bad.append((ne, str(err)[:120]))
             bad_kinds.add("no_data")
         elif tri:
             hit.append(ne)
-            if reason:                                   # 脚本给的命中理由(人话)不能丢,进 explain
+            if reason:                                   # 脚本给的命中理由(文字说明)不能丢,进 explain
                 hit_why.append((ne, reason[:200]))
             for ev in (r.get("evidence") or [])[:5]:
                 if isinstance(ev, dict):                 # 新契约证据条目:{type, id, data:{source_files, matched_items}}
@@ -490,7 +490,7 @@ def fault_check(table, args, load):
                     evidence.append(f"{ne}: {str(ev)[:200]}" if not str(ev).startswith(f"{ne}:") else str(ev)[:200])
         else:
             miss.append(ne)
-            if reason:                                   # 未命中的人话理由同样留痕(如"步骤1成立但步骤2输出非空")
+            if reason:                                   # 未命中的文字理由同样留痕(如"步骤1成立但步骤2输出非空")
                 miss_why.append((ne, reason[:160]))
     if not hit and not miss:                             # 全部网元都没给出 matched(error/坏形状/四态的两种判不了)
         gap = ("no_data" if bad_kinds == {"no_data"}
@@ -520,7 +520,7 @@ def fault_check(table, args, load):
 
 @register("latest_by_seq_then_match")
 def latest_by_seq_then_match(table, args, load):
-    """先按 seq 列取"最新一轮采集"的行,再在目标列里找特征串("取最新一次再判"的口径,DSL 表达不了)。
+    """先按 seq 列取"最新一轮采集"的行,再在目标列里找特征串("取最新一次再判"这种规则,DSL 表达不了)。
     args: {"filter": 选行(可选,同 filter 子句), "seq_column": "CmdSeq",
            "column": "DataValue", "contains": "Down"}"""
     import condition_kernels as _k

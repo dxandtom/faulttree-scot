@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""把子代理写的批次结果机械合并进 <ind>_analyzer.py:验收、去重、格式守卫、落盘一条龙。
+"""把子代理写的批次结果机械合并进 <ind>_analyzer.py:验收、去重、格式守卫、写入文件一次完成。
 
 为什么要它:绑定结果(几百条)若走"子代理回复 → 主代理转录 → Edit 重打"要三过模型上下文——
 实测撑爆主会话(自动压缩)、写入代理 600s 流挂。改为:子代理把结果写成
 <OUT>/dispatch/<ind>_batch<N>_result.py(各写各的、零竞态),本脚本串行合并进产物:
   · 逐批验收:UTF-8 可读、无 U+FFFD 乱码、ast 可解析为 list[dict];
   · 格式守卫:点名「C/G 既无 contains 也无 equals」(op/target 之类野字段内核不读,
-    实测整源假排除)与「缺 node_id」的条目——条目保留、修绑定去,内核对空 targets 也会响亮拒绝;
+    实测整源假排除)与「缺 node_id」的条目——条目保留、修绑定去,内核对空 targets 也会明确拒绝;
   · 完全重复的条目去重(实测子代理会把同一段重复两遍);
-  · 用 ast 定位 <ind>_analyzer.py 里的 CONDITIONS 赋值块整体替换(骨架/已填过的旧内容都认),幂等。
+  · 用 ast 定位 <ind>_analyzer.py 里的 CONDITIONS 赋值块整体替换(空白脚本/已填过的旧内容都认),幂等。
 **先到先合**:哪批结果文件在就合哪批,可反复跑——"谁先回来就先写谁"天然成立,不必等全齐。
 
 用法:
     merge_conditions.py --out "<OUT>" [--indicators cmd,dblg,...]
-退出码:0=全部批次到齐且合并完成;1=有缺批/坏批(照打印重派或等到货后重跑);2=用法/产物错误。
+退出码:0=全部批次到齐且合并完成;1=有缺批/坏批(照打印重派或等结果到齐后重跑);2=用法/产物错误。
 """
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ _BRIEF = re.compile(r"^(?P<ind>.+)_batch(?P<n>\d+)\.txt$")
 
 
 def _record_batch_timings(out: Path, ddir: Path, plan: dict) -> None:
-    """每批绑定耗时 = 结果文件 mtime − 简报 mtime(纯文件时间,零模型参与),幂等追加进
-    <OUT>/timing.json(重复收货不重记)。提效汇报的数据从这里拿,不靠人掐表。"""
+    """每批绑定耗时 = 结果文件 mtime − 任务说明 mtime(纯文件时间,零模型参与),幂等追加进
+    <OUT>/timing.json(重复合并不重记)。提效汇报的数据从这里拿,不靠人掐表。"""
     import datetime as _dt
     import json as _json
     p = Path(out) / "timing.json"
@@ -44,7 +44,7 @@ def _record_batch_timings(out: Path, ddir: Path, plan: dict) -> None:
             if ("bind_batch", ind, n) in seen or not (bp.exists() and rp.exists()):
                 continue
             dt = rp.stat().st_mtime - bp.stat().st_mtime
-            if dt <= 0:                                  # 简报比结果还新(重生成过)→ 算不出,跳过
+            if dt <= 0:                                  # 任务说明比结果还新(重生成过)→ 算不出,跳过
                 continue
             recs.append({"step": "bind_batch", "ind": ind, "batch": n, "seconds": round(dt, 1),
                          "at": _dt.datetime.fromtimestamp(rp.stat().st_mtime).isoformat(timespec="seconds")})
@@ -103,7 +103,7 @@ def drift_warnings(entries, tag):
 
 
 def write_conditions(analyzer: Path, entries) -> str | None:
-    """用 ast 定位 CONDITIONS 赋值块并整体替换(骨架/旧内容都认)。返回错误串或 None。"""
+    """用 ast 定位 CONDITIONS 赋值块并整体替换(空白脚本/旧内容都认)。返回错误串或 None。"""
     try:
         src = analyzer.read_text(encoding="utf-8")
         tree = ast.parse(src)
@@ -122,7 +122,7 @@ def write_conditions(analyzer: Path, entries) -> str | None:
     new_src = "".join(lines[:span[0] - 1]) + block + "\n" + "".join(lines[span[1]:])
     analyzer.write_text(new_src, encoding="utf-8")
     try:
-        ast.parse(new_src)                              # 落盘后自检,绝不留语法坏文件
+        ast.parse(new_src)                              # 写入后自检,绝不留语法坏文件
     except SyntaxError as e:
         return f"写入后语法自检失败:{e}"
     return None
@@ -144,10 +144,10 @@ def main() -> int:
         print(f"✗ 没有 {ddir}——先跑 make_dispatch.py", file=sys.stderr)
         return 2
 
-    plan = {}                                           # ind -> [批号...](按简报发现)
+    plan = {}                                           # ind -> [批号...](按任务说明发现)
     for p in sorted(ddir.iterdir()):
         m = _BRIEF.match(p.name)
-        if m and m.group("ind") != "route":             # route_batch*.txt 是路由简报(make_dispatch --route),
+        if m and m.group("ind") != "route":             # route_batch*.txt 是路由任务说明(make_dispatch --route),
             plan.setdefault(m.group("ind"), []).append(int(m.group("n")))  # 结果是 JSON 不是绑定,不归这里收
     if args.indicators:
         keep = {x.strip() for x in args.indicators.split(",") if x.strip()}
@@ -155,7 +155,7 @@ def main() -> int:
     if not plan:
         print("✗ dispatch/ 里没有任何简报(或 --indicators 全滤掉了)", file=sys.stderr)
         return 2
-    require_marker = False                              # 老 dispatch 目录没铭牌 → 不启用标记检查(向后兼容)
+    require_marker = False                              # 老 dispatch 目录没有派发标记文件 → 不启用标记检查(向后兼容)
     mf = ddir / "manifest.json"
     if mf.exists():
         try:
@@ -183,7 +183,7 @@ def main() -> int:
     for ind in sorted(plan):
         merged, seen = [], set()
         got = []
-        n_dec = n_marks = 0                             # 灌水/滥标体检用
+        n_dec = n_marks = 0                             # 检查滥填 decision 与滥标 cross_source 用
         for n in sorted(plan[ind]):
             rp = ddir / f"{ind}_batch{n}_result.py"
             tag = rp.stem
@@ -198,8 +198,8 @@ def main() -> int:
             entries, err = parse_result(rp, require_marker)
             if err and ind == "cross" and "BATCH_COMPLETE" in err:
                 # cross 特赦通道:cross 规约要求本批**每条候选都表态**(单源批允许不认领,享受不了这条),
-                # 所以"缺完成标记"可以机械补证——结果里的 node_id 集合盖住简报候选集合 = 内容齐全,代收。
-                # 实测弱模型重派后仍丢标记行、然后主会话手工往文件里补标记(废掉截断闸的危险动作),这里堵住。
+                # 所以"缺完成标记"可以机械补证——结果里的 node_id 集合覆盖任务说明的候选集合 = 内容齐全,代收。
+                # 实测弱模型重派后仍丢标记行、然后主会话手工往文件里补标记(让截断检查失效的危险动作),这里堵住。
                 e2, err2 = parse_result(rp, False)
                 bp_ = ddir / f"{ind}_batch{n}.txt"
                 exp = set(re.findall(r"^\[(\w+)\]", bp_.read_text(encoding="utf-8"), re.M)) \
@@ -214,7 +214,7 @@ def main() -> int:
                 continue
             s_ids = [str(e.get("node_id") or "?") for e in entries
                      if isinstance(e, dict) and str(e.get("class") or "").upper() == "S"]
-            if s_ids:                                    # S(代码类)只认人工/调优表来源:模型产出=绕过全部 DSL 闸门
+            if s_ids:                                    # S(代码类)只认人工/调优表来源:模型产出=绕过全部 DSL 检查
                 pending.append(f"{ind} 批{n}:含 class:S 条目({', '.join(s_ids[:5])})——代码类只许人工/调优表"
                                "来源,绑定子代理不得产出;从结果文件删掉这些条目再重跑(确需脚本逻辑请人工补)")
                 pending_inds.add(ind)
@@ -281,10 +281,10 @@ def main() -> int:
         wrote.append(ind)
         print(f"{ind}:{' / '.join(got)} → 合并 {len(merged)} 条,已写入 {analyzer.name}"
               + (f"(缺 {len(plan[ind]) - len(got)} 批,到货后重跑本脚本即可)" if len(got) < len(plan[ind]) else ""))
-        # 灌水/滥标体检(软点名):decision 占比畸高=对全树逐条表态(规约明令"不归本源答的整条不写",
-        # 实测 log 源 92 条全 decision 把闸门糊瞎);cross_source 占比畸高=把"不归我答"误标跨源。
+        # 滥填/滥标检查(软提示):decision 占比畸高=对全树逐条表态(规约明令"不归本源答的整条不写",
+        # 实测 log 源 92 条全 decision 让覆盖度检查失去意义);cross_source 占比畸高=把"不归我答"误标跨源。
         # cross 批不适用:CROSS_RULES 要求每条候选都表态,decision 占位是义务不是灌水(实测 8/13 占位
-        # 被误点名,弱模型照"删多余占位"的建议琢磨删条目)——cross 的体检是上面的"占位必须带理由"。
+        # 被误点名,弱模型照"删多余占位"的建议琢磨删条目)——cross 的检查是上面的"占位必须带理由"。
         if ind != "cross" and len(merged) >= 10 and n_dec > len(merged) * 0.5:
             all_warns.append(f"  ⚠ [{ind}] 灌水嫌疑:{n_dec}/{len(merged)} 条是 decision 占位——"
                              "「明显不归本源答的判据整条不写」,占位只给「确属本源该答却答不了」的;复核并删多余占位")

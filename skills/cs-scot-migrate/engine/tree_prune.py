@@ -76,7 +76,7 @@ def _sub_explains(subs) -> str:
     parts = []
     for i, sf in enumerate((subs or [])[:4]):
         mark = _CIRCLED[i] if i < len(_CIRCLED) else f"{i + 1}."
-        # 重拼没有该类分支的子条件(如 S 脚本)同款用原 explain 保底;sub_facts 不入瘦身产物,别指过去
+        # 没有对应分支的子条件(如 S 脚本)同样用原 explain 作为默认;sub_facts 不进精简后的产物,不要引用它
         parts.append(mark + (_explain(sf) or str(sf.get("explain") or "")[:120]
                              or f"子条件{i + 1}({sf.get('class')} 类)"))
     if len(subs or []) > 4:
@@ -85,7 +85,7 @@ def _sub_explains(subs) -> str:
 
 
 def _explain(f: dict) -> str:
-    """把一条事实拼成"怎么判的"人话(给不懂判据分类的人看,也给 RCA 报告直接引用)。
+    """把一条事实拼成"怎么判的"易懂说明(给不懂判据分类的人看,也给 RCA 报告直接引用)。
     机械生成、数字取自事实原字段——弱模型引用它就不会把数值/规则改写编错。拼不出的类返回空串。
     D 组合(含 group_by 分组)会**递归**拼装各子条件的解释:报告读者能看到"在哪个组里、
     每个子条件各命中多少"而非一句笼统的"组合成立"。"""
@@ -173,7 +173,7 @@ def _explain(f: dict) -> str:
 
 
 def _ev_str(x) -> str:
-    """证据条目转人话:主通路(custom_lib 转接头)给的是拼好的字符串标签;file= 直调脚本可能
+    """证据条目转成易懂文字:主路径(custom_lib 的通用适配函数)给的是拼好的字符串标签;file= 直调脚本可能
     透传 {type,id,data} 原始 dict——机械拼 type:id + k=v(剔 data 大块与 _ 元键),
     不许把 Python repr 漏给报告。"""
     if isinstance(x, dict):
@@ -200,11 +200,11 @@ def _slim_fact(entry: dict) -> dict:
         if len(f["matched_nes"]) > 8:                    # 截断后总数另存,下游算"几比几"不失真
             out["matched_nes_total"] = len(f["matched_nes"])
     # 非 ok 事实带上机器理由(截断):内核的"为什么数据不足"(含 extract 抽不到的样例、列解析失败详情)是 RCA 写
-    # undetermined/复核错误绑定的弹药——绑定算错时,模型靠它才有翻案余地。只挂非 ok、封 160 字,压缩比无感。
+    # 供 undetermined 与复核错误绑定时使用的依据——绑定算错时,模型靠它才能提出异议。只挂在非 ok 的事实上、截到 160 字,对压缩比影响可忽略。
     if f.get("status") != "ok" and f.get("reason"):
         out["reason"] = str(f["reason"])[:160]
-    # "怎么判的"人话:机械重拼自事实原字段;没有该类分支的(S 脚本)用事实原 explain 保底——
-    # 它由转接头/k_script 机械拼装("N/M 个网元命中"+脚本说明),数字同样不过模型的手
+    # "怎么判的"说明:机械重拼自事实原字段;没有对应分支的(S 脚本)用事实原 explain 作为默认——
+    # 它由通用适配函数/k_script 机械拼装("N/M 个网元命中"+脚本说明),数字同样不过模型的手
     ex = _explain(f) or str(f.get("explain") or "")[:300]
     if ex:
         out["explain"] = ex
@@ -213,7 +213,7 @@ def _slim_fact(entry: dict) -> dict:
 
 # outline 图例:随 payload 一起下发(数据自解释)。历史教训:曾用英文缩词 hold/pass 且全链无解释,
 # 弱模型把 hold 读成"搁置待查"(on hold)、把成立的节点丢进待确认写"具体证据待查"——词是给模型看的,
-# 必须不可误读、且定义随数据走,不赌模型去翻文档。
+# 必须不可误读、且定义随数据走,不指望模型去翻文档。
 OUTLINE_LEGEND = ("粗状态图例(仅导航,判档必须读该节点 facts):成立=有查证成功且命中的事实(有正向证据,"
                   "不许丢待确认);不成立=查了未命中;数据不足=查不了;未覆盖=无任何事实(没人绑/缺数据源);"
                   "免检=高层分类节点,不参与判断")
@@ -237,7 +237,7 @@ def _coarse(entry_list, pass_through) -> str:
 
 
 def prune(index: dict, results: dict) -> dict:
-    """index + 各源事实 → 剪枝后的局部子树 + 覆盖报告。瘦身:outline(导航)+ 精简事实。"""
+    """index + 各源事实 → 剪枝后的局部子树 + 覆盖报告。精简:outline(导航)+ 精简后的事实。"""
     nodes = index.get("nodes", {})
     # 别名表:节点 key(nN)和 code 都指向同一节点 → 绑定填哪个 node_id 都能挂上
     alias = {}
@@ -255,7 +255,7 @@ def prune(index: dict, results: dict) -> dict:
             cur = nodes[cur].get("parent")
     if index.get("root"):
         keep.add(index["root"])
-    # 兜底节点也留:任一保留节点的"非典型/其他/unspecified"子节点 → 留住,给未被具体兄弟认领的记录一个落点
+    # "其他"类节点也留:任一保留节点的"非典型/其他/unspecified"子节点 → 留住,给未被具体兄弟认领的记录一个归处
     # (绑定漏绑时,RCA 仍能据原始事实把那些记录归到这个真实节点上、可展示,不致随剪枝静默消失)。
     _CATCHALL = ("非典型", "其他", "其它", "unspecified", "unknown", "other", "misc")
 
@@ -307,10 +307,10 @@ def prune(index: dict, results: dict) -> dict:
     unmapped = list(facts.get("__no_node_id__", []))
     for oid in orphans:
         unmapped.extend(facts[oid])
-    unmapped = [_slim_fact(e) for e in unmapped]   # 孤儿事实也瘦身(同 pruned_nodes):去整条 condition_text、截 mapping_reason
+    unmapped = [_slim_fact(e) for e in unmapped]   # 孤儿事实也精简(同 pruned_nodes):去整条 condition_text、截 mapping_reason
 
     # 覆盖度:分类列(C/G)里出现、却没被任何绑定 targets 认领的取值 + 记录数 → 显式喂给 RCA,
-    # 这样即便 bind 时漏绑/忽略告警,RCA 也拿到"这 N 条没着落",可归到上面保留的兜底节点、不致漏诊。
+    # 这样即便 bind 时漏绑/忽略告警,RCA 也拿到"这 N 条没着落",可归到上面保留的"其他"类节点、不致漏诊。
     # 去噪:跳过占比≥50% 的取值(多半是该列"正常/健康"值,如 Fault/Normal 的 Normal),
     # 但**不**按"认领值个数"去噪——只绑了 1 个值却漏了一堆失败码,正是最该报的(别误伤)。
     col_claims, col_top, col_mode, col_total = defaultdict(set), defaultdict(dict), {}, defaultdict(int)
@@ -370,7 +370,7 @@ def compose_rca_payload(index: dict, results: dict, md_text: str = "") -> dict:
                            "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
             "unmapped_facts": pr["unmapped"], "tree_issues": cov,
             # 判别列里没被绑定认领的取值 —— prune() 已算好,必须随压缩形态一起送给 RCA
-            # (fault-tree-rca 契约据此把漏绑记录归到"非典型/其他"兜底节点报出、防漏诊);
+            # (fault-tree-rca 契约据此把漏绑记录归到"非典型/其他"节点报出、防漏诊);
             # 键恒在(空则空 dict),别再在这里静默丢掉。
             "uncovered_values": pr["uncovered_values"]}
     md_payload = {"fault_tree_md": md_text, "indicator_results": results}

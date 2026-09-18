@@ -119,7 +119,7 @@ def render(doc: dict, tree_text: str | None = None) -> str:
             L.append("")
 
     if und:
-        # 四态分型:优先按结构化 gap_kind 计数,老产物无字段时按 reason 文本兜底
+        # 四态分型:优先按结构化 gap_kind 计数,老产物没有该字段时按 reason 文本推断
         def _gk(c):
             gk = c.get("gap_kind")
             if gk in ("no_data", "cannot_judge", "mixed"):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""逐条件事实自检(机械兜底):在数据进 RCA 之前,先揪"静默编造"。
+"""逐条件事实自检(机械检查):在数据进 RCA 之前,先查出"静默编造"。
 
 不依赖运行模型的自觉,直接扫 condition_facts.json:
 1. **无中生有**:列没解析到(resolved_column 为空)或 status=insufficient_data,却给了 predicate_satisfied。

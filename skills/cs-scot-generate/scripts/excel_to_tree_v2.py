@@ -42,7 +42,7 @@ from excel_to_tree import _clean_text, _infer_combine, _is_skip_judgment, scenar
 _LEVEL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")          # 新格式 L1.. / 老格式 L1(Chinese) 都认
 _OLD_RE = re.compile(r"old\b|旧", re.IGNORECASE)            # 页签名带 old/旧 = 过期版,默认跳过
 DEFAULT_START_LEVEL = 2                                      # 背景业务知识:场景节点通常在 L2
-# 判断列表头 → 规范源标签(按关键词模糊匹配,扛各页签命名差异)。顺序无所谓,一个表头通常只含一个源词。
+# 判断列表头 → 规范源标签(按关键词模糊匹配,兼容各页签的命名差异)。顺序无所谓,一个表头通常只含一个源词。
 _SRC_KEYWORDS: List[Tuple[str, str]] = [
     ("CHR", "CHR"), ("X2", "X2"), ("RB", "RB"), ("DBG", "DBG"), ("DEBUG", "DBG"),
     ("信令", "信令"), ("配置", "配置"), ("话统", "话统"), ("PFM", "话统"),
@@ -69,7 +69,7 @@ def classify(h: str) -> Tuple[str, Any]:
         if kw.lower() in h.lower():
             return ("method", tag)
     # 通用判据列(老格式单列判据,常见于"混血"表:v2 层级列 + v1 判据列,如数通树)——不认它
-    # 会把整棵树的判据**静默丢光**(建出 0 判据的空壳树,下游只能瞎猜)。
+    # 会把整棵树的判据**静默丢光**(建出 0 判据的空树,下游只能瞎猜)。
     # 标签"通用"= 判据未按源分列,路由靠模型读判据原文。
     if "judgment condition" in h.lower() or "判断条件" in h:
         return ("method", "通用")
@@ -132,7 +132,7 @@ _CJK_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")   # 中日韩统一表意�
 
 def slugify(name: str):
     """英文名 → 文件/目录用短名(slug):小写、非字母数字一律转 '-'、合并去首尾。
-    含中文字符(英文格没翻译、填的还是中文)或转换后为空 → 返回 None(不可用,交上层兜底)。"""
+    含中文字符(英文格没翻译、填的还是中文)或转换后为空 → 返回 None(不可用,由上层用备用做法)。"""
     s = str(name or "").strip()
     if not s or _CJK_RE.search(s):
         return None
@@ -181,10 +181,10 @@ def is_tree_sheet(header: List[str]) -> bool:
 
 
 def default_out(anchor: Path, stem: str, slug, scenario: str):
-    """默认落点:**直出打包技能形态**——scot技能/<短名>/(execute 骨架+SKILL 身份),产物=其 assets/,
+    """默认落点:**直接生成技能形态**——scot技能/<短名>/(execute 的执行指引与脚本+SKILL 身份),产物=其 assets/,
     流水线跑完技能即成品,免掉单独打包一步(调优/迁移本就支持在 assets 上就地做)。
-    直出的前提:有英文短名(云端技能名要英文)+ 本机有同门 cs-scot-execute / fault-tree-rca;
-    不满足 → 退回老的 scot产物/<场景名>/ 产物形态,响亮提示最后跑 package_scenario.py 补打包。
+    直接生成的前提:有英文短名(云端技能名要英文)+ 本机 skills 目录下有 cs-scot-execute / fault-tree-rca;
+    不满足 → 退回老的 scot产物/<场景名>/ 产物形态,明确提示最后跑 package_scenario.py 单独打包。
     返回 (技能目录|None, 产物目录, 说明)。"""
     skill_dir = anchor / "scot技能" / stem
     if (skill_dir / "SKILL.md").exists() and (skill_dir / "assets").is_dir():
@@ -194,7 +194,7 @@ def default_out(anchor: Path, stem: str, slug, scenario: str):
     except ImportError:                                  # 没有打包脚本:不许崩,退回产物形态照常出树
         return None, scenario_out_dir(anchor, stem), \
             "打包脚本 package_scenario.py 不在(单文件部署)——退回产物形态;要直出技能请带全 scripts/ 目录"
-    exe = package_scenario.find_material("cs-scot-execute")          # ①技能内嵌 ②同门 skills/
+    exe = package_scenario.find_material("cs-scot-execute")          # ①技能内嵌 ②同一 skills 目录下
     rca = package_scenario.find_material("fault-tree-rca")
     if not slug:
         return None, scenario_out_dir(anchor, stem), \
@@ -275,7 +275,7 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
             sl = start_level
             if len(full) >= sl and full[sl - 1][1] == scenario:   # 优先:场景名在 L2
                 path = full[sl - 1:]
-            elif scenario in names:                                # 兜底:在别的层找到
+            elif scenario in names:                                # 备用做法:在别的层找到
                 path = full[names.index(scenario):]
             else:
                 continue
@@ -328,7 +328,7 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
 def index_to_markdown(index: Dict[str, Any]) -> str:
     """扁平 index → #/##/### 层级 md;判断条件(按源标签)+ 元数据紧跟节点。
     显式栈迭代而非递归:异常深的树(层级列识别错位/填充数据)不该炸 RecursionError,
-    要么正常渲染、要么(万一 index 被外部改出环)响亮点名坏在哪个节点。"""
+    要么正常渲染、要么(万一 index 被外部改出环)明确点名坏在哪个节点。"""
     nodes = index["nodes"]
     lines: List[str] = []
     if index.get("root"):
@@ -415,7 +415,7 @@ def main() -> None:
         print(f"未在任何树页签找到场景「{args.start_node}」(L{args.start_level},主列与英文备选列都查过)。"
               "用 --list 核对名字。", file=sys.stderr)
         sys.exit(1)
-    # 深度体检:正常故障树十来层;几十层以上=层级列识别错位/异常数据,响亮报出来别静默产坏树
+    # 深度检查:正常故障树十来层;几十层以上=层级列识别错位/异常数据,明确报出来,别静默产出坏树
     def _depth(nid: str) -> int:
         d, cur = 0, nid
         while cur:
@@ -440,7 +440,7 @@ def main() -> None:
         if topjudge:
             print(f"高层不判断:L1/L2/场景根带判据节点 {len(topjudge)} 个已标 pass_through(不阻断路径、不参与绑定;"
                   "判据保留供人读。确要在高层判 → 重跑加 --bind-top-levels)")
-    solutions = index.pop("solutions", {})              # 单独落盘,不进 tree_index(别膨胀树契约)
+    solutions = index.pop("solutions", {})              # 单独写文件,不进 tree_index(别膨胀树契约)
     md = index_to_markdown(index)
 
     # 英文短名:--slug 手工指定 > 场景所在层英文列自动转 > 场景名本身(本就是英文时)> 沿用中文名(现状)

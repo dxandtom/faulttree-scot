@@ -21,7 +21,7 @@
   ab_test_mechanisms.py [--engine mock|real] [--k 3] [--only <场景名子串>]
       [--suite <suite_real 目录>] [--trees <trees 目录>] [--out /tmp/ab_result.json]
       [--vendor-dir ... --config ...]
-mock 引擎只验证管线与指标口径,机制优劣结论必须以真引擎跑出的数字为准。
+mock 引擎只验证流程与指标定义,机制优劣结论必须以真引擎跑出的数字为准。
 """
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ def main() -> int:
 
         question = build_question(rca_input, enriched)
         t0 = time.time()
-        work = Path(a.out).resolve().parent / "_ab_xlsx"      # 落盘不删:免 Windows 句柄清理坑 + 可审计
+        work = Path(a.out).resolve().parent / "_ab_xlsx"      # 写成文件不删:避免 Windows 句柄清理问题 + 可审计
         work.mkdir(parents=True, exist_ok=True)
         xlsx = work / f"{sd.name}.xlsx"
         write_xlsx(enriched, xlsx)

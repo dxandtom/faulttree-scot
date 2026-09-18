@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""评估反思整批汇总(评估输出根目录 quality_score_batch.json)口径测试(标准库,直接 python 跑):
+"""评估反思整批汇总(评估输出根目录 quality_score_batch.json)算法测试(标准库,直接 python 跑):
 ① build_batch_score 纯函数:通过 = PASS + PASS_WITH_GAPS;pass_rate = 通过 ÷ 全部用例;total_score = 各用例
    总分平均,没评出分按 0;六维 = 通过该关的用例比例;没判卷的记 NOT_EVALUATED;
 ② 用自带演练场(make_drill)跑两条入口——eval_run 批量判卷、regress --eval-only——两边写出的整批
@@ -69,7 +69,7 @@ print("\n== ② 演练场:两条入口写出同一份口径的整批 quality_sco
 W = Path(tempfile.mkdtemp(prefix="reflect-idx-"))
 rc, o = run([SCRIPTS / "make_drill.py", "--out", W / "drill"])
 check("演练场生成", rc == 0, o[-300:])
-flat = W / "flat"                                     # 结果目录平铺(目录名含 case_id → 批量对号规则①)
+flat = W / "flat"                                     # 结果目录平铺(目录名含 case_id → 批量匹配规则①)
 flat.mkdir()
 for d in sorted((W / "drill" / "results").glob("*/result-drill-*")):
     shutil.copytree(d, flat / d.name)

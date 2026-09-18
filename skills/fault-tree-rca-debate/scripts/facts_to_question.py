@@ -26,7 +26,7 @@ from pathlib import Path
 
 def _fmt_fact(f: dict) -> str:
     """一条 fact → 简短实测描述(只挑有意义的量)。
-    D 类组合等瘦身后无数值字段的事实 → 回退成"判定为真(class X)",别渲染出空的「实测:」。
+    D 类组合等精简后无数值字段的事实 → 回退成"判定为真(class X)",别渲染出空的「实测:」。
     S 类脚本事实的金证据是 evidence 标签(实体+命中原文+来源文件)与 hits(命中原文片段,
     代码抓的)——必须带上:评委和最终报告的证据栏都靠它;命中原文是数据现场不是判据文本,
     成立节点上渲染不破回声策略。"""
@@ -43,7 +43,7 @@ def _fmt_fact(f: dict) -> str:
         bits.append("命中原文:" + " / ".join(f"『{h[:80]}』" for h in hits))
     if f.get("matched_nes"):
         ck = f.get("checked_nes")
-        n = f.get("matched_nes_total") or len(f["matched_nes"])   # 瘦身截断过的用真值算几比几
+        n = f.get("matched_nes_total") or len(f["matched_nes"])   # 精简截断过的用真值算几比几
         names = "、".join(str(x) for x in f["matched_nes"][:5]) + ("等" if n > 5 else "")
         bits.append(f"命中网元:{names}" + (f"({n}/{ck})" if ck else ""))
     if not bits:
@@ -53,7 +53,7 @@ def _fmt_fact(f: dict) -> str:
 
 def _fmt_fail(entries: list) -> str:
     """不成立节点的**安全**实测摘要:只报列名+命中计数/比例,绝不带判据的目标值/op/阈值——
-    那些是判据文本的组成部分,进 question 会被引擎的文本匹配误配成"成立"(回声策略红线)。"""
+    那些是判据文本的组成部分,进 question 会被引擎的文本匹配误配成"成立"(回声策略的硬性规则)。"""
     for e in entries or []:
         f = e.get("fact") or e
         if f.get("status") == "ok" and f.get("predicate_satisfied") is False:
@@ -100,14 +100,14 @@ def _classify(entries: list) -> tuple:
 
 def _weak_neg(f: dict) -> bool:
     """存在类(C/G 非 absent)的 ok+不成立=**弱阴性**:只说明"这份数据里没找到",不构成反证
-    (与手工 draft_rca._weak_neg 同口径)。强反证=A 阈值/P 成对/absent 缺失类/D 组合的不成立。"""
+    (与手工 draft_rca._weak_neg 同一规则)。强反证=A 阈值/P 成对/absent 缺失类/D 组合的不成立。"""
     return str(f.get("class") or "").upper() in ("C", "G") and not f.get("absent")
 
 
 def _tri4(entries: list) -> tuple:
-    """节点事实 → 机械四态(与手工 draft_rca._tri 同口径,**冲突不塌缩**):
+    """节点事实 → 机械四态(与手工 draft_rca._tri 同一规则,**冲突不合并**):
     ("held"|"conflict"|"refuted"|"insufficient"|None, 成立侧实测串列表)。
-    conflict=成立与强反证并存(两边都是硬话)——手工闸对这种候选拒收确证,这里同样不许洗白。"""
+    conflict=成立与强反证并存(两边都是硬话)——手工路径的确证检查对这种候选拒收确证,这里同样不许洗白。"""
     facts = [e.get("fact") or e for e in entries or []]
     ok_t = [f for f in facts if f.get("status") == "ok" and f.get("predicate_satisfied") is True]
     ok_f = [f for f in facts if f.get("status") == "ok" and f.get("predicate_satisfied") is False]
@@ -127,7 +127,7 @@ def _tri4(entries: list) -> tuple:
 def facts_index(rca_input: dict) -> dict:
     """rca_input → {node_id: {"st": 四态, "obs": 成立实测串, "fail": 反证摘要, "insuf": 缺数原因}}。
     节点级先聚合再判态(同节点跨源的成立+强反证要判成 conflict,逐条判再合并会洗白冲突);
-    result_adapter 的回程事实感知与 DossierKit 的档案都从这张表读,口径一处定。"""
+    result_adapter 的回程事实感知与 DossierKit 的材料都从这张表读,规则只定义在一处。"""
     groups: dict = {}
     ft = (rca_input or {}).get("fault_tree")
     if isinstance(ft, dict) and ft.get("pruned_nodes"):
@@ -146,7 +146,7 @@ def facts_index(rca_input: dict) -> dict:
             continue
         rec = {"st": st, "obs": "; ".join(obs),
                "fail": _fmt_fail(entries), "insuf": _insuf_reason(entries)}
-        if st == "insufficient":                         # 四态分型:缺数据 vs 数据在判不动(注记口径用)
+        if st == "insufficient":                         # 四态分型:缺数据 vs 数据在判不动(写注记用)
             kinds = {(e.get("fact") or e).get("gap_kind") for e in entries
                      if isinstance(e, dict) and (e.get("fact") or e).get("gap_kind")}
             if kinds:
@@ -220,8 +220,8 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
         parts.append("\n【数据不足、无法判定的节点】\n- " + "、".join(sorted(set(insufficient))))
     # 整个数据源没提供(execute 部分数据运行,解析步骤被跳过):只报源名+原因,不含判据文本——
     # 名字级暴露与既有小节(排除/数据不足)同级;再给 ASCII 源名(kpi/chr/config…)插零宽空格断词,
-    # 引擎的关键词兜底是**子串匹配**,防止「CHR 异常」这类短判据被源名 token 翻成假阳命中
-    # (兜底只在 LLM 失败时启用,LLM 主路径读零宽空格无碍)。
+    # 引擎的关键词回退是**子串匹配**,防止「CHR 异常」这类短判据被源名 token 误判为命中
+    # (回退只在 LLM 失败时启用,LLM 主路径读零宽空格无碍)。
     # 让评委知道"这些源的判据既未证实也未证伪",而不是把静默无事实误读成"查过没问题"。
     mi = rca_input.get("missing_indicators") or {}
     if mi:
@@ -245,27 +245,27 @@ def build_question(rca_input: dict, tree_index: dict | None = None) -> str:
     return "\n".join(parts)
 
 
-# ---------------- 辩论侧分层卷宗(信息全员对称,任务各自专属) ----------------
+# ---------------- 辩论侧分层角色材料(信息全员对称,任务各自专属) ----------------
 # 上面的 build_question 是给**机械文本匹配器**的回声安全版(不成立/缺数只报名,防误配)。
 # 辩论角色(辩护/攻击/回应/一致性/评委)是推理者,不做文本匹配——给它们完整档案:
 # **判据原文全员必读**(含被证伪/缺数节点的),附实测事实与反证:攻击者才能拿数据说话,
 # 评委才能"实测优先于辩词"。分层:角色任务框架(唯一按角色不同的部分)+ 本组节点档案
 # (组局部细节,控 token)+ 全局案情(共享)。信息不裁剪、不做信息不对称。
-# engine_boost._wrap_agent_questions 在各 agent 门口把 question 换成这里出的卷宗。
+# engine_boost._wrap_agent_questions 在各 agent 入口把 question 换成这里出的材料。
 
 _CAP = 40                                                # 全局清单每节最多带判据全文的节点数
 
 
 class DossierKit:
-    """rca_input + tree_index → 预组装分层卷宗(全局层惰性构建一次,组层按组缓存)。"""
+    """rca_input + tree_index → 预组装分层角色材料(全局层惰性构建一次,组层按组缓存)。"""
 
     def __init__(self, rca_input: dict, tree_index: dict, focus_note: str = ""):
-        self.focus_note = str(focus_note or "").strip()  # 辩题聚焦注记(事实短路筛给):点明辩什么+背景纪律
+        self.focus_note = str(focus_note or "").strip()  # 辩题聚焦注记(预筛与分诊给出):点明辩什么+背景规则
         nodes = (tree_index or {}).get("nodes") or {}
         self.names = {nid: (n.get("name") or nid) for nid, n in nodes.items()}
         self.conds = {nid: str(n.get("condition") or "").strip() for nid, n in nodes.items()}
         self.parents = {nid: n.get("parent") for nid, n in nodes.items()}
-        self.facts = facts_index(rca_input)              # 四态共享索引(与 result_adapter 同一口径)
+        self.facts = facts_index(rca_input)              # 四态共享索引(与 result_adapter 同一规则)
         ft = (rca_input or {}).get("fault_tree")
         self.scenario = ((ft.get("scenario") if isinstance(ft, dict) else "")
                          or (tree_index or {}).get("scenario") or "")
@@ -358,7 +358,7 @@ class DossierKit:
         return self._global_text
 
     def _compose(self, header: str, vnodes) -> str:
-        # 聚焦注记放卷宗**开头**(任务框架之前):辩什么、背景纪律,各角色第一眼看到
+        # 聚焦注记放材料**开头**(任务框架之前):辩什么、背景规则,各角色第一眼看到
         return ((self.focus_note + "\n\n") if self.focus_note else "") \
             + (header + "\n\n【本组节点档案(判据原文+实测事实;信息全员一致)】\n"
                + self.group_text(vnodes) + "\n\n【全局案情】\n" + self.global_text())

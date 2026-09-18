@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """从现行 skill 产物生成平台1 **增强全量表**(联调工装,不进技能)。
 
-平台口径(已对齐):每次优化都给全量表 + 标记哪些节点改了,请求带 optimizeType=ALL。
+平台约定(已对齐):每次优化都给全量表 + 标记哪些节点改了,请求带 optimizeType=ALL。
 本脚本把现行 skill 的树原样导成这张表,作为"零改动基线"——不动它直接喂驱动,预期零动作;
 在上面改几格(改判据/加一行/删一行/标记"是"),就是一次真实的树更新实验,不用等平台样例。
 
@@ -65,7 +65,7 @@ def dfs_order(nodes: dict, root: str):
             walk(k)
 
     walk(root)
-    for nid in nodes:                                     # 孤儿/多根兜底:也列出来,别悄悄丢
+    for nid in nodes:                                     # 孤儿/多根的处理:也列出来,别悄悄丢
         if nid not in seen:
             walk(nid)
     return out

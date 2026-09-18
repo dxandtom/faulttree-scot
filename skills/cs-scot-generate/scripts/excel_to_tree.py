@@ -16,7 +16,7 @@
 
 要点:
 - 背景业务知识:场景节点通常在 **L2**,所以 `--start-level` 默认 2,`--start-node` 在该层选具体场景;
-  万一不在 L2,会自动在其它层找到该场景名并以它为根截取(兜底)。
+  万一不在 L2,会自动在其它层找到该场景名并以它为根截取(备用做法)。
 - `--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`;传 `--exclude-pattern ""` 可保留全部。
 读 xlsx 走同目录 xlsx_reader.py(零三方依赖,不需要 openpyxl);csv 用标准库即可。
 """
@@ -75,7 +75,7 @@ def _read_table(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
 
 def find_level_columns(headers: List[str]) -> List[Tuple[str, int]]:
     """从表头里找出所有 Ln(Chinese)/Ln 层级列,按层级升序返回 (列名, 层级)。
-    同层裸列与 (Chinese) 列并存时取中文列(与 v2 的混血表口径一致),每层只留一列。"""
+    同层裸列与 (Chinese) 列并存时取中文列(与 v2 处理混合格式表的规则一致),每层只留一列。"""
     cols: Dict[int, str] = {}
     for h in headers:
         m = _LEVEL_RE.match((h or "").strip())
@@ -173,7 +173,7 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
 
     路径截取规则(给了 start_node 时):
     - 优先在 start_level 层(默认 L2,背景业务知识)匹配场景名;
-    - 若该层不是,则在该行任意层找到 start_node 并以它为根(兜底);
+    - 若该层不是,则在该行任意层找到 start_node 并以它为根(备用做法);
     - 都没有则跳过该行。
     """
     tree: Dict[str, Any] = {}
@@ -201,7 +201,7 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
             if len(full) >= sl and full[sl - 1] == start_node:
                 path = full[sl - 1:]                    # 优先:场景名在 L2
             elif start_node in full:
-                path = full[full.index(start_node):]    # 兜底:在别的层找到也认
+                path = full[full.index(start_node):]    # 备用做法:在别的层找到也认
             else:
                 continue
         elif start_level and start_level > 1:
@@ -378,7 +378,7 @@ def main() -> None:
     try:
         md = excel_to_tree_markdown(args.excel_path, output_path, args.start_level,
                                     args.start_node, args.exclude_pattern)
-    except Exception as e:  # noqa: BLE001 — CLI 边界统一兜底
+    except Exception as e:  # noqa: BLE001 — CLI 边界统一捕获
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
     if output_path:

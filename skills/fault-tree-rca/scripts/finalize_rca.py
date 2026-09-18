@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """裁决单 → rca.json 机械合成器:模型只写小裁决单,几百行 JSON 由代码拼,取代 validate 后置校验。
 
-实测病根:draft 治了"忘候选",但模型仍要手打整份 rca.json(几百行,写半天还会抄错)。
+实测发现的问题:draft 解决了"忘候选",但模型仍要手打整份 rca.json(几百行,写半天还会抄错)。
 与绑定产线同配方——模型只交判定,机械字段代码填。诚实性从"事后校验"改成"结构上做不出假的":
-- 骨架里的候选**一条都不许漏裁决**(漏了响亮报错,候选想消失必须显式给 verdict+理由);
-- verdict=confirmed 的闸:**只看候选自身**——候选(叶子,或下级无一成立的中间节点)必须成立
+- 候选清单里的候选**一条都不许漏裁决**(漏了明确报错,候选想消失必须显式给 verdict+理由);
+- verdict=confirmed 的检查:**只看候选自身**——候选(叶子,或下级无一成立的中间节点)必须成立
   (被改成 存疑/语义近似/不成立 → 拒收);中间节点确证的「叶子因待定」自动落 caveats;
-  **祖先口径 v4**:「未绑定/数据不足/存疑」=默认放行(零信息不冒充反证),落 caveats、
+  **祖先的规则**:「未绑定/数据不足/存疑」=默认放行(零信息不当作反证),落 caveats、
   报告提示"此处无判断"——判断方法写错的中间节点走调优表清绑定即归此类;
   上级实测「不成立/冲突」=层级矛盾 → **确证拒收**,只收 probable(blocked_at=该上级,
   note 写清矛盾)——留着绑定又实测不成立就是有效反证;带 auto_verdict 的候选不给裁决
-  自动收,给了相反裁决则响亮拒收;
+  自动收,给了相反裁决则明确拒收;
 - 有成立事实的候选 verdict=undetermined → 拒收(有证据的不收待确认);
 - verdict=excluded 必须给 reason(排除无理由拒收);
-- evidence_path/Fault_tree_path 逐字来自骨架(代码抓的原文),模型改不了数字。
+- evidence_path/Fault_tree_path 逐字来自候选清单(代码抓的原文),模型改不了数字。
 
 用法:
     finalize_rca.py <rca_draft.json> <decisions.json> -o <rca.json>
@@ -44,7 +44,7 @@ _CLEAN = ("成立", "无独立条件")
 
 
 def _load(path: Path):
-    """json 优先,ast 兜底(弱模型爱写 Python 风格单引号/True)。"""
+    """json 优先,解析失败再用 ast(弱模型爱写 Python 风格单引号/True)。"""
     text = path.read_text(encoding="utf-8")
     try:
         return json.loads(text)
@@ -56,7 +56,7 @@ def _load(path: Path):
 
 
 def _ev_final(entry, overrides):
-    """骨架预填 evidence → 最终 evidence_path(逐字照搬;overrides 只许把 judgment 改成存疑落字)。"""
+    """候选清单预填的 evidence → 最终 evidence_path(逐字照搬;overrides 只许把 judgment 改成存疑落字)。"""
     out = []
     for e in entry.get("evidence_prefilled") or [entry]:
         item = {k: e[k] for k in ("node", "node_id", "condition", "actual", "how", "judgment",
@@ -69,9 +69,9 @@ def _ev_final(entry, overrides):
 
 
 def _dirty(ev):
-    """确证闸的"不干净"条目:**只看候选自身(路径末位)**——不是 成立/无独立条件(含被 overrides
-    改成 存疑/语义近似)就拒收。祖先一律不拦:数据不足=零信息(查不了不冒充反证);不成立/冲突=
-    层级矛盾(祖先绑定假阴或叶子命中系背景?)——口径 v2 由确证闸另行拒收,这里只管候选自身;
+    """确证检查里的"不干净"条目:**只看候选自身(路径末位)**——不是 成立/无独立条件(含被 overrides
+    改成 存疑/语义近似)就拒收。祖先一律不拦:数据不足=零信息(查不了不当作反证);不成立/冲突=
+    层级矛盾(祖先绑定漏判或叶子命中只是背景?)——由确证检查另行拒收,这里只管候选自身;
     存疑=对祖先证据的怀疑,同样不否定叶子自身的事实——全部由 _anc_notes 机械落 caveats 留痕。"""
     if not ev:
         return []
@@ -131,7 +131,7 @@ def main() -> int:
         if not isinstance(dec_list, list):
             raise SystemExit("裁决单须是 list(或 {\"decisions\": [...]}),一个候选一条")
     else:
-        dec_list = []                                    # 骨架全自动定档时允许不给裁决单
+        dec_list = []                                    # 候选清单全自动定档时允许不给裁决单
     decisions = {}
     for d in dec_list:
         if not isinstance(d, dict) or not d.get("node_id"):
@@ -147,7 +147,7 @@ def main() -> int:
     adjudicables = {str(e["node_id"]): e for e in
                     (draft.get("confirmed_candidates", []) + draft.get("probable_candidates", [])
                      + draft.get("holding_candidates", []) + draft.get("conflict_nodes", []))}
-    # 骨架已机械定档的(auto_verdict):不给裁决自动收;给了相反裁决响亮拒收(机械档不容改写)
+    # 候选清单已机械定档的(auto_verdict):不给裁决自动收;给了相反裁决明确拒收(机械定档不容改写)
     auto_cnt = 0
     for nid, e in adjudicables.items():
         av = _VERDICT.get(str(e.get("auto_verdict") or "").strip().lower())
@@ -230,7 +230,7 @@ def main() -> int:
                 raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」有'成立'事实,不收 undetermined"
                                  "(待确认=既无正向证据又缺数据)——升 probable 或有据 excluded")
 
-    # 待确认骨架(真缺数节点)自动带出;模型给了裁决的按裁决走(如补充 reason)
+    # 待确认条目(真缺数据的节点)自动带出;模型给了裁决的按裁决走(如补充 reason)
     for e in draft.get("undetermined_skeleton", []):
         nid = str(e.get("node_id"))
         d = decisions.get(nid, {})

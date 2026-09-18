@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
-"""datacom-fault-tree-tester 交付包 → 场景产物:判据替换 + 绑定换血,一条龙机械迁移。
+"""datacom-fault-tree-tester 的节点交付包 → 场景产物:判据替换 + 绑定更换,完整的机械迁移。
 
 链路(用户拍板):a. 把交付包里人确认过的「判断方法」替换到故障树对应节点的判据上;
-b. 把该节点旧绑定去掉,换成一条 S 绑定(func=fault_check 通用转接头),直接跑交付的脚本。
+b. 把该节点旧绑定去掉,换成一条 S 绑定(func=fault_check 通用适配函数),直接跑交付的脚本。
 
 三种模式:
   匹配模式(不带 --node):解析交付包,和产物故障树逐节点算相似度,列出候选——
       python migrate_fault_check.py --package <交付包目录|zip> --product <场景产物目录>
-  执行模式(带 --node):人确认节点号后落地迁移——
+  执行模式(带 --node):人确认节点号后执行迁移——
       python migrate_fault_check.py --package <…> --product <…> --node n17
       可选:--entry <入口函数名> --per-ne --entry-kwargs '<JSON>'(自动探测不准时手工指定)
-  批量模式(多节点合集包 + --auto):逐子包循环,精确同名唯一的全部自动落地(一轮手术原子落地),
-      对不上号的列候选决不赌;之后逐个 --only "<包节点名>" --node nX 补对号——
+  批量模式(多节点合集包 + --auto):逐子包循环,精确同名唯一的全部自动迁入(一轮调优表修改,原子生效),
+      匹配不上的列候选,绝不猜;之后逐个 --only "<包节点名>" --node nX 补充匹配——
       python migrate_fault_check.py --package <合集包.zip> --product <…> --auto
   对应表模式(--map <excel>):同事提供的对应表(调优表同款层级列 L1..Ln,**无 node_id**,
       新增 zip 列=交付 zip 名)驱动全自动批量——按「名字路径」定位节点(同名节点靠全路径消歧,
-      不再要人指定),按 zip 列把合集里的包对号入座——
+      不再要人指定),按 zip 列把合集里的包匹配到节点——
       python migrate_fault_check.py --package <合集目录|zip> --product <…> --map <对应表.xlsx>
 
-落地动作(全走产物自带的调优表往返,复用其全部校验):
+迁移动作(全走产物自带的调优表往返,复用其全部校验):
   1. 交付包脚本(fault_check_*.py + search_*.py 共享模块)拷进 产物/scripts/custom/;
   2. export_tree_excel → 改该节点一行:判据落「判据:原文」列(标签列清空)、单源绑定列清空、
      「绑定:cross」列写 S 绑定 → import_tree_excel 机械编译回产物 → 再 export 让调优表同步;
-  3. 产物 cross_analyzer.py 骨架过旧(不支持 S 全量喂源/raw 通道)时,借 cs-scot-generate 的
-     骨架手术就地升级(绑定原样保留);借不到就响亮提醒;
+  3. 产物 cross_analyzer.py 脚本框架过旧(不支持 S 类全量传源/原始日志目录)时,借 cs-scot-generate 的
+     框架升级函数就地升级(绑定原样保留);借不到就明确提醒;
   4. 迁移台账记进 产物/tree/migrations.json(哪个节点、来自哪个包、入口是什么)。
 
-设计红线:判断逻辑照单全收(对错归交付脚本,不改写、不"顺手优化");调优表已有**未导入**的
-人工修改时硬停(绝不覆盖别人手里的活)。
+设计规则:判断逻辑原样接收(对错归交付脚本,不改写、不"顺手优化");调优表已有**未导入**的
+人工修改时停止并报错(绝不覆盖别人手里的活)。
 """
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def unpack(package: Path, tmp: Path) -> Path:
 
 def find_subpackages(pkg: Path):
     """多节点合集包探测:按「判断方法*.md 所在的顶层子目录」分组。
-    返回 {子包根: [md 路径…]};单节点包 → {pkg: [md]}。顶层与子目录同时有 md 的奇形包 → 硬停
+    返回 {子包根: [md 路径…]};单节点包 → {pkg: [md]}。顶层与子目录同时有 md 的异常包 → 停止并报错
     (分不清哪份文档配哪个脚本,机器不猜)。"""
     cands = [p for p in pkg.rglob("判断方法*.md") if "规范" not in p.name]
     groups: dict[Path, list[Path]] = {}
@@ -126,7 +126,7 @@ def parse_method_md(pkg: Path):
     """判断方法.md → {name, condition(=全文逐字), core(=判断条件段,只用于相似度匹配), file}。
     判据替换用**全文**:故障描述/判断条件/命中条件/输出/数据来源表/注意事项一个不丢——
     树上的判据从此就是整份规范文档(数据来源表是核对采集覆盖的依据,绝不能丢);
-    对号匹配仍用「判断条件」段,免得模板固定段落稀释相似度。"""
+    相似度匹配仍用「判断条件」段,免得模板固定段落稀释相似度。"""
     cands = [p for p in pkg.rglob("判断方法*.md") if "规范" not in p.name]
     if not cands:
         raise SystemExit(f"交付包里找不到 判断方法*.md(排除规范文件):{pkg}")
@@ -176,8 +176,8 @@ def _path_pick(nodes, method, exact):
 
 def find_scripts(pkg: Path, script_arg: str | None, node_name: str | None = None):
     """交付包里的 fault_check 脚本 + 共享模块(search_*.py)。verify_*.py 调试遗留不收。
-    多脚本包(平台存包常把整个共享脚本目录都打进去):按 tester 命名规范
-    fault_check_<节点名>.py 精确同名唯一命中就自动选——规范约定不是赌;对不上仍硬停。"""
+    多脚本包(平台存包常把整个共享脚本目录都打进去):按交付规范
+    fault_check_<节点名>.py 精确同名唯一命中就自动选——按规范约定选不算猜;对不上仍停止并报错。"""
     fcs = sorted(set(pkg.rglob("fault_check_*.py")))
     if script_arg:
         hit = [p for p in fcs if p.name == script_arg] or [pkg / script_arg]
@@ -245,7 +245,7 @@ def _needed_deps(fc: Path, cands):
 
 
 # 入口候选(优先级序)。fault_check 是 tester 规范的约定入口名(与文件名前缀同名),排最前——
-# 实测漏了它:脚本入口叫 fault_check 时名单撞上内部帮手 check_ne(吃 Path、返回 tuple),运行期必炸。
+# 实测漏了它:脚本入口叫 fault_check 时候选名单误选了内部帮手 check_ne(接受 Path、返回 tuple),运行期必出错。
 _ENTRY_CANDIDATES = ("fault_check", "diagnose", "main", "check_ne", "diagnose_ne", "check")
 
 
@@ -257,9 +257,9 @@ def _required_kwargs(fn) -> dict:
 
 
 def detect_entry(script: Path):
-    """静态探测入口函数(候选见 _ENTRY_CANDIDATES;选中后还要过 arbitrate_entry 的空目录烟测)。
+    """静态探测入口函数(候选见 _ENTRY_CANDIDATES;选中后还要过 arbitrate_entry 的空目录试跑)。
     入口契约=至少接收 1 个位置参数(数据目录);0 参函数(从 sys.argv 自取路径的老脚本)一律跳过
-    并记入 note——运行期转接头必传目录参数,选了 0 参入口就是必炸的 TypeError,在迁移时拦下。
+    并记入 note——运行期适配函数必传目录参数,选了 0 参入口就是必然的 TypeError,在迁移时拦下。
     单网元入口(check_ne/diagnose_ne)→ per_ne。返回 (entry, per_ne, kwargs, 顶层函数清单, argc 表, note)。"""
     tree = ast.parse(script.read_text(encoding="utf-8", errors="replace"))
     defs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
@@ -281,8 +281,8 @@ def detect_entry(script: Path):
 
 
 class _StrPathLite(str):
-    """烟测入参:与引擎 custom_lib._StrPath 同款的 str/Path 双兼容路径(str 子类,支持 / 拼接与
-    Path 方法)——烟测传参必须和运行期转接头同型,否则烟测放行的脚本运行期照炸(或反之)。"""
+    """试跑入参:与引擎 custom_lib._StrPath 同款的 str/Path 双兼容路径(str 子类,支持 / 拼接与
+    Path 方法)——试跑传参必须和运行期适配函数同型,否则试跑放行的脚本运行期照样出错(或反之)。"""
     def __truediv__(self, other):
         import os as _os
         return _StrPathLite(_os.path.join(str(self), str(other)))
@@ -292,7 +292,7 @@ class _StrPathLite(str):
 
 
 def _shape_ok(r):
-    """返回值是否是转接头认识的形状(与 custom_lib._fc_normalize 同口径,只验形不验语义)。"""
+    """返回值是否是适配函数认识的形状(与 custom_lib._fc_normalize 同一规则,只验形不验语义)。"""
     if not isinstance(r, dict):
         return False, f"返回 {type(r).__name__},不是 dict"
     if "matched" in r or "error" in r or "status" in r:
@@ -312,7 +312,7 @@ def _shape_ok(r):
 
 
 def _smoke_call(stage: Path, script_name: str, entry: str, kwargs: dict):
-    """空目录烟测:以库方式(argv 隔离/stdout 收走/异常拦截,与运行期转接头同款护现场)调一次
+    """空目录试跑:以库方式(argv 隔离/stdout 收走/异常拦截,与运行期适配函数同样的现场保护)调一次
     入口,验返回形状。空数据下合契约的脚本该返回 undetermined——至少得是个认得出的 dict。"""
     import contextlib
     import importlib.util
@@ -350,13 +350,13 @@ def _smoke_call(stage: Path, script_name: str, entry: str, kwargs: dict):
 
 
 def arbitrate_entry(fc: Path, deps, entry: str, per_ne: bool, kwargs: dict, explicit: bool):
-    """入口烟测仲裁:选中的入口先真调一次;不合契约时——auto 模式按候选序换下一个(谁返回契约
-    形状谁当入口,机械裁决不猜名字),全不行硬停并逐个报原因;人工 --entry 指定的只警告不换(人>名单)。
+    """入口试跑仲裁:选中的入口先真调一次;不合契约时——auto 模式按候选序换下一个(谁返回契约
+    形状谁当入口,机械裁决不猜名字),全不行则停止并报错、逐个报原因;人工 --entry 指定的只警告不换(人>名单)。
     返回 (entry, per_ne, kwargs, 仲裁说明)。"""
     with tempfile.TemporaryDirectory(prefix="stage_") as sd:
         stage = Path(sd)
         for p in [fc] + list(deps):
-            shutil.copy2(p, stage / p.name)              # 依赖凑齐再测,和落地后 custom/ 同布局
+            shutil.copy2(p, stage / p.name)              # 依赖凑齐再测,和迁入后 custom/ 同布局
         ok, why = _smoke_call(stage, fc.name, entry, kwargs)
         if ok:
             return entry, per_ne, kwargs, ""
@@ -407,7 +407,7 @@ def rank_nodes(index, pkg_name: str, pkg_cond: str, top=5):
     return out[:top]
 
 
-# ---------- 调优表手术 ----------
+# ---------- 调优表修改 ----------
 def _open_tuning(product: Path):
     """打开产物调优表(锁文件/唯一性/node_id 列检查),返回 (路径, wb, ws, header, id_col)。"""
     from openpyxl import load_workbook
@@ -448,10 +448,10 @@ def edit_tuning_excel(product: Path, nid: str, condition: str, binding: dict):
     if row is None:
         raise SystemExit(f"调优表里找不到节点 {nid} 的行(表刚由 export 生成,不该缺——核对节点号)")
     # 注意:openpyxl 的 ws.cell(..., value=None) 是"不赋值"而非"清空"——清格必须走 .value = None
-    ws.cell(row=row, column=raw_col).value = condition or None   # 判据整段进原文列(清除行传空=清格)
+    ws.cell(row=row, column=raw_col).value = condition or None   # 判据整段进原文列(清除判据的行传空=清格)
     for c in tag_cols:
         ws.cell(row=row, column=c).value = None          # 标签列清空(原文/标签二选一)
-    for src, c in bind_cols.items():                     # binding 为空(清除行)= 全部绑定列清空
+    for src, c in bind_cols.items():                     # binding 为空(清除判据的行)= 全部绑定列清空
         ws.cell(row=row, column=c).value = (json.dumps(binding, ensure_ascii=False)
                                             if src == "cross" and binding else None)
     wb.save(path)
@@ -470,7 +470,7 @@ def edit_tuning_add(product: Path, parent_nid: str, parent_chain, name: str,
         m = lvl_re.match(h.replace("：", ":").strip())
         if m:
             lvl_cols[int(m.group(1))] = i + 1
-    child_depth = len(parent_chain) + 1                  # 相对深度:根=L1(与 export 同口径)
+    child_depth = len(parent_chain) + 1                  # 相对深度:根=L1(与 export 同一规则)
     for d in range(1, child_depth + 1):
         if d not in lvl_cols:                            # 树长深了一层:补层级列(导入按表头识别)
             lvl_cols[d] = _ensure_col(ws, header, f"L{d}(Chinese)")
@@ -502,7 +502,7 @@ def edit_tuning_add(product: Path, parent_nid: str, parent_chain, name: str,
 def edit_tuning_condition(product: Path, nid: str, condition: str):
     """调优表**只改判据**(判据同步行):原文列写入、标签列清空(原文/标签二选一),
     **绑定列一格不动**——判据文字变了但没有新交付包,现有绑定(脚本/判断方式)继续生效;
-    脚本可能落后于新判据的事实由返厂清单点名,交付方补包后走正常迁移行换血。"""
+    脚本可能落后于新判据的事实由退回清单点名,交付方补包后走正常迁移行换血。"""
     path, wb, ws, header, id_col = _open_tuning(product)
     raw_col = _ensure_col(ws, header, RAW_TAG)
     tag_cols = [i + 1 for i, h in enumerate(header) if h.startswith("判据:") and h != RAW_TAG]
@@ -531,7 +531,7 @@ def edit_tuning_solution(product: Path, nid: str, text: str):
 
 
 def edit_tuning_del(product: Path, nid: str):
-    """调优表**删行**(全量表口径的删节点):按 node_id 定位整行删除,import 重建后节点消失。
+    """调优表**删行**(全量表模式的删节点):按 node_id 定位整行删除,import 重建后节点消失。
     只应由 --map-mode all 的全量对账调用(候选集天然含整棵子树,见 _delete_targets)。"""
     path, wb, ws, header, id_col = _open_tuning(product)
     row = next((r for r in range(2, ws.max_row + 1)
@@ -559,11 +559,11 @@ def run_step(product: Path, script_name: str, desc: str) -> None:
 
 
 # 产物里属于"引擎"的自包含副本(assemble 拷进去的,工具链所有,人不该手改)。
-# 同步规则(refresh_engine):与本机同门源逐文件比对,内容不同就刷新、旧文件留 .bak——以本机
+# 同步规则(refresh_engine):与本机 skills 目录下的源文件逐文件比对,内容不同就刷新、旧文件留 .bak——以本机
 # 安装的工具链为准。下面的能力标记用来**核验源**(缺标记的源不可信、不用它刷)和识别"整代过旧"
 # 的副本;custom_lib.py 含手工 @register 函数时退回"按标记只补缺"以免顶掉人工代码。
-# 引擎源两级:本机同门 cs-scot-generate / cs-scot-execute(更新鲜)→ 本技能内置 engine/
-# (自包含兜底;维护:引擎侧改动后跑 scripts/sync_engine.py 对齐)。
+# 引擎源两级:本机 skills 目录下的 cs-scot-generate / cs-scot-execute(更新)→ 本技能内置 engine/
+# (自包含的备用副本;维护:引擎侧改动后跑 scripts/sync_engine.py 对齐)。
 ENGINE_CAPS = {
     "condition_kernels.py": ("def k_script", "def alias_sources", "【位置 ",
                              "except SystemExit", "xlsx_reader",
@@ -579,17 +579,17 @@ ENGINE_CAPS = {
     "import_tree_excel.py": ('{"P", "S"}', "xlsx_reader"),   # S/P 放行 + cross 列 + 读表零依赖同代
     "export_tree_excel.py": ('!= "cross"', "os.utime"),  # cross 列/相对深度 + 导出后表 mtime 对齐 index(消假警报)
 }
-RUNNER_CAP = "execution_status"                          # 逐节点执行状态落盘(评估反思归因信号);
+RUNNER_CAP = "execution_status"                          # 逐节点执行状态写入文件(评估反思归因信号);
                                                          # 兼含前代:raw-only 放行 / diag↔cmd 互认
 TREE_PRUNE_CAP = "matched_nes"                           # 剪枝放行 S 证据(evidence/matched_nes/
-                                                         # explain 保底)这一代——旧版瘦身丢证据字段
+                                                         # explain 作为默认)这一代——旧版精简时丢证据字段
 
 
 def _mat(name: str) -> Path:
-    """素材/同门目录查找:①同门 skills/<name>(仓库开发态)②发行包形态——素材收进生成线
+    """公共素材目录查找:①同一 skills 目录下的 skills/<name>(仓库开发态)②发行包形态——素材收进生成线
     目录下(generate/<name>;cs-scot-generate 本身在发行包里就叫 generate)③本技能单独部署、
-    旁边没有同门时,用内置 engine/<name> 副本(fault-tree-rca、zip2csv 整目录,cs-scot-execute
-    只有 SKILL.md;副本由 sync_engine.py 生成)。都没有返回同门路径。"""
+    旁边没有其他技能时,用内置 engine/<name> 副本(fault-tree-rca、zip2csv 整目录,cs-scot-execute
+    只有 SKILL.md;副本由 sync_engine.py 生成)。都没有时返回 skills 目录下的路径。"""
     base = Path(__file__).resolve().parents[2]
     engine = Path(__file__).resolve().parents[1] / "engine"
     cands = (base / name, base / "generate", engine / name) if name == "cs-scot-generate" \
@@ -601,7 +601,7 @@ def _mat(name: str) -> Path:
 
 
 def _engine_src(name: str, caps, sibling: Path):
-    """引擎文件取源:同门技能优先,内置 engine/ 兜底;两处都必须带齐能力标记才可信。"""
+    """引擎文件取源:skills 目录下的技能优先,其次内置 engine/;两处都必须带齐能力标记才可信。"""
     for d in (sibling, Path(__file__).resolve().parents[1] / "engine"):
         p = d / name
         if p.exists():
@@ -621,7 +621,7 @@ def _differs(dst: Path, src: Path) -> bool:
 
 
 def _sync_file(dst: Path, src: Path, label: str, touched: list) -> bool:
-    """标准件同步:与已核验的源内容不同就覆盖,旧文件留 <原名>.bak(x.py → x.py.bak);
+    """工具链公共文件同步:与已核验的源内容不同就覆盖,旧文件留 <原名>.bak(x.py → x.py.bak);
     记入 touched 并打印一行。返回是否动了。"""
     if not _differs(dst, src):
         return False
@@ -647,14 +647,14 @@ def _tracked(src_dir: Path, ignore=("__pycache__", "*.pyc", "*.bak", "runs", "re
 
 
 def refresh_engine(product: Path) -> list:
-    """产物标准件体检+同步。标准件 = 工具链所有、与场景无关的文件:assets/scripts 引擎脚本、
+    """产物工具链公共文件检查+同步。工具链公共文件 = 工具链所有、与场景无关的文件:assets/scripts 引擎脚本、
     技能根 scripts/ 的 runner/check_data/tree_prune 与 references/、assets/zip2csv、
-    assets/fault-tree-rca 规则副本、SKILL.md 执行指引正文。逐文件与本机同门源比对(行尾差异
-    不算),内容不同就刷新,旧文件留 .bak;源须先通过自身能力标记核验,坏源不用(本机同门 →
-    本技能内置 engine/ 兜底)。场景件(树、绑定、cross_analyzer、各指标脚本、节点脚本、knowledge)
+    assets/fault-tree-rca 规则副本、SKILL.md 执行指引正文。逐文件与本机 skills 目录下的源比对(行尾差异
+    不算),内容不同就刷新,旧文件留 .bak;源须先通过自身能力标记核验,坏源不用(本机技能 →
+    本技能内置 engine/ 备用)。场景件(树、绑定、cross_analyzer、各指标脚本、节点脚本、knowledge)
     一概不碰;custom_lib.py 含手工 @register 的函数时只按能力标记补缺、不整体覆盖,并点名。
     返回本次动过的清单(逐项文字),--refresh-only 原样打印。
-    某引擎文件缺能力又找不到可信源 → 硬停(迁过去也是全线'未知类别')。"""
+    某引擎文件缺能力又找不到可信源 → 停止并报错(迁过去也是全线'未知类别')。"""
     touched = []
     sdir = product / "scripts"
     gen = _mat("cs-scot-generate") / "scripts"
@@ -701,7 +701,7 @@ def refresh_engine(product: Path) -> list:
         for rel in _tracked(exe / "references"):
             _sync_file(skill_root / "references" / rel, exe / "references" / rel,
                        f"references/{rel.as_posix()}", touched)
-    # ③ assets/zip2csv(裸 txt→三表转换器,含 ifilter 归类器)
+    # ③ assets/zip2csv(原始日志文件→三表转换器,含 ifilter 归类器)
     z2c_dst, z2c_src = product / "zip2csv", _mat("zip2csv")
     z2c_main_src = z2c_src / "scripts" / "zip2csv.py"
     z2c_new = z2c_main_src.exists() \
@@ -727,7 +727,7 @@ def refresh_engine(product: Path) -> list:
     else:
         for rel in _tracked(z2c_src):
             _sync_file(z2c_dst / rel, z2c_src / rel, f"assets/zip2csv/{rel.as_posix()}", touched)
-    # ④ assets/fault-tree-rca(根因规则副本):缺→补挂;旧或与源不同→整目录刷新
+    # ④ assets/fault-tree-rca(根因规则副本):缺→补齐;旧或与源不同→整目录刷新
     rca_dst, rca_src = product / "fault-tree-rca", _mat("fault-tree-rca")
     rca_src_draft = rca_src / "scripts" / "draft_rca.py"
     _rca_caps = ("gap_kind", 'f.get("evidence")')    # 四态分型 + S 证据标签引用这一代
@@ -761,10 +761,10 @@ def refresh_engine(product: Path) -> list:
         elif old_gen:
             print("  [warn] 打包技能的 assets/fault-tree-rca 是旧版(无自动定档/机械报告/树视图),"
                   "且本机没有同门 fault-tree-rca 技能可刷新——RCA 仍走旧口径手工裁决")
-    # ⑤ SKILL.md 正文(执行指引):换正文保身份——frontmatter(技能名/描述)原样,正文取同门当前版
+    # ⑤ SKILL.md 正文(执行指引):换正文保身份——frontmatter(技能名/描述)原样,正文取 skills 目录下技能的当前版
     sk = skill_root / "SKILL.md"
     sk_text = sk.read_text(encoding="utf-8", errors="replace")
-    _sk_caps = ("check_data.py", "draft_rca.py", "rca_reply.md")   # 执行指引正文须带齐的三处引用:数据体检、候选清单、回复稿
+    _sk_caps = ("check_data.py", "draft_rca.py", "rca_reply.md")   # 执行指引正文须带齐的三处引用:数据检查、候选清单、回复稿
     exe_sk = exe / "SKILL.md"
     m_old = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", sk_text, re.S)
     new_txt = exe_sk.read_text(encoding="utf-8", errors="replace") if exe_sk.exists() else ""
@@ -785,20 +785,20 @@ def refresh_engine(product: Path) -> list:
 
 
 def _refresh_standard(product: Path) -> int:
-    """每次收表/收包都先把标准件与本机同门对齐(见 refresh_engine),打一行结果;返回动了几处。"""
+    """每次收表/收包都先把工具链公共文件与本机 skills 目录下的源对齐(见 refresh_engine),打一行结果;返回动了几处。"""
     touched = refresh_engine(product)
     print(f"  标准件刷新 {len(touched)} 处" if touched else "  标准件与本机同门一致,无需刷新")
     return len(touched)
 
 
 def upgrade_cross_scaffold(product: Path) -> None:
-    """产物 cross_analyzer.py 骨架过旧(无 S 全量喂源/raw 通道)→ 借 generate 的手术就地升级。"""
+    """产物 cross_analyzer.py 脚本框架过旧(无 S 类全量传源/原始日志目录)→ 借 generate 的框架升级函数就地升级。"""
     ca = product / "scripts" / "cross_analyzer.py"
     if not ca.exists():
         return
     text = ca.read_text(encoding="utf-8", errors="replace")
     if "raw_dir" in text and "load_all" in text:
-        return                                           # 已是新骨架
+        return                                           # 已是新框架
     asm_p = _engine_src("assemble_scenario.py", ("raw_dir", "_upgrade_cross_scaffold"),
                         _mat("cs-scot-generate") / "scripts")          # 发行包里叫 generate/,走 _mat
     try:
@@ -819,7 +819,7 @@ def upgrade_cross_scaffold(product: Path) -> None:
         print("  cross_analyzer.py 骨架已升级(绑定原样保留,旧文件备份 .py.bak)")
 
 
-# ---------- 落地动作(单节点与批量共用) ----------
+# ---------- 迁移动作(单节点与批量共用) ----------
 def _binding(fc_name: str, entry: str, per_ne: bool, kwargs: dict, pkg_node: str) -> dict:
     return {"class": "S", "func": "fault_check",
             "args": {"script": f"custom/{fc_name}", "entry": entry,
@@ -853,7 +853,7 @@ def _missing_shared(fc: Path, deps):
 
 
 def _shared_lib_src(fname: str):
-    """共享模块兜底取源:同门 tester 优先,内置 engine/ 兜底。"""
+    """共享模块的补齐来源:skills 目录下的 tester 优先,其次内置 engine/。"""
     for d in (_mat("datacom-fault-tree-tester") / "scripts",
               Path(__file__).resolve().parents[1] / "engine"):
         if (d / fname).exists():
@@ -862,7 +862,7 @@ def _shared_lib_src(fname: str):
 
 
 def _with_supplied(fc: Path, deps):
-    """包缺共享模块 → 兜底补齐名单:(supplied[(模块名,源路径)…], unsupplied[模块名…])。"""
+    """包缺共享模块 → 补齐名单:(supplied[(模块名,源路径)…], unsupplied[模块名…])。"""
     supplied, unsupplied = [], []
     for name in _missing_shared(fc, deps):
         src = _shared_lib_src(name + ".py")
@@ -882,9 +882,9 @@ def _effective(product: Path, p: Path) -> Path:
 
 def _copy_scripts(product: Path, fc: Path, deps) -> None:
     """脚本进场,两条附加规矩:
-    ①保修复:包没变而 custom/ 副本修过管道(.orig 基准==包里原件)→ 保留修复副本不覆盖;
-      包真变了 → 正常覆盖并清掉过期 .orig(新包重新过体检);
-    ②补库:脚本 import 的 search_*.py 包里没带 → 从同门 tester/engine 兜底拷入(不覆盖已有)。"""
+    ①保修复:包没变而 custom/ 副本修过输入输出契约(.orig 基准==包里原件)→ 保留修复副本不覆盖;
+      包真变了 → 正常覆盖并清掉过期 .orig(新包重新过检查);
+    ②补库:脚本 import 的 search_*.py 包里没带 → 从 skills 目录下的 tester 或 engine/ 拷入(不覆盖已有)。"""
     custom = product / "scripts" / "custom"
     custom.mkdir(parents=True, exist_ok=True)
     preserved = []
@@ -928,16 +928,16 @@ def _stage_no_entry(product: Path, fc: Path, deps) -> str:
             f"补薄封装入口后重跑同一条命令即续迁")
 
 
-# ---------- 收编体检(契约闸)+ 管道修复循环 ----------
+# ---------- 导入检查(契约检查)+ 契约修复循环 ----------
 _CC_CACHE = []
-# 体检 FAIL 里转接头运行时兜得住的项(能走到这一步=烟测仲裁已确认驱动得动):
+# 检查 FAIL 里适配函数运行时能处理的项(能走到这一步=试跑仲裁已确认能驱动):
 #   S1 入口名/签名(仲裁选定入口+entry_kwargs 驱动)、D2x/D3x 调用崩(_StrPath/护现场/逐网元重调)
-# ——降为 WARN 放行记台账;其余 FAIL(如 S3 只认 .txt、D2 缺数据冒充结论)执行必受影响,拦。
+# ——降为 WARN 放行并记台账;其余 FAIL(如 S3 只认 .txt、D2 缺数据当作结论)执行必受影响,拦下。
 _ABSORBED = {"S1", "D2x", "D3x"}
 
 
 def _contract_mod():
-    """加载契约体检模块(同门 tester 优先,engine/ 兜底);都没有 → None(老环境,跳过体检)。"""
+    """加载契约检查模块(skills 目录下的 tester 优先,其次 engine/);都没有 → None(老环境,跳过检查)。"""
     if not _CC_CACHE:
         import importlib.util
         p = _engine_src("check_contract.py", ("def check_script",),
@@ -948,7 +948,7 @@ def _contract_mod():
                 spec = importlib.util.spec_from_file_location("cc_gate", p)
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
-            except Exception:                            # noqa: BLE001 体检组件坏了不拦迁移,响亮说
+            except Exception:                            # noqa: BLE001 检查组件坏了不拦迁移,明确说明
                 print(f"  [warn] 契约体检组件加载失败({p})——本次跳过体检")
                 mod = None
         _CC_CACHE.append(mod)
@@ -957,12 +957,12 @@ def _contract_mod():
 
 def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
                    entry=None, per_ne=False, kwargs=None, explicit=False):
-    """收编契约闸(两档处置)。返回 ("skip"|"ok"|"fail", info|修法文本):
-    - FAIL(兜不住)→ 不落绑定:把脚本连同 .orig 修复基准落进 scripts/custom/,返回修法清单
-      ——模型照单只修管道(副本),重跑同命令续迁(保修复规则保证副本不被包里原件冲掉);
-    - WARN(转接头兜得住/静态无法确证)→ 放行,记台账+返厂清单;
-    - 回归保险:包里带 测试数据/ 时体检自动记基线;修复后基线 matched 与修前不一致 → 拦
-      (管道修复不许改变判断结论)。"""
+    """导入时的契约检查(两档处置)。返回 ("skip"|"ok"|"fail", info|修法文本):
+    - FAIL(适配函数处理不了)→ 不写绑定:把脚本连同 .orig 修复基准落进 scripts/custom/,返回修法清单
+      ——模型照清单只修输入输出契约(副本),重跑同命令续迁(保修复规则保证副本不被包里原件冲掉);
+    - WARN(适配函数能处理/静态无法确证)→ 放行,记台账+退回清单;
+    - 回归保护:包里带 测试数据/ 时检查自动记基线;修复后基线 matched 与修前不一致 → 拦下
+      (契约修复不许改变判断结论)。"""
     cc = _contract_mod()
     if cc is None:
         return "skip", None
@@ -976,12 +976,12 @@ def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
                 shutil.copy2(_effective(product, p), stage / p.name)
             for name, src in supplied:
                 shutil.copy2(src, stage / (name + ".py"))
-            try:                                         # 体检按烟测仲裁的裁决口径跑(入口/单网元/kwargs)
+            try:                                         # 检查按试跑仲裁的裁决结果跑(入口/单网元/kwargs)
                 rep = cc.check_script(stage / fc.name, data_dir=data, entry=entry,
                                       per_ne=per_ne, entry_kwargs=kwargs)
-            except TypeError:                            # 旧版体检组件不认裁决参数:退回老签名
+            except TypeError:                            # 旧版检查组件不认裁决参数:退回老签名
                 rep = cc.check_script(stage / fc.name, data_dir=data)
-    finally:                                             # 体检导入的脚本/共享库不许留缓存串包
+    finally:                                             # 检查时导入的脚本/共享库不许留缓存,防止串包
         for m in set(sys.modules) - mods_bak:
             if m.startswith(("search_", "cc_")):
                 sys.modules.pop(m, None)
@@ -1057,7 +1057,7 @@ def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
 
 
 def _gate_extra(info) -> dict:
-    """契约闸信息 → 台账附加字段(只落非空项)。"""
+    """契约检查信息 → 台账附加字段(只写非空项)。"""
     if not info:
         return {}
     out = {}
@@ -1069,8 +1069,8 @@ def _gate_extra(info) -> dict:
 
 
 def _factory_report(rows):
-    """返厂清单:rows=[(标签, warn_items, repairs)…] 有料才打印。副本已兜/已修不影响本次执行,
-    但正本的窟窿必须回到交付方手里,否则每次全量交付都复活一遍。"""
+    """退回清单:rows=[(标签, warn_items, repairs)…] 有内容才打印。副本已处理/已修不影响本次执行,
+    但正本的问题必须回到交付方手里,否则每次全量交付都会再出现一遍。"""
     rows = [(lb, wi, rp) for lb, wi, rp in rows if wi or rp]
     if not rows:
         return
@@ -1091,11 +1091,11 @@ REBUILD_TUNING = False   # --rebuild-tuning:存量调优表备份为 .bak 后从
 def _surgery(product: Path, edits, adds=(), cond_edits=(), dels=(), sol_edits=(), note=None) -> None:
     """edits=[(nid, condition, binding)…] 改既有行;adds=[(父nid, 父链名字, 节点名, condition, binding)…]
     新增行(增节点,node_id 留空由 import 分配);cond_edits=[(nid, condition)…] 只改判据
-    绑定不动(判据同步行);dels=[nid…] 删行(全量表口径删节点,最后执行);
+    绑定不动(判据同步行);dels=[nid…] 删行(全量表模式删节点,最后执行);
     sol_edits=[(nid, 解决方案文本)…] 只改解决方案中文列。
-    预导入收编(如需)→ 一次导出 → 改/增/删 N 行 → 一次导入 → 回导。批量也只走一轮
-    export/import:落地是**原子**的——任一行编译不过,整批不生效。
-    表比 tree_index 新(可能有未导入的人工修改,也可能只是上次迁移的回导)→ 先导入收编,绝不覆盖。"""
+    预导入(如需)→ 一次导出 → 改/增/删 N 行 → 一次导入 → 回导。批量也只走一轮
+    export/import:写入是**原子**的——任一行编译不过,整批不生效。
+    表比 tree_index 新(可能有未导入的人工修改,也可能只是上次迁移的回导)→ 先导入,绝不覆盖。"""
     tis = sorted((product / "tree").glob("*.tree_index.json"))
     xls = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
                  if not p.name.startswith("~$"))
@@ -1175,7 +1175,7 @@ def _ledger_read(product: Path) -> dict:
 
 
 def _ledger(product: Path, entries) -> None:
-    """entries 每条 7 元组;可选第 8 元 dict(契约闸信息:contract_warns/repairs)直接并进记录。"""
+    """entries 每条 7 元组;可选第 8 元 dict(契约检查信息:contract_warns/repairs)直接并进记录。"""
     mig_p = product / "tree" / "migrations.json"
     mig = _ledger_read(product)
     for e in entries:
@@ -1188,9 +1188,9 @@ def _ledger(product: Path, entries) -> None:
 
 
 def _clear_targets(nodes, clears):
-    """清除行 → (要清的 [(nid, 名)], 已是空跳过 [(nid, 名)], 定位失败 [(路径, 原因)])。
-    幂等:全量表每次都带清除行,判据已空的节点不再动(天生无判据的结构节点同样落这档)。
-    纯函数零副作用,执行(调优表手术)由调用方做。"""
+    """清除判据的行 → (要清的 [(nid, 名)], 已是空跳过 [(nid, 名)], 定位失败 [(路径, 原因)])。
+    幂等:全量表每次都带清除判据的行,判据已空的节点不再动(天生无判据的结构节点同样落这档)。
+    纯函数零副作用,执行(改调优表)由调用方做。"""
     edits, already, misses = [], [], []
     for names, rowno in clears:
         nid, why, _d = resolve_node_by_path(nodes, names)
@@ -1213,7 +1213,7 @@ def _is_subseq(sub, full) -> bool:
 
 
 def _delete_targets(nodes, all_paths, n_lvls, force=False):
-    """--map-mode all 的删除候选:树上有、整张全量表(迁移/结构/清除行路径的并集)里
+    """--map-mode all 的删除候选:树上有、整张全量表(迁移/结构/清除判据行路径的并集)里
     踪影全无的节点。"在表里"用与 resolve_node_by_path 同一套子序列语义(根→节点的名字链
     按顺序出现在某行路径里;母表高层可以比我们的树多)——由此候选集天然对子树封闭:
     后代在表里则祖先必在,所以"祖先删、后代漏"不会发生。
@@ -1268,20 +1268,20 @@ def _norm_header(h) -> str:
 
 
 def _is_marker_col(hn: str) -> bool:
-    """标记列(平台正式名 Need_Optimize;老口径 是否修改/is_modified 等)。"""
+    """标记列(平台正式名 Need_Optimize;老写法 是否修改/is_modified 等)。"""
     low = hn.lower()
     return any(k in low for k in _MARK_KEYS) or low in _MARK_EXACT
 
 
 def _is_judgment_col(hn: str) -> bool:
-    """判据列(平台正式名 Diagnosis_Method_CN/EN;老口径 判据/判断方法/judgement_condition 等)。"""
+    """判据列(平台正式名 Diagnosis_Method_CN/EN;老写法 判据/判断方法/judgement_condition 等)。"""
     low = hn.lower()
     return any(k in low for k in _JD_KEYS)
 
 
 def _is_tuning_header(names) -> bool:
     """是不是我们自己的调优表:有 node_id 列且带 判据:/绑定:/meta 列。带标记列的一律不算——
-    平台表带 Node_ID(节点 UUID)与 Need_Optimize,认对应表靠"层级列+Product_Name",标记列是兜底。"""
+    平台表带 Node_ID(节点 UUID)与 Need_Optimize,认对应表靠"层级列+Product_Name",标记列是备用依据。"""
     lows = [n.lower() for n in names]
     if "node_id" not in lows or any(_is_marker_col(n) for n in names):
         return False
@@ -1296,7 +1296,7 @@ def _parse_map_header(header):
     再认唯一含 zip 的列名。
     平台1 表的 L{n}_Name_CN 当层级列(定位靠中文名),L{n}_Name_EN 与 Product_Obs 整列忽略。
     判据列(可选):表头含 判据/判断方法/判断条件/judgment/judgement 的列——**在场即启用
-    "双空=清除"与"判据以表为准"语义**(老表没有此列,行为一切照旧,零兼容风险)。
+    "判据与包名都为空=清除"与"判据以表为准"语义**(老表没有此列,行为一切照旧,零兼容风险)。
     平台1 增强表判据列成对(judgement_condition_cn/en):取 cn(树节点判据是中文),en 忽略。
     标记列(可选,第四返回值):表头含 是否修改/是否变更/需要优化/is_modified/modified 等
     ——在场即启用**标记契约**:结构(增删)仍看行的出现/消失,内容(迁移/判据同步/清除/
@@ -1349,7 +1349,7 @@ def _mk_true(v) -> bool:
 
 
 def _read_table(path: Path):
-    """读对应表 → (header, rows[dict])。xlsx 走零依赖 xlsx_reader(同门/engine 两级取径);
+    """读对应表 → (header, rows[dict])。xlsx 走零依赖 xlsx_reader(skills 目录/engine 两级取路径);
     csv 标准库+编码自测(同事给 csv 也认)。"""
     if path.suffix.lower() == ".csv":
         import csv as _csv
@@ -1377,18 +1377,18 @@ def _read_table(path: Path):
 
 def load_map_excel(path: Path):
     """同事的对应表(xlsx/csv):层级列 + zip 列 + 可选判据列(表头兼容见 _parse_map_header;
-    **没有 node_id**)。一行一节点、上级各层名字逐行照抄(调优表口径)。行语义(全量表口径):
+    **没有 node_id**)。一行一节点、上级各层名字逐行照抄(与调优表相同)。行语义(全量表模式):
     - zip 有值 → 迁移行(判据列有值时**判据以表为准**——界面是用户最后编辑的状态,
-      与包内判断方法不一致的在返厂清单点名);
+      与包内判断方法不一致的在退回清单点名);
     - zip 空 + 判据有值(或表根本没有判据列)→ 结构行:节点在、没配包——表有判据列时
       判据与树上不一致就**同步判据进树(绑定不动)**,没有判据列则零动作
       (全量对账用它区分"还在只是没包" vs "节点已从树里删除");
-    - zip 空 + 判据空 + **表有判据列** → 清除行:用户在界面上删了该节点的判据与包
+    - zip 空 + 判据空 + **表有判据列** → 清除判据的行:用户在界面上删了该节点的判据与包
       → 清该节点的判据+绑定(**节点本身保留**;删除整节点走 --map-mode all 的全量对账)。
     返回 ([(路径名字列表, zip名, 行号, 判据文本)], [(结构行路径, 判据文本, 标记)],
-          [(清除行路径, 行号)], 层级列数, {路径元组: 解决方案文本})。
+          [(清除判据行路径, 行号)], 层级列数, {路径元组: 解决方案文本})。
     **标记契约**(表有标记列时):内容动作只对标记行执行——未标记行的 zip 不迁(只当登记,
-    提示一行)、双空不清;结构增删不看标记(看行的出现/消失)。无标记列=全部行视同已标记。
+    提示一行)、判据与包名都空的行不清;结构增删不看标记(看行的出现/消失)。无标记列=全部行视同已标记。
     解决方案:只收**标记行的非空值**进末位字典(以表为准同步;空≠删除,不清)。"""
     header, rows = _read_table(path)
     lvls, zip_col, jd_col, mk_col, sol_col = _parse_map_header(header)
@@ -1408,7 +1408,7 @@ def load_map_excel(path: Path):
                 sols[tuple(names)] = sol                 # 解决方案以表为准(空≠删除,不收)
         if not z:
             if names and jd_col is not None and not jd and marked:
-                clears.append((names, i))                # 双空+标记=清除指令(界面删了判据与包)
+                clears.append((names, i))                # 判据与包名都空+标记=清除指令(界面删了判据与包)
             elif names:
                 zipless.append((names, jd, marked))
             continue
@@ -1431,7 +1431,7 @@ def load_map_excel(path: Path):
 def find_map_table(pkg: Path):
     """交付包里自动找对应表(同事把表和 zip 打在一个包里给,不用单独 --map 指):
     扫 xlsx/xlsm/csv,表头像对应表(层级列+zip 列、无 node_id)的才算。
-    恰一张 → 返回;多张 → 硬停(不猜哪张算数);没有 → None。"""
+    恰一张 → 返回;多张 → 停止并报错(不猜哪张算数);没有 → None。"""
     hits = []
     for p in sorted(pkg.rglob("*")):
         if p.suffix.lower() not in (".xlsx", ".xlsm", ".csv") or p.name.startswith("~$"):
@@ -1473,7 +1473,7 @@ def resolve_node_by_path(nodes, path_names):
     if not cands:
         return None, f"树上没有名为「{target}」的节点", ""
     if len(cands) == 1:
-        return cands[0], "", ""                          # 全树唯一同名:直接对号(路径只是佐证,少填上级不卡)
+        return cands[0], "", ""                          # 全树唯一同名:直接匹配(路径只是佐证,少填上级不卡)
     hits = [nid for nid in cands if is_subseq(chain(nid), path_names)]
     detail = "; ".join(f"{nid}: {'/'.join(chain(nid))}" for nid in (hits or cands)[:4])
     if len(hits) == 1:
@@ -1485,7 +1485,7 @@ def resolve_node_by_path(nodes, path_names):
 
 
 def build_zip_registry(pkg: Path, tmp: Path):
-    """合集里可对号的子包登记:①目录形态里躺着的 *.zip(逐个解到临时目录)②嵌套 zip 已被
+    """合集里可匹配的子包登记:①目录形态里躺着的 *.zip(逐个解到临时目录)②嵌套 zip 已被
     unpack 解出的子目录。键=zip 名(带/不带 .zip 都注册)与子目录名;值=子包根目录。"""
     reg = {}
 
@@ -1512,7 +1512,7 @@ def build_zip_registry(pkg: Path, tmp: Path):
 
 
 def _pick_for_row(sub: Path, row_name: str, md_name: str):
-    """对应表驱动的脚本对号:多脚本合集里**先按表行的节点名**找同名脚本(表为准 + tester
+    """对应表驱动的脚本匹配:多脚本合集里**先按表行的节点名**找同名脚本(表为准 + 交付
     命名规范 fault_check_<节点名>.py),找不到再按包内判断方法的名字——同一份合集被表挂到
     别的节点名下时(联调实测:平台把一个对象摊给多行),不会把合集里别人的脚本绑过来;
     单脚本包/同名复用(dscp/8021p 共用一个包)行为不变。"""
@@ -1525,7 +1525,7 @@ def _pick_for_row(sub: Path, row_name: str, md_name: str):
 
 
 def _print_map_summary(n_rows, n_ok, n_add, n_refreshed, has_fails, counted) -> None:
-    """对应表批量迁移的汇总行:落地数 + 各类动作计数(为 0 的不显示)+ 标准件刷新;
+    """对应表批量迁移的汇总行:生效行数 + 各类动作计数(为 0 的不显示)+ 工具链公共文件刷新;
     表里没有标记行、结构也没变时,说清楚这一单到底做了什么。"""
     head = f"落地 {n_ok + n_add}/{n_rows} 行" + (f"(其中新增节点 {n_add} 个)" if n_add else "")
     parts = [text.format(n=n) for n, text in counted if n]
@@ -1538,16 +1538,16 @@ def _print_map_summary(n_rows, n_ok, n_add, n_refreshed, has_fails, counted) -> 
 
 
 def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
-    """对应表驱动的全自动批量:每行 zip↔路径,路径定位节点(同名靠全路径消歧),zip 对号子包,
-    落地机器与 --auto 批量同一套(一轮手术原子落地);任一行对应不上→进失败清单,退出码 3。
+    """对应表驱动的全自动批量:每行 zip↔路径,路径定位节点(同名靠全路径消歧),zip 匹配子包,
+    写入逻辑与 --auto 批量同一套(一轮调优表修改,原子生效);任一行对应不上→进失败清单,退出码 3。
     **全量交付语义**:内容指纹与台账一致的包自动跳过(幂等;人工调优不被冲;--force 强制全重迁);
     台账里有、表里已消失的迁移节点点名待人工确认(不自动删树);
-    **清除行**(表有判据列时,判据格+zip 格双空=界面删了该节点的判据与包)→ 清该节点判据+绑定
+    **清除判据的行**(表有判据列时,判据格与 zip 格都空=界面删了该节点的判据与包)→ 清该节点判据+绑定
     (节点保留、幂等、台账 cleared_at 留痕;--no-clear 只点名不执行)。"""
     entries, zipless, clears, n_lvls, sols = load_map_excel(map_path)
     mode = getattr(a, "map_mode", "auto") or "auto"
-    # 手工改过调优表(表比 tree_index 新)→ 开头就收编,这一轮的对号直接看新树。
-    # 不能只靠 _surgery 里的 [0/3]:全跳过/全失败的轮次进不了写入阶段,收编永远轮不上
+    # 手工改过调优表(表比 tree_index 新)→ 开头就先导入,这一轮的匹配直接看新树。
+    # 不能只靠 _surgery 里的 [0/3]:全跳过/全失败的轮次进不了写入阶段,导入永远轮不上
     tis0 = sorted((product / "tree").glob("*.tree_index.json"))
     xls0 = sorted(p for p in (product / "tree").glob("*.tuning.xlsx")
                   if not p.name.startswith("~$"))
@@ -1725,8 +1725,8 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
             if _norm_jd(sol) != _norm_jd(cur):
                 sol_edits.append((snid2, sol))
 
-    # 清除行先行解析(执行仍在落地手术之后):ALL 单里,双空行定位不到=平台树有这层、
-    # 本地树没有(平台的无判据结构节点导出就是双空)→ 补建裸节点(无判据无绑定);
+    # 清除判据的行先解析(执行仍在写入之后):ALL 单里,判据与包名都空的行定位不到=平台树有这层、
+    # 本地树没有(平台的无判据结构节点导出就是两格都空)→ 补建空节点(无判据无绑定);
     # 它名下的新叶子行第二遍运行即可挂上(与增节点"先落父再落子"同一条规矩)
     c_edits, clear_already, clear_miss = [], [], []
     clear_guard = None
@@ -1734,7 +1734,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
         c_edits, clear_already, clear_miss = _clear_targets(nodes, clears)
         with_jd = sum(1 for nd in nodes.values() if str(nd.get("condition") or "").strip())
         if not a.force and c_edits and len(c_edits) > max(3, with_jd // 2):
-            # 与删除过半闸对称:清除过半更像「平台判据数据没录全」,不像专家批量删判据
+            # 与删除过半的检查对称:清除过半更像「平台判据数据没录全」,不像专家批量删判据
             clear_guard = (f"清除行要实际清掉 {len(c_edits)}/{with_jd} 个有判据的节点,超过一半"
                            "——更像平台判据数据没录全(空≠删除),而非专家批量删判据;"
                            "清除一律不执行。确认表里的空判据确为删除指令,加 --force 重跑")
@@ -1749,7 +1749,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                     rest.append((cnames, cwhy))
             clear_miss = rest
 
-    # ALL 单全量对账的删除候选:整张表(迁移/结构/清除行)里踪影全无的树节点
+    # ALL 单全量对账的删除候选:整张表(迁移/结构/清除判据行)里踪影全无的树节点
     dels, too_deep, del_guard = [], [], None
     if mode == "all":
         all_paths = [names for names, _z, _r, _j in entries] \
@@ -1804,8 +1804,8 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
                 (product / "tree" / "migrations.json").write_text(
                     json.dumps(mig, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 清除行执行(解析在落地手术前已做):界面删了判据与包 → 清判据+绑定(节点保留;
-    # 走调优表手术,与迁移同一合规通道)
+    # 清除判据的行执行(解析在写入前已做):界面删了判据与包 → 清判据+绑定(节点保留;
+    # 走调优表修改,与迁移同一合规通道)
     cleared_report = []
     if clears and a.no_clear:
         print(f"\n  [info] --no-clear:{len(clears)} 个清除行(双空)只点名不执行")
@@ -1887,7 +1887,7 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
               f"{'…' if len(unused) > 8 else ''}")
 
     # 全量对账:台账里迁移过、这次对应表里却没有配 zip 的节点——上游删了节点?撤了优化包?
-    # 只点名不动手(删节点是结构手术,必须人确认;评估反思/删除指令能力接上后由那边闭环)。
+    # 只点名不动手(删节点是结构改动,必须人确认;评估反思/删除指令能力接上后由那边闭环)。
     zipless_nids = set()
     for names, _jd, _mk in zipless:
         znid, _w, _d = resolve_node_by_path(nodes, names)
@@ -1918,8 +1918,8 @@ def migrate_map(a, pkg: Path, product: Path, tmp: Path, map_path: Path) -> None:
 
 # ---------- 批量模式(多节点合集包 + --auto) ----------
 def migrate_batch(a, pkg: Path, product: Path) -> None:
-    """逐子包全自动循环:精确同名唯一的直接落地(一轮手术原子落地);对不上号/探不到入口的
-    **决不赌**——收集起来最后统一列清单,每个附补对号命令(退出码 3=还有没落地的)。"""
+    """逐子包全自动循环:精确同名唯一的直接迁入(一轮调优表修改,原子生效);匹配不上/探不到入口的
+    **绝不猜**——收集起来最后统一列清单,每个附补充匹配的命令(退出码 3=还有没迁入的)。"""
     groups = find_subpackages(pkg)
     subs = sorted(groups, key=lambda p: p.name)
     index = load_index(product)
@@ -2083,7 +2083,7 @@ def main() -> None:
         else:
             raise SystemExit(f"--product 不像场景产物目录(缺 tree/ 或 scripts/):{product}")
 
-    if a.refresh_only:                                   # 无包翻新:只走标准件同步 + cross 骨架升级
+    if a.refresh_only:                                   # 无包翻新:只走工具链公共文件同步 + cross 脚本框架升级
         touched = refresh_engine(product)
         upgrade_cross_scaffold(product)
         if touched:
@@ -2101,7 +2101,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="migrate_") as td:
         pkg = unpack(Path(a.package).expanduser().resolve(), Path(td))
         # 处理方式按输入动态定:①有对应表(--map 显式,或表就打在交付包里→自动发现)→ 对应表批量;
-        # ②无表+合集包+--auto → 逐子包精确对号批量;③无表+单包 → 单节点流程。全在下面顺序分流。
+        # ②无表+合集包+--auto → 逐子包精确匹配批量;③无表+单包 → 单节点流程。全在下面顺序分流。
         manual = a.node or a.only or a.script or a.entry or a.per_ne or a.entry_kwargs
         map_path = Path(a.map).expanduser().resolve() if a.map else None
         if map_path is None and not manual:
@@ -2155,7 +2155,7 @@ def main() -> None:
         entry, per_ne, kwargs, all_defs, argc, note = detect_entry(eff_fc)
         if a.entry:
             entry, per_ne = a.entry, a.per_ne
-            if argc.get(entry, 1) < 1:                   # 手工指定也过同一道闸:0 参入口运行期必炸
+            if argc.get(entry, 1) < 1:                   # 手工指定也过同一道检查:0 参入口运行期必出错
                 raise SystemExit(f"--entry 指定的「{entry}」不接收数据目录参数(脚本从 sys.argv 自取路径)"
                                  "——转接头必传目录参数,选它运行期必报 TypeError。"
                                  "让交付方按规范改成 diagnose(data_dir),或选一个吃目录参数的函数。")
@@ -2166,7 +2166,7 @@ def main() -> None:
               f"{'(单网元模式)' if per_ne else ''} 共享模块 {[d.name for d in deps] or '无'}"
               + (f"\n  ⚠ {note}" if note else ""))
 
-        # 对号三级:① 代码精确匹配(名字一字不差且唯一)→ --auto 直接落地;
+        # 匹配三级:① 代码精确匹配(名字一字不差且唯一)→ --auto 直接迁入;
         #          ② 无精确命中 → 列候选,模型按语义对齐后带 --node 重跑;
         #          ③ 模型也拿不准 → 问人。②③发生在技能层,本脚本只负责①和出候选。
         nodes = index.get("nodes") or {}
@@ -2191,7 +2191,7 @@ def main() -> None:
                 print(f"  {mark}{score:5.3f}  {cnid:>6}  {name}")
             print("\n确认后执行:加 --node <节点号> 重跑本命令落地迁移。")
             if a.auto:
-                sys.exit(3)                              # 给上层一个"没能自动对号"的机器可读信号
+                sys.exit(3)                              # 给上层一个"没能自动匹配"的机器可读信号
             return
         if nid not in nodes:
             raise SystemExit(f"节点 {nid} 不在故障树里——先跑匹配模式看候选")
@@ -2225,18 +2225,18 @@ def main() -> None:
         if ginfo and ginfo["warns"]:
             print(f"  [契约WARN] {','.join(ginfo['warns'])}(转接头兜着跑;详见结尾返厂清单)")
 
-        # 0. 引擎体检+补全(旧产物的内核/函数库/导入校验不认 S 类,先刷新再动手术)
+        # 0. 引擎检查+补全(旧产物的内核/函数库/导入校验不认 S 类,先刷新再改)
         refresh_engine(product)
 
         # 1. 脚本进场
         _copy_scripts(product, fc, deps)
         print(f"  已拷入 scripts/custom/:{fc.name}" + (f" + {len(deps)} 个共享模块" if deps else ""))
 
-        # 2. 调优表手术(预导入收编→导出→改行→导入→回导,细节见 _surgery)
+        # 2. 调优表修改(预导入→导出→改行→导入→回导,细节见 _surgery)
         _surgery(product, [(nid, method["condition"],
                             _binding(fc.name, entry, per_ne, kwargs, method["name"]))])
 
-        # 3. 骨架体检 + 台账
+        # 3. 脚本框架检查 + 台账
         upgrade_cross_scaffold(product)
         _ledger(product, [(nid, method["name"], fc.name, entry, per_ne, kwargs, fp,
                            _gate_extra(ginfo))])

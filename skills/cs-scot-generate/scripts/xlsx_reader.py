@@ -4,7 +4,7 @@
 本仓所有要**读** xlsx 的地方(概览 analyzer / 内核 condition_kernels / 建树 excel_to_tree(_v2) /
 调优表导入 import_tree_excel)都从这里读——**同一份数据在各环节必须读出同样的值**,否则
 "概览看到的列值"和"逐条件判定用的值"会悄悄不一致,RCA 结论跟着脏,这类 bug 极难查。
-(写 xlsx——调优表导出/手术——仍走 openpyxl:写是生成/迁移期的开发动作,读是诊断现场的运行动作,
+(写 xlsx——调优表导出/增删节点——仍走 openpyxl:写是生成/迁移期的开发动作,读是诊断现场的运行动作,
 只有读必须零依赖。)
 
 xlsx 就是个 zip:
@@ -189,7 +189,7 @@ def _sheets(zf: zipfile.ZipFile) -> Tuple[List[Tuple[str, str]], int]:
         path = target.lstrip("/").replace("../", "")
         if not path.startswith("xl/"):
             path = "xl/" + path
-        if path not in names:  # rels 缺失/异常时按顺序兜底
+        if path not in names:  # rels 缺失/异常时按顺序推断
             path = f"xl/worksheets/sheet{len(entries) + 1}.xml"
         entries.append((sh.get("name") or f"Sheet{len(entries) + 1}", path))
     active = 0
@@ -275,7 +275,7 @@ def read_xlsx(path, sheet: Optional[str] = None) -> Tuple[List[str], List[Dict[s
 
 def read_rows(path, sheet: Optional[str] = None) -> List[List[str]]:
     """位置形态:全部行(含表头行)按 list[str] 原样给,值不 strip、重复表头不吞、不建 dict——
-    调优表导入的表头校验(重复列/错位列要点名报人话)必须拿到原始位置信息,dict 会把重复列悄悄合并。"""
+    调优表导入的表头校验(重复列/错位列要用易懂的话点名)必须拿到原始位置信息,dict 会把重复列悄悄合并。"""
     with _open(path) as zf:
         entries, active = _sheets(zf)
         if not entries:

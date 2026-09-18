@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""树驱动的「叶子覆盖度」闸门（generate 第3步用）。
+"""树驱动的「叶子覆盖度」检查（generate 第3步用）。
 
 为什么要它:`validate_conditions.py` 的覆盖检查是**数据值级**的——只能逮"绑了的列里有哪些值没被认领"。
 但一个**整支故障的叶子根本没人绑、它的判别码这次数据里又没出现**的情况,值级检查看不见
 (没 node_id → 没列 → 隐形)。结果弱模型容易**数据驱动**地只绑"这次出现过的码"、把没出现的叶子静默丢掉,
 既欠覆盖、又过拟合当前数据(换份数据就用不了)。
 
-本闸门**树驱动、与数据取值无关**:从 `tree_index.json` 枚举所有"需要绑定的诊断节点"(带判别条件、
+本检查**树驱动、与数据取值无关**:从 `tree_index.json` 枚举所有"需要绑定的诊断节点"(带判别条件、
 非 pass_through;优先取无子节点的叶子,若该树把判据挂在中间节点则退而取全部带条件节点),对照各源
 `CONDITIONS`/事实里出现过的 `node_id`,把**没有任何绑定认领的节点全列出来**——不管它的码这次出没出现。
 
 判别"本源大概率能答":若节点的判别条件正文里**(按词边界)提到了本次已喂数据源的某个列名**(--columns 给),
-则标 `[可能本源可答]` —— 这类未绑的节点是高置信"漏绑",闸门**退出码 1**(逼重绑);其余未绑节点多半
+则标 `[可能本源可答]` —— 这类未绑的节点是高置信"漏绑",检查**退出码 1**(要求重绑);其余未绑节点多半
 是"缺源"(判据要信令跟踪/配置等本次没喂的数据),只列出来知会,不阻断。无论是否被启发式标记,未绑节点
 都会**全量列出**,真正的价值是"让漏绑可见、不可静默"。
 
 另附**跨源认领对账**(软提示,不改退出码):各源各认领了哪些节点;"判据像多个子条件却只有 1 条绑定认领"
 和"告警类判据多源在场却单源认领"两类最隐蔽的欠绑定会被点名(子代理按源并行、互相看不见,
-碰了一条就算认领整个节点 / 互相谦让,值级和节点级检查都看不出来,这里机械对账兜底)。
+碰了一条就算认领整个节点 / 互相谦让,值级和节点级检查都看不出来,这里机械对账补上)。
 
-退出码:0=无漏绑;1=有漏绑(条件提到已喂列却没绑);2=闸门无法判定(树里没有任何带条件节点 / 参数缺失)。
+退出码:0=无漏绑;1=有漏绑(条件提到已喂列却没绑);2=无法判定(树里没有任何带条件节点 / 参数缺失)。
 
 用法:
   check_tree_coverage.py <tree_index.json> \
@@ -77,7 +77,7 @@ def _claims_from_analyzer(path: Path) -> dict:
                     n_sub = len(v.elts)
             if nid:
                 units[nid] = units.get(nid, 0) + max(1, n_sub)
-        if not elems:                                   # 兜底:CONDITIONS 不是字面量列表 → 全走读只计次数
+        if not elems:                                   # 备用做法:CONDITIONS 不是字面量列表 → 只遍历计次数
             for d in ast.walk(stmt.value):
                 if isinstance(d, ast.Dict):
                     for k, v in zip(d.keys, d.values):
@@ -171,15 +171,15 @@ def main() -> int:
         label, units = _claims_from_facts(Path(fp))
         if label is not None:
             _merge(label, units)
-    # node_id 兼容 code 形式:把 claimed 里写成 code 的归一回短 id（schema 明确两者都认,闸门也要认,否则误报漏绑）
+    # node_id 兼容 code 形式:把 claimed 里写成 code 的归一回短 id（schema 明确两者都认,本检查也要认,否则误报漏绑）
     code2nid = {str(n["code"]): nid for nid, n in nodes.items() if n.get("code")}
     per_source = {lab: _renorm(d, code2nid) for lab, d in per_source.items()}
     claimed = set().union(*per_source.values()) if per_source else set()
 
     cols = [c.strip() for c in args.columns.split(",") if c.strip()]
     if not cols:
-        # 缺省自动读概览列名——闸门的"可答"扳机不再依赖模型手抄 --columns(传空/传错 = 闸门永不硬失败,
-        # 号称机械的闸门扳机却是模型供给的,评审点名)。--columns 显式给了则以给的为准。
+        # 缺省自动读概览列名——"可答"判定的触发条件不再依赖模型手抄 --columns(传空/传错 = 检查永远不会失败,
+        # 号称机械的检查,触发条件却由模型供给,评审时被点名)。--columns 显式给了则以给的为准。
         auto_from = []
         for apath in args.analyzer:
             p = Path(apath)
@@ -224,9 +224,9 @@ def main() -> int:
         return out
 
     # 跨源候选清单(软注记原料):dispatch/cross_candidates.json 是"cross 通道正在处理谁"的权威清单
-    # (merge 汇集 cross_source 标记 + make_dispatch --cross 机械兜底扫入无人认领者后写回)。
+    # (merge 汇集 cross_source 标记 + make_dispatch --cross 机械补漏扫入无人认领者后写回)。
     # 未绑节点若在这份清单上 = 流程中(等 cross 合并),不是真漏——路由批上线后每条判据基本只有
-    # 一次绑定机会,这类"已进候选"的未绑会变多,注记就是把它和真漏分开,防止中途跑本闸误判。
+    # 一次绑定机会,这类"已进候选"的未绑会变多,注记就是把它和真漏分开,防止中途跑本检查误判。
     cross_ids = set()
     try:
         cand_p = Path(args.tree_index).resolve().parent.parent / "dispatch" / "cross_candidates.json"

@@ -10,21 +10,21 @@
                        [--reconcile <reconcile.json>]
                        [--out <output.json>]
 
-触发门（与 SKILL.md 决策树一致）：
-    只有对账存在 MISSED 或 FALSE_CONFIRM 时才逐类查错；全命中直接返回"未分类"（PASS 路径），
+触发条件（与 SKILL.md 决策树一致）：
+    只有对账存在 MISSED（漏判）或 FALSE_CONFIRM（假阳）时才逐类查错；全部命中直接返回"未分类"（PASS 路径），
     数据缺口由 verdict 层按 PASS_WITH_GAPS 处理，不在这里定错。
     （未提供 --reconcile 时无从判断，保守地照旧全查。）
 
 错误分类（按序命中即停）:
     0: ENV_FAILURE - execution_status.*.ok == false 或 run.json不存在
     1: INPUT_GAP - missing_inputs非空 且 有期望根因 MISSED
-    2: BINDING_GAP - 绑定层的一切毛病：孤儿绑定（orphan：产出事实但树上无此节点，
-       典型=删节点没清绑定）；或 漏判期望根因**自身**有判据无绑定。
-       祖先未绑定不算：v4 执行口径（rca_rules.md）未绑定上级=默认放行、永不阻断叶子确证，
-       解释不了漏判；全树其余未绑定节点也不定错——"清空绑定让节点默认放行"是合规调优通道。
+    2: BINDING_GAP - 绑定层的所有问题：孤儿绑定（orphan：产出了事实但树上无此节点，
+       典型原因是删节点没清绑定）；或 漏判的期望根因**自身**有判据但无绑定。
+       祖先未绑定不算：执行规则（rca_rules.md）规定未绑定的上级节点默认放行、永不阻断叶子确证，
+       解释不了漏判；全树其余未绑定节点也不定错——"清空绑定让节点默认放行"是合规的调优方式。
     3: KNOWLEDGE_GAP - tree_index不存在该节点
     4: CRITERIA_GAP - predicate vs expected_facts不相等
-    5: VERDICT_GAP - 裁决≠期望（含阴性用例假阳）——纯裁决层，事实全对还归错档才是它
+    5: VERDICT_GAP - 裁决≠期望（含阴性用例假阳）——纯裁决层问题，事实全对却归入了错误的结论档（确证/疑似）才属于它
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def extract_actual_facts(rca_input_data: Dict[str, Any]) -> Dict[str, bool]:
 
     兼容两种形态：
     - 剪枝形态（真实场景常态）：fault_tree.pruned_nodes[<node_id>].facts[]，
-      fact 条目可能是瘦身后的扁平结构（字段在顶层）或未瘦身的嵌套 {"fact": {...}}；
+      fact 条目可能是精简后的扁平结构（字段在顶层）或未精简的嵌套 {"fact": {...}}；
     - 退化形态（树很小、剪枝不划算时）：indicator_results.<源>.conditions[]。
     """
     facts: Dict[str, bool] = {}
@@ -130,8 +130,8 @@ def check_env_failure(run_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _case_data_names(expected_data: Dict[str, Any]) -> Optional[set]:
-    """扫用例自带 data 目录的文件/目录名(上限 5000 个),小写集合。
-    expected 没记 data_source 或目录不存在 → None(判不了,调用方保守处理)。"""
+    """扫描用例自带 data 目录下的文件/目录名(上限 5000 个),返回小写集合。
+    expected 没记录 data_source 或目录不存在 → None(无法判断,调用方保守处理)。"""
     root = str(expected_data.get("data_source") or "").strip()
     if not root or not Path(root).is_dir():
         return None
@@ -148,8 +148,8 @@ _TABLE_SUFFIXES = (".csv", ".xlsx", ".xls")
 
 
 def _source_forms(k, names: set):
-    """该源在数据名单里的在场形态 → (有内容, 有表文件)。
-    表文件=名字含源名且以 .csv/.xlsx/.xls 结尾;其余(目录名/txt/log)算 raw 形态。"""
+    """该数据源在文件名集合里以什么形态存在 → (有内容, 有表文件)。
+    表文件=名字含源名且以 .csv/.xlsx/.xls 结尾;其余(目录名/txt/log)算原始采集文本(raw 形态)。"""
     keys = _SRC_SYN.get(str(k).lower(), (str(k).lower(),))
     hit = [n for n in names if any(kk in n for kk in keys)]
     return bool(hit), any(n.endswith(_TABLE_SUFFIXES) for n in hit)
@@ -159,19 +159,19 @@ def check_input_gap(run_data: Dict[str, Any], missed_count: int,
                     expected_data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """类1: INPUT_GAP 检测
 
-    条件: missing_inputs非空 且 有期望根因 MISSED（缺数据但全命中不算错，由 verdict 层
-    按 PASS_WITH_GAPS 处理；阴性用例假阳与缺数据无因果，也不在这里拦）
-    **且缺的源是本可提供的**——三条机械通道,依据都是"用例数据即判定的充分数据"(tester 契约):
-    ① run.json 的 missing_kind 标 collection_absent(runner 认定采集不含该类,非漏传)→ 剔除;
-    ② 用例自带数据里本来就没有该类内容 → 剔除(数据形态天然不含,缺它是绑定落点问题——
-      实测 22 个无 LOG 采集的用例曾被归 INPUT_GAP,开成"使用方补数据"的死指令);
-    ③ 缺的源在用例数据里**只有 raw 形态**(目录/txt 可见,没有表文件)而执行仍缺 → 不是
-      没数据,是现绑定(表类)吃不了在场的 raw——判 **类2 绑定形态不匹配**,修法在绑定层
-      (migrate 重迁换 S 绑定 / zip2csv 转表 + data_map 映射),不是要数据(实测:mpls n33
-      老式 cmd 表绑定,raw 里 CMD 在场,被归类1 让人补数据,正解=用交付包重迁)。
-      注意:**表文件在场**(如 logbuffer.csv)没喂到的仍是类1——修法是喂表/data_map 映射,
+    条件: missing_inputs非空 且 有期望根因 MISSED（缺数据但全部命中不算错，由 verdict 层
+    按 PASS_WITH_GAPS 处理；阴性用例假阳与缺数据没有因果关系，也不在这里拦）
+    **且缺的数据源是本可提供的**——三条机械规则,依据都是"用例数据就是判定所需的充分数据"(与节点交付方的契约):
+    ① run.json 的 missing_kind 标为 collection_absent(runner 认定采集本身不含该类数据,不是漏传)→ 剔除;
+    ② 用例自带数据里本来就没有该类内容 → 剔除(数据形态天然不含,缺它是绑定位置的问题——
+      实测 22 个没有 LOG 采集的用例曾被归为 INPUT_GAP,开出"使用方补数据"这种无法执行的指令);
+    ③ 缺的数据源在用例数据里**只有原始采集文本(raw 形态)**(目录/txt 可见,没有表文件)而执行仍报缺 → 不是
+      没数据,是现有绑定(表类)处理不了已存在的原始文本——判为 **类2 绑定形态不匹配**,修复在绑定层
+      (migrate 重迁换成 S 类脚本绑定,即直接读原始文本的 fault_check 脚本 / zip2csv 转成表 + data_map 映射),
+      不是要数据(实测:mpls n33 老式 cmd 表绑定,原始目录里 CMD 存在,被归为类1 让人补数据,正确做法是用交付包重迁)。
+      注意:**表文件存在**(如 logbuffer.csv)却没传给脚本的仍是类1——修复方法是传入表文件/data_map 映射,
       归 needs_data 没错。
-    ①②剔完为空 → 类1 不成立,穿透继续查绑定层。
+    ①②剔完为空 → 类1 不成立,继续往下查绑定层。
     """
     missing = run_data.get("missing_inputs", [])
     if not (missing and missed_count > 0):
@@ -219,16 +219,16 @@ def check_binding_gap(
     missed_nodes: List[str],
     rca_data: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
-    """类2: BINDING_GAP 检测（绑定层的一切毛病）
+    """类2: BINDING_GAP 检测（绑定层的所有问题）
 
     条件一（孤儿绑定）: rca.json 的 tree_issues.orphan_node_ids 非空——执行产出了某节点
-    的事实但树上没有这个节点（典型：删节点没清绑定），是绑定/树不一致，修法=清残留绑定。
-    条件二（缺绑定）: 某个漏判期望根因**自身**有判据但无绑定（静态查tree_index）。
-    祖先未绑定不构成本类：v4 执行口径（rca_rules.md）未绑定/数据不足的上级=默认放行、
-    永不阻断叶子确证，解释不了叶子漏判——按"路径上级"开票只会引人往祖先补无包背书的绑定。
-    全树其余未绑定节点（含故意清空绑定走"默认放行"通道的）也不定错。
+    的事实但树上没有这个节点（典型原因：删节点没清绑定），属于绑定与树不一致，修复方法是清掉残留绑定。
+    条件二（缺绑定）: 某个漏判的期望根因**自身**有判据但无绑定（静态查tree_index）。
+    祖先未绑定不构成本类：执行规则（rca_rules.md）规定未绑定/数据不足的上级节点默认放行、
+    永不阻断叶子确证，解释不了叶子漏判——按"路径上级"开工单只会引导人去给祖先补没有交付包依据的绑定。
+    全树其余未绑定节点（含故意清空绑定、走"默认放行"方式的）也不定错。
     """
-    # 孤儿绑定：绑定指到树上不存在的节点——硬性不一致，先于缺绑定报
+    # 孤儿绑定：绑定指向树上不存在的节点——确定的不一致，先于缺绑定报出
     orphan_nodes = ((rca_data or {}).get("tree_issues") or {}).get("orphan_node_ids", [])
     if orphan_nodes:
         return {
@@ -328,7 +328,7 @@ def check_verdict_gap(
     """类5: VERDICT_GAP 检测
 
     条件: 裁决≠期望（漏判/阴性用例假阳）。
-    只查裁决层——事实全对还归错档才轮到它（orphan 属绑定/树不一致，归类2）。
+    只查裁决层——事实全对却归入了错误的结论档才轮到它（孤儿绑定属于绑定与树不一致，归类2）。
     """
     reconciliation = reconcile_data.get("reconciliation", {}) if reconcile_data else {}
 
@@ -380,7 +380,7 @@ def classify(
 ) -> Dict[str, Any]:
     """执行完整分类流程
 
-    触发门：对账无 MISSED 且无 FALSE_CONFIRM → 不查错直接返回未分类（PASS 路径）。
+    触发条件：对账无 MISSED 且无 FALSE_CONFIRM → 不查错直接返回未分类（PASS 路径）。
     否则按 0→5 顺序查错，命中即停。
     """
     not_classified = {
@@ -394,7 +394,7 @@ def classify(
     missed_count = reconciliation.get("missed", 0)
     false_confirm = reconciliation.get("false_confirm", 0)
 
-    # 触发门：给了对账且全命中 → 不查错（数据缺口交给 verdict 层的 PASS_WITH_GAPS）
+    # 触发条件：提供了对账结果且全部命中 → 不查错（数据缺口交给 verdict 层的 PASS_WITH_GAPS）
     if reconcile_data and missed_count == 0 and false_confirm == 0:
         return not_classified
 
@@ -422,8 +422,8 @@ def classify(
         name, check_fn = checks[class_num]
         result = check_fn()
         if result:
-            # 检测函数可自报更准的类别(如类1 检测发现"raw 在场表未供"改报类2 绑定形态
-            # 不匹配)——尊重它;未自报时按链位归类(既有各检测都自报本位,行为不变)
+            # 检测函数可以自行报出更准确的类别(如类1 检测发现"原始文本存在但没提供表文件"时改报类2 绑定形态
+            # 不匹配)——以它为准;没有自报时按检查顺序中的位置归类(现有各检测都自报本类,行为不变)
             cls = result.get("class", class_num)
             cat = result.get("error_category") or ERROR_CLASSES.get(cls, name)
             result["error_class"] = cls

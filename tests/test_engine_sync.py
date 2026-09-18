@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """引擎副本与发行包重复文件测试:
-① migrate/engine/ 副本与同门源文件逐字节一致(sync_engine.py --check);
+① migrate/engine/ 副本与 skills 目录下的源文件逐字节一致(sync_engine.py --check);
 ② package_skill 打出的发行包里不含 migrate/engine/,且全包内没有内容完全相同的重复文件;
 ③ 发行包内的 migrate(无 engine/)真跑一单迁移,csv/xlsx 表都过;
-④ 单独部署的 migrate(旁边没有任何同门)靠 engine/ 里的整目录副本,把旧打包技能的
+④ 单独部署的 migrate(旁边没有任何其他技能)靠 engine/ 里的整目录副本,把旧打包技能的
    assets/fault-tree-rca(补上树视图 render_tree.py)与 SKILL.md 正文(带 rca_reply.md 指引)刷新到当前代;
-⑤ 发行包里的 migrate(无 engine/)靠包根同门做同一件事,结果与 ④ 相同——两种形态没有能力差。"""
+⑤ 发行包里的 migrate(无 engine/)靠包根的其他技能目录做同一件事,结果与 ④ 相同——两种形态没有能力差。"""
 import hashlib
 import shutil
 import subprocess
@@ -133,7 +133,7 @@ shutil.rmtree(out, ignore_errors=True)
 
 print("\n== ④ 单独部署形态:只装 cs-scot-migrate(无同门),靠 engine/ 刷新 assets/fault-tree-rca 树视图与 SKILL.md 正文 ==")
 S = Path(tempfile.mkdtemp(prefix="solo-"))
-solo = S / "skills" / "cs-scot-migrate"                  # 只拷 migrate 自己,旁边什么同门都没有
+solo = S / "skills" / "cs-scot-migrate"                  # 只拷 migrate 自己,旁边没有任何其他技能
 shutil.copytree(REPO / "skills" / "cs-scot-migrate", solo, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 check("单独部署目录里只有 cs-scot-migrate(没有 fault-tree-rca/zip2csv/cs-scot-execute)",
       sorted(p.name for p in (S / "skills").iterdir()) == ["cs-scot-migrate"])

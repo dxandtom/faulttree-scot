@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""平台1 联调驱动——把平台的优化请求翻成技能的本地输入,跑完迁移后回调。工装层,不进技能。
+"""平台1 联调驱动——把平台的优化请求转换成技能的本地输入,跑完迁移后回调平台。属于联调工具层,不进入技能。
 
-链路(字段名与平台1 接口文档 callDongXuanOptimizeApi 对齐):
-  平台点优化 → POST 我方接口(multipart:versionId + excelFile + prevObjectkey)
-  → 我方受理即回 success(见 server.py)→ 本驱动异步干活:
-     ① 解析平台 excel(L*_Name_CN/EN + Product_Obs + Product_Name,层级动态)
+处理链路(字段名与平台1 接口文档 callDongXuanOptimizeApi 一致):
+  平台点击优化 → POST 我方接口(multipart:versionId + excelFile + prevObjectkey)
+  → 我方受理后立即返回 success(见 server.py)→ 本驱动在后台异步处理:
+     ① 解析平台 excel(L*_Name_CN/EN + Product_Obs + Product_Name,层级数动态)
      ② 按 Product_Obs 逐条下载节点 zip、按 prevObjectkey 下载上一版 skill(downloader.py)
-     ③ 解包 skill、定位产物目录(技能形态认 assets/)
-     ④ 调 cs-scot-migrate 对应表批量迁移(表直接喂 --map,技能已认平台表格式)
-     ⑤ 重打包新版 skill zip
+     ③ 解包 skill、定位产物目录(技能形态取 assets/)
+     ④ 调用 cs-scot-migrate 按对应表批量迁移(表直接作为 --map 参数传入,技能已能识别平台表格式)
+     ⑤ 重新打包新版 skill zip
      ⑥ 回调平台 POST /workspace/faultTreeNode/optimizeCallback
-       (multipart:versionId + skillFile 文件流;OBS 上传与版本记录更新由平台做)
+       (multipart:versionId + skillFile 文件流;OBS 上传与版本记录更新由平台完成)
 
-三种优化场景(平台按选择导出 excel;prevObjectkey 首次优化为 null):
-  MULTI/ALL:表里有技能行 + 有上一版 skill → 本驱动全自动跑(主路)
-  表里有行 + 无上一版:生成场景,要走 cs-scot-generate 的模型会话,本驱动不代跑(退出码 4)
-  NONE(空壳表,只有表头)+ 有上一版:无迁移可做——现行 skill 原样下载回传,
-  让平台状态正常闭环(顺带这就是「skill 下载」的独立验证路)
+三种优化场景(平台按用户选择导出 excel;首次优化时 prevObjectkey 为 null):
+  MULTI/ALL:表里有技能行 + 有上一版 skill → 本驱动全自动处理(主要流程)
+  表里有行 + 无上一版:属于生成场景,要走 cs-scot-generate 的模型会话,本驱动不代为处理(退出码 4)
+  NONE(只有表头的空表)+ 有上一版:无迁移可做——现行 skill 原样下载后回传,
+  让平台的版本状态正常完结(这同时也是「skill 下载」功能的独立验证路径)
 
 用法(本地模拟;样例见 request.example.json):
   python integration/platform1/driver.py --request request.json \
@@ -44,9 +44,9 @@ REPO = HERE.parents[1]
 
 
 def _skill_roots():
-    """技能可能装在哪(按序):环境变量 SCOT_SKILLS_ROOT(平台装技能的目录)→ 本仓库 skills/
-    → 用户级 ~/.claude/skills。每个根下既认独立技能 cs-scot-migrate/,也认发行包
-    cs-scot-generate-optimize/(两线内嵌为子目录 migrate/、generate/,平台2 只上这一个包)。"""
+    """技能可能安装的位置(按顺序查找):环境变量 SCOT_SKILLS_ROOT(平台安装技能的目录)→ 本仓库 skills/
+    → 用户级 ~/.claude/skills。每个根目录下既识别独立技能 cs-scot-migrate/,也识别发行包
+    cs-scot-generate-optimize/(迁移与生成两个技能内嵌为子目录 migrate/、generate/,平台2 只部署这一个包)。"""
     roots = []
     env = os.environ.get("SCOT_SKILLS_ROOT", "").strip()
     if env:
@@ -56,7 +56,7 @@ def _skill_roots():
 
 
 def _find_skill_file(rel_in_migrate: str, rel_in_generate: str | None = None) -> Path | None:
-    """在各技能根下找 migrate/generate 的某个文件:独立技能形态与发行包内嵌形态都认。"""
+    """在各技能根目录下查找 migrate/generate 的某个文件:独立技能形态与发行包内嵌形态都识别。"""
     for root in _skill_roots():
         cands = [root / "cs-scot-migrate" / rel_in_migrate,
                  root / "cs-scot-generate-optimize" / "migrate" / rel_in_migrate]
@@ -70,9 +70,10 @@ def _find_skill_file(rel_in_migrate: str, rel_in_generate: str | None = None) ->
 
 
 def _find_migrate() -> Path:
-    """迁移脚本定位:SCOT_MIGRATE_SCRIPT 显式指定 → 各技能根下的独立技能 / 发行包内嵌形态。
-    平台2 只装 cs-scot-generate-optimize 时,命中的是 <包>/migrate/scripts/migrate_fault_check.py
-    ——机械迁移直接调这个脚本,不经前门;前门只在模型档起会话时参与(按表形态路由到优化线)。"""
+    """迁移脚本定位:SCOT_MIGRATE_SCRIPT 显式指定 → 各技能根目录下的独立技能 / 发行包内嵌形态。
+    平台2 只安装 cs-scot-generate-optimize 时,命中的是 <包>/migrate/scripts/migrate_fault_check.py
+    ——机械迁移(不用模型的脚本迁移)直接调用这个脚本,不经过统一入口 cs-scot-generate-optimize;
+    统一入口只在模型处置环节启动会话时参与(按表的形态路由到优化流程)。"""
     env = os.environ.get("SCOT_MIGRATE_SCRIPT", "").strip()
     if env:
         return Path(env)
@@ -81,9 +82,9 @@ def _find_migrate() -> Path:
 
 
 def _skill_name_for_model() -> str:
-    """模型档点名哪个技能:装了独立 cs-scot-migrate 就点它;只装了发行包就点前门
-    cs-scot-generate-optimize(前门按输入形态机械路由:对应表=有层级列∧有 zip 列 → 优化线)。
-    SCOT_MODEL_SKILL 可显式指定。"""
+    """模型处置环节(--with-model 启动的模型会话)使用哪个技能:安装了独立 cs-scot-migrate 就用它;
+    只安装了发行包就用统一入口 cs-scot-generate-optimize(统一入口按输入形态自动路由:
+    对应表=有层级列∧有 zip 列 → 优化流程)。SCOT_MODEL_SKILL 可显式指定。"""
     env = os.environ.get("SCOT_MODEL_SKILL", "").strip()
     if env:
         return env
@@ -132,9 +133,9 @@ def _read_table(path: Path):
 
 def parse_platform_excel(path: Path):
     """平台表 → [(节点路径名字列表, zip 包名, obs 地址)];Product_Name 空的行(结构行)跳过。
-    列口径与 cs-scot-migrate 的表识别一致:路径取 L{n}_Name_CN,层级动态。
+    列的识别规则与 cs-scot-migrate 一致:路径取 L{n}_Name_CN,层级动态。
     表带标记列(是否修改/is_modified 等)时,未标记行的 zip 不下载(标记契约:
-    内容动作只对标记行执行,migrate 同口径)。"""
+    内容动作只对标记行执行,与 migrate 同一规则)。"""
     header, rows = _read_table(path)
     cn_cols, obs_col, name_col, mk_col = [], None, None, None
     for h in header:
@@ -228,7 +229,7 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
         headers.update(json.loads(extra))   # 例 {"invokeToken": "..."} 或 {"Cookie": "..."}
         print("[回调] 鉴权:PLATFORM1_CB_HEADERS 指定的请求头")
     elif mode != "none":
-        # 回调接口与下载服务同一个网关(webot)时鉴权口径一致:复用下载脚本的 invokeToken
+        # 回调接口与下载服务同一个网关(webot)时鉴权方式一致:复用下载脚本的 invokeToken
         # (token 文件 + 它的加密封装,配置就在 obs_headers_config.json)。auto=主机相同才复用;
         # platform=强制复用;none=不带
         from urllib.parse import urlparse
@@ -273,7 +274,7 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
     with resp_cm as resp:
         text = resp.read().decode("utf-8", "replace")
         print(f"[回调] {url} → HTTP {resp.status} {text[:300]}")
-        # 平台口径:成败在响应 JSON 里(responseCode "0"=成功,"1"=失败),HTTP 200 也可能是
+        # 平台约定:成败在响应 JSON 里(responseCode "0"=成功,"1"=失败),HTTP 200 也可能是
         # 业务失败——认这个字段;响应不是这格式(本地假平台/旧对端)才退回只看 HTTP 状态
         try:
             data = json.loads(text)
@@ -321,7 +322,7 @@ def _run_migrate(cmd):
 
 
 def _parse_migrate_result(out: str):
-    """从迁移输出解析结果清单:落地/新增/跳过/判据同步/删除/失败(带表行号与原因)。
+    """从迁移输出解析结果清单:生效/新增/跳过/判据同步/删除/失败(带表行号与原因)。
     解析不到返回 None。"""
     m = re.search(r"落地 (\d+)/(\d+) 行", out)
     if not m:
@@ -351,7 +352,7 @@ def _parse_migrate_result(out: str):
 
 def _model_session(claude_cmd, mlog: Path, timeout: int) -> None:
     """起 Claude Code 无头会话:事件流逐行接收——原始行落 mlog,关键动作翻译成
-    人话实时打到终端(带时间戳),看得见它每一步在干什么;超时杀进程按已修部分继续。"""
+    易懂的文字实时打到终端(带时间戳),看得见它每一步在干什么;超时杀进程按已修部分继续。"""
     import time
     start = time.time()
     try:
@@ -464,7 +465,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
     version_id = str(req.get("versionId") or "").strip()
     cb_url = _resolve_callback_url(req)
     ctx.update(cb_url=cb_url, version_id=version_id)
-    # optimizeType(平台口径):NONE=问题不在节点,把 skill 引擎代码刷到当前代;
+    # optimizeType(平台约定):NONE=问题不在节点,把 skill 引擎代码刷到当前代;
     # MULTI=部分表,只动列出的节点、不动树结构;ALL=全量表,判据与树结构都以表为准。
     # 缺省(本地实验/老请求)= 老行为:空表原样回传,有行走迁移且不带 --map-mode。
     otype = str(req.get("optimizeType") or "").strip().lower()
@@ -495,7 +496,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
     ctx.update(work=work, skill_dir=skill_dir, out_dir=out_dir)
 
     if otype == "none":
-        # NONE 单(平台口径):问题不在节点——把 skill 的引擎代码刷到当前代后回传。
+        # NONE 单(平台约定):问题不在节点——把 skill 的引擎代码刷到当前代后回传。
         # 引擎的"当前代"取自本机仓库副本:线上跑之前保证联调机器仓库已拉新。
         print("[NONE] 问题不在节点:下载现行 skill → 引擎翻新(--refresh-only)→ 回传。")
         skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
@@ -518,7 +519,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
         return out_zip
 
     if not rows and not otype:
-        # 空壳表且没带 optimizeType(本地实验/老请求):现行 skill 原样返回,
+        # 空表且没带 optimizeType(本地实验/老请求):现行 skill 原样返回,
         # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING);
         # 逐字节一致也正是「skill 真下载」实验的判定标尺
         print("空壳表(未带 optimizeType):无迁移可做,现行 skill 原样返回。")
@@ -535,7 +536,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
             print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
         return out_zip
     # 同一个 Product_Obs 摊给多个不同 zip 名 = 同一对象被当成多个节点的包,必是上传/导表
-    # 错位(联调实测:5 个对象摊给 16 行)——下载迁移只会张冠李戴,下载前就停。
+    # 错位(联调实测:5 个对象摊给 16 行)——下载迁移只会把包对到错误的节点,下载前就停。
     # 同名 zip 被多行复用(如 dscp/8021p 共用一个包)是合法惯例,不在此列
     by_obs: dict[str, set[str]] = {}
     for _names, _name, _obs in rows:
@@ -578,7 +579,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
 
     def _fix_tuning(rc, out):
         # 存量调优表的旧版结构病(如多个顶层节点)卡预导入:备份 .bak 后重建再跑一次。
-        # 只有存在可落地的行、迁移进到写入阶段才会触发收编——纯机械问题,机械修
+        # 只有存在可生效的行、迁移进到写入阶段才会触发预导入——纯机械问题,机械修
         if rc != 0 and "预导入(收编现有调优表) 失败" in out:
             print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
                   "(病表备份为 .bak,从产物重建)")
@@ -590,11 +591,11 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
     rc, last_out = _fix_tuning(rc, last_out)
     if rc != 0 and with_model and _parse_migrate_result(last_out) is None:
         # 没跑到汇总=环境/输入问题(坏 zip、表读不了、参数错),不存在"失败项"清单,
-        # 模型档无从下手——省一轮无头会话,直接走下方硬停
+        # 模型档无从下手——省一轮无头会话,直接走下方的停止并报错
         print("[模型] 迁移没跑到汇总(环境/输入问题,不是节点失败项)——"
               "模型档帮不上,跳过;报错看上方迁移输出")
     elif rc != 0 and with_model:
-        # 机械挡吃不下的失败项(语义对号/修管道/补入口)交给模型:起 Claude Code 无头会话
+        # 机械档处理不了的失败项(语义匹配/修输入输出契约/补入口)交给模型:起 Claude Code 无头会话
         # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
         skill = _skill_name_for_model()
         route = ("(前门按输入形态路由:这是对应表批量迁移,走优化线的 migrate 手册)"
@@ -626,7 +627,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
             claude_cmd[0] = exe
             timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
             # 一单一轮:点一次优化只做一轮模型处置,复跑验证后就交付(部分交付
-            # 兜底),没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
+            # 作为保底),没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
             mlog = work / "model_session.log"
             print(f"[模型] 起 Claude Code 无头会话处置失败项({skill} 技能),"
                   f"每一步动作实时打在下面,事件流落 {mlog}")
@@ -644,7 +645,7 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
             print(f"[停] 迁移退出码 {rc},且包里没有任何已生效的迁移内容——不打包新版;"
                   f"工作目录留在 {work} 供排查。")
             sys.exit(rc)
-        # 部分交付:已落地的节点先生效,成功/失败清单连原因写进包内,平台可解包查看
+        # 部分交付:已迁入的节点先生效,成功/失败清单连原因写进包内,平台可解包查看
         result["versionId"] = version_id
         report = product / "tree" / "migration_report.json"
         report.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")

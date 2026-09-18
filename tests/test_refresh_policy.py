@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""migrate --refresh-only 的标准件同步策略测试(标准库,直接 python 跑):
+"""migrate --refresh-only 的工具链公共文件同步策略测试(标准库,直接 python 跑):
 ① 全部一致 → 打印"没有文件需要刷新",不产生新的 .bak;
-② 技能根 scripts/check_data.py 与同门内容不同 → 刷新并留 .py.bak;references/ 缺文件 → 补挂;
+② 技能根 scripts/check_data.py 与 skills 目录下的源不同 → 刷新并留 .py.bak;references/ 缺文件 → 补齐;
 ③ 只有行尾差异(CRLF)→ 不算不同,不动;
 ④ assets/scripts/custom_lib.py 含手工 @register 函数且能力齐全 → 不整体覆盖,只点名;
-⑤ SKILL.md 正文与同门不同 → 换正文、保 frontmatter 身份、留 SKILL.md.bak;
+⑤ SKILL.md 正文与 skills 目录下的源不同 → 换正文、保 frontmatter 身份、留 SKILL.md.bak;
 ⑥ assets/zip2csv 单个文件不同 → 只刷新该文件;assets/fault-tree-rca 有文件不同 → 整目录刷新;
 ⑦ 结束语逐项列出本次动了什么。"""
 import hashlib
@@ -50,7 +50,7 @@ def baks(root: Path):
 
 
 def mk_skill(root: Path):
-    """按当前同门源拼一个打包技能:执行骨架 + assets(compression-demo 产物 + rca/zip2csv 副本)。"""
+    """按当前 skills 目录下的源拼一个打包技能:执行器脚本 + assets(compression-demo 产物 + rca/zip2csv 副本)。"""
     exe = SK / "cs-scot-execute"
     (root / "scripts").mkdir(parents=True)
     for n in ("runner.py", "check_data.py", "tree_prune.py"):

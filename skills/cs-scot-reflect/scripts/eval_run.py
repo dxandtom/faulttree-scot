@@ -9,23 +9,20 @@
                        --skill-dir <skill-dir> [--out <evaluation-base-dir>]
                        [--prev-evaluation <prev-eval-dir>]
 
-v9 变更:
-    - result-dir 支持两种模式：单 result 目录（直接含 rca.json）或多 result-* 子目录的父目录
+行为要点:
+    - result-dir 支持两种模式：单个 result 目录（直接含 rca.json），或含多个 result-* 子目录的父目录
     - 输出结构: <case_id>-v<round>-<时间戳>/evaluation_report.json（唯一对外出口）
-    - 新增 --prev-evaluation 参数支持 loop 轮次追踪
-    - verdict 只用 PASS/PASS_WITH_GAPS/PARTIAL_PASS/FAIL
+    - --prev-evaluation 用于接续上一轮、追踪 round 与 feedback_iteration；兼容传报告文件或评估目录，
+      round/feedback_iteration 从报告的 meta 读
+    - verdict 按 SKILL.md 的评估流程统一：全部命中→PASS / PASS_WITH_GAPS；有漏判或假阳→
+      命中类0~5 则 FAIL、否则 PARTIAL_PASS；评估过程自身失败→success=false + EVAL_ERROR
     - success 字段表示评估过程正常完成（不依赖 verdict 结果）
-
-v10 变更（对接执行链实测修正）:
-    - verdict 按 SKILL.md 决策树统一：全命中→PASS / PASS_WITH_GAPS；有漏判/假阳→
-      触发类0~5则 FAIL、否则 PARTIAL_PASS；评估过程自身失败→success=false + EVAL_ERROR
-    - 批量模式 case↔result 按目录名匹配（执行时用 runner 的 --result-suffix 带上 case_id），
-      匹配不到时响亮报错，绝不拿别的用例的结果顶数
-    - check_tree 按用例接线（查该用例期望节点是否在树上）；checks 面板类型比较修复
-    - 熔断历史固定存 --out 目录（跨轮生效），按 同case+同节点+同类 计数
-    - --prev-evaluation 兼容传报告文件或评估目录；round/feedback_iteration 从 meta 读
-    - 默认输出目录改为 <result-dir 父目录>/<scenario>-eval（去掉盘符硬编码）；
-      临时文件走系统临时目录，不再整体回拷输出目录
+    - 批量模式下 case 与 result 目录按目录名等规则匹配（执行时用 runner 的 --result-suffix 带上 case_id），
+      匹配不到时明确报错，绝不拿别的用例的结果顶替
+    - check_tree 按用例检查（查该用例的期望节点是否在树上）
+    - 熔断历史固定存在 --out 目录（跨轮生效），按 同case+同节点+同类 计数
+    - 默认输出目录为 <result-dir 父目录>/<scenario>-eval（不硬编码盘符）；
+      临时文件走系统临时目录，不整体回拷输出目录
 """
 from __future__ import annotations
 
@@ -40,7 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from batch_summary import format_line, read_case_score, write_batch_score  # noqa: E402  批量汇总的唯一口径
+from batch_summary import format_line, read_case_score, write_batch_score  # noqa: E402  整批汇总的唯一算法来源
 
 # 脚本所在目录（相对于本文件位置推导）
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -176,7 +173,7 @@ def _norm_path(p: str) -> str:
 
 
 def _run_inputs_match(result_subdir: Path, data_anchors: List[str]) -> bool:
-    """查这轮运行的"出生证明"：run.json 的 inputs 里记着本轮吃的是哪些数据路径（runner
+    """查这轮运行的运行记录：run.json 的 inputs 里记着本轮读了哪些数据路径（runner
     每轮都写）。任一记录路径与用例的数据目录互为前缀（同一目录/上下级）即认定归属。"""
     run_p = result_subdir / "run.json"
     if not run_p.exists() or not data_anchors:
@@ -198,14 +195,14 @@ def find_case_result_dir(result_dir: Path, case_id: str,
     """为指定 case 查找对应的 result 子目录
 
     single 模式（用户直接指到结果目录）原样采用。
-    multi 模式按阶梯对号（多个命中取最新;带 -abandoned/-superseded 后缀的目录不参与）:
+    multi 模式按四级规则依次匹配（多个命中取最新;带 -abandoned/-superseded 后缀的目录不参与）:
     ① 目录名含完整 case_id（执行时用 --result-suffix 显式标注的，仍然优先认）；
     ①b 目录名后缀段与 case_id 按段精确比对（后缀只认字母数字-_,执行侧常只带 nX 短段;
        n5 只配 n5-*，配不上 n50-*）；
-    ② run.json 记录的输入数据路径落在本用例数据目录内（runner 每轮都写"出生证明"；
-       注意执行侧若喂的是合并副本目录，此通道会失手——①b 就是为这兜底）；
+    ② run.json 记录的输入数据路径落在本用例数据目录内（runner 每轮都写运行记录；
+       注意执行侧若传的是合并副本目录，这条规则会失效——①b 就是为此准备的备用规则）；
     ③ 只有一个候选 → 用它并警告；
-    ④ 都对不上 → 拒绝猜测返回 None（拿别的用例的结果对账会把漏判/假阳全部张冠李戴）。
+    ④ 都匹配不上 → 拒绝猜测返回 None（拿别的用例的结果对账会把漏判/假阳全部记到错误的用例上）。
 
     Returns:
         result 子目录路径，或 None
@@ -249,14 +246,14 @@ def find_case_result_dir(result_dir: Path, case_id: str,
     return None
 
 
-_RETIRED_SUFFIXES = ("-abandoned", "-superseded")   # 人工标记"移出对号"的目录后缀(空壳/残次轮留档)
+_RETIRED_SUFFIXES = ("-abandoned", "-superseded")   # 人工标记"不参与匹配"的目录后缀(空目录或不完整轮次的留档)
 
 
 def find_result_subdirs(result_dir: Path) -> List[Path]:
     """在 result-dir 下查找所有 result-<timestamp> 格式的子目录
 
-    带 -abandoned / -superseded 后缀的目录 = 人工标记的空壳/残次轮留档,不参与对号
-    (实测:首次探路只喂了部分数据的残次轮若参与对号,可能顶掉正式轮)。
+    带 -abandoned / -superseded 后缀的目录 = 人工标记的空目录或不完整轮次的留档,不参与匹配
+    (实测:首次试跑只提供了部分数据的不完整轮次若参与匹配,可能顶掉正式轮次)。
 
     Returns:
         按修改时间倒序排列的子目录列表
@@ -276,10 +273,10 @@ _SUBDIR_SFX_RE = re.compile(r"^result-(?:(?P<sfx>.+)-)?\d{8}T\d{6}Z-[0-9a-f]{6}$
 
 
 def _suffix_token_match(d: Path, case_id: str) -> bool:
-    """①b 短后缀对号:runner 的 --result-suffix 只认字母数字-_,执行侧常按规约只用 case_id 的
+    """①b 短后缀匹配:runner 的 --result-suffix 只认字母数字-_,执行侧常按规约只用 case_id 的
     nX 短段当后缀(中文进不了后缀)——目录名装不下完整 case_id 时,取目录名的后缀段与 case_id
     **按段精确**比对:后缀 n5 只配 n5-*,配不上 n50-*(实测 9 个用例因短后缀配不上完整
-    case_id、run.json 又指向合并副本目录,双通道全失手被误判 EVAL_ERROR)。"""
+    case_id、run.json 又指向合并副本目录,两条规则都失效而被误判 EVAL_ERROR)。"""
     m = _SUBDIR_SFX_RE.match(d.name)
     sfx = (m.group("sfx") or "") if m else ""
     return bool(sfx) and (case_id == sfx or case_id.startswith(sfx + "-"))
@@ -448,7 +445,7 @@ def process_case(
     expected_data = load_json(expected_path)
     print(f"[{case_id}] expected.json 加载成功: {expected_path}")
 
-    # Step 2: 定位 result 目录（对号锚=本用例的数据目录：expected 记录的 data_source
+    # Step 2: 定位 result 目录（匹配依据=本用例的数据目录：expected 记录的 data_source
     # 与 cases/<id>/data，run.json 的输入路径落在其中即认定归属）
     data_anchors = [expected_data.get("data_source", ""),
                     str(cases_dir / case_id / "data")]
@@ -551,7 +548,7 @@ def process_case(
         print(f"[{case_id}] classify.py 完成（exit code={classify_result['returncode']}）")
         update_progress(progress_file, f"{task_prefix}:classify", "completed")
     else:
-        # 真正失败：输出文件不存在或无法解析——评估过程失败，不能冒充"未分类=PASS"
+        # 真正失败：输出文件不存在或无法解析——评估过程失败，不能当作"未分类=PASS"
         print(f"[{case_id}] classify.py 失败: {classify_result['stderr']}")
         update_progress(progress_file, f"{task_prefix}:classify", "completed",
                         f"returncode={classify_result['returncode']}")
@@ -759,7 +756,7 @@ def generate_report(
         success = result.get("ok", False)
 
         # v10: 标准 verdict 按 SKILL.md 决策树从 对账+分类+缺口 计算；
-        # 评估过程自身失败（子脚本没产出）单列 EVAL_ERROR，绝不冒充 PASS
+        # 评估过程自身失败（子脚本没产出）单列 EVAL_ERROR，绝不算作 PASS
         classified = classify_data.get("classified", False)
         error_category = classify_data.get("error_category", "")
         error_class = classify_data.get("error_class", "")
@@ -880,7 +877,7 @@ def generate_report(
         print(f"[eval_run] {case_id}: 报告已写入 {report_path}")
 
         # 平台展示适配:同目录机械产出 quality_score.json(六维 BOOLEAN 计分,短路后未评维度
-        # 记 null/N-A,总分=通过关数/6×100;口径与实现见 score_report.py)。EVAL_ERROR 无有效
+        # 记 null/N-A,总分=通过关数/6×100;算法与实现见 score_report.py)。EVAL_ERROR 无有效
         # 评分主动跳过;生成失败不拖垮评估——报告仍是权威,可手跑 score_report.py 补出。
         case_score, case_dims = None, {}
         try:
@@ -933,7 +930,7 @@ def generate_report(
             "report_path": str(report_path.relative_to(out_dir))
         })
 
-    # 根目录 quality_score_batch.json(整批):与一键回归同一口径(batch_summary.py),平台读这一份
+    # 根目录 quality_score_batch.json(整批):与一键回归同一算法(batch_summary.py),平台读这一份
     summary_report = write_batch_score(out_dir, all_case_summaries, evaluation_time)
     print(f"[eval_run] 整批汇总已写入 {out_dir / 'quality_score_batch.json'}")
 
@@ -974,7 +971,7 @@ def compute_round_and_feedback_iteration(
     - 直接传上一轮 evaluation_report.json 文件路径（SKILL.md 的推荐用法）
     - 传评估输出目录（在其下按 <case_id>-v<round>-* 找该 case 最新一轮）
 
-    round 从上轮报告 meta.round 读（目录名只作兜底）；feedback_iteration：
+    round 从上轮报告 meta.round 读（目录名只作备用来源）；feedback_iteration：
     上轮 verdict 为 PARTIAL_PASS/FAIL（有 feedback）→ +1，否则清零。
 
     Returns:
@@ -1017,7 +1014,7 @@ def compute_round_and_feedback_iteration(
     except (TypeError, ValueError):
         prev_round = prev_round_fallback
 
-    # verdict 在 meta.verdict（verdict_detail.verdict 兜底）——报告顶层没有 verdict 字段
+    # verdict 在 meta.verdict（取不到时用 verdict_detail.verdict）——报告顶层没有 verdict 字段
     prev_verdict = meta.get("verdict") or prev_report.get("verdict_detail", {}).get("verdict", "")
     try:
         prev_feedback_iteration = int(meta.get("feedback_iteration", 0) or 0)
@@ -1123,7 +1120,7 @@ def main() -> None:
     if prev_evaluation:
         print(f"[eval_run] prev_evaluation={prev_evaluation}")
 
-    # 创建临时目录（用于中途落盘）——走系统临时目录，不在当前目录/技能目录里拉 temp/
+    # 创建临时目录（用于中途写文件）——走系统临时目录，不在当前目录/技能目录里拉 temp/
     temp_dir = Path(tempfile.mkdtemp(prefix="cs-scot-reflect-"))
     progress_file = temp_dir / "progress.jsonl"
     progress_file.write_text("", encoding="utf-8")

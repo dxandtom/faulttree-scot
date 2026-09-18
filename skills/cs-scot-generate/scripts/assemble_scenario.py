@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""把 cs-scot-generate 的中间产物归集成一个场景的诊断产物(资产,不是 skill)。
+"""把 cs-scot-generate 的中间产物组装成一个场景的诊断产物目录(它是资产,不是 skill)。
 
-产物 = plan.json(真正的 SCoT 计划)+ manifest.json(格式契约铭牌)
-       + scripts/<指标>_analyzer.py(逐条件分析骨架,模型在步骤 2.5 填 CONDITIONS)
+产物 = plan.json(真正的 SCoT 计划)+ manifest.json(产物清单,记录格式契约版本)
+       + scripts/<指标>_analyzer.py(待填写的逐条件分析脚本,模型在步骤 2.5 填 CONDITIONS)
        + 内核/适配器/概览引擎/绑定契约副本 + tree/<场景>.md。由 cs-scot-execute 来跑。
 """
 from __future__ import annotations
@@ -18,7 +18,8 @@ from typing import List
 # 与 excel_to_tree.py 保持一致的统一产物目录约定:<anchor>/scot产物/<场景名>
 DEFAULT_OUT_CONTAINER = "scot产物"
 
-# 外挂知识模板:首次归集时写入 tree/knowledge.md(已存在**永不覆盖**——它是业务同事手写的)。
+# 外挂知识(业务同事手写的补充知识)模板:首次组装产物目录时写入 tree/knowledge.md
+# (文件已存在则**永不覆盖**——它是业务同事手写的)。
 # 两条示例是真实场景(M-LAG)的可用知识,照这个样子一条一条往下加即可。
 KNOWLEDGE_TEMPLATE = """\
 # 外挂知识(knowledge.md)——业务同事直接编辑本文件
@@ -59,17 +60,19 @@ KNOWLEDGE_TEMPLATE = """\
 运行时没出现=不成立。分析口径:该日志表示接口 [hwIfMonitorName] 存在错包,原因通常是链路质量问题。
 """
 
-# 产物格式契约版本(写进出厂铭牌 manifest.json):**只在改动使旧产物与新执行器不兼容时才 +1**
-# (修 bug、改文案不动它)。bump 时同步 bump cs-scot-execute/scripts/runner.py 的 EXPECTED_PRODUCT_FORMAT。
-# v2:绑定新增 filter 字段(EAV 行级预过滤)+ 空表守卫——旧产物里的旧 condition_kernels 副本会
-#     **静默忽略 filter、在全表上算出假阳**,必须重新 assemble 刷新内核副本。
+# 产物格式契约版本(写进产物清单 manifest.json):**只在改动使旧产物与新执行器不兼容时才 +1**
+# (修 bug、改文案不动它)。递增时同步递增 cs-scot-execute/scripts/runner.py 的 EXPECTED_PRODUCT_FORMAT。
+# v2:绑定新增 filter 字段(对 EAV 窄表——一行一个指标的表——做行级预过滤)+ 空表守卫——
+#     旧产物里的旧 condition_kernels 副本会**静默忽略 filter、在全表上算出假阳性**,
+#     必须重新 assemble 刷新内核副本。
 # v3:plan 新增 cross 节点(inputs.data="$input.*",跨源判据脚本要**全部**数据源)——
 #     旧执行器解析不了 "$input.*" 会当场报错,须升级 cs-scot-execute。
 PRODUCT_FORMAT_VERSION = 3
 
-# 每个指标一份"逐条件分析脚本"的骨架:模型在 generate 时按类别模板(A/C/G/D/J/P)填 CONDITIONS。
+# 每个指标一份待填写的"逐条件分析脚本":模型在 generate 时按类别模板填 CONDITIONS
+# (类别 A/C/G/D/J/P:A 阈值比较、C/G 文本匹配、D 组合、J 人工确认、P 成对比较)。
 # 默认直接套预制内核(evaluate_binding);模板不够用时,模型才为个别条件写 custom。
-# execute 把它当普通脚本跑:python <ind>_analyzer.py <数据> -o out.json,直接吐该源逐条件事实。
+# execute 把它当普通脚本跑:python <ind>_analyzer.py <数据> -o out.json,直接输出该源的逐条件事实。
 ANALYZER_SCAFFOLD = '''#!/usr/bin/env python3
 """生成的「__IND__」逐条件分析脚本——读表 → 逐条件统计 → 输出事实。
 
@@ -177,9 +180,9 @@ if __name__ == "__main__":
 '''
 
 
-# 跨源判据分析脚本骨架:需要**多个源**才能判的条件(param_from 传参链 / P pair_from 跨源比较 /
-# 跨源 D 组合)都放这里,由步骤 2.5 的「跨源补绑」环节填(make_dispatch --cross 产简报)。
-# 执行时 runner 把本轮全部 --data 源都递进来;没有跨源判据时 CONDITIONS 为空、秒过。
+# 待填写的跨源判据分析脚本:需要**多个源**才能判的条件(param_from 传参链 / P 类 pair_from 跨源比较 /
+# 跨源 D 组合)都放这里,由步骤 2.5 的「跨源补充绑定」环节填(make_dispatch --cross 生成任务说明)。
+# 执行时 runner 把本轮全部 --data 源都传进来;没有跨源判据时 CONDITIONS 为空、立刻跑完。
 CROSS_SCAFFOLD = '''#!/usr/bin/env python3
 """生成的「cross」跨源判据分析脚本——一条判据要动用多个数据源时的家。
 
@@ -290,7 +293,7 @@ if __name__ == "__main__":
 
 
 def _extract_block(src: str, name: str):
-    """顶层 `NAME = ...` 赋值块的原文;找不到/语法错 → None。(cross 骨架升级手术用)"""
+    """顶层 `NAME = ...` 赋值块的原文;找不到/语法错 → None。(升级 cross 脚本框架时用)"""
     import ast
     try:
         tree = ast.parse(src)
@@ -305,9 +308,9 @@ def _extract_block(src: str, name: str):
 
 
 def _upgrade_cross_scaffold(existing: str, pristine: str):
-    """已填绑定的 cross_analyzer.py 骨架升级:引擎部分换当前版,CONDITIONS/CUSTOM 赋值块**原文保留**。
-    返回 (结果, 原因):结果=新文本(需写盘)/ existing(引擎已是当前版,不动)/ None(结构超出骨架
-    认知——如手写了辅助函数——不敢动,附原因;绑定安全第一,拿不准就不碰)。"""
+    """已填绑定的 cross_analyzer.py 脚本框架升级:引擎部分换当前版,CONDITIONS/CUSTOM 赋值块**原文保留**。
+    返回 (结果, 原因):结果=新文本(需写盘)/ existing(引擎已是当前版,不动)/ None(结构超出脚本框架
+    的预期——如手写了辅助函数——不敢动,附原因;绑定安全第一,拿不准就不碰)。"""
     import ast
     try:
         et, pt = ast.parse(existing), ast.parse(pristine)
@@ -444,12 +447,12 @@ def main() -> None:
         out = scenario_out_dir(anchor, scenario)
         # 扫容器对账(**无条件**,不能只在推导目录缺失时扫):步骤1目录名可能是英文短名(slug)
         # 而 --scenario 输的是中文名;更危险的是**新旧两代产物并存**(升级后旧中文名目录没删)——
-        # 若只在"推导目录不存在"时才扫,旧中文名目录恰好存在就会被静默选中、归集出过期的树。
-        # 按 tree_index 内容认领:恰一个 → 用它;多个 → 硬拦;零个 → 沿用推导目录(下游闸门给指引)。
+        # 若只在"推导目录不存在"时才扫,旧中文名目录恰好存在就会被静默选中、组装出过期的树。
+        # 按 tree_index 内容认领:恰一个 → 用它;多个 → 直接拦下;零个 → 沿用推导目录(下游检查会给指引)。
         hits = []
         for ti in sorted(list((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json"))
                          + list((Path(anchor) / "scot技能").glob("*/assets/tree/*.tree_index.json"))):
-            # 两个容器都扫:老形态 scot产物/<场景>/,新默认 scot技能/<短名>/assets/(步骤1直出技能)
+            # 两个容器都扫:老形态 scot产物/<场景>/,新默认 scot技能/<短名>/assets/(步骤1直接生成技能)
             try:
                 d = json.loads(ti.read_text(encoding="utf-8"))
             except Exception:
@@ -466,7 +469,7 @@ def main() -> None:
             sys.exit(2)
     work = Path(args.work) if args.work else out  # 默认 work==out,产物只此一处
 
-    # 硬闸门:0 判据的树不许归集——判据是整条流水线的原料,0 判据多半是步骤1格式识别问题
+    # 硬性检查:0 判据的树不许组装——判据是整条流水线的原料,0 判据多半是步骤1格式识别问题
     # (判据列没被认出被静默丢弃)。此时继续会诱发"模型自由发挥硬绑/写脚本量产绑定"的事故,
     # 必须在这里停下、回去查 Excel 表头,而不是往下走。
     # 定位步骤1产物:目录内唯一的 *.tree_index.json(文件名=英文短名或中文场景名,以内容为准)。
@@ -507,7 +510,7 @@ def main() -> None:
 
     copy_into(work / "tree" / f"{stem}.md", out / "tree" / f"{stem}.md")
     # 推荐解决方案表(可选,RCA 报根因时点查):树侧为准、**增量并入**——out 侧可能有 cs-scot-adopt
-    # 从平台脚本并入的方案,整表覆盖/删除都会把收编成果静默清掉(实测审计发现);
+    # 从平台脚本并入的方案,整表覆盖/删除都会把导入成果静默清掉(实测审计发现);
     # 树上已不存在的节点条目留着无害(点查不中)。
     wsol, osol = work / "tree" / "solutions.json", out / "tree" / "solutions.json"
     if wsol.exists():
@@ -526,7 +529,7 @@ def main() -> None:
             print(f"solutions.json:树侧 {len(merged_sol) - kept} 条 + 保留 out 侧既有 {kept} 条(如 adopt 并入的方案)")
     elif osol.exists():
         print("solutions.json:树侧本次没有,out 侧既有的**保留不删**(可能含 adopt 并入的方案)")
-    # 拷预制模板库 + 概览引擎 + 绑定契约进产物;再为每个指标写一份待填的"逐条件分析脚本"骨架。
+    # 复制公共脚本(预制函数库、概览引擎、绑定契约)进产物;再为每个指标写一份待填写的"逐条件分析脚本"。
     here = Path(__file__).parent
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # 类别模板库
     copy_into(here / "xlsx_reader.py", out / "scripts" / "xlsx_reader.py")              # 零依赖 xlsx 读取器(内核/导入都靠它读表)
@@ -546,8 +549,8 @@ def main() -> None:
         else:
             kn.write_text(KNOWLEDGE_TEMPLATE, encoding="utf-8")
             print(f"已建外挂知识模板 → {kn}(业务同事可编辑;绑定简报与 RCA 输入会按分支自动载入)")
-    # 重跑 = 重新编译:默认用当前版本的空骨架覆盖旧脚本(这样才能用上刚拷进来的新 condition_kernels/mo_config);
-    # 覆盖前若旧脚本不是"全新空骨架"(填过/手改过/上一版骨架)→ 先备份成 .py.bak,绝不静默丢失。
+    # 重跑 = 重新编译:默认用当前版本的空白脚本覆盖旧脚本(这样才能用上刚拷进来的新 condition_kernels/mo_config);
+    # 覆盖前若旧脚本不是"全新空白脚本"(填过/手改过/上一版框架)→ 先备份成 .py.bak,绝不静默丢失。
     # 想原样保留已填脚本:加 --keep(老的 skip-if-exists 行为)。
     scaffolded, regenerated = [], []
     for ind in indicators + ["cross"]:                   # cross = 跨源判据脚本(补绑环节填),同一套备份规矩
@@ -562,7 +565,7 @@ def main() -> None:
         except Exception:
             existing = None
         if existing == pristine:
-            continue                                    # 还是全新空骨架,没填过 → 无需动
+            continue                                    # 还是全新空白脚本,没填过 → 无需动
         if ind == "cross":                              # 已填过的跨源绑定是补绑环节的手工产物,重跑 assemble
             upgraded, why = _upgrade_cross_scaffold(existing, pristine)
             if upgraded is not None and upgraded != existing:
@@ -579,7 +582,7 @@ def main() -> None:
                       f"绑定不动。若需 S 类/raw 通道等新能力,先手工迁出 CONDITIONS 再删文件重铺): {target}")
             else:
                 print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 骨架已是当前版本,不重铺): {target}")
-            continue                                    # 绑定绝不清空——此前重铺会把 param_from 链静默打回空骨架
+            continue                                    # 绑定绝不清空——此前重新生成会把 param_from 链静默打回空白
         if args.keep:
             print(f"  [keep] 保留已存在脚本(--keep,未刷新骨架/库依赖): {target}")
             continue
@@ -589,14 +592,14 @@ def main() -> None:
             note = f"  (旧脚本已备份 → {bak.name})"
         except Exception:
             note = "  (备份失败,已直接覆盖)"
-        target.write_text(pristine, encoding="utf-8")   # 铺当前版本空骨架,模型在步骤2.5重新填
+        target.write_text(pristine, encoding="utf-8")   # 写入当前版本的空白脚本,模型在步骤2.5重新填
         regenerated.append(ind)
         print(f"  [regen] 重铺空骨架: {target}{note}")
 
     plan = build_plan(scenario, indicators, tree_rel, stem)
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 出厂铭牌:这批产物由哪版格式契约、何时编译。execute/benchmark 启动时比对,旧产物只告警不阻断。
+    # 产物清单 manifest:这批产物由哪版格式契约、何时编译。execute/benchmark 启动时比对,旧产物只告警不阻断。
     manifest = {"product_format_version": PRODUCT_FORMAT_VERSION,
                 "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
                 "scenario": scenario, "slug": _ti.get("slug"),

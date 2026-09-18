@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""发行打包:把生成/优化前门 + 两条线(generate/migrate)+ 公共素材(execute/rca/zip2csv,
+"""发行打包:把生成/优化统一入口 + 两条线(generate/migrate)+ 公共素材(execute/rca/zip2csv,
 与线平铺包根)合成一个自包含包。
 
 用法(在仓库任意位置):
@@ -13,9 +13,9 @@
     包内 MANIFEST.txt                        全部文件清单 + 来源提交(带 +dirty 标记)
 
 原则:纯复制,不改写任何源文件;输出目录与任何源目录重叠即拒绝执行;
-关键文件逐一核验,缺一响亮失败并清掉残局(不留半个包)。
-公共素材(cs-scot-execute / fault-tree-rca / zip2csv)与线目录平铺在包根(包根=同门容器)——
-装了这个包,生成线直出的场景技能就是完整可执行成品,不再有"止于产物形态"的边界。
+关键文件逐一核验,缺一个就明确报错并清掉残留(不留半个包)。
+公共素材(cs-scot-execute / fault-tree-rca / zip2csv)与线目录平铺在包根(包根扮演仓库 skills/ 目录的角色)——
+装了这个包,生成线直接生成的场景技能就是完整可执行成品,不再有"只生成产物目录"的边界。
 """
 import argparse
 import hashlib
@@ -27,9 +27,9 @@ from pathlib import Path
 
 PKG_NAME = "cs-scot-generate-optimize"
 
-# 收进包的源目录 → 包内位置。**包根=同门容器**(扮演仓库 skills/ 的角色):
+# 收进包的源目录 → 包内位置。**包根扮演仓库 skills/ 目录的角色**:
 # 线目录(generate/migrate)与公共素材(execute/rca/zip2csv)平铺其下——
-# generate 走素材查找次序②"同门"命中,migrate 的 _mat 第一候选"同门"命中,
+# generate 走素材查找次序②"同一 skills 目录"命中,migrate 的 _mat 第一候选"同一 skills 目录"命中,
 # 谁也不伸手进谁的目录;素材各只有一份。
 # ("素材内嵌进 generate"的形态留给**单交付 generate** 场景:没有包根可放时,
 #  素材拷进技能内与 SKILL.md 同层,查找次序①管它。)
@@ -40,8 +40,8 @@ LAYOUT = {
     "zip2csv": ["zip2csv"],
     "cs-scot-execute": ["cs-scot-execute"],
     "fault-tree-rca": ["fault-tree-rca"],
-    # tester 随包:回流线的类3(缺知识)/类4(实现偏离判据)处置票要路由到它重产
-    # 判断方法/fault_check——不带它,评估反思的返厂通道在交付环境里就是断头路
+    # tester 随包:反馈处理线的类3(缺知识)/类4(实现偏离判据)处置票要路由到它重新产出
+    # 判断方法/fault_check——不带它,评估反思退回交付方的通道在交付环境里就走不通
     "datacom-fault-tree-tester": ["datacom-fault-tree-tester"],
 }
 MATERIALS = ("cs-scot-execute", "fault-tree-rca", "zip2csv")
@@ -98,9 +98,9 @@ REQUIRED = (
 EXCLUDE_DIRS = {"__pycache__", ".git", "dist"}
 EXCLUDE_SUFFIX = {".pyc", ".pyo"}
 EXCLUDE_NAMES = {".DS_Store", "Thumbs.db"}
-# 前门自己的打包脚本不进发行包(平台侧用不上,也别让包里再套打包器)
+# 统一入口自己的打包脚本不进发行包(平台侧用不上,也别让包里再套打包器)
 EXCLUDE_REL = {"scripts/package_skill.py"}
-# 按包内位置排除的**顶层目录**:migrate 的 engine/ 是同门脚本的兜底副本,只在 migrate 单独部署时
+# 按包内位置排除的**顶层目录**:migrate 的 engine/ 是其他技能脚本的备用副本,只在 migrate 单独部署时
 # 才用;发行包里 generate/execute/tester 都在包根,副本纯属重复文件(且手工副本会漂移)→ 不进包
 EXCLUDE_TOP_BY_PKG = {"migrate": {"engine"}}
 
@@ -141,7 +141,7 @@ def _git_rev(repo: Path) -> str:
             cwd=str(repo), capture_output=True, text=True, timeout=10,
         )
         if st.returncode == 0 and st.stdout.strip():
-            rev += "+dirty"                              # 包内容与铭牌提交不完全对应,明说
+            rev += "+dirty"                              # 包内容与清单里记的提交不完全对应,明说
         return rev
     except Exception:
         return "(非 git 环境)"
@@ -210,7 +210,7 @@ def main() -> int:
         for rel in dests:
             dst = pkg_dir if rel == "." else pkg_dir / rel
             if rel == ".":
-                # 前门内容平铺到包根(目标已存在,不能整目录 copytree)
+                # 统一入口的内容平铺到包根(目标已存在,不能整目录 copytree)
                 for item in sorted(src.iterdir()):
                     if item.name in EXCLUDE_DIRS or item.name in EXCLUDE_NAMES:
                         continue
@@ -227,7 +227,7 @@ def main() -> int:
                 ig = _ignore(src, rel)
                 if src_name == "cs-scot-generate":
                     # 源 generate 若是"单交付内嵌"形态(素材长在技能内),拷贝时剔除其顶层素材目录:
-                    # 包内素材统一放包根一份,不重复、也不会与后续素材复制相撞(Windows 实测事故)
+                    # 包内素材统一放包根一份,不重复、也不会与后续素材复制冲突(Windows 实测事故)
                     base_ig = ig
 
                     def ig(dirpath, names, _src=src, _base=base_ig):   # noqa: PLW0642
@@ -236,8 +236,8 @@ def main() -> int:
                             skip |= {n for n in names if n in MATERIALS}
                         return skip
                 if dst.exists():
-                    # 正确代码到不了这里(每轮都是清空重建)。真撞上=脚本被改过/新旧混装。
-                    # 响亮自解释,不留裸 traceback——traceback 会诱导弱模型拿 dirs_exist_ok
+                    # 正确代码到不了这里(每轮都是清空重建)。真遇到=脚本被改过/新旧混装。
+                    # 明确自解释,不留裸 traceback——traceback 会诱导弱模型拿 dirs_exist_ok
                     # 之类的静默合并去"修"(实测发生过),那会把两份来源的文件混进包里。
                     raise SystemExit(
                         f"✗ 包内目标已存在:{dst}(复制 {src_name} 时撞车)。\n"

@@ -55,7 +55,7 @@ def spread(downloads: Path, store: Path) -> int:
                 print(f"[节点包] {zp.name}:原样入货架")
                 shutil.copy2(zp, store / zp.name)
                 n += 1
-    # 2) 节点包被解压软件解成文件夹的:重新压成 zip 入货架(包内套一层同名目录,交付包口径)
+    # 2) 节点包被解压软件解成文件夹的:重新压成 zip 入货架(包内套一层同名目录,与交付包一致)
     for d in sorted(list(p for p in downloads.rglob("*") if p.is_dir())):
         if d.resolve() == store.resolve() or not _looks_like_node_pkg(d):
             continue

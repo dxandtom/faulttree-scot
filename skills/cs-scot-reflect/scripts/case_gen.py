@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""case_gen.py - 从 migrate 迁移台账 + tester 交付包机械生成评估用例库
+"""case_gen.py - 从 migrate 迁移台账 + 节点交付包机械生成评估用例库
 
-无台账兜底:产物没有 tree/migrations.json(generate 直出、没走过 migrate 的技能)时,
-退回**按名字对号**——包内判断方法的节点名 ↔ 树节点名,配得上且全树唯一才落用例(决不赌;
-同名撞车/对不上的逐包点名)。要零歧义的精确对号,先对技能跑一次 migrate 再建库。
+没有台账时的备用做法:产物没有 tree/migrations.json(generate 直接生成、没走过 migrate 的技能)时,
+退回**按名字匹配**——包内判断方法的节点名 ↔ 树节点名,配得上且全树唯一才生成用例(绝不猜;
+同名或对不上的逐包点名)。要零歧义的精确匹配,先对技能跑一次 migrate 再建库。
 
-原理：tester 交付包天然就是带标注的用例——每个包 = 单节点判据 + 一份"跑出来就该是
-这个节点"的测试数据（tester 的交付契约）。migrate 对号落地时已在 产物/tree/migrations.json
+原理：节点交付包天然就是带标注的用例——每个包 = 单节点判据 + 一份"跑出来就该是
+这个节点"的测试数据（交付方的契约）。migrate 匹配导入时已在 产物/tree/migrations.json
 台账里机械记下"节点 ↔ 包 ↔ 入口"。本脚本只是把这份已知信息落成 cases/<case_id>/expected.json，
 零人工、可重复：故障树结构调整（增删节点、node_id 重排）后重跑一遍即全库刷新。
 
@@ -17,7 +17,7 @@
                        [--map <节点↔zip对应表 xlsx/csv>] [--copy-data] [--force]
 
 包目录混乱(「互补」变体、多时间戳版本、改名 zip)导致名字匹配大面积歧义时,**加 --map**:
-调优表导出天然带 node_id 列和产物 zip 文件名列,照表精确对号,零赌博。
+调优表导出天然带 node_id 列和产物 zip 文件名列,照表精确匹配,不用猜。
 
 --packages 的消化语义与 migrate 一致：zip → 解到临时区并递归解嵌套 zip；目录里有 zip →
 拷到临时区再解（绝不动用户目录）；纯目录 → 原样用。来自 zip/临时区的测试数据会**强制拷贝**
@@ -28,10 +28,10 @@
     ├── expected.json    # 期望：该节点为唯一期望根因，predicate_satisfied=true
     └── data/            # 包内 测试数据/ 的拷贝（--copy-data 时；默认只在 expected 里记录来源路径）
 
-防泄题红线（与 SKILL.md 一致）:
+防止泄露答案的规则（与 SKILL.md 一致）:
     cases/ 目录不进产物、不进 assets/、不随 result-* 携带；
     跑诊断（execute/RCA）的必须是没读过 expected 的独立会话。
-    生成 expected 不构成泄题——"包对哪个节点"本来就是 migrate 的本职信息。
+    生成 expected 不构成泄露答案——"包对哪个节点"本来就是 migrate 的本职信息。
 
 阴性用例（健康数据、期望无根因）没有机械来源，不由本脚本生成，人工按 expected_schema.md 放少量即可。
 """
@@ -106,7 +106,7 @@ def prepare_packages_root(packages: Path, tmp: Path) -> Tuple[List[Path], bool]:
 
     目录里有 zip 时**只把 zip 文件拷进临时区解包**、原目录保持只读扫描（双根）——不整目录
     copytree：实测用户的包目录里躺着 _work/__pycache__ 等深层嵌套，整拷会顶爆 Windows 路径
-    长度上限；而这些目录本就不该被复制——zip 才需要解，散包（含 _work 下带测试数据的）原地读。
+    长度上限；而这些目录本就不该被复制——zip 才需要解，散开的包目录（含 _work 下带测试数据的）原地读。
     返回 (根目录列表, 是否用了临时区)。临时区在本次运行结束后清理——来自临时区的
     测试数据必须拷进用例目录，记路径会变成空引用。
     """
@@ -150,7 +150,7 @@ def _norm(s: str) -> str:
 
 
 def _md_name(md: Path) -> Optional[str]:
-    """从 判断方法*.md 提包节点名——与 migrate 同口径：
+    """从 判断方法*.md 提包节点名——与 migrate 同一规则：
     标题行「# 判断方法: <名字>」优先，退文件名 stem 去「判断方法」前缀。"""
     text = None
     for enc in ("utf-8-sig", "utf-8", "gbk", "gb18030"):
@@ -200,9 +200,9 @@ def find_test_data(pkg_dir: Path) -> Optional[Path]:
 def index_packages(root: Path, zip_root: bool = False) -> List[Dict[str, Any]]:
     """全根扫一遍，建候选包索引：[{dir, aliases(归一化名集合), title, src_zip, data}]。
     zip_root=True(root 是 zip 解包临时区)时记 src_zip=包所在的顶层解包目录名(即来源 zip 的
-    文件名去扩展名,归一化)——--map 按它精确对号。
+    文件名去扩展名,归一化)——--map 按它精确匹配。
 
-    包身份**优先取包内 判断方法*.md**（台账包名的同源出处，目录叫什么都不影响对号）：
+    包身份**优先取包内 判断方法*.md**（台账包名的同源出处，目录叫什么都不影响匹配）：
     md 标题名 + md 文件名名 + 所在目录名 + 各级到 root 的中间目录名都记为别名。
     没有 md、但自己带测试数据目录的目录（散数据包）也收，以目录名为别名。
     """
@@ -275,11 +275,11 @@ def _pkg_label(p: Dict[str, Any]) -> str:
 
 
 def match_package(pkgs: List[Dict[str, Any]], package_node: str):
-    """按归一化阶梯对号：①别名精确相等 ②别名包含包名 ③包名包含别名(别名≥4字防碰瓷)。
+    """按归一化后的三级规则匹配：①别名精确相等 ②别名包含包名 ③包名包含别名(别名≥4字,防止短名误配)。
 
     返回 (包, 注记或None) 或 (None, 问题说明)。同级多个命中时分两种：
     - 候选的「正名」(判断方法 md 标题)完全相同 = **同一个包的不同批次版本**(tester 重复生成,
-      文件名只差时间戳,实测一个文件夹里躺 84 个 zip 大半是这种)→ 机械取最新、响亮播报,不全灭;
+      文件名只差时间戳,实测一个文件夹里躺 84 个 zip 大半是这种)→ 机械取最新、明确提示,不整体放弃;
     - 正名不同 = 真歧义，点名候选交人，不瞎猜。
     """
     key = _norm(package_node)
@@ -306,9 +306,9 @@ def match_package(pkgs: List[Dict[str, Any]], package_node: str):
 
 
 def load_node_zip_map(path: Path) -> Dict[str, str]:
-    """--map 对应表 → {node_id: 归一化 zip 名(去扩展名)}。**权威对号通道**:tester 实产包目录里
+    """--map 对应表 → {node_id: 归一化 zip 名(去扩展名)}。**权威的匹配依据**:交付方实际产出的包目录里
     「互补」变体(真不同包)、多时间戳版本、改名 zip 会让名字模糊匹配大面积歧义/落空(实测 51 项
-    只对上 8),而调优表导出天然带 node_id 列 + 产物 zip 文件名列——照表对号,零赌博。
+    只对上 8),而调优表导出天然带 node_id 列 + 产物 zip 文件名列——照表匹配,不用猜。
     xlsx 用 openpyxl(migrate 调优表同款依赖);csv 用标准库。列识别:node_id 列=表头恰为
     node_id;zip 列=表头含 zip/产物/文件名/优化包/package,识别不出就退化为"该行里以 .zip 结尾
     的单元格"。值可带全路径,只取文件名。多页 xlsx 取第一页(调优表导出的汇总页)。"""
@@ -438,7 +438,7 @@ def main() -> None:
     made, skipped, problems = [], [], []
     dup_reported: set = set()
     if ledgerless:
-        # 无台账:逐树节点试配包(名字对号);同名节点数先备好,配上包但名字撞车的不赌
+        # 无台账:逐树节点试配包(按名字匹配);先统计同名节点数,配上包但名字重复的不猜
         name_dup: Dict[str, int] = {}
         for nd in nodes.values():
             nm = str(nd.get("name") or "").strip()
@@ -463,7 +463,7 @@ def main() -> None:
 
         pkg, why = None, None
         want = nid_zip.get(nid)
-        if want:                                           # --map 权威通道:按来源 zip 精确对号
+        if want:                                           # --map 是权威依据:按来源 zip 精确匹配
             hits = [p for p in pkg_index if p.get("src_zip") == want]
             if not hits:
                 problems.append(f"{nid}「{package_node}」：--map 指到 zip「{want}」,但 --packages 里"
@@ -485,8 +485,8 @@ def main() -> None:
                     problems.append(f"{nid}「{package_node}」：{why}——跳过")
                 continue
         if ledgerless and want is None and name_dup.get(package_node, 0) > 1:
-            # 同名撞车(--map 显式给了 node_id 的行不进此闸——表是权威通道):
-            # 包内「## 节点路径」在场就机械消歧(子序列),否则不赌
+            # 同名冲突(--map 显式给了 node_id 的行不做此检查——表是权威依据):
+            # 包内有「## 节点路径」就机械消歧(子序列),否则不猜
             ppath = [s for s in (pkg.get("path") or []) if s]
             picked = None
             if ppath:
@@ -522,7 +522,7 @@ def main() -> None:
         if ledgerless:
             why = "; ".join(x for x in ("无台账,按节点名对号", why) if x)
         used_pkg_dirs.add(str(pkg["dir"]))
-        if why:                                            # 对上了但带注记(map 对号/同名多版本取最新)
+        if why:                                            # 匹配上了但带注记(按 map 匹配/同名多版本取最新)
             print(f"  ⚠ {nid}「{package_node}」：{why}")
         data_dir = pkg["data"]
         if data_dir is None:
