@@ -89,6 +89,7 @@ REQUIRED = (
         "scripts/validate_rca.py", "scripts/rca_query.py")]
     + [f"datacom-fault-tree-tester/{s}" for s in
        ("SKILL.md", "判断方法_规范.md", "scripts/check_contract.py",
+        "references/script_contract.md", "references/templates.md",
         "scripts/search_cmd.py", "scripts/search_config.py",
         "scripts/search_diag_txt.py", "scripts/search_log.py")]
 )
