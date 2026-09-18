@@ -72,7 +72,7 @@ _Z2C = ["zip2csv.py", "config2csv.py", "logbuffer2csv.py", "parse_diag_to_csv.py
 
 REQUIRED = (
     [
-        "SKILL.md",
+        "SKILL.md", "references/feedback_routing.md",
         "generate/SKILL.md", "generate/knowledge.md",
         "migrate/SKILL.md", "migrate/scripts/migrate_fault_check.py", "migrate/scripts/sync_engine.py",
         "migrate/references/mapping_table.md", "migrate/references/script_check.md",
