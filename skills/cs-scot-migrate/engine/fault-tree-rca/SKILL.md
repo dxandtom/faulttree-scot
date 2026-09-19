@@ -12,7 +12,7 @@ description: 综合根因分析。输入故障子树和各指标的解析事实�
 三步做完（路径以 runner 打印的"结果目录"为准）：
 
 1. 运行 `python "<本技能目录>/scripts/draft_rca.py" <结果目录>/rca_input.json`，生成候选清单 `rca_draft.json`：所有"成立"的节点已经列成候选，根到叶子的路径和证据已预填，每个候选已自动定档。不要自己逐个节点翻找候选。
-2. 只有清单里存在冲突候选（`conflict_nodes` 非空）时，写一份裁决单 `<结果目录>/decisions.json`：一个候选一条，只写判定与理由（格式见 finalize_rca.py 文件头）。没有冲突候选就跳过这一步。
+2. 只有清单里存在冲突候选（`conflict_nodes` 非空）时，写一份裁决单 `<结果目录>/decisions.json`：一个候选一条，只写判定与理由（格式见 finalize_rca.py 文件头）。理由、注意、卡点这些自由文本用当前对话的语言写：用户用英文提问就写英文，脚本会原样带进 rca.json 的中英两个版本。没有冲突候选就跳过这一步。
 3. 运行 `python "<本技能目录>/scripts/finalize_rca.py" <结果目录>/rca_draft.json [<结果目录>/decisions.json] -o <结果目录>/rca.json`（有 `assets/tree/solutions.json` 时加 `--solutions`，再加 `--rca-input <结果目录>/rca_input.json` 带上 tree_issues），由脚本拼装 rca.json，不要手写。合成脚本自带结构检查，报错就改裁决单重跑；合成成功即为最终交付，不用再跑校验。
 
 然后按 cs-scot-execute 的第 4 步渲染报告并汇报。
@@ -86,7 +86,7 @@ finalize_rca.py 在合成时检查：候选一条不许漏裁决；确证的条�
 
 ## 报告与汇报
 
-`scripts/render_report.py <rca.json> --tree tree/<场景>.tree_index.json [--lang en]` 渲染三份文件：`rca_report.md`（完整报告）、`rca_tree.txt`（树视图，只展开确诊、疑似、缺数据所在的路径）、`rca_reply.md`（聊天框回复稿：树视图 + 确证根因表 + 疑似表 + 待确认）。最终回复的正文就是 rca_reply.md 的全文，原样贴出，前面加执行过程，只在末尾的"补充说明"里写自己的解读（同一病根归组、处理优先级、需要人复核的疑点），数字以渲染段落为准。用户用英文提问（整段英文才算，混杂按中文）时，渲染加 `--lang en`：标题、表头、标签、判定词由脚本输出英文，节点名、判据、方案取树里存的 `name_en`、`condition_en` 和 `solutions.json` 的 `en`，没有英文的地方回退中文；回复稿里剩下的中文自由文本（原因、注意、卡点）逐句直译，证据行原文保留，结构一行不改，具体规则见场景技能 `references/reply_format.md`。
+`scripts/render_report.py <rca.json> --tree tree/<场景>.tree_index.json [--lang en]` 渲染三份文件：`rca_report.md`（完整报告）、`rca_tree.txt`（树视图，只展开确诊、疑似、缺数据所在的路径）、`rca_reply.md`（聊天框回复稿：树视图 + 确证根因表 + 疑似表 + 待确认）。最终回复的正文就是 rca_reply.md 的全文，原样贴出，前面加执行过程，只在末尾的"补充说明"里写自己的解读（同一病根归组、处理优先级、需要人复核的疑点），数字以渲染段落为准。用户用英文提问（整段英文才算，混杂按中文）时，渲染加 `--lang en`：标题、表头、标签、判定词由脚本输出英文，节点名、判据、方案取树里存的 `name_en`、`condition_en` 和 `solutions.json` 的 `en`，脚本写进 rca.json 的机械说明（祖先注记、卡点、待确认原因、排除留痕）用同名 `_en` 字段的英文版，没有英文的地方回退中文。回复稿里可能剩下的中文只有分析脚本给出的事实原文（`how`、事实 reason）；证据行原文保留，结构一行不改，具体规则见场景技能 `references/reply_format.md`。
 
 ## 分工
 

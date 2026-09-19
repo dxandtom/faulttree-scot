@@ -15,6 +15,10 @@
 - 冲突条目(候选自身成立+强反证并存)→ **唯一交模型权衡的**,清单不定档。
 **模型的工作收窄为:只裁冲突条目**(md 形态无路径信息,退回逐条裁决)。
 
+机械说明中英并列:候选清单与 rca.json 里由本脚本生成的说明文字(卡点、层级矛盾、缺口分型、
+弱阴性注记等)同时给出英文版本,放在同名加 _en 的字段里;中文字段逐字不变(平台与评估按它解析)。
+节点英文名来自 rca_input 的 pruned_nodes.name_en(树里有才有),没有英文名的节点回退中文名。
+
 用法:python draft_rca.py <rca_input.json> [-o <rca_draft.json>]   # 缺省写在输入同目录
 """
 from __future__ import annotations
@@ -37,6 +41,52 @@ _README = (
     "(只含需要你裁的条目;全自动时可不写),然后跑 finalize_rca.py <本清单> [裁决单] 机械合成 "
     "rca.json——不要手写 rca.json。"
 )
+
+
+# 机械说明的中英模板:zh 逐字等于原有输出,en 供 render_report / render_tree --lang en 使用
+_L = {
+    "absent_ok": ("absent=true(缺失类:未出现=成立)", "absent=true (absence class: not present = holds)"),
+    "hit": ("命中原文:「{h}」", "matched text: 「{h}」"),
+    "no_facts": ("无任何事实(没人绑/缺数据源)", "no facts at all (nothing bound / data source missing)"),
+    "other_source": ("另有 {n} 条存在类绑定未命中(如:{ex})——存在类的未命中=该份数据里没看见,不构成反证,caveat 提一笔即可",
+                     "{n} other presence-class binding(s) did not match (e.g. {ex}); a presence-class miss only means "
+                     "not seen in this data and is not counter-evidence; mention it in the caveat"),
+    "gap_no_data": ("数据不足(缺数据)", "insufficient data (data missing)"),
+    "gap_cannot": ("数据在,无法判断", "data present, cannot judge"),
+    "gap_mixed": ("部分缺数据/部分无法判断", "partly missing data / partly cannot judge"),
+    "uncovered": ("未覆盖(没人绑/缺数据)", "not covered (nothing bound / data missing)"),
+    "kind_refuted": ("实测不成立", "observed not holding"),
+    "kind_conflict": ("证据冲突(成立与强反证并存)", "conflicting evidence (holds and strong counter-evidence coexist)"),
+    "blocked_hint": ("上级「{node}」({nid}){kind}", "ancestor 「{node}」({nid}) {kind}"),
+    "note_actual": ("(实际值:{a})", " (observed: {a})"),
+    "note": ("层级矛盾:候选「{cand}」实测成立,但上级「{node}」{kind}{actual}——可能该上级绑定假阴,或候选命中系背景;"
+             "人复核前不升确证(该上级判断方法确认写错的,走调优表清其绑定→未绑定默认放行,下轮即确证)",
+             "Hierarchy contradiction: candidate 「{cand}」 holds as observed, but ancestor 「{node}」 {kind}{actual}; "
+             "the ancestor binding may be a false negative, or the candidate hit may be background; not promoted to "
+             "confirmed before human review (if the ancestor's judgment method is confirmed wrong, clear its binding "
+             "in the tuning table; an unbound ancestor passes by default and the next run confirms)"),
+    "conflict_note": ("同节点成立与不成立并存(真冲突),权衡后归档并写 caveat",
+                      "The same node both holds and does not hold (genuine conflict); weigh both sides, file it and write a caveat"),
+}
+_TRI_EN = {"成立": "holds", "不成立": "does not hold", "冲突": "conflict", "数据不足": "insufficient data"}
+
+
+def _t(key: str, lang: str = "zh", **kw) -> str:
+    return _L[key][0 if lang == "zh" else 1].format(**kw)
+
+
+def _name(n: dict, lang: str) -> str:
+    """节点显示名:en 且有 name_en / node_en 用英文,否则中文。"""
+    if lang == "en":
+        return str(n.get("name_en") or n.get("node_en") or n.get("name") or n.get("node") or "")
+    return str(n.get("name") or n.get("node") or "")
+
+
+def _put(d: dict, key: str, zh: str, en: str) -> None:
+    """写中文字段;英文与中文不同才写 <key>_en(纯数字/原文的说明两边一样,不重复存)。"""
+    d[key] = zh
+    if en != zh:
+        d[key + "_en"] = en
 
 
 def _weak_neg(f) -> bool:
@@ -68,8 +118,8 @@ def _pick(facts, want: bool):
     return None
 
 
-def _actual(f: dict) -> str:
-    """事实 → 简短的机械 actual 串(数字逐字,不加工)。"""
+def _actual(f: dict, lang: str = "zh") -> str:
+    """事实 → 简短的机械 actual 串(数字逐字,不加工;只有固定提示语按语言取)。"""
     if not f:
         return ""
     bits = []
@@ -78,14 +128,18 @@ def _actual(f: dict) -> str:
         if f.get(k) is not None:
             bits.append(f"{k}={f[k]}")
     if f.get("absent"):
-        bits.append("absent=true(缺失类:未出现=成立)")
+        bits.append(_t("absent_ok", lang))
     if f.get("evidence"):                                # S 脚本证据标签:实体+命中原文+来源文件,比裸 hits 全
         bits.append(";".join(str(x)[:220] for x in f["evidence"][:2]))
     elif f.get("hits"):
-        bits.append(f"命中原文:「{f['hits'][0]}」")
+        bits.append(_t("hit", lang, h=f['hits'][0]))
     if not bits and f.get("reason"):
         bits.append(str(f["reason"])[:120])
     return ";".join(str(b) for b in bits)[:400]
+
+
+def _put_actual(e: dict, f: dict, key: str = "actual") -> None:
+    _put(e, key, _actual(f), _actual(f, "en"))
 
 
 def _ev(nid: str, n: dict) -> dict:
@@ -93,6 +147,8 @@ def _ev(nid: str, n: dict) -> dict:
     cond = n.get("condition") or ""
     has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond
     e = {"node": n.get("name"), "node_id": nid, "condition": cond}
+    if n.get("name_en"):
+        e["node_en"] = n["name_en"]
     facts = n.get("facts") or []
     if n.get("pass_through") or not has_cond:
         e["judgment"] = "无独立条件"
@@ -101,30 +157,31 @@ def _ev(nid: str, n: dict) -> dict:
     e["judgment"] = tri
     if tri in ("成立", "冲突"):
         f = _pick(facts, True)
-        e["actual"] = _actual(f)
+        _put_actual(e, f)
         if f and f.get("explain"):
             e["how"] = f["explain"]
         if tri == "冲突":
             g = _pick(facts, False)
-            e["conflict_actual"] = _actual(g)
+            _put_actual(e, g, "conflict_actual")
             if g and g.get("explain"):
                 e["conflict_how"] = g["explain"]
         else:
             misses = [x for x in facts if x.get("status") == "ok" and x.get("predicate_satisfied") is False]
             if misses:                                   # 存在类弱阴性:如实记一笔,但不拉低判定
-                e["other_source_note"] = (f"另有 {len(misses)} 条存在类绑定未命中"
-                                          f"(如:{(misses[0].get('explain') or '')[:80]})"
-                                          "——存在类的未命中=该份数据里没看见,不构成反证,caveat 提一笔即可")
+                ex = (misses[0].get('explain') or '')[:80]
+                _put(e, "other_source_note", _t("other_source", "zh", n=len(misses), ex=ex),
+                     _t("other_source", "en", n=len(misses), ex=ex))
     elif tri == "不成立":
         f = _pick(facts, False)
-        e["actual"] = _actual(f)
+        _put_actual(e, f)
         if f and f.get("explain"):
             e["how"] = f["explain"]
     else:
-        e["actual"] = "" if facts else "无任何事实(没人绑/缺数据源)"
+        _put(e, "actual", "" if facts else _t("no_facts"), "" if facts else _t("no_facts", "en"))
         rs = [f.get("reason") for f in facts if f.get("reason")]
         if rs:
             e["actual"] = str(rs[0])[:160]
+            e.pop("actual_en", None)
         _apply_gap(e, facts)
     return e
 
@@ -138,10 +195,11 @@ def _apply_gap(e: dict, facts) -> None:
     gk = ("cannot_judge" if kinds == {"cannot_judge"}
           else "no_data" if kinds == {"no_data"} else "mixed")
     e["gap_kind"] = gk
-    tag = {"no_data": "数据不足(缺数据)", "cannot_judge": "数据在,无法判断",
-           "mixed": "部分缺数据/部分无法判断"}[gk]
+    key = {"no_data": "gap_no_data", "cannot_judge": "gap_cannot", "mixed": "gap_mixed"}[gk]
     if not str(e.get("actual") or "").startswith(("数据不足", "数据在,", "部分缺")):
-        e["actual"] = (tag + (":" + e["actual"] if e.get("actual") else ""))[:200]
+        base_en = e.get("actual_en") or e.get("actual")
+        e["actual_en"] = (_t(key, "en") + (":" + base_en if base_en else ""))[:200]
+        e["actual"] = (_t(key) + (":" + e["actual"] if e.get("actual") else ""))[:200]
 
 
 def _path(nid: str, nodes: dict, limit=400):
@@ -197,7 +255,7 @@ def draft_pruned(data: dict) -> dict:
                  "evidence_prefilled": ev}
         f = _pick(n.get("facts") or [], True)
         if f:
-            entry["support_hint"] = _actual(f)
+            _put(entry, "support_hint", _actual(f), _actual(f, "en"))
         if anc_insuf:
             entry["ancestor_insufficient"] = (
                 "祖先节点未验证(无绑定/数据不足/无法判断):"
@@ -229,13 +287,18 @@ def draft_pruned(data: dict) -> dict:
                 if c.get("pass_through") or not ccond or "无条件" in ccond or "无判断" in ccond:
                     continue
                 cf = c.get("facts") or []
-                kids.append({"node": c.get("name"), "node_id": cid,
-                             "状态": _tri(cf) if cf else "未覆盖(没人绑/缺数据)"})
+                st = _tri(cf) if cf else _t("uncovered")
+                kid = {"node": c.get("name"), "node_id": cid, "状态": st,
+                       "status_en": _TRI_EN.get(st) or _t("uncovered", "en")}
+                if c.get("name_en"):
+                    kid["node_en"] = c["name_en"]
+                kids.append(kid)
             for u in unc:
                 uid = u.get("id") if isinstance(u, dict) else u
                 if uid and not any(k["node_id"] == uid for k in kids):
                     nm = (u.get("name") if isinstance(u, dict) else "") or unc_names.get(uid, "")
-                    kids.append({"node": nm, "node_id": uid, "状态": "未覆盖(没人绑/缺数据)"})
+                    kids.append({"node": nm, "node_id": uid, "状态": _t("uncovered"),
+                                 "status_en": _t("uncovered", "en")})
             if kids:
                 entry["children_status"] = kids
             entry["leaf_pending"] = ("非叶子/有未覆盖子因:叶子因待定(下级无一成立)——按本层命中确证,"
@@ -243,14 +306,16 @@ def draft_pruned(data: dict) -> dict:
         if refutes or gaps:
             # 层级矛盾 → 机械降疑似:卡点=离候选最近的带反证上级(最可指认)
             worst = (refutes or gaps)[-1]
-            kind = "实测不成立" if refutes else "证据冲突(成立与强反证并存)"
+            kind_key = "kind_refuted" if refutes else "kind_conflict"
             entry["auto_verdict"] = "probable"
-            entry["blocked_at_hint"] = f"上级「{worst['node']}」({worst['node_id']}){kind}"
-            entry["note"] = (
-                f"层级矛盾:候选「{n.get('name')}」实测成立,但上级「{worst['node']}」{kind}"
-                + (f"(实际值:{str(worst.get('actual'))[:120]})" if worst.get("actual") else "")
-                + "——可能该上级绑定假阴,或候选命中系背景;人复核前不升确证"
-                  "(该上级判断方法确认写错的,走调优表清其绑定→未绑定默认放行,下轮即确证)")
+            for lang in ("zh", "en"):
+                kind = _t(kind_key, lang)
+                wa = worst.get("actual_en") if lang == "en" and worst.get("actual_en") else worst.get("actual")
+                hint = _t("blocked_hint", lang, node=_name(worst, lang), nid=worst["node_id"], kind=kind)
+                note = _t("note", lang, cand=_name(n, lang), node=_name(worst, lang), kind=kind,
+                          actual=(_t("note_actual", lang, a=str(wa)[:120]) if worst.get("actual") else ""))
+                entry["blocked_at_hint" if lang == "zh" else "blocked_at_hint_en"] = hint
+                entry["note" if lang == "zh" else "note_en"] = note
             entry["draft_tier"] = "probable_auto(机械降档:候选成立+上级实测不成立/冲突=层级矛盾)"
             probable.append(entry)
         else:
@@ -264,9 +329,10 @@ def draft_pruned(data: dict) -> dict:
         "confirmed_candidates": confirmed,
         "probable_candidates": probable,
         "conflict_nodes": [{"node": nodes[nid].get("name"), "node_id": nid,
+                            **({"node_en": nodes[nid]["name_en"]} if nodes[nid].get("name_en") else {}),
                             "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
                             "evidence_prefilled": [_ev(p, nodes[p]) for p in _path(nid, nodes)],
-                            "note": "同节点成立与不成立并存(真冲突),权衡后归档并写 caveat"}
+                            "note": _t("conflict_note"), "note_en": _t("conflict_note", "en")}
                            for nid in sorted(conflict)],
         "excluded_candidates": [_ev(nid, nodes[nid]) for nid in sorted(refuted)],
         "undetermined_skeleton": [_ev(nid, nodes[nid]) for nid in sorted(insuf)],
@@ -281,7 +347,8 @@ def draft_md(data: dict) -> dict:
             f = c.get("fact") or {}
             tri = _tri([f]) if f else "数据不足"
             e = {"node": c.get("node"), "node_id": c.get("node_id"), "indicator": ind,
-                 "condition": (c.get("condition_text") or "")[:200], "actual": _actual(f)}
+                 "condition": (c.get("condition_text") or "")[:200]}
+            _put_actual(e, f)
             if f.get("explain"):
                 e["how"] = f["explain"]
             if tri == "数据不足":                          # md 形态同样带四态分型(与 _ev 同款)

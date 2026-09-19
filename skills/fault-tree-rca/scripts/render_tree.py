@@ -43,6 +43,13 @@ _TEXT = {
 }
 
 
+def txt(obj: dict, key: str, lang: str = "zh"):
+    """rca.json 里的说明字段:en 且有同名 _en 字段用英文,否则原文(中文或模型写的原样)。"""
+    if lang == "en" and (obj or {}).get(key + "_en"):
+        return obj[key + "_en"]
+    return (obj or {}).get(key)
+
+
 def node_name(nodes: dict, nid: str, lang: str = "zh") -> str:
     """节点显示名:en 且树里有 name_en 用英文,否则中文名(英文缺失回退中文)。"""
     n = nodes.get(nid) or {}
@@ -192,19 +199,19 @@ def render_tree(doc: dict, nodes: dict, root: str, lang: str = "zh", solutions: 
         if cond and cond != "(无独立条件)":
             items.append((T["cond"], cond, 120))
         if tag == "undetermined":
-            items.append((T["missing"], it.get("reason") or T["missing_default"], 200))
+            items.append((T["missing"], txt(it, "reason", lang) or T["missing_default"], 200))
         else:
             if e.get("actual"):
-                items.append((T["evidence"], e["actual"], 300))
+                items.append((T["evidence"], txt(e, "actual", lang), 300))
             elif it.get("support"):
-                items.append((T["evidence"], it["support"], 300))
+                items.append((T["evidence"], txt(it, "support", lang), 300))
             if e.get("how"):
                 items.append((T["basis"], e["how"], 160))
             if tag == "probable" and it.get("blocked_at"):
-                items.append((T["blocked"], it["blocked_at"], 160))
+                items.append((T["blocked"], txt(it, "blocked_at", lang), 160))
             if it.get("caveats"):
-                items.append((T["caveat"], it["caveats"], 200))
-            sol = it.get("recommend_solution")
+                items.append((T["caveat"], txt(it, "caveats", lang), 200))
+            sol = txt(it, "recommend_solution", lang)
             if lang == "en" and (solutions.get(nid) or {}).get("en"):
                 sol = solutions[nid]["en"]                 # 英文方案(solutions.json 的 en,没有回退)
             if sol:
@@ -233,7 +240,9 @@ def render_tree(doc: dict, nodes: dict, root: str, lang: str = "zh", solutions: 
             return
         if nid not in expand:
             return
-        if nid in flags and flags[nid][0] == "undetermined":   # 缺数据:卡点在此,子树折叠
+        if nid in flags and flags[nid][0] == "undetermined" and not any(k in expand for k in kids):
+            # 缺数据:卡点在此,子树折叠;子树里另有确诊/疑似/缺数据节点时不折叠,继续往下展开
+            # (否则挂在缺数据上级下面的确诊根因会从树视图里消失,头行计数与树对不上)
             lines.append(child_prefix + T["fold_sub"].format(n=_count(nid)))
             return
         on = [k for k in kids if k in expand]

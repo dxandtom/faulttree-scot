@@ -97,6 +97,13 @@ def _sym(j: str) -> str:
     return "~"                                           # 存疑/语义近似/评分制等
 
 
+def _txt(obj: dict, key: str, lang: str):
+    """rca.json 里的说明字段:en 且有同名 _en 字段用英文,否则原文。"""
+    if lang == "en" and (obj or {}).get(key + "_en"):
+        return obj[key + "_en"]
+    return (obj or {}).get(key)
+
+
 def _jd_text(j, lang: str) -> str:
     """判定词:en 时把已知的中文判定词译成英文,其余原样。"""
     s = str(j or "")
@@ -146,24 +153,24 @@ def _ev_block(e: dict, indent="  ", lang: str = "zh") -> list:
     if e.get("condition") and e["condition"] != "(无独立判据)":
         lines.append(f"{indent}- {T['ev_cond']}:{_one(e['condition'], 300)}")
     if e.get("actual"):
-        lines.append(f"{indent}- {T['ev_actual']}:{_one(e['actual'], 500)}")
+        lines.append(f"{indent}- {T['ev_actual']}:{_one(_txt(e, 'actual', lang), 500)}")
     if e.get("how"):
         lines.append(f"{indent}- {T['ev_how']}:{_one(e['how'], 400)}")
     if e.get("conflict_actual"):
-        lines.append(f"{indent}- {T['ev_conflict']}:{_one(e['conflict_actual'], 300)}"
+        lines.append(f"{indent}- {T['ev_conflict']}:{_one(_txt(e, 'conflict_actual', lang), 300)}"
                      + (f"({T['ev_conflict_how']}:{_one(e.get('conflict_how'), 200)})" if e.get("conflict_how") else ""))
     if e.get("other_source_note"):
-        lines.append(f"{indent}- {T['ev_note']}:{_one(e['other_source_note'], 200)}")
+        lines.append(f"{indent}- {T['ev_note']}:{_one(_txt(e, 'other_source_note', lang), 200)}")
     return lines
 
 
 def _solution(c: dict, lang: str, solutions: dict | None) -> str:
-    """根因的推荐方案:en 且 solutions.json 有该节点的 en 就用英文,否则 rca.json 里的原文。"""
+    """根因的推荐方案:en 且 solutions.json 有该节点的 en 就用英文,否则 rca.json 里的原文(含 _en)。"""
     if lang == "en" and solutions:
         s = (solutions.get(str(c.get("node_id") or "")) or {}).get("en")
         if s:
             return str(s)
-    return c.get("recommend_solution") or ""
+    return _txt(c, "recommend_solution", lang) or ""
 
 
 def render(doc: dict, tree_text: str | None = None, lang: str = "zh",
@@ -187,7 +194,7 @@ def render(doc: dict, tree_text: str | None = None, lang: str = "zh",
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
             cand = (ev or [{}])[-1]
-            brief = _cell(cand.get("actual") or cand.get("how") or c.get("support"), 120)
+            brief = _cell(_txt(cand, "actual", lang) or cand.get("how") or _txt(c, "support", lang), 120)
             L.append(f"| {i} | {_cell(nm(c.get('Root_cause'), c.get('node_id')), 80)} | {brief} | {_cell(_solution(c, lang, solutions), 90) or '—'} |")
         L.append("")
         for i, c in enumerate(conf, 1):
@@ -204,7 +211,7 @@ def render(doc: dict, tree_text: str | None = None, lang: str = "zh",
                          + "、".join(f"「{nm(u.get('node'), u.get('node_id'))}」" for u in unv[:5])
                          + ("…" if len(unv) > 5 else ""))
             if c.get("caveats"):
-                L.append(T["caveat"].format(t=_one(c['caveats'], 500)))
+                L.append(T["caveat"].format(t=_one(_txt(c, "caveats", lang), 500)))
             if _solution(c, lang, solutions):
                 L.append(T["sol"].format(t=_one(_solution(c, lang, solutions), 400)))
             L.append("")
@@ -214,10 +221,10 @@ def render(doc: dict, tree_text: str | None = None, lang: str = "zh",
         for i, c in enumerate(prob, 1):
             ev = c.get("evidence_path") or []
             L += [f"### {i}. {nm(c.get('Root_cause'), c.get('node_id'))} ⚠(confidence={c.get('confidence', '?')})", "",
-                  T["blocked"].format(t=_one(c.get('blocked_at'), 300) or T["unmarked"]),
+                  T["blocked"].format(t=_one(_txt(c, "blocked_at", lang), 300) or T["unmarked"]),
                   T["ppath"].format(p=_path_line(ev, lang, nm))]
             if c.get("caveats"):
-                L.append(T["reason"].format(t=_one(c['caveats'], 600)))
+                L.append(T["reason"].format(t=_one(_txt(c, "caveats", lang), 600)))
             if ev:
                 L.append(T["cand"])
                 L += _ev_block(ev[-1], "    ", lang)
@@ -243,13 +250,13 @@ def render(doc: dict, tree_text: str | None = None, lang: str = "zh",
                  + (T["und_mixed"].format(m=mx) if mx else "") + ")") if (cj or mx) else ""
         L += [T["und"].format(s=split), ""]
         for c in und[:30]:
-            L.append(f"- {nm((c.get('Fault_tree_path') or ['?'])[-1], c.get('node_id'))}:{_one(c.get('reason'), 200)}")
+            L.append(f"- {nm((c.get('Fault_tree_path') or ['?'])[-1], c.get('node_id'))}:{_one(_txt(c, 'reason', lang), 200)}")
         if len(und) > 30:
             L.append(T["und_more"].format(n=len(und) - 30))
         L.append("")
 
     if doc.get("excluded_note"):
-        L += [T["excl"], "", _one(doc["excluded_note"], 1500), ""]
+        L += [T["excl"], "", _one(_txt(doc, "excluded_note", lang), 1500), ""]
 
     unc = ti.get("uncovered_condition_nodes") or []
     orp = ti.get("orphan_node_ids") or []
@@ -285,7 +292,7 @@ def render_reply(doc: dict, tree_text: str | None = None, lang: str = "zh",
         for i, c in enumerate(conf, 1):
             ev = c.get("evidence_path") or []
             cand = (ev or [{}])[-1]
-            match = " / ".join(x for x in (cand.get("actual"), cand.get("how")) if x) or c.get("support") or "—"
+            match = " / ".join(x for x in (_txt(cand, "actual", lang), cand.get("how")) if x) or _txt(c, "support", lang) or "—"
             path_names = [nm(p, None) for p in (c.get("Fault_tree_path") or [])]
             L.append(f"| {i} | {_cell_full(nm(c.get('Root_cause'), c.get('node_id')), 80, lang)} | {_cell_full(' → '.join(path_names), 160, lang)} "
                      f"| {_cell_full(match, lang=lang)} | {_cell_full(_solution(c, lang, solutions), 200, lang) or '—'} |")
@@ -295,13 +302,13 @@ def render_reply(doc: dict, tree_text: str | None = None, lang: str = "zh",
         for i, c in enumerate(prob, 1):
             ev = c.get("evidence_path") or []
             cand = (ev or [{}])[-1]
-            L.append(f"| {i} | {_cell_full(nm(c.get('Root_cause'), c.get('node_id')), 80, lang)} | {_cell_full(c.get('blocked_at'), 160, lang) or '—'} "
-                     f"| {_cell_full(cand.get('actual') or c.get('support'), lang=lang)} | {_cell_full(c.get('caveats'), 300, lang) or '—'} |")
+            L.append(f"| {i} | {_cell_full(nm(c.get('Root_cause'), c.get('node_id')), 80, lang)} | {_cell_full(_txt(c, 'blocked_at', lang), 160, lang) or '—'} "
+                     f"| {_cell_full(_txt(cand, 'actual', lang) or _txt(c, 'support', lang), lang=lang)} | {_cell_full(_txt(c, 'caveats', lang), 300, lang) or '—'} |")
         L.append("")
     if und:
         L += [T["r_und"], ""]
         for c in und[:20]:
-            L.append(f"- {nm((c.get('Fault_tree_path') or ['?'])[-1], c.get('node_id'))}:{_cell_full(c.get('reason'), 200, lang)}")
+            L.append(f"- {nm((c.get('Fault_tree_path') or ['?'])[-1], c.get('node_id'))}:{_cell_full(_txt(c, 'reason', lang), 200, lang)}")
         if len(und) > 20:
             L.append(T["r_und_more"].format(n=len(und) - 20))
         L.append("")

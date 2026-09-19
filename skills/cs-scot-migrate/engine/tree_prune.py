@@ -281,6 +281,8 @@ def prune(index: dict, results: dict) -> dict:
                and (e.get("fact") or {}).get("predicate_satisfied") is True for e in ent):
             ent = [e for e in ent if (e.get("fact") or {}).get("status") != "insufficient_data"]
         rec = {"name": n.get("name"), "parent": n.get("parent"), "level": n.get("level")}
+        if n.get("name_en"):                                        # 英文名(树里有才带):候选清单与 rca.json 的英文说明用
+            rec["name_en"] = n["name_en"]
         ch = n.get("children") or []
         if ch:                                                      # 非叶子:RCA 据此知道"这不是根因、下面还有更深的因"
             unc = [c for c in ch if c in nodes and not nodes[c].get("pass_through")
