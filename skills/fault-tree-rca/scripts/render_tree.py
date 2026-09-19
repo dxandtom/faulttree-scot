@@ -10,8 +10,10 @@
 - 详情:标记节点下带 判据(问题)/ 证据(实测+依据,逐字来自 evidence_path)/ 方案
   (recommend_solution)/ 卡点或缺什么。
 符号:✅确诊 ⚠疑似 ?缺数据 ✓成立 ✗不成立 ·未判定/无独立条件
+语言:--lang zh(默认)/ en。en 时节点名用树里的 name_en、判据用 condition_en、方案用 solutions.json 的 en,
+固定文案(标签、折叠提示、头行)用英文;树里没有英文的地方回退中文,证据原文一律不译。
 
-用法:python render_tree.py <rca.json> --tree <tree_index.json> [-o rca_tree.txt]
+用法:python render_tree.py <rca.json> --tree <tree_index.json> [-o rca_tree.txt] [--lang zh|en]
 render_report.py 加 --tree 会把同一棵树塞进报告首节并写 rca_tree.txt。
 """
 from __future__ import annotations
@@ -24,6 +26,38 @@ from pathlib import Path
 
 _SYM = (("不成立", "✗"), ("数据不足", "?"), ("冲突", "⚠"), ("无独立条件", "·"), ("成立", "✓"))
 _NID_RE = re.compile(r"\((\w+)\)\s*$")
+# 固定文案按语言取;zh 一字不改(平台侧按它解析),en 与 cs-scot-execute/references/reply_format.md 的对照表一致
+_TEXT = {
+    "zh": {"head": "树视图:确诊 {c} · 疑似 {p} · 缺数据 {u}(只展开这些节点所在路径;✅确诊 ⚠疑似 ?缺数据 ✓成立 ✗不成立 ·未判定)",
+           "tag": {"confirmed": "确诊", "probable": "疑似", "undetermined": "缺数据"},
+           "cond": "判据", "missing": "缺", "missing_default": "数据不足", "evidence": "证据",
+           "basis": "依据", "blocked": "卡点", "caveat": "注意", "solution": "方案",
+           "more": "…(详见报告全文)", "fold_sub": "└─ …(子树 {n} 个节点未判定,数据补齐后重跑)",
+           "fold_sib": "…(其余 {n} 个分支未涉及)", "none": "└─ …(本轮无确诊/疑似/缺数据节点,树未展开)"},
+    "en": {"head": "Tree view: confirmed {c} · probable {p} · missing data {u} (only paths to these nodes are expanded; ✅confirmed ⚠probable ?missing data ✓holds ✗does not hold ·not evaluated)",
+           "tag": {"confirmed": "Confirmed", "probable": "Probable", "undetermined": "Missing data"},
+           "cond": "Criterion", "missing": "Missing", "missing_default": "insufficient data", "evidence": "Evidence",
+           "basis": "Basis", "blocked": "Blocked at", "caveat": "Caveat", "solution": "Solution",
+           "more": "…(see full report)", "fold_sub": "└─ …({n} nodes in subtree not evaluated; rerun after data is supplied)",
+           "fold_sib": "…({n} more branches not involved)", "none": "└─ …(no confirmed/probable/missing-data node this round; tree not expanded)"},
+}
+
+
+def node_name(nodes: dict, nid: str, lang: str = "zh") -> str:
+    """节点显示名:en 且树里有 name_en 用英文,否则中文名(英文缺失回退中文)。"""
+    n = nodes.get(nid) or {}
+    if lang == "en" and n.get("name_en"):
+        return str(n["name_en"])
+    return str(n.get("name"))
+
+
+def load_solutions(tree_path: Path) -> dict:
+    """tree_index 同目录的 solutions.json({nid: {zh, en}}),没有就空字典。"""
+    p = Path(tree_path).parent / "solutions.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:  # noqa: BLE001 — 方案表坏了不影响树视图
+        return {}
 
 
 def _sym(j: str) -> str:
@@ -38,14 +72,14 @@ def _one(s, n=160) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def _compact(text, n: int) -> str:
+def _compact(text, n: int, lang: str = "zh") -> str:
     """树视图里的详情一律压成一行:去空行、去行首编号后的多余空白、多空格合一,条目之间用「;」
     连;超过 n 字符截断并指向报告全文——树视图是"结果落在哪"的鸟瞰,全文在 rca_report.md 里。"""
     lines = [" ".join(ln.split()) for ln in str(text or "").replace("\r", "").split("\n")]
     lines = [ln for ln in lines if ln]
     t = ";".join(lines) if len(lines) > 1 else (lines[0] if lines else "")
     t = t.replace(":;", ":").replace(";;", ";")
-    return t if len(t) <= n else t[: n - 1] + "…(详见报告全文)"     # 标记不含空格,折行拆不开
+    return t if len(t) <= n else t[: n - 1] + _TEXT[lang]["more"]     # 标记不含空格,折行拆不开
 
 
 def _block(label: str, text, width: int = 72) -> list:
@@ -119,7 +153,9 @@ def collect(doc: dict, nodes: dict):
 _TAG = {"confirmed": ("✅", "确诊"), "probable": ("⚠", "疑似"), "undetermined": ("?", "缺数据")}
 
 
-def render_tree(doc: dict, nodes: dict, root: str) -> str:
+def render_tree(doc: dict, nodes: dict, root: str, lang: str = "zh", solutions: dict | None = None) -> str:
+    T = _TEXT.get(lang) or _TEXT["zh"]
+    solutions = solutions or {}
     flags, ev, failed = collect(doc, nodes)
     if root is None or root not in nodes:
         return "(tree_index 无根节点,树视图略)"
@@ -139,10 +175,9 @@ def render_tree(doc: dict, nodes: dict, root: str) -> str:
         return "·"
 
     def label(nid):
-        n = nodes[nid]
-        s = f"{symbol(nid)} {n.get('name')}"
+        s = f"{symbol(nid)} {node_name(nodes, nid, lang)}"
         if nid in flags:
-            s += f"  [{_TAG[flags[nid][0]][1]}]"
+            s += f"  [{T['tag'][flags[nid][0]]}]"
         return s
 
     def details(nid):
@@ -152,26 +187,31 @@ def render_tree(doc: dict, nodes: dict, root: str) -> str:
         e = ev.get(nid) or {}
         items = []                                        # (标签, 文本, 上限):树里只放摘要,全文看报告
         cond = e.get("condition") or nodes[nid].get("condition")
+        if lang == "en" and nodes[nid].get("condition_en"):
+            cond = nodes[nid]["condition_en"]            # 英文判据(树里有才用,没有回退中文)
         if cond and cond != "(无独立条件)":
-            items.append(("判据", cond, 120))
+            items.append((T["cond"], cond, 120))
         if tag == "undetermined":
-            items.append(("缺", it.get("reason") or "数据不足", 200))
+            items.append((T["missing"], it.get("reason") or T["missing_default"], 200))
         else:
             if e.get("actual"):
-                items.append(("证据", e["actual"], 300))
+                items.append((T["evidence"], e["actual"], 300))
             elif it.get("support"):
-                items.append(("证据", it["support"], 300))
+                items.append((T["evidence"], it["support"], 300))
             if e.get("how"):
-                items.append(("依据", e["how"], 160))
+                items.append((T["basis"], e["how"], 160))
             if tag == "probable" and it.get("blocked_at"):
-                items.append(("卡点", it["blocked_at"], 160))
+                items.append((T["blocked"], it["blocked_at"], 160))
             if it.get("caveats"):
-                items.append(("注意", it["caveats"], 200))
-            if it.get("recommend_solution"):
-                items.append(("方案", it["recommend_solution"], 200))
+                items.append((T["caveat"], it["caveats"], 200))
+            sol = it.get("recommend_solution")
+            if lang == "en" and (solutions.get(nid) or {}).get("en"):
+                sol = solutions[nid]["en"]                 # 英文方案(solutions.json 的 en,没有回退)
+            if sol:
+                items.append((T["solution"], sol, 200))
         out = []
         for label, text, n in items:
-            out += _block(label, _compact(text, n))
+            out += _block(label, _compact(text, n, lang))
         return out
 
     lines = []
@@ -194,7 +234,7 @@ def render_tree(doc: dict, nodes: dict, root: str) -> str:
         if nid not in expand:
             return
         if nid in flags and flags[nid][0] == "undetermined":   # 缺数据:卡点在此,子树折叠
-            lines.append(child_prefix + f"└─ …(子树 {_count(nid)} 个节点未判定,数据补齐后重跑)")
+            lines.append(child_prefix + T["fold_sub"].format(n=_count(nid)))
             return
         on = [k for k in kids if k in expand]
         shown_off = [k for k in kids if k not in expand and k in failed]        # 已知不成立的兄弟
@@ -206,7 +246,7 @@ def render_tree(doc: dict, nodes: dict, root: str) -> str:
             last = i == len(items) - 1
             if kind == "other":
                 lines.append(child_prefix + ("└─ " if last else "├─ ")
-                             + f"…(其余 {len(other)} 个分支未涉及)")
+                             + T["fold_sib"].format(n=len(other)))
             elif k in expand:
                 walk(k, child_prefix, last, False, False)
             else:
@@ -223,10 +263,9 @@ def render_tree(doc: dict, nodes: dict, root: str) -> str:
     n_c = sum(1 for t, _ in flags.values() if t == "confirmed")
     n_p = sum(1 for t, _ in flags.values() if t == "probable")
     n_u = sum(1 for t, _ in flags.values() if t == "undetermined")
-    head = [f"树视图:确诊 {n_c} · 疑似 {n_p} · 缺数据 {n_u}(只展开这些节点所在路径;"
-            "✅确诊 ⚠疑似 ?缺数据 ✓成立 ✗不成立 ·未判定)", ""]
+    head = [T["head"].format(c=n_c, p=n_p, u=n_u), ""]
     if not flags:
-        return "\n".join(head + [f"{nodes[root].get('name')}", "└─ …(本轮无确诊/疑似/缺数据节点,树未展开)"])
+        return "\n".join(head + [node_name(nodes, root, lang), T["none"]])
     walk(root, "", True, True, False)
     return "\n".join(head + lines)
 
@@ -240,11 +279,13 @@ def main() -> int:
     ap.add_argument("rca")
     ap.add_argument("--tree", required=True, help="tree/<场景>.tree_index.json")
     ap.add_argument("-o", "--out", help="输出 txt(缺省:rca.json 同目录 rca_tree.txt)")
+    ap.add_argument("--lang", choices=("zh", "en"), default="zh",
+                    help="输出语言:en 用树里的英文名/英文判据与 solutions.json 的英文方案,缺失回退中文")
     a = ap.parse_args()
     src = Path(a.rca)
     doc = json.loads(src.read_text(encoding="utf-8"))
     nodes, root = _load_tree(Path(a.tree))
-    txt = render_tree(doc, nodes, root)
+    txt = render_tree(doc, nodes, root, lang=a.lang, solutions=load_solutions(Path(a.tree)))
     out = Path(a.out) if a.out else src.parent / "rca_tree.txt"
     out.write_text(txt + "\n", encoding="utf-8")
     print(txt)

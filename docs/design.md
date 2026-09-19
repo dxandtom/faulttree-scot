@@ -18,7 +18,7 @@
 | cs-scot-reflect | 评估 | 用用例库评估执行结果：对账、六类错误归因、通过率与得分；输出反馈 | 工具链开发者或平台 |
 | cs-scot-generate-optimize | 入口 | 生成与优化的统一入口：按输入判断走生成、导入优化、增删节点还是反馈处理 | 平台 |
 
-辅助部件：zip2csv（原始采集数据转成三张表，随场景技能内置）、fault-tree-rca-debate（辩论式根因分析引擎，与 fault-tree-rca 接在同一位置、可互换，交付出去的场景技能默认不带）。
+辅助部件：zip2csv（原始采集数据转成三张表，随场景技能内置）。
 
 ## 3. 一次完整的流程
 
@@ -72,7 +72,6 @@ skills/
   cs-scot-generate/            生成：SKILL.md、scripts/、references/（绑定格式、派发、绑定规则、数通接入）
   cs-scot-execute/             执行指引：SKILL.md、scripts/runner.py、check_data.py、references/
   fault-tree-rca/              根因分析：SKILL.md、scripts/（draft、finalize、render）、references/rca_rules.md
-  fault-tree-rca-debate/       辩论引擎：SKILL.md、scripts/、vendor/、references/engine_ops.md
   datacom-fault-tree-tester/   业务侧：SKILL.md、判断方法_规范.md、scripts/（共享解析库、格式检查）
   cs-scot-migrate/             迁移：SKILL.md、scripts/、references/、engine/（公共文件副本，单独安装用）
   cs-scot-reflect/             评估反思：SKILL.md、scripts/、references/

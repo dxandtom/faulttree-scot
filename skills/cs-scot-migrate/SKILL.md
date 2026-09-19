@@ -114,7 +114,7 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 - `multi`（部分表）：不动树结构，不新增节点。
 - `all`（全量表）：树结构以表为准，表里没出现的节点删除（三道防误删检查），只有判据的新行也建结构节点。
 
-表带 `Need_Optimize` 列时，内容动作只对 TRUE 行执行，FALSE 行只用来对照结构。全部 FALSE 且表与树一致，等于只刷新技能。表头识别、每一行的处理规则、清除判据的规则、三种模式的完整对照和防误删检查，见 `references/mapping_table.md`；收表前先读它。
+表带 `Need_Optimize` 列时，内容动作只对 TRUE 行执行，FALSE 行只用来对照结构。全部 FALSE 且表与树一致，等于只刷新技能。表带英文列（`L*_Name_EN`、`Diagnosis_Method_EN`、`Solution_EN`）时，英文名、英文判据、英文解决方案以表为准存进产物，不看标记；中文判据改了而英文列为空，英文判据清空。表头识别、每一行的处理规则、清除判据的规则、三种模式的完整对照和防误删检查，见 `references/mapping_table.md`；收表前先读它。
 
 ## 脚本自动做的事
 

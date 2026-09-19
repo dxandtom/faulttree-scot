@@ -20,6 +20,9 @@
   中文场景名保留在 index.scenario。节点多了可选 `meta`/`sheets` 字段(additive,老消费方忽略即可)。
 - **推荐解决方案**:`Recommend Solution(Chinese/English)` 列按节点收进 `tree/solutions.json`
   (不进树、不进判据、不进裁决上下文;RCA 报根因时按 node_id 点查,给结论附解决方案)。
+- **英文名与英文判据**:中英双列表里同层的英文格(`L n` 与 `L n(Chinese)` 成对时的 `L n`,或显式的
+  `L n(English)`)存为节点 `name_en`,`Judgment Condition`(英文)列存为 `condition_en`;只存不参与
+  建树与判据解析,供树视图与报告按用户语言输出。英文格为空就不存。
 
 用法:
     excel_to_tree_v2.py <xlsx> --list                          # 列出所有可输入的场景名(L2)+ 各自出处页签
@@ -113,6 +116,32 @@ def sheet_schema(header: List[str]):
             fallback[l] = rest
     primary.sort(key=lambda x: x[1])
     return primary, methods, metas, fallback
+
+
+_LEVEL_EN_RE = re.compile(r"^L(\d+)(?:\(English\)|_Name_EN)$", re.IGNORECASE)
+
+
+def sheet_en_cols(header: List[str]):
+    """表头 → (英文层级列 {层级: 列名}, 英文判据列名|None)。
+    英文层级列:显式的 L n(English) / L n_Name_EN;或中英双列时与 L n(Chinese) 成对的裸 L n 列。
+    英文判据列:Judgment Condition 中英双列里不带 Chinese 的那列(sheet_schema 去重时弃掉的那列)。"""
+    levels, _m, _me, fb = sheet_schema(header)
+    en_lvl: Dict[int, str] = {}
+    for h in header:
+        m = _LEVEL_EN_RE.match((h or "").strip())
+        if m:
+            en_lvl.setdefault(int(m.group(1)), h)
+    for col, lvl in levels:
+        if lvl in en_lvl or "chinese" not in col.lower():
+            continue
+        for c in fb.get(lvl) or ():
+            if "chinese" not in c.lower():
+                en_lvl[lvl] = c
+                break
+    jd_en = next((h for h in header
+                  if ("judgment condition" in (h or "").lower() and "chinese" not in h.lower())
+                  or (h or "").strip().lower() == "diagnosis_method_en"), None)
+    return en_lvl, jd_en
 
 
 def _lvl_value(row, col: str, fb_cols) -> str:
@@ -252,6 +281,7 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
         levels, methods, metas, fb = sheet_schema(header)
         if not levels:
             continue
+        en_lvl, jd_en_col = sheet_en_cols(header)
         # 推荐解决方案列(混血表英文表头,classify 不收):不进树/不进判据,单独按节点收集,
         # 供 RCA 报根因时点查输出——诊断结论"太干巴巴"的补丁,但绝不掺进裁决上下文。
         sol_cols = [(h, "zh" if "chinese" in h.lower() else "en")
@@ -290,6 +320,9 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
                 v = _clean_text(row.get(c))
                 if v:
                     meta.setdefault(tag, v)
+            cond_en = _clean_text(row.get(jd_en_col)) if (jd_en_col and mth) else ""
+            if cond_en and _is_skip_judgment(cond_en):
+                cond_en = ""
             parent_id, parts = None, []
             for j, (lvl, nm) in enumerate(path):
                 parts.append(nm)
@@ -301,9 +334,16 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
                     nodes[parent_id]["children"].append(nid)
                 if j == 0:
                     root_id = nid
+                if not nd.get("name_en") and lvl in en_lvl:
+                    en_name = (row.get(en_lvl[lvl]) or "").strip()
+                    if en_name and en_name != nm:
+                        nd["name_en"] = en_name
                 if j == len(path) - 1:
                     if name not in nd["sheets"]:
                         nd["sheets"].append(name)
+                    if cond_en:
+                        prev = nd.get("condition_en")
+                        nd["condition_en"] = (prev + "\n" + cond_en) if (prev and cond_en not in prev) else (prev or cond_en)
                     for tag, v in mth.items():
                         prev = nd["data_source"].get(tag)
                         nd["data_source"][tag] = (prev + "\n" + v) if (prev and v not in prev) else (prev or v)
@@ -487,7 +527,9 @@ def main() -> None:
     src_sheets = sorted({s for nd in index["nodes"].values() for s in nd.get("sheets", [])})
     n_cond = sum(1 for nd in index["nodes"].values()
                  if nd.get("condition") and not nd.get("pass_through"))
-    print(f"场景「{args.start_node}」合并自页签: {src_sheets};节点数 {len(index['nodes'])},带判据节点 {n_cond}")
+    n_en = sum(1 for nd in index["nodes"].values() if nd.get("name_en"))
+    print(f"场景「{args.start_node}」合并自页签: {src_sheets};节点数 {len(index['nodes'])},带判据节点 {n_cond}"
+          + (f",带英文名节点 {n_en}" if n_en else ""))
     if n_cond == 0:
         print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是格式没被识别"
               "(判据列表头对不上关键词/通用判据列),**停下检查 Excel 表头,别往下绑定**"

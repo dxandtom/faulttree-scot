@@ -4,7 +4,10 @@
 输入 Excel 的约定(沿用现网故障树导出格式):
 - 层级列:L1(Chinese)、L2(Chinese) … Ln(Chinese),每列是该层的节点名;
 - 判断条件列:Judgment Condition(Chinese),挂在每行最深的那个节点上;
-- 值为"不涉及"的判断条件会被跳过。
+- 值为"不涉及"的判断条件会被跳过;
+- 英文列(可选):L1(English)…Ln(English) 与 Judgment Condition(English)(平台写法 L1_Name_EN、
+  Diagnosis_Method_EN 也识别)。有值时存进 tree_index 的 name_en / condition_en,供树视图与报告按
+  用户语言输出;没有英文列一切照旧。
 
 输出 Markdown:用 #/##/### 表示层级,标题下面紧跟该节点的判断条件正文。
 
@@ -35,6 +38,9 @@ _LEVEL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")     # 裸 L7 也认(实测:�
                                                         # 老正则静默丢整层、该层判据错挂到上一层)
 _CODE_RE = re.compile(r"^L(\d+) Code$")
 _JUDGMENT_HEADER = "Judgment Condition(Chinese)"
+# 英文列:与中文列成对,只做存储,不参与建树分支与判据解析
+_LEVEL_EN_RE = re.compile(r"^L(\d+)(?:\(English\)|_Name_EN)$", re.IGNORECASE)
+_JUDGMENT_HEADERS_EN = ("judgment condition(english)", "diagnosis_method_en")
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
 # 现网导出里常见的"自动萃取"噪声节点,默认排除(与同事产出 69KB 子树的做法一致)
 DEFAULT_EXCLUDE = r"萃取新增节点-.*"
@@ -93,6 +99,20 @@ def find_judgment_column(headers: List[str]) -> Optional[str]:
         if (h or "").strip() == _JUDGMENT_HEADER:
             return h
     return None
+
+
+def find_english_columns(headers: List[str]) -> Tuple[Dict[int, str], Optional[str]]:
+    """从表头找英文层级列 {层级: 列名} 与英文判据列名(没有则空字典 / None)。"""
+    lvls: Dict[int, str] = {}
+    jd_en: Optional[str] = None
+    for h in headers:
+        hs = (h or "").strip()
+        m = _LEVEL_EN_RE.match(hs)
+        if m:
+            lvls.setdefault(int(m.group(1)), h)
+        elif hs.lower().replace(" ", "") in tuple(x.replace(" ", "") for x in _JUDGMENT_HEADERS_EN) and jd_en is None:
+            jd_en = h
+    return lvls, jd_en
 
 
 def find_code_columns(headers: List[str]) -> Dict[int, str]:
@@ -224,11 +244,15 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
 
 def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                 code_cols: Dict[int, str], start_level: Optional[int], start_node: Optional[str],
-                judgment_col: Optional[str], exclude_pattern: Optional[str]) -> Dict[str, Any]:
+                judgment_col: Optional[str], exclude_pattern: Optional[str],
+                en_cols: Optional[Dict[int, str]] = None,
+                judgment_en_col: Optional[str] = None) -> Dict[str, Any]:
     """与 build_tree 同样的截取规则,但产出**扁平权威 index**(给压缩/RCA 用):
     每个节点 = 稳定 id(L-Code 链,缺则用名字链)+ name/parent/level/condition/combine/data_source/pass_through。
+    母表带英文列时另存 name_en(该层英文格)与 condition_en(英文判据格,挂最深节点);英文格为空就不存。
     """
     exclude_re = re.compile(exclude_pattern) if exclude_pattern else None
+    en_cols = en_cols or {}
     nodes: Dict[str, Any] = {}
     root_id: Optional[str] = None
     short_map: Dict[str, str] = {}  # code-chain → 短稳定 id(n1,n2,…),同一节点跨行一致
@@ -257,6 +281,11 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
             jv = (row.get(judgment_col) or "").strip()
             if not _is_skip_judgment(jv):
                 judgment = jv                       # 原文交给 _split_judgment(内部 _clean_text)
+        judgment_en = None
+        if judgment_en_col and judgment:            # 英文判据只在中文判据成立时跟着存(中英成对)
+            jev = _clean_text(row.get(judgment_en_col))
+            if jev and not _is_skip_judgment(jev):
+                judgment_en = jev
         # 截取(镜像 build_tree)
         if start_node:
             sl = start_level or 1
@@ -284,6 +313,10 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                 nodes[parent_id]["children"].append(nid)
             if j == 0:
                 root_id = nid
+            if not node.get("name_en") and lvl in en_cols:
+                en_name = (row.get(en_cols[lvl]) or "").strip()
+                if en_name and en_name != nm:
+                    node["name_en"] = en_name
             if j == len(path) - 1 and judgment:
                 method, src = _split_judgment(judgment)
                 if method:
@@ -292,6 +325,12 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                     node["pass_through"] = False
                 if src:
                     node["data_source"].update(src)
+                if judgment_en:
+                    prev = node.get("condition_en")
+                    if not prev:
+                        node["condition_en"] = judgment_en
+                    elif judgment_en not in prev:
+                        node["condition_en"] = prev + "\n" + judgment_en
             parent_id = nid
     return {"scenario": start_node, "root": root_id, "nodes": nodes}
 
@@ -331,13 +370,15 @@ def excel_to_tree_markdown(excel_path: str, output_path: Optional[str] = None,
         raise ValueError("未找到 Ln(Chinese) 格式的层级列,请检查 Excel 表头")
     judgment_col = find_judgment_column(headers)
     code_cols = find_code_columns(headers)
+    en_cols, judgment_en_col = find_english_columns(headers)
     tree = build_tree(rows, level_cols, start_level, start_node, judgment_col, exclude_pattern)
     lines = tree_to_markdown(tree)
     if not lines:
         raise ValueError(f"未构建出任何节点。请确认场景名是否准确(--start-node「{start_node}」是否在故障树里)")
     md = "\n".join(lines) + "\n"
     # 同时产权威 index(给压缩/RCA;Code 链当稳定 id),写在 md 旁边
-    index = build_index(rows, level_cols, code_cols, start_level, start_node, judgment_col, exclude_pattern)
+    index = build_index(rows, level_cols, code_cols, start_level, start_node, judgment_col, exclude_pattern,
+                        en_cols=en_cols, judgment_en_col=judgment_en_col)
     if output_path:
         outp = Path(output_path)
         outp.parent.mkdir(parents=True, exist_ok=True)
@@ -387,7 +428,9 @@ def main() -> None:
         try:                                             # 与 v2 同款:亮出判据数,0 判据当场喊停
             _idx = json.loads(Path(output_path).with_suffix(".tree_index.json").read_text(encoding="utf-8"))
             _n = sum(1 for nd in (_idx.get("nodes") or {}).values() if nd.get("condition"))
-            print(f"节点数 {len(_idx.get('nodes') or {})},带判据节点 {_n}")
+            _ne = sum(1 for nd in (_idx.get("nodes") or {}).values() if nd.get("name_en"))
+            print(f"节点数 {len(_idx.get('nodes') or {})},带判据节点 {_n}"
+                  + (f",带英文名节点 {_ne}" if _ne else ""))
             if _n == 0:
                 print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是判据列没被识别"
                       "(本脚本只认表头「Judgment Condition(Chinese)」)——**停下检查 Excel 表头,"

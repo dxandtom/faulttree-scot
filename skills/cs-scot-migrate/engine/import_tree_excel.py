@@ -15,6 +15,9 @@
 - **新增数据源列**(绑定:<新源>)自动克隆现有 analyzer 换 INDICATOR 并接进 plan;
   绑定全清空时 plan 同步退化为只剩 rca(与 assemble 空指标行为一致)。
 - **变更摘要**:节点增/删/改名/移动、判据/解决方案改动、各源绑定条数——每次导入可评审。
+- **英文列**(L<n>(English)、Judgment Condition(English),导出时树里有英文才带):英文名取本行
+  最深层的英文格,英文判据随中文判据走(中文判据空则英文判据一并清空);旧产物有英文而表头
+  被删掉英文列 → 拦下,防"删列即清数据"。
 
 用法:import_tree_excel.py --out <场景产物目录(或打包技能的 assets/)>
 读 xlsx 走同目录 xlsx_reader.py(零三方依赖,与本脚本一起随产物分发);除它外不依赖 generate
@@ -30,6 +33,8 @@ import sys
 from pathlib import Path
 
 _LVL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
+_LVL_EN_RE = re.compile(r"^L(\d+)\(English\)$")
+COND_EN_COL = "Judgment Condition(English)"
 _NID_RE = re.compile(r"^n\d+$")
 _SRC_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _CLASSES = set("ABCDEFGHIJ") | {"P", "S"}   # A-J 含封存字母(老产物兼容);P 成对;S 代码类(人手调优专用)
@@ -181,11 +186,12 @@ def main() -> None:
 
     # ---- 表头解析(全角冒号/空格归一;重复列、非法源名硬拦)----
     errors, warns = [], []
-    lvl_col, tag_col, src_col = {}, {}, {}
-    id_col = sol_zh = sol_en = meta_col = raw_col = None
+    lvl_col, tag_col, src_col, en_lvl_col = {}, {}, {}, {}
+    id_col = sol_zh = sol_en = meta_col = raw_col = cond_en_col = None
     for i, h in enumerate(header):
         hn = h.replace("：", ":").strip()
         m = _LVL_RE.match(hn)
+        m_en = _LVL_EN_RE.match(hn)
         if hn == "node_id":
             id_col = i
         elif m:
@@ -193,6 +199,13 @@ def main() -> None:
             if l in lvl_col:
                 errors.append(f"表头有两个 L{l} 层级列——删掉多余的一列")
             lvl_col[l] = i
+        elif m_en:
+            l = int(m_en.group(1))
+            if l in en_lvl_col:
+                errors.append(f"表头有两个 L{l}(English) 列——删掉多余的一列")
+            en_lvl_col[l] = i
+        elif hn == COND_EN_COL:
+            cond_en_col = i
         elif hn.startswith("判据:"):
             t = hn.split(":", 1)[1].strip()
             if t == RAW_TAG:
@@ -234,6 +247,12 @@ def main() -> None:
         errors.append("旧产物有 solutions.json,但表头没有 Recommend Solution 列——删了会清空全部解决方案;误删就加回来")
     if any((n.get("meta") or {}) for n in old_nodes.values()) and meta_col is None:
         errors.append("旧产物节点带 meta,但表头没有 meta(勿改) 列——误删就加回来")
+    miss_en = sorted(set(lvl_col) - set(en_lvl_col))
+    if any(n.get("name_en") for n in old_nodes.values()) and miss_en:
+        errors.append("旧产物节点带英文名,但表头缺 " + "、".join(f"L{l}(English)" for l in miss_en)
+                      + " 列——删了会清空该层的英文名;误删就加回来")
+    if any(n.get("condition_en") for n in old_nodes.values()) and cond_en_col is None:
+        errors.append(f"旧产物节点带英文判据,但表头没有「{COND_EN_COL}」列——删了会清空全部英文判据;误删就加回来")
 
     # ---- 逐行解析 ----
     nodes, order, solutions = {}, [], {}
@@ -297,6 +316,12 @@ def main() -> None:
                           old_nodes[nid].get("pass_through", False) if nid in old_nodes
                           else parent is None),
                       "sheets": ["tuning"], "meta": meta}
+        name_en = cell(en_lvl_col.get(lvl))              # 英文名:本行最深层(本节点所在层)的英文格
+        if name_en and name_en != name:
+            nodes[key]["name_en"] = name_en
+        cond_en = cell(cond_en_col) if condition else ""  # 英文判据随中文判据:中文清空则英文清空
+        if cond_en:
+            nodes[key]["condition_en"] = cond_en
         # pass_through:既有节点**保留原值**(建树时按母表层级定的"高层不判断"标记,调优表的列号
         # 是相对深度、语义已不同,按列号重算会误伤);新增节点默认只豁免根,带判据的新行照常参与绑定。
         order.append(key)
@@ -442,6 +467,9 @@ def main() -> None:
     moved = [k for k in new_nodes if k in old_nodes and old_nodes[k].get("parent") != new_nodes[k]["parent"]]
     cond_chg = [k for k in new_nodes if k in old_nodes
                 and (old_nodes[k].get("condition") or None) != new_nodes[k]["condition"]]
+    en_chg = [k for k in new_nodes if k in old_nodes
+              and ((old_nodes[k].get("name_en") or None, old_nodes[k].get("condition_en") or None)
+                   != (new_nodes[k].get("name_en"), new_nodes[k].get("condition_en")))]
     sol_chg = [k for k in set(solutions) | set(old_solutions)
                if (solutions.get(k) or {}) != (old_solutions.get(k) or {})]
 
@@ -474,6 +502,8 @@ def main() -> None:
           + (", ".join(f"{_nm(k, new_nodes)}: {old_nodes[k].get('parent')}→{new_nodes[k]['parent']}"
                        for k in moved) or "无"))
     print(f"  判据改动 {len(cond_chg)}: {', '.join(_nm(k, new_nodes) for k in cond_chg) or '无'}")
+    if en_chg:
+        print(f"  英文名/英文判据改动 {len(en_chg)}: {', '.join(_nm(k, new_nodes) for k in en_chg)}")
     print(f"  解决方案改动 {len(sol_chg)}: {', '.join(sorted(sol_chg)) or '无'}")
     print(f"  绑定: {'; '.join(summary_src) or '无'}")
     # ---- 跨源绑定联动核对:仅当调优表**没有**「绑定:cross」列时才需要——那时 cross_analyzer 是表外

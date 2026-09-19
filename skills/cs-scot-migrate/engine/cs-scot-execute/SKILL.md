@@ -80,10 +80,10 @@ python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" \
 诊断结论一律由脚本渲染，不手写：
 
 ```bash
-python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<场景>.tree_index.json"
+python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<场景>.tree_index.json" [--lang en]
 ```
 
-产出 `rca_report.md`（完整报告）、`rca_tree.txt`（树视图）、`rca_reply.md`（聊天框回复稿：树视图 + 确证根因表 + 疑似表 + 待确认）。最终回复的正文就是 `rca_reply.md` 的全文，原样贴出，树视图保持在 ```text 代码块里，表格一格不改；正文前面加"执行过程"，末尾的"补充说明"是唯一可以自己写的地方。用户用英文提问时，把回复稿逐行翻译，固定文案按对照表。三份文件的内容、回复的组织、英文翻译的六条规则，见 `references/reply_format.md`。
+产出 `rca_report.md`（完整报告）、`rca_tree.txt`（树视图）、`rca_reply.md`（聊天框回复稿：树视图 + 确证根因表 + 疑似表 + 待确认）。最终回复的正文就是 `rca_reply.md` 的全文，原样贴出，树视图保持在 ```text 代码块里，表格一格不改；正文前面加"执行过程"，末尾的"补充说明"是唯一可以自己写的地方。用户整段用英文提问时，渲染命令加 `--lang en`：标题、表头、标签、节点名、判据、方案由脚本按树里存的英文输出，树里没有英文的地方回退中文；回复稿里剩下的中文自由文本（原因、注意、卡点）由你逐句直译，其余一字不动。三份文件的内容、回复的组织、英文提问的处理规则，见 `references/reply_format.md`。
 
 根因分析按 fault-tree-rca 的流程走：候选清单自动定档 → 只裁决冲突候选 → 脚本合成 → 脚本渲染。带 `auto_verdict` 的候选不需要裁决；finalize_rca 报错（冲突条目漏裁决、自动定档被改写、排除没写理由）就改裁决单重跑。判定规则：未绑定或数据不足的上级节点默认放行，记入 caveats，报告提示"此处无判断"；上级实测"不成立"或"冲突"是层级矛盾，候选降为疑似并写明卡点。
 
@@ -138,4 +138,4 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
 | 2 | 按文件名匹配指标：cmd、config、log | 三份数据各对应一个 `<指标>_analyzer.py` |
 | 3 | `runner.py --plan assets/plan.json --result-base ../layer-3-service-issues-result --data cmd=… --data config=… --data log=… --data raw=D:\采集\站点A --result-suffix 站点A` | 打印"结果目录：…"，各脚本步骤正常，缺口汇总 |
 | 3 | 进入 rca 步骤：`draft_rca.py` → 有冲突候选才写裁决单 → `finalize_rca.py` | 结果目录里出现 rca.json |
-| 4 | `render_report.py rca.json --tree assets/tree/<场景>.tree_index.json` | 三份文件；把 rca_reply.md 全文贴进回复，前面加执行过程，末尾补充说明 |
+| 4 | `render_report.py rca.json --tree assets/tree/<场景>.tree_index.json`（英文提问加 `--lang en`） | 三份文件；把 rca_reply.md 全文贴进回复，前面加执行过程，末尾补充说明 |

@@ -6,8 +6,12 @@
 Excel(调优的唯一事实源);改完用 import_tree_excel.py 机械编译回产物,全程零模型参与。
 
 表格式(单页签「树」,一行 = 一个节点,父先子后、兄弟按行序;上级各层名字逐行照抄):
-  node_id | L<n>(Chinese)… | 判据:<源标签>…/判据:原文 | 绑定:<指标>… | Recommend Solution(Chinese/English) | meta(勿改)
+  node_id | L<n>(Chinese)… | [L<n>(English)…] | 判据:<源标签>…/判据:原文 | [Judgment Condition(English)]
+  | 绑定:<指标>… | Recommend Solution(Chinese/English) | meta(勿改)
 - node_id:现有节点已填(nN);**新增节点这格留空**(导入时自动分配),**禁止改动/复制已有 id**;
+- 英文列(方括号的两组)只在树里有英文名/英文判据时才导出:L<n>(English) 与中文层级列同位置对照,
+  一行的英文名填在该节点所在层的英文格(上级各层的英文名也照抄,便于阅读);英文判据整段一格。
+  导入时英文名取本行最深层的英文格,英文判据随中文判据走:中文判据清空则英文判据一并清空;
 - 判据:**以节点 condition 为准**——能按源标签拆回去的落各 `判据:<标签>` 列;拆不回去的
   (老格式 v1 树:condition 有值但无标签结构)整段落 `判据:原文` 列逐字保真,绝不丢判据;
 - 绑定列:JSON;与默认值一致的自动字段(id=<源>-<nN>、source=<源>、condition_text=节点判据)
@@ -30,6 +34,7 @@ from pathlib import Path
 
 META_COL = "meta(勿改)"
 RAW_TAG = "原文"
+COND_EN_COL = "Judgment Condition(English)"
 
 
 def read_conditions(path: Path):
@@ -120,10 +125,15 @@ def export(out_dir: Path) -> Path:
             cond_cells[nid] = ("raw", cond)
             need_raw = True
     tag_headers = [f"判据:{t}" for t in tags] + ([f"判据:{RAW_TAG}"] if need_raw else [])
+    has_en_name = any(nodes[n].get("name_en") for n in order)
+    has_en_cond = any(nodes[n].get("condition_en") for n in order)
 
-    header = (["node_id"] + [f"L{l}(Chinese)" for l in levels] + tag_headers
+    header = (["node_id"] + [f"L{l}(Chinese)" for l in levels]
+              + ([f"L{l}(English)" for l in levels] if has_en_name else [])
+              + tag_headers + ([COND_EN_COL] if has_en_cond else [])
               + [f"绑定:{s}" for s in sources]
               + ["Recommend Solution(Chinese)", "Recommend Solution(English)", META_COL])
+    col = {h: i + 1 for i, h in enumerate(header)}      # 表头名 → 1 起列号(导入按表头名识别,位置无关)
 
     def path_ids(nid):
         chain, cur = [], nid
@@ -140,10 +150,11 @@ def export(out_dir: Path) -> Path:
     ws.append(header)
     for c in ws[1]:
         c.font = Font(bold=True)
-    lcol = {l: 2 + i for i, l in enumerate(levels)}
-    tcol = {t: 2 + len(levels) + i for i, t in enumerate(tags)}
-    raw_col = 2 + len(levels) + len(tags) if need_raw else None
-    scol = {s: 2 + len(levels) + len(tag_headers) + i for i, s in enumerate(sources)}
+    lcol = {l: col[f"L{l}(Chinese)"] for l in levels}
+    ecol = {l: col[f"L{l}(English)"] for l in levels} if has_en_name else {}
+    tcol = {t: col[f"判据:{t}"] for t in tags}
+    raw_col = col[f"判据:{RAW_TAG}"] if need_raw else None
+    scol = {s: col[f"绑定:{s}"] for s in sources}
     for nid in order:
         n = nodes[nid]
         row = [""] * len(header)
@@ -152,6 +163,11 @@ def export(out_dir: Path) -> Path:
             li = lcol.get(depth[anc])
             if li:
                 row[li - 1] = nodes[anc].get("name") or ""
+            ei = ecol.get(depth[anc])
+            if ei and nodes[anc].get("name_en"):
+                row[ei - 1] = nodes[anc]["name_en"]
+        if has_en_cond and n.get("condition_en"):
+            row[col[COND_EN_COL] - 1] = n["condition_en"]
         kind_ds = cond_cells.get(nid)
         if kind_ds:
             kind, payload = kind_ds
@@ -169,7 +185,18 @@ def export(out_dir: Path) -> Path:
         if n.get("meta"):
             row[-1] = json.dumps(n["meta"], ensure_ascii=False)
         ws.append(row)
-    widths = [8] + [18] * len(levels) + [50] * len(tag_headers) + [60] * len(sources) + [40, 30, 20]
+
+    def _width(h):
+        if h == "node_id":
+            return 8
+        if h.startswith("L") and (h.endswith("(Chinese)") or h.endswith("(English)")):
+            return 18
+        if h.startswith("判据:") or h == COND_EN_COL:
+            return 50
+        if h.startswith("绑定:"):
+            return 60
+        return {"Recommend Solution(Chinese)": 40, "Recommend Solution(English)": 30, META_COL: 20}.get(h, 20)
+    widths = [_width(h) for h in header]
     for col, width in zip(ws.columns, widths):
         ws.column_dimensions[col[0].column_letter].width = width
         for cell in col:

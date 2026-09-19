@@ -28,33 +28,18 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
 
 ## 3. 用户用英文提问时
 
-树和回复稿目前只有中文素材，正式的英文支持见仓库 `docs/遗留任务.md`。过渡做法：仍先照上面渲染三份文件，再把 `rca_reply.md` 逐行翻译成英文作为回复正文。这不是自由发挥，是按下面六条规则做文字替换：
+启用条件：用户本轮提问整段是英文；中英混杂按中文处理。
 
-1. **结构逐一对应**：段落的顺序与数量、每段的标题、树视图所在的 ```text 代码块、表格的行列与格数、待确认列表的条数，都与 rca_reply.md 一致；树视图一行对一行，缩进、连线（├─ └─ │）、符号（✅ ⚠ ? ✓ ✗ ·）、折叠计数一个不改。不增删段落或行，不在段落之间插自己的话。
-2. **固定文案按对照表翻，不换说法**：
+1. 渲染时加 `--lang en`：
 
-   | 中文 | 英文 |
-   |---|---|
-   | 诊断结论 | Diagnosis |
-   | 确证根因 | Confirmed root causes |
-   | 疑似根因 | Probable root causes |
-   | 待确认 | To be confirmed |
-   | 补充说明 | Notes |
-   | 树视图 | Tree view |
-   | 确诊 / 疑似 / 缺数据 | Confirmed / Probable / Missing data |
-   | 成立 / 不成立 / 未判定 | Holds / Does not hold / Not evaluated |
-   | 判据 / 证据 / 依据 / 卡点 / 注意 / 方案 / 缺 | Criterion / Evidence / Basis / Blocked at / Caveat / Solution / Missing |
-   | 根因 / 根因路径 / 推荐方案 | Root cause / Path / Recommended solution |
-   | 原文匹配（实测 / 依据） | Match (observed / basis) |
-   | 未满足确证条件，给出卡点 | did not meet the confirmation criteria; blocked-at is given |
-   | 数据不足/无法判断 | insufficient data / cannot judge |
-   | …（详见报告全文） | … (see full report) |
-   | …（子树 N 个节点未判定，数据补齐后重跑） | … (N nodes in subtree not evaluated; rerun after data is supplied) |
-   | …（本轮无确诊/疑似/缺数据节点，树未展开） | … (no confirmed/probable/missing-data node this round; tree not expanded) |
+   ```bash
+   python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<场景>.tree_index.json" --lang en
+   ```
 
-3. **节点名**译成英文后括注中文原名，如 `Interference (干扰导致)`；判据、卡点、注意、方案这类自由文本逐句直译，不概括、不补充、不解释；拿不准的词保留中文并括注。
-4. **不翻的**：证据行（设备回显、实测值、来源文件名、命令名）、数字、节点编号、判定档位、表格分隔线。
-5. 正文第一行固定写 "Translated by the model from the mechanical Chinese output; Chinese original: <result>/rca_reply.md"；"补充说明"照旧只在末尾写，用英文，仍只解读不改数字。
-6. 启用条件：用户本轮提问整段是英文；中英混杂按中文处理，不翻。
+   脚本负责的部分：标题、表头、标签（Criterion / Evidence / Basis / Blocked at / Caveat / Solution / Missing）、树视图头行与折叠提示、判定词（holds / does not hold / insufficient data / conflict）；节点名用树里的 `name_en`，判据用 `condition_en`，方案用 `solutions.json` 的 `en`。树里没有英文的节点回退中文，不算错误。
+2. 回复稿里剩下的中文只有 rca.json 里的自由文本：待确认的原因、注意、卡点、排除留痕。这些由你逐句直译成英文：不概括、不补充、不解释，拿不准的词保留中文并括注。回退成中文的节点名，译成英文后括注中文原名，如 `Interference (干扰导致)`。
+3. 不翻的：证据行（设备回显、实测值、来源文件名、命令名）、数字、节点编号、判定档位、表格分隔线。
+4. 结构一个不改：段落顺序与数量、树视图的每一行、缩进、连线（├─ └─ │）、符号（✅ ⚠ ? ✓ ✗ ·）、折叠计数、表格的行列与格数。
+5. 正文第一行固定写 "Node names, criteria and labels are rendered from the stored English; free text translated by the model. Chinese original: <result>/rca_reply.md"。"补充说明"照旧只在末尾写，用英文，只解读不改数字。
 
-这是过渡做法，不是许可改写结论。
+树里没有英文时（生成时母表没有英文列，迁移时平台表也没给），整份回复稿只有标签和表头是英文，其余仍是中文；这时按第 2 条逐句直译节点名与判据，并在补充说明里提一句"该场景技能未存英文，节点名与判据为临时翻译"。要让英文稳定，把带英文列的平台全量表交给 cs-scot-migrate 同步一次即可。

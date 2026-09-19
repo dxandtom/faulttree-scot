@@ -6,10 +6,11 @@
 
 表头的写法不要求交付方固定，以下几种形式都可以处理：
 
-- 层级列：`L1`、`L2`……，或 `L1(Chinese)`、`L1(中文)`，全角括号、大小写、带空格都可以；平台全量表的 `L1_Name_CN`、`L2_Name_CN`……也认，`L*_Name_EN` 整列忽略。
+- 层级列：`L1`、`L2`……，或 `L1(Chinese)`、`L1(中文)`，全角括号、大小写、带空格都可以；平台全量表的 `L1_Name_CN`、`L2_Name_CN`……也认。`L*_Name_EN`（或 `L*(English)`）不参与定位，内容按下面的英文列规则同步。
 - zip 列：叫 `zip` 的列，或唯一一个列名含 zip 的列；平台表用 `Product_Name`。zip 值带不带 `.zip` 都行。`Product_Obs`（下载地址，由联调驱动使用）整列忽略。
-- 判据列（可选）：平台表的 `Diagnosis_Method_CN`（`_EN` 忽略）；老写法含"判据""判断方法""判断条件""judgment""judgement"的列也认。有判据列才启用"判据以表为准"和"清除判据"两项规则，没有则行为与老表相同。
-- 解决方案列（可选）：含"解决方案"或"solution"的列，平台表 `Solution_CN`（`_EN` 忽略）；调优表的 `Recommend Solution(Chinese)` 也认。
+- 判据列（可选）：平台表的 `Diagnosis_Method_CN`（`_EN` 按英文列规则同步）；老写法含"判据""判断方法""判断条件""judgment""judgement"的列也认。有判据列才启用"判据以表为准"和"清除判据"两项规则，没有则行为与老表相同。
+- 解决方案列（可选）：含"解决方案"或"solution"的列，平台表 `Solution_CN`（`_EN` 按英文列规则同步）；调优表的 `Recommend Solution(Chinese)` 也认。
+- 英文列（可选）：`L*_Name_EN`、`Diagnosis_Method_EN`、`Solution_EN`（或 `L*(English)`、`Judgment Condition(English)`、`Recommend Solution(English)`）。表里有这些列时，英文名、英文判据、英文解决方案以表为准存进产物（树的 `name_en`、`condition_en` 和 `solutions.json` 的 `en`），供树视图和报告按用户语言输出。规则：非空就存，不看标记列，因为补英文不改变结构和判断内容；本次中文判据被改的节点，英文判据严格以表为准，表里为空就清空，旧英文对应的是旧中文，留着会误导；中文判据为空的节点不存英文判据；新增节点的英文随新行一起写。汇总行里记为"英文同步 N 个"，逐节点一行 `≈ nN「名」 英文已按对应表更新`。
 - 标记列（可选）：平台正式名 `Need_Optimize`，取值 TRUE/FALSE；老写法"是否修改""是否变更""需要优化""is_modified"等也认，取值 是/要/需要/Y/yes/1/true 算"要改"，其余含空算"不改"。没有标记列时全部行视同已标记。
 - `Node_ID`（平台的节点 UUID）整列忽略，节点靠路径名字定位。
 

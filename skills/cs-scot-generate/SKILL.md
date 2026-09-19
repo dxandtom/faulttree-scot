@@ -108,6 +108,7 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<�
 ### 两种 Excel 格式，选对脚本
 
 - 老格式：单页签，层级列写成 `L1(Chinese)`，判断条件挤在一列 `Judgment Condition(Chinese)`。用上面的 `excel_to_tree.py`。
+- 英文列：两种格式都会把母表里的英文一并存进树。老格式认 `L1(English)`…、`Judgment Condition(English)`；新格式认与 `L1(Chinese)` 成对的裸 `L1` 列和不带 Chinese 的 `Judgment Condition` 列。有值就存到节点的 `name_en`、`condition_en`，没有英文列一切照旧。这两个字段只供树视图和报告按用户语言输出，不参与建树和绑定。
 - 新格式：多页签，层级列是 `L1`…`L6`，判断条件按数据源分列（`CHR判断方法`、`X2 cause`、`RB日志判断方法`、`配置数据判断方法`、`DBG日志判断方法`、`信令判断方法`、`话统辅助判断方法` 等）。用 `excel_to_tree_v2.py`：
 
   ```bash
@@ -248,7 +249,7 @@ python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根�
 
 ## 步骤 6（人工调优）：调优表是树和绑定的可编辑事实源
 
-打包时自动产出 `tree/<短名>.tuning.xlsx`：单页签，一行一个节点，含层级、判据、各源绑定 JSON、解决方案；绑定列的写法和类别模板见产物自带的 `scripts/condition_binding_schema.md`，既是机器读取的格式约定，人也读得懂，不另设第二份文档。人改完表后一条命令编译回产物，零模型参与：
+打包时自动产出 `tree/<短名>.tuning.xlsx`：单页签，一行一个节点，含层级、判据、各源绑定 JSON、解决方案；树里有英文时多出 `L<n>(English)` 和 `Judgment Condition(English)` 列，改英文也在这张表上改，中文判据清空则英文判据一并清空；绑定列的写法和类别模板见产物自带的 `scripts/condition_binding_schema.md`，既是机器读取的格式约定，人也读得懂，不另设第二份文档。人改完表后一条命令编译回产物，零模型参与：
 
 ```bash
 python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或场景技能的 assets/>"

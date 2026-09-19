@@ -5,10 +5,13 @@ Node_ID | L1_Name_CN | L1_Name_EN | … | Diagnosis_Method_CN | Diagnosis_Method
 | Product_Obs | Product_Name | Need_Optimize
 ① 表头识别:Node_ID 忽略、Diagnosis_Method_CN 当判据列、Need_Optimize 当标记列、Solution_CN 当方案列;
    我们自己的调优表(node_id + 判据:/绑定: 列)仍被拒;带 Need_Optimize 的一律按平台表认(备用规则);
-② 全 FALSE、表与树一致(ALL 模式)→ 零结构动作,工具链公共文件刷新照做;未标记的 zip 行只汇总一行;
+② 全 FALSE、表与树一致(ALL 模式)→ 零结构动作,工具链公共文件刷新照做;表带英文列时首轮把英文名/
+   英文判据同步进树(不看标记),再跑一遍没有任何改动;未标记的 zip 行只汇总一行;
 ③ 全 FALSE、表里少了一个节点 → 删除;
-④ TRUE 行:有包 → 迁移;判据改了没包 → 只同步判据;方案改了 → 同步方案;新路径带包 → 新增;
-⑤ TRUE 行判据与包都空 → 清除判据与绑定,节点保留。"""
+④ TRUE 行:有包 → 迁移;判据改了没包 → 只同步判据(英文判据随行同步);方案改了 → 同步方案(含英文);
+   新路径带包 → 新增(英文名/英文判据随新行);
+⑤ TRUE 行中文判据改了、英文判据空 → 中文更新,英文判据清空(旧英文对应旧中文),英文名不动;
+⑥ TRUE 行判据与包都空 → 清除判据与绑定,节点保留,英文判据一并清空。"""
 import csv
 import importlib.util
 import json
@@ -169,12 +172,17 @@ rows[("接入失败示例", "QoS建立失败", "干扰导致")]["Product_Obs"] =
 write_table(table, rows.values())
 rc, o = run_all(store, product, table)
 check("退出码 0", rc == 0, o[-800:])
-check("首轮刷新工具链公共文件(compression-demo 引擎脚本旧代)并说明“只刷新了工具链公共文件”",
-      "工具链公共文件刷新" in o and "只刷新了工具链公共文件" in o, o[-800:])
+check("首轮刷新工具链公共文件(compression-demo 引擎脚本旧代),并把表里的英文同步进树(英文同步 N 个)",
+      "工具链公共文件刷新" in o and "英文同步" in o and "英文已按对应表更新" in o, o[-800:])
 check("未标记的 zip 行只汇总一行,不逐行刷屏", o.count("[标记]") == 1 and "干扰导致" in o.split("[标记]")[1].split("\n")[0], o[-800:])
 check("没有 ✓ / + / ✂ / ~ 动作,节点数不变", not any(s in o for s in ("✓ n", "✂ n", "+ n")) and len(load_tree(product)) == len(nodes0), o[-800:])
+nodes_en = load_tree(product)
+check("全部节点存了 name_en(表的 L*_Name_EN),有判据的节点存了 condition_en(Diagnosis_Method_EN),不看标记",
+      all(n.get("name_en") == "EN-" + n["name"] for n in nodes_en.values())
+      and all((n.get("condition_en") == "EN-" + str(n.get("condition"))) == bool(n.get("condition")) for n in nodes_en.values()),
+      repr({k: (n.get("name_en"), n.get("condition_en")) for k, n in list(nodes_en.items())[:3]}))
 rc, o = run_all(store, product, table)
-check("再跑一遍:工具链公共文件已一致,汇报“没有任何改动”", rc == 0 and "没有任何改动" in o, o[-600:])
+check("再跑一遍:工具链公共文件已一致、英文已一致,汇报“没有任何改动”", rc == 0 and "没有任何改动" in o and "英文同步" not in o, o[-600:])
 
 print("\n== ③ 全 FALSE、表里少了 License受限 → 删除 ==")
 nodes1 = load_tree(product)
@@ -191,9 +199,10 @@ rows = rows_from_tree(nodes2)
 r = rows[("接入失败示例", "QoS建立失败", "干扰导致")]
 r.update({"Product_Name": "干扰导致.zip", "Product_Obs": "obs://bucket/干扰导致.zip", "Need_Optimize": "TRUE"})
 r = rows[("接入失败示例", "QoS建立失败", "弱覆盖")]
-r.update({"Diagnosis_Method_CN": "弱覆盖新判据:RSRP 低于门限", "Need_Optimize": "TRUE"})
+r.update({"Diagnosis_Method_CN": "弱覆盖新判据:RSRP 低于门限", "Diagnosis_Method_EN": "EN-new weak coverage rule",
+          "Need_Optimize": "TRUE"})
 r = rows[("接入失败示例", "QoS建立失败")]
-r.update({"Solution_CN": "方案甲:检查 QoS 配置", "Need_Optimize": "TRUE"})
+r.update({"Solution_CN": "方案甲:检查 QoS 配置", "Solution_EN": "EN-plan A: check QoS config", "Need_Optimize": "TRUE"})
 rows[("接入失败示例", "QoS建立失败", "新增节点甲")] = row(["接入失败示例", "QoS建立失败", "新增节点甲"],
                                                        jd="新节点判据", zname="新增节点甲.zip", mark=True)
 write_table(table, rows.values())
@@ -207,16 +216,38 @@ check("QoS建立失败 解决方案同步", "解决方案同步 1" in o, o[-800:
 added = node_by_name(nodes3, "新增节点甲")
 check("新增节点甲 新增并绑定脚本 +", "新增节点 1" in o and added is not None
       and "新增节点甲" in (json.loads((product / "tree" / "migrations.json").read_text(encoding="utf-8")).__str__()), o[-800:])
+check("弱覆盖 英文判据随判据同步行更新", weak and weak.get("condition_en") == "EN-new weak coverage rule", repr(weak))
+sols = json.loads((product / "tree" / "solutions.json").read_text(encoding="utf-8"))
+qos = next(k for k, n in nodes3.items() if n["name"] == "QoS建立失败")
+check("QoS建立失败 中英文解决方案都同步进 solutions.json",
+      sols.get(qos) == {"zh": "方案甲:检查 QoS 配置", "en": "EN-plan A: check QoS config"}, repr(sols.get(qos)))
+check("新增节点甲 带英文名与英文判据", added and added.get("name_en") == "EN-新增节点甲"
+      and added.get("condition_en") == "EN-新节点判据", repr(added))
+from openpyxl import load_workbook
+hdr = [str(c.value or "") for c in load_workbook(next((product / "tree").glob("*.tuning.xlsx")), read_only=True).active[1]]
+check("调优表里有英文列 L1(English) 与 Judgment Condition(English)(往返后仍在)",
+      "L1(English)" in hdr and "Judgment Condition(English)" in hdr, repr(hdr))
 
-print("\n== ⑤ TRUE 行判据与包都空 → 清除,节点保留 ==")
+print("\n== ⑤ TRUE 行中文判据改了、英文判据空 → 英文判据清空,英文名不动 ==")
 rows = rows_from_tree(nodes3)
+rows[("接入失败示例", "QoS建立失败", "弱覆盖")].update({"Diagnosis_Method_CN": "弱覆盖第三版判据", "Diagnosis_Method_EN": "",
+                                                     "Need_Optimize": "TRUE"})
+write_table(table, rows.values())
+rc, o = run_all(store, product, table)
+nodes3b = load_tree(product)
+weak = node_by_name(nodes3b, "弱覆盖")
+check("中文判据更新、英文判据清空(旧英文对应旧中文)、英文名保留", rc == 0 and weak and "第三版" in str(weak.get("condition"))
+      and not weak.get("condition_en") and weak.get("name_en") == "EN-弱覆盖" and "英文判据清空" in o, repr(weak) + o[-400:])
+
+print("\n== ⑥ TRUE 行判据与包都空 → 清除,节点保留 ==")
+rows = rows_from_tree(nodes3b)
 rows[("接入失败示例", "QoS建立失败", "弱覆盖")].update({"Diagnosis_Method_CN": "", "Need_Optimize": "TRUE"})
 write_table(table, rows.values())
 rc, o = run_all(store, product, table)
 nodes4 = load_tree(product)
 weak = node_by_name(nodes4, "弱覆盖")
-check("清除 1 个节点,弱覆盖判据清空、节点仍在", rc == 0 and "清除 1 个节点" in o and weak is not None
-      and not str(weak.get("condition") or "").strip(), o[-800:])
+check("清除 1 个节点,弱覆盖判据清空、节点仍在、英文判据也没了", rc == 0 and "清除 1 个节点" in o and weak is not None
+      and not str(weak.get("condition") or "").strip() and not weak.get("condition_en"), o[-800:])
 shutil.rmtree(W, ignore_errors=True)
 
 print(f"\n通过 {PASSED} / {PASSED + FAILED}" + ("  全绿" if not FAILED else "  【有失败!】"))
