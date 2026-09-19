@@ -22,17 +22,17 @@ ZIP 解压 + 自动转换流水线
     <output_dir>/<zip_basename>_csv.zip
 
 输入形态自动识别,共三种(数据解析全流程 1→2→3):
-    ①原始散文件(单个或一批 log/txt、rar、混杂 zip,**没有** LOG/CONFIG/DIAG/CMD 分类目录)
+    ①原始散文件(单个或一批 log/txt、混杂 zip,**没有** LOG/CONFIG/DIAG/CMD 分类目录;rar 需先手工解压)
       → 先调用 vendor/ifilter.py 归类为 formated_result/<网元>/<CMD|CONFIG|LOG>/ 再按②处理;
     ②分类目录(网元/LOG|CONFIG|DIAG|CMD 下的原始日志文件)→ 本脚本常规转换;
     ③已是 csv → 不需要本脚本,直接交给后续的绑定/runner 环节。
-ifilter 是同事维护的第三方原样引入件(放在 vendor 下,不改),依赖第三方库(rarfile/chardet/olefile/
-oletools/pandas)且首次运行会自动 pip 安装——装不上时①无法处理,②③不受影响。
+ifilter 是同事维护的第三方原样引入件(放在 vendor 下,不改),只依赖 chardet 与 pandas 两个第三方库,
+首次运行会自动 pip 安装——装不上时①无法处理,②③不受影响。
 
 用法：
     python zip2csv.py <zip包或原始数据目录> [output_dir]     # 目录直接给,无需先压成 zip
     python zip2csv.py <zip包或原始数据目录> -o <output_dir>
-    python zip2csv.py <单个原始log/txt或rar>                 # 单个原始散文件也可直接输入(自动调用 ifilter 归类)
+    python zip2csv.py <单个原始log/txt>                      # 单个原始散文件也可直接输入(自动调用 ifilter 归类)
 """
 
 import argparse
@@ -85,7 +85,7 @@ def run_ifilter(raw_dir):
         print("        请把这些目录移走/改名,或把原始数据放进一个干净目录后重跑")
         return None
     print(f"[2b/7] 调用 ifilter 归类原始散文件: {raw_dir}")
-    print("  (ifilter 依赖三方件 rarfile/chardet/olefile/oletools/pandas,首跑会自动 pip 安装)")
+    print("  (ifilter 依赖三方件 chardet/pandas,首跑会自动 pip 安装)")
     try:
         r = subprocess.run([sys.executable, VENDOR_IFILTER, raw_dir])
     except Exception as e:  # noqa: BLE001

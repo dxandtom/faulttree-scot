@@ -24,7 +24,7 @@ disable-model-invocation: false
 | 术语 | 含义 |
 |---|---|
 | 分类目录 | 网元目录下的 `LOG/`、`CONFIG/`、`DIAG/`、`CMD/` 子目录，里面是命令回显的原始文本 |
-| 原始散文件 | 单个或一堆 log、txt、rar、混杂的 zip，没有分类目录 |
+| 原始散文件 | 单个或一堆 log、txt、混杂的 zip，没有分类目录；rar 需先手工解压 |
 | ifilter | 同事维护的归类脚本，放在 `vendor/` 下原样引入，不改内部逻辑；把散文件归类成 `formated_result/<网元>/<CMD、CONFIG、LOG>/` |
 | 网元 | 一台设备；输出按网元分目录 |
 | 原始日志目录 | S 类节点脚本直接读的原始回显所在目录，执行器用 `--data raw=<目录>` 接收；脚本结束时会打印建议填哪个路径 |
@@ -35,14 +35,14 @@ disable-model-invocation: false
 
 | 形态 | 特征 | 处理 |
 |---|---|---|
-| 原始散文件 | 单个或一堆 log/txt、rar、混杂 zip，没有分类目录 | 脚本自动调用 ifilter 归类出 `formated_result/<网元>/<CMD、CONFIG、LOG>/`，再按分类目录处理 |
+| 原始散文件 | 单个或一堆 log/txt、混杂 zip，没有分类目录；rar 需先手工解压 | 脚本自动调用 ifilter 归类出 `formated_result/<网元>/<CMD、CONFIG、LOG>/`，再按分类目录处理 |
 | 分类目录 | 任意深度存在 LOG、CONFIG、DIAG、CMD 目录，里面是 txt 或 log 文件 | 本技能常规转换成三类表 |
 | 已是 csv | 表头带 NEName、CmdName 等列 | 不需要本技能，直接交给绑定或执行器 |
 
 关于 ifilter 归类，有五点要知道：
 
 - 混装输入（既有分类目录又有散文件）以分类目录为准，散文件不再另行归类。
-- ifilter 依赖第三方库（rarfile、chardet、olefile、oletools、pandas），首次运行会自动 pip 安装。受控环境装不上时，散文件形态走不了；脚本会明确报错并给出替代做法（在能装依赖的机器上先跑 ifilter）。另外两种形态不受影响。
+- ifilter 只依赖两个第三方库（chardet、pandas），首次运行会自动 pip 安装。它能解开 zip 与嵌套 zip，不再处理 rar 和 Word 文档，这两类要先手工解压或转成文本。受控环境装不上时，散文件形态走不了；脚本会明确报错并给出替代做法（在能装依赖的机器上先跑 ifilter）。另外两种形态不受影响。
 - 走过 ifilter 后，原始日志目录应指向 `formated_result/`，脚本结束时会打印建议值。
 - 副作用提醒：ifilter 会在输入目录里写 `formated_result/`，并清删自己的旧产物；这个清理还会波及任何名字以 `_result` 结尾的目录，包括输入目录的同名 `_result` 兄弟目录。zip2csv 在调用前已做避让检查，发现可能误删用户目录时会停下并点名，按提示移走或改名后重跑。
 - 对同一目录重跑时，已有的 `formated_result/` 直接复用，不重新归类（脚本会打 ⚠ 提醒）。原始数据有更新时，先删掉 `formated_result/` 再跑。

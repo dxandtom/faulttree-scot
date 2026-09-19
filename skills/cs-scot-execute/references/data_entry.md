@@ -23,7 +23,7 @@ csv 或 xlsx，表头带 NEName、CmdName、Summary、level1 这类列。按正�
 
 ### 零散的原始文件
 
-单个或一堆 log/txt、rar、混杂的 zip，没有 CONFIG、CMD、LOG 分类目录。检查退出码 2 且连分类目录都找不到，就是这种。同样喂给 zip2csv：它会调用内置的 ifilter 先归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/`，再转成三张表。此时 `--data raw=` 指向 `formated_result/`（zip2csv 结束时会打印建议值）。ifilter 依赖第三方库，装不上时 zip2csv 会明确报错并给替代做法，把报错原样给用户，不要强行继续。
+单个或一堆 log/txt、混杂的 zip，没有 CONFIG、CMD、LOG 分类目录（rar 需先手工解压）。检查退出码 2 且连分类目录都找不到，就是这种。同样喂给 zip2csv：它会调用内置的 ifilter 先归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/`，再转成三张表。此时 `--data raw=` 指向 `formated_result/`（zip2csv 结束时会打印建议值）。ifilter 只依赖 chardet 和 pandas，装不上时 zip2csv 会明确报错并给替代做法，把报错原样给用户，不要强行继续。
 
 ### 原始日志目录（txt/log）
 

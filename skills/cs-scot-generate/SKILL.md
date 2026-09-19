@@ -75,7 +75,7 @@ python "<zip2csv.py 路径>" <zip或目录> -o <输出目录>
 ```
 
 - zip2csv 的查找次序：先找本技能目录内的 `zip2csv/scripts/zip2csv.py`（发行包形态内嵌），没有再用同一 skills 目录下独立安装的 `zip2csv/scripts/zip2csv.py`。zip 和目录都可以直接作为输入，LOG 目录下 `.txt` 和 `.log` 都能识别。
-- 散乱的原始文件（零散的 log/txt/rar、混杂的 zip，连分类目录都没有）也直接喂给 zip2csv：它会先调用内置的 `vendor/ifilter.py` 归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/`，再转表。ifilter 依赖第三方库，装不上时它会明确报错并给出替代做法，把报错原样给用户，不要强行继续。
+- 散乱的原始文件（零散的 log/txt、混杂的 zip，连分类目录都没有；rar 需先手工解压）也直接喂给 zip2csv：它会先调用内置的 `vendor/ifilter.py` 归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/`，再转表。ifilter 只依赖 chardet 和 pandas，装不上时它会明确报错并给出替代做法，把报错原样给用户，不要强行继续。
 - 转换结果在 `csv/<网元>/LOG|CONFIG|DIAG|CMD/*.csv`，按子目录名对应指标（log、config、cmd；DIAG 与 cmd 是同一类的新旧两种名字）。多个网元的同类 csv 合并成一张再作为该指标的数据：保留第一份的表头，其余文件逐个追加。
 - 四类目录之外的自由格式 txt 转不了表，这类内容走 S 类节点判断脚本（由 cs-scot-migrate 从节点交付包收入）或 `custom` 解析。
 - 原始目录本身要保留：执行时还要用 `--data raw=<原始目录>` 传给 runner，S 类脚本直接读原始文件。

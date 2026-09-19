@@ -181,8 +181,8 @@ def _conclude(root: Path, usable: list, problems: list, suggest: list) -> int:
             print("  → 原始日志文件还要转成三张表供原有绑定使用:python <assets>/zip2csv/scripts/zip2csv.py <上面 raw= 的目录> -o <输出>")
         return 0
     print("✗ 认不出可用的数据形态:既没有 <网元>/CONFIG|CMD|LOG 结构,也没有表头能对上号的数据表。")
-    # 原始散文件(零散的 log/txt/rar/嵌套 zip,连分类目录都没有)是可以自动补救的:zip2csv 会调内置
-    # ifilter 归类后再转——这种情况指路,别一律停手问用户
+    # 原始散文件(零散的 log/txt/嵌套 zip,连分类目录都没有)是可以自动补救的:zip2csv 会调内置
+    # ifilter 归类后再转——这种情况指路,别一律停手问用户(rar 它不再解,用户要先手工解压)
     raw_loose = next((p for p in root.rglob("*") if p.is_file()
                       and p.suffix.lower() in (".txt", ".log", ".zip", ".rar")), None)
     if raw_loose:
