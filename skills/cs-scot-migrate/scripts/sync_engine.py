@@ -56,9 +56,8 @@ def _dir_files(src: Path, only):
     return {q.relative_to(src): q for q in sorted(src.rglob("*"))
             if q.is_file() and not _ignored(q.relative_to(src))}
 
-def main() -> int:
-    check = "--check" in sys.argv
-    changed, drift = [], []
+def _sync_flat(check: bool, changed: list, drift: list) -> None:
+    """单文件脚本(SRC):源缺失停止并报错;副本与源不同 → --check 记漂移,否则从源覆盖。"""
     for name, d in SRC.items():
         src = d / name
         if not src.exists():
@@ -72,36 +71,54 @@ def main() -> int:
         else:
             shutil.copy2(src, dst)
             changed.append(name)
-    n_dir = 0
-    for dname, (src_dir, only) in DIRS.items():
-        if not src_dir.is_dir():
-            sys.exit(f"源目录缺失:{src_dir}(在技能仓根目录下跑本脚本)")
-        want = _dir_files(src_dir, only)
-        n_dir += len(want)
-        ddir = ENGINE / dname
-        for rel, src in want.items():
-            if not src.exists():
-                sys.exit(f"源文件缺失:{src}")
-            dst = ddir / rel
-            if dst.exists() and dst.read_bytes() == src.read_bytes():
-                continue
-            if check:
-                drift.append(f"engine/{dname}/{rel.as_posix()}  ≠  {src.relative_to(SKILLS).as_posix()}")
-            else:
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
-                changed.append(f"{dname}/{rel.as_posix()}")
-        if ddir.is_dir():                                # 副本里多出来的文件:源已删除/改名 → 副本也删除
-            for q in sorted(ddir.rglob("*")):
-                if q.is_file() and q.relative_to(ddir) not in want and not _ignored(q.relative_to(ddir)):
-                    if check:
-                        drift.append(f"engine/{dname}/{q.relative_to(ddir).as_posix()}  源里没有(游离)")
-                    else:
-                        q.unlink()
-                        changed.append(f"删 {dname}/{q.relative_to(ddir).as_posix()}")
+
+
+def _sync_dir(dname: str, src_dir: Path, only, check: bool, changed: list, drift: list) -> int:
+    """整目录素材(DIRS 的一项):按 only/ignore 收录源文件同步到 engine/<dname>/;
+    副本里多出来的文件(源已删除/改名)→ 副本也删除(--check 记为游离)。返回应纳入的源文件数。"""
+    if not src_dir.is_dir():
+        sys.exit(f"源目录缺失:{src_dir}(在技能仓根目录下跑本脚本)")
+    want = _dir_files(src_dir, only)
+    ddir = ENGINE / dname
+    for rel, src in want.items():
+        if not src.exists():
+            sys.exit(f"源文件缺失:{src}")
+        dst = ddir / rel
+        if dst.exists() and dst.read_bytes() == src.read_bytes():
+            continue
+        if check:
+            drift.append(f"engine/{dname}/{rel.as_posix()}  ≠  {src.relative_to(SKILLS).as_posix()}")
+        else:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            changed.append(f"{dname}/{rel.as_posix()}")
+    if ddir.is_dir():                                # 副本里多出来的文件:源已删除/改名 → 副本也删除
+        for q in sorted(ddir.rglob("*")):
+            if q.is_file() and q.relative_to(ddir) not in want and not _ignored(q.relative_to(ddir)):
+                if check:
+                    drift.append(f"engine/{dname}/{q.relative_to(ddir).as_posix()}  源里没有(游离)")
+                else:
+                    q.unlink()
+                    changed.append(f"删 {dname}/{q.relative_to(ddir).as_posix()}")
+    return len(want)
+
+
+def _stray_entries() -> list:
+    """engine/ 里不在同步清单(SRC/DIRS)的文件与目录。"""
     extra = sorted(q.name for q in ENGINE.glob("*.py") if q.name not in SRC)
     extra += sorted(q.name for q in ENGINE.iterdir() if q.is_dir() and q.name not in DIRS
                     and q.name != "__pycache__")
+    return extra
+
+
+def main() -> int:
+    check = "--check" in sys.argv
+    changed, drift = [], []
+    _sync_flat(check, changed, drift)
+    n_dir = 0
+    for dname, (src_dir, only) in DIRS.items():
+        n_dir += _sync_dir(dname, src_dir, only, check, changed, drift)
+    extra = _stray_entries()
     if extra:
         print("engine/ 里有不在同步清单的文件/目录(要么加进 SRC/DIRS,要么删掉):" + ", ".join(extra))
     if check:

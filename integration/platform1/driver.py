@@ -131,12 +131,17 @@ def _read_table(path: Path):
     return xlsx_reader.read_xlsx(path)
 
 
-def parse_platform_excel(path: Path):
-    """平台表 → [(节点路径名字列表, zip 包名, obs 地址)];Product_Name 空的行(结构行)跳过。
-    列的识别规则与 cs-scot-migrate 一致:路径取 L{n}_Name_CN,层级动态。
-    表带标记列(是否修改/is_modified 等)时,未标记行的 zip 不下载(标记契约:
-    内容动作只对标记行执行,与 migrate 同一规则)。"""
-    header, rows = _read_table(path)
+def _is_mark_header(hn: str, low: str) -> bool:
+    """表头是不是"是否修改/is_modified"这类标记列(hn=去空白原名,low=其小写)。"""
+    cn_keys = ("是否修改", "是否变更", "是否优化", "需要优化", "修改标记")
+    low_keys = ("is_modified", "need_optimize")
+    exact = ("modified", "changed", "is_update", "update_flag")
+    return (any(k in hn for k in cn_keys) or any(k in low for k in low_keys)
+            or low in exact)
+
+
+def _classify_platform_header(header):
+    """按列名识别平台表的四类列:返回 (层级列 [(层号, 列名)], obs 列, 包名列, 标记列);同类多列后者覆盖。"""
     cn_cols, obs_col, name_col, mk_col = [], None, None, None
     for h in header:
         hn = str(h).strip()
@@ -150,14 +155,13 @@ def parse_platform_excel(path: Path):
             obs_col = h
         elif low == "product_name":
             name_col = h
-        elif ("是否修改" in hn or "是否变更" in hn or "是否优化" in hn or "需要优化" in hn
-              or "修改标记" in hn or "is_modified" in low or "need_optimize" in low
-              or low in ("modified", "changed", "is_update", "update_flag")):
+        elif _is_mark_header(hn, low):
             mk_col = h
-    if not cn_cols or name_col is None:
-        raise SystemExit(f"不是平台1 导出表(需要 L*_Name_CN 层级列 + Product_Name 列);"
-                         f"实际表头:{header}")
-    cn_cols.sort()
+    return cn_cols, obs_col, name_col, mk_col
+
+
+def _select_platform_rows(rows, cn_cols, obs_col, name_col, mk_col):
+    """逐行取 (路径名字列表, 包名, obs):包名空的结构行跳过,有标记列时未标记行也跳过。"""
     out = []
     for r in rows:
         name = str(r.get(name_col) or "").strip()
@@ -170,6 +174,20 @@ def parse_platform_excel(path: Path):
         obs = str(r.get(obs_col) or "").strip() if obs_col else ""
         out.append((names, name, obs))
     return out
+
+
+def parse_platform_excel(path: Path):
+    """平台表 → [(节点路径名字列表, zip 包名, obs 地址)];Product_Name 空的行(结构行)跳过。
+    列的识别规则与 cs-scot-migrate 一致:路径取 L{n}_Name_CN,层级动态。
+    表带标记列(是否修改/is_modified 等)时,未标记行的 zip 不下载(标记契约:
+    内容动作只对标记行执行,与 migrate 同一规则)。"""
+    header, rows = _read_table(path)
+    cn_cols, obs_col, name_col, mk_col = _classify_platform_header(header)
+    if not cn_cols or name_col is None:
+        raise SystemExit(f"不是平台1 导出表(需要 L*_Name_CN 层级列 + Product_Name 列);"
+                         f"实际表头:{header}")
+    cn_cols.sort()
+    return _select_platform_rows(rows, cn_cols, obs_col, name_col, mk_col)
 
 
 # ---------- ③ skill 解包与产物目录定位 ----------
@@ -206,7 +224,8 @@ def repack(unpack_root: Path, out_zip: Path) -> Path:
 
 # ---------- ⑥ 回调(标准库 multipart,零依赖) ----------
 
-def post_callback(url: str, version_id: str, zip_path: Path) -> int:
+def _multipart_body(version_id: str, zip_path: Path):
+    """拼回调报文(versionId 文本域 + skillFile 文件域),返回 (请求头 dict, 报文字节)。"""
     boundary = uuid.uuid4().hex
     body = io.BytesIO()
 
@@ -222,6 +241,11 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
          zip_path.read_bytes())
     body.write(f"--{boundary}--\r\n".encode("utf-8"))
     headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    return headers, body.getvalue()
+
+
+def _callback_auth(url: str, headers: dict) -> bool:
+    """按 PLATFORM1_CB_HEADERS / PLATFORM1_CB_AUTH 往请求头里加鉴权;返回是否复用了下载脚本的鉴权。"""
     reused = False
     extra = os.environ.get("PLATFORM1_CB_HEADERS", "")
     mode = os.environ.get("PLATFORM1_CB_AUTH", "auto").strip().lower() or "auto"
@@ -246,7 +270,11 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
             print(f"[回调] 鉴权:复用下载脚本的 {'/'.join(auth)}(回调与下载服务同主机 {cb_host})")
         elif auth and mode == "auto":
             print(f"[回调] 鉴权:不带(回调主机 {cb_host} ≠ 下载服务 {dl_host};要强制复用设 PLATFORM1_CB_AUTH=platform)")
-    req = urllib.request.Request(url, data=body.getvalue(), method="POST", headers=headers)
+    return reused
+
+
+def _callback_ssl_context(reused: bool):
+    """复用下载脚本鉴权或设了 PLATFORM1_CB_INSECURE 时返回不校验证书的 SSL 上下文,否则 None。"""
     ctx = None
     if reused or os.environ.get("PLATFORM1_CB_INSECURE", "").strip().lower() in ("1", "true", "yes"):
         # 复用下载脚本鉴权时同它一样不校验证书(该脚本对这个网关一直 verify=False)
@@ -254,8 +282,13 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
         ctx = ssl._create_unverified_context()
         if not reused:
             print("[回调] PLATFORM1_CB_INSECURE=1:不校验对端 HTTPS 证书")
+    return ctx
+
+
+def _callback_open(req, url: str, ctx):
+    """发出回调请求;HTTP 错误码 / 连不上分别翻译成带排查提示的 SystemExit。返回响应(上下文管理器)。"""
     try:
-        resp_cm = urllib.request.urlopen(req, timeout=60, context=ctx)
+        return urllib.request.urlopen(req, timeout=60, context=ctx)
     except urllib.error.HTTPError as e:
         snippet = e.read().decode("utf-8", "replace")[:200]
         hint = {404: "——路径或主机不对(找平台要完整回调 URL:协议+主机+端口+路径)",
@@ -271,6 +304,10 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
         else:
             hint = "——网络不通:确认主机/端口/防火墙"
         raise SystemExit(f"[回调失败] 连不上 {url}:{reason}{hint};产物已在本地 out/,修好重跑即重发")
+
+
+def _callback_result(resp_cm, url: str) -> int:
+    """读回调响应:打印状态与正文,按响应 JSON 的 responseCode 判业务成败;返回 HTTP 状态码。"""
     with resp_cm as resp:
         text = resp.read().decode("utf-8", "replace")
         print(f"[回调] {url} → HTTP {resp.status} {text[:300]}")
@@ -285,6 +322,15 @@ def post_callback(url: str, version_id: str, zip_path: Path) -> int:
                              f" message={data.get('message', '')}——产物已在本地 out/ 目录,"
                              "排查后重跑同一条命令即可重发(续跑不重迁,直接打包回调)")
         return resp.status
+
+
+def post_callback(url: str, version_id: str, zip_path: Path) -> int:
+    headers, body = _multipart_body(version_id, zip_path)
+    reused = _callback_auth(url, headers)
+    req = urllib.request.Request(url, data=body, method="POST", headers=headers)
+    ctx = _callback_ssl_context(reused)
+    resp_cm = _callback_open(req, url, ctx)
+    return _callback_result(resp_cm, url)
 
 
 def _resolve_callback_url(req: dict) -> str:
@@ -458,8 +504,8 @@ def run(req: dict, workdir: Path | None = None, fake_store: Path | None = None,
         raise
 
 
-def _run(req: dict, workdir: Path | None, fake_store: Path | None,
-         keep: bool, with_model: bool, ctx: dict) -> Path | None:
+def _check_request(req: dict, ctx: dict):
+    """校验请求入参并解析回调地址,返回 (excel 路径, obskey, versionId, 回调地址, optimizeType 小写)。"""
     excel = Path(req["excel"]).resolve()
     obskey = str(req.get("prevObjectkey") or "").strip()
     version_id = str(req.get("versionId") or "").strip()
@@ -478,7 +524,11 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
     if obskey.lower() in ("null", "none"):                # 平台首次优化传 null
         obskey = ""
     ctx["obskey"] = obskey
+    return excel, obskey, version_id, cb_url, otype
 
+
+def _parse_rows(excel: Path, otype: str, obskey: str):
+    """解析平台表并报行数;首次优化(没有上一版 skill)不归本驱动处理,退出码 4。"""
     rows = parse_platform_excel(excel)
     print(f"[表] {excel.name}:{len(rows)} 个待迁移节点"
           + (f";optimizeType={otype.upper()}" if otype else ""))
@@ -488,53 +538,71 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
               "和 zip 包,凑不齐——首版 skill 应线下用 cs-scot-generate 生成后录入平台,"
               "优化按钮只管之后的迭代。本驱动不处理这种请求。")
         sys.exit(4)
+    return rows
 
+
+def _prepare_workdir(workdir: Path | None, ctx: dict):
+    """建工作目录(缺省临时目录),返回 (work, bundle, skill_dir, out_dir)。"""
     work = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="p1opt-"))
     work.mkdir(parents=True, exist_ok=True)
     bundle, skill_dir, out_dir = work / "bundle", work / "skill", work / "out"
     bundle.mkdir(exist_ok=True)
     ctx.update(work=work, skill_dir=skill_dir, out_dir=out_dir)
+    return work, bundle, skill_dir, out_dir
 
-    if otype == "none":
-        # NONE 单(平台约定):问题不在节点——把 skill 的引擎代码刷到当前代后回传。
-        # 引擎的"当前代"取自本机仓库副本:线上跑之前保证联调机器仓库已拉新。
-        print("[NONE] 问题不在节点:下载现行 skill → 引擎翻新(--refresh-only)→ 回传。")
-        skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
-        ctx["skill_zip"] = skill_zip
-        product = unpack_skill(skill_zip, skill_dir)
-        print(f"[skill] 已解包,产物目录:{product}")
-        rc, _out = _run_migrate([sys.executable, str(MIGRATE),
-                                 "--refresh-only", "--product", str(product)])
-        if rc != 0:
-            ctx["reason"] = f"[停] 引擎翻新(--refresh-only)退出码 {rc}"
-            print(ctx["reason"] + f"——工作目录留在 {work} 供排查。")
-            sys.exit(rc)
-        out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
-        print(f"[产物] {out_zip}(引擎已刷到当前代,树与绑定未动)")
-        if cb_url:
-            ctx["cb_done"] = True
-            post_callback(cb_url, version_id, out_zip)
-        else:
-            print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
-        return out_zip
 
-    if not rows and not otype:
-        # 空表且没带 optimizeType(本地实验/老请求):现行 skill 原样返回,
-        # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING);
-        # 逐字节一致也正是「skill 真下载」实验的判定标尺
-        print("空表(未带 optimizeType):无迁移可做,现行 skill 原样返回。")
-        skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
-        ctx["skill_zip"] = skill_zip
-        out_dir.mkdir(exist_ok=True)
-        out_zip = out_dir / f"skill_{version_id[:8]}.zip"
-        shutil.copy2(skill_zip, out_zip)
-        print(f"[产物] {out_zip}(与现行 skill 逐字节相同)")
-        if cb_url:
-            ctx["cb_done"] = True
-            post_callback(cb_url, version_id, out_zip)
-        else:
-            print(f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
-        return out_zip
+def _callback_or_note(cb_url: str, version_id: str, out_zip: Path, ctx: dict, note: str) -> None:
+    """有回调地址就回调(先记 cb_done,回调本身失败不再套失败回传);没有就只提示产物在哪。"""
+    if cb_url:
+        ctx["cb_done"] = True
+        post_callback(cb_url, version_id, out_zip)
+    else:
+        print(note)
+
+
+def _run_none(obskey: str, work: Path, skill_dir: Path, out_dir: Path, version_id: str,
+              cb_url: str, fake_store: Path | None, ctx: dict) -> Path:
+    """NONE 单:下载现行 skill → 引擎翻新(--refresh-only)→ 重打包 → 回传。"""
+    # NONE 单(平台约定):问题不在节点——把 skill 的引擎代码刷到当前代后回传。
+    # 引擎的"当前代"取自本机仓库副本:线上跑之前保证联调机器仓库已拉新。
+    print("[NONE] 问题不在节点:下载现行 skill → 引擎翻新(--refresh-only)→ 回传。")
+    skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+    ctx["skill_zip"] = skill_zip
+    product = unpack_skill(skill_zip, skill_dir)
+    print(f"[skill] 已解包,产物目录:{product}")
+    rc, _out = _run_migrate([sys.executable, str(MIGRATE),
+                             "--refresh-only", "--product", str(product)])
+    if rc != 0:
+        ctx["reason"] = f"[停] 引擎翻新(--refresh-only)退出码 {rc}"
+        print(ctx["reason"] + f"——工作目录留在 {work} 供排查。")
+        sys.exit(rc)
+    out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
+    print(f"[产物] {out_zip}(引擎已刷到当前代,树与绑定未动)")
+    _callback_or_note(cb_url, version_id, out_zip, ctx,
+                      f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
+    return out_zip
+
+
+def _run_empty(obskey: str, work: Path, out_dir: Path, version_id: str, cb_url: str,
+               fake_store: Path | None, ctx: dict) -> Path:
+    """空表且没带 optimizeType:现行 skill 原样下载后回传。"""
+    # 空表且没带 optimizeType(本地实验/老请求):现行 skill 原样返回,
+    # 让平台状态正常闭环(不回调会把版本记录挂死在 OPTIMIZING);
+    # 逐字节一致也正是「skill 真下载」实验的判定标尺
+    print("空表(未带 optimizeType):无迁移可做,现行 skill 原样返回。")
+    skill_zip = downloader.download_skill(obskey, work, fake_store=fake_store)
+    ctx["skill_zip"] = skill_zip
+    out_dir.mkdir(exist_ok=True)
+    out_zip = out_dir / f"skill_{version_id[:8]}.zip"
+    shutil.copy2(skill_zip, out_zip)
+    print(f"[产物] {out_zip}(与现行 skill 逐字节相同)")
+    _callback_or_note(cb_url, version_id, out_zip, ctx,
+                      f"[回调] 未配置 callback_url,只出产物:versionId={version_id}")
+    return out_zip
+
+
+def _check_obs_tangle(rows) -> None:
+    """同一个 Product_Obs 指向多个不同 zip 名 = 上传/导表错位,下载前就停。"""
     # 同一个 Product_Obs 摊给多个不同 zip 名 = 同一对象被当成多个节点的包,必是上传/导表
     # 错位(联调实测:5 个对象摊给 16 行)——下载迁移只会把包对到错误的节点,下载前就停。
     # 同名 zip 被多行复用(如 dscp/8021p 共用一个包)是合法惯例,不在此列
@@ -548,6 +616,10 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
         raise SystemExit("[停] 表里同一个 Product_Obs 指向多个不同的 zip 名——同一个对象"
                          "不可能同时是多个节点的包,是上传/导表错位:\n" + lines +
                          "\n请平台侧给每个节点上传自己的包、重新导出表后再跑")
+
+
+def _download_bundle(rows, bundle: Path, fake_store: Path | None) -> None:
+    """按表逐条下载节点 zip 到 bundle/:已在的合法 zip 跳过,坏件删掉重下。"""
     for names, name, obs in rows:
         fname = name if name.lower().endswith(".zip") else name + ".zip"
         have = bundle / fname
@@ -560,6 +632,11 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
             have.unlink()
         downloader.download_zip(obs, name, bundle, fake_store=fake_store)
         print(f"[下载] {'/'.join(names)} ← {name}")
+
+
+def _prepare_product(skill_dir: Path, obskey: str, work: Path, fake_store: Path | None,
+                     ctx: dict) -> Path:
+    """定位迁移用的产物目录:续跑沿用工作目录里已迁移的产物,否则下载上一版 skill 解包。"""
     if skill_dir.exists() and any(skill_dir.rglob("tree/migrations.json")):
         # 续跑同一工作目录:上一轮迁移成果(tree_index/调优表/修复副本)就地保留——
         # 重新解包会把 zip 里的旧版 tree_index 盖回去,而台账又让已迁移的包被跳过,账实不符
@@ -570,98 +647,136 @@ def _run(req: dict, workdir: Path | None, fake_store: Path | None,
         ctx["skill_zip"] = skill_zip
         product = unpack_skill(skill_zip, skill_dir)
         print(f"[skill] 上一版已解包,产物目录:{product}")
+    return product
 
+
+def _migrate_cmd(bundle: Path, product: Path, excel: Path, otype: str) -> list:
+    """拼机械迁移命令行(MULTI/ALL 带 --map-mode)并打印。"""
     cmd = [sys.executable, str(MIGRATE), "--package", str(bundle),
            "--product", str(product), "--auto", "--map", str(excel)]
     if otype in ("multi", "all"):
         cmd += ["--map-mode", otype]                      # multi=不动树结构 / all=结构以表为准
     print("[迁移]", " ".join(cmd))
+    return cmd
 
-    def _fix_tuning(rc, out):
-        # 存量调优表的旧版结构病(如多个顶层节点)卡预导入:备份 .bak 后重建再跑一次。
-        # 只有存在可生效的行、迁移进到写入阶段才会触发预导入——纯机械问题,机械修
-        if rc != 0 and "预导入(收编现有调优表) 失败" in out:
-            print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
-                  "(病表备份为 .bak,从产物重建)")
-            rc, out = _run_migrate(cmd + ["--rebuild-tuning"])
-            print(f"[修表] 重跑退出码 {rc}")
-        return rc, out
 
-    rc, last_out = _run_migrate(cmd)
-    rc, last_out = _fix_tuning(rc, last_out)
-    if rc != 0 and with_model and _parse_migrate_result(last_out) is None:
+def _fix_tuning(cmd: list, rc: int, out: str):
+    """存量调优表的旧版结构病卡预导入:加 --rebuild-tuning 重跑一次,返回 (rc, out)。"""
+    # 存量调优表的旧版结构病(如多个顶层节点)卡预导入:备份 .bak 后重建再跑一次。
+    # 只有存在可生效的行、迁移进到写入阶段才会触发预导入——纯机械问题,机械修
+    if rc != 0 and "预导入(收编现有调优表) 失败" in out:
+        print("[修表] 存量调优表有旧版结构病 → 加 --rebuild-tuning 重跑"
+              "(病表备份为 .bak,从产物重建)")
+        rc, out = _run_migrate(cmd + ["--rebuild-tuning"])
+        print(f"[修表] 重跑退出码 {rc}")
+    return rc, out
+
+
+def _model_prompt(skill: str, cmd: list) -> str:
+    """模型会话的提示词:按 cs-scot-migrate 技能处置失败项,只改文件不跑命令。"""
+    route = ("(统一入口按输入形态路由:这是对应表批量迁移,走优化线的 migrate 手册)"
+             if skill == "cs-scot-generate-optimize" else "")
+    return (f"用 {skill} 技能{route}处理一次批量迁移的失败项,只改文件,不用跑命令。"
+            f"失败清单看这条命令上一轮的输出(可以重跑它看,但验证不归你,驱动会自动复跑):"
+            f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约检查 FAIL 的照修法"
+            f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
+            f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
+            f"改逻辑就跳过并在最后列入退回清单,绝不猜。三条实测经验:S3 这类文件过滤"
+            f"在同一脚本里常有多处(不同函数各扫一遍目录),要全文搜 .txt 过滤逐处改净;"
+            f"S5 第三方库(如 chardet)属管道,按修法换标准库实现(编码探测退化为"
+            f" utf-8/gbk 依次尝试 + errors='replace');缺入口的脚本先补完入口再检查"
+            f"跑不了,清单上只看得见缺入口——补完薄封装后顺手把同一脚本的 S3"
+            f"(.txt/.log 双后缀)与 D3(缺数据判 insufficient_data 而非 false)"
+            f"查一遍修净,免得复跑才暴露、又拖到下一单。"
+            f"完成后汇报改了哪些文件、跳过了哪些。")
+
+
+def _model_pass(cmd: list, rc: int, last_out: str, work: Path):
+    """机械迁移失败后的模型档:起无头会话处置失败项,再复跑机械迁移验证;返回 (rc, last_out)。"""
+    if _parse_migrate_result(last_out) is None:
         # 没跑到汇总=环境/输入问题(坏 zip、表读不了、参数错),不存在"失败项"清单,
         # 模型档无从下手——省一轮无头会话,直接走下方的停止并报错
         print("[模型] 迁移没跑到汇总(环境/输入问题,不是节点失败项)——"
               "模型档帮不上,跳过;报错看上方迁移输出")
-    elif rc != 0 and with_model:
-        # 机械档处理不了的失败项(语义匹配/修输入输出契约/补入口)交给模型:起 Claude Code 无头会话
-        # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
-        skill = _skill_name_for_model()
-        route = ("(统一入口按输入形态路由:这是对应表批量迁移,走优化线的 migrate 手册)"
-                 if skill == "cs-scot-generate-optimize" else "")
-        prompt = (f"用 {skill} 技能{route}处理一次批量迁移的失败项,只改文件,不用跑命令。"
-                  f"失败清单看这条命令上一轮的输出(可以重跑它看,但验证不归你,驱动会自动复跑):"
-                  f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约检查 FAIL 的照修法"
-                  f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
-                  f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
-                  f"改逻辑就跳过并在最后列入退回清单,绝不猜。三条实测经验:S3 这类文件过滤"
-                  f"在同一脚本里常有多处(不同函数各扫一遍目录),要全文搜 .txt 过滤逐处改净;"
-                  f"S5 第三方库(如 chardet)属管道,按修法换标准库实现(编码探测退化为"
-                  f" utf-8/gbk 依次尝试 + errors='replace');缺入口的脚本先补完入口再检查"
-                  f"跑不了,清单上只看得见缺入口——补完薄封装后顺手把同一脚本的 S3"
-                  f"(.txt/.log 双后缀)与 D3(缺数据判 insufficient_data 而非 false)"
-                  f"查一遍修净,免得复跑才暴露、又拖到下一单。"
-                  f"完成后汇报改了哪些文件、跳过了哪些。")
-        # 本地联调默认按用户的日常用法起会话(全权限);平台2 集成时权限策略另定
-        claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
-                                    "claude --dangerously-skip-permissions -p").split()
-        if "--output-format" not in claude_cmd:
-            claude_cmd += ["--output-format", "stream-json", "--verbose"]  # 事件流:每步实时一行
-        claude_cmd.append(prompt)
-        exe = shutil.which(claude_cmd[0])   # Windows 上 npm 装的是 claude.cmd,须 which 解析
-        if exe is None:
-            print(f"[模型] 找不到命令「{claude_cmd[0]}」——跳过模型档,按机械迁移结果处理。"
-                  f"(检查 Claude Code 是否在 PATH,或设 PLATFORM1_CLAUDE_CMD 指定完整调用)")
-        else:
-            claude_cmd[0] = exe
-            timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
-            # 一单一轮:点一次优化只做一轮模型处置,复跑验证后就交付(部分交付
-            # 作为保底),没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
-            mlog = work / "model_session.log"
-            print(f"[模型] 起 Claude Code 无头会话处置失败项({skill} 技能),"
-                  f"每一步动作实时打在下面,事件流落 {mlog}")
-            _model_session(claude_cmd, mlog, timeout)
-            rc, last_out = _run_migrate(cmd)
-            print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
-            rc, last_out = _fix_tuning(rc, last_out)
+        return rc, last_out
+    # 机械档处理不了的失败项(语义匹配/修输入输出契约/补入口)交给模型:起 Claude Code 无头会话
+    # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
+    skill = _skill_name_for_model()
+    prompt = _model_prompt(skill, cmd)
+    # 本地联调默认按用户的日常用法起会话(全权限);平台2 集成时权限策略另定
+    claude_cmd = os.environ.get("PLATFORM1_CLAUDE_CMD",
+                                "claude --dangerously-skip-permissions -p").split()
+    if "--output-format" not in claude_cmd:
+        claude_cmd += ["--output-format", "stream-json", "--verbose"]  # 事件流:每步实时一行
+    claude_cmd.append(prompt)
+    exe = shutil.which(claude_cmd[0])   # Windows 上 npm 装的是 claude.cmd,须 which 解析
+    if exe is None:
+        print(f"[模型] 找不到命令「{claude_cmd[0]}」——跳过模型档,按机械迁移结果处理。"
+              f"(检查 Claude Code 是否在 PATH,或设 PLATFORM1_CLAUDE_CMD 指定完整调用)")
+        return rc, last_out
+    claude_cmd[0] = exe
+    timeout = int(os.environ.get("PLATFORM1_MODEL_TIMEOUT", "3600"))
+    # 一单一轮:点一次优化只做一轮模型处置,复跑验证后就交付(部分交付
+    # 作为保底),没修完的下次点优化在交付包基础上续迁——不让平台一单等几轮
+    mlog = work / "model_session.log"
+    print(f"[模型] 起 Claude Code 无头会话处置失败项({skill} 技能),"
+          f"每一步动作实时打在下面,事件流落 {mlog}")
+    _model_session(claude_cmd, mlog, timeout)
+    rc, last_out = _run_migrate(cmd)
+    print(f"[模型] 处置后复跑机械迁移,退出码 {rc}")
+    return _fix_tuning(cmd, rc, last_out)
+
+
+def _settle_failures(rc: int, last_out: str, work: Path, product: Path, version_id: str,
+                     ctx: dict) -> None:
+    """迁移退出码非 0 时定夺:一行没生效就停;否则部分交付,清单写进包内 migration_report.json。"""
+    result = _parse_migrate_result(last_out)
+    effective = (result["landed"] + len(result["skipped"])) if result else 0
+    if not result or effective == 0:
+        tail = "\n".join(l for l in last_out.splitlines() if l.strip())[-1500:]
+        ctx["reason"] = (f"[停] 迁移退出码 {rc},包里没有任何已生效的迁移内容(一行都没落地)。"
+                         f"迁移输出末尾:\n{tail}")
+        print(f"[停] 迁移退出码 {rc},且包里没有任何已生效的迁移内容——不打包新版;"
+              f"工作目录留在 {work} 供排查。")
+        sys.exit(rc)
+    # 部分交付:已迁入的节点先生效,成功/失败清单连原因写进包内,平台可解包查看
+    result["versionId"] = version_id
+    report = product / "tree" / "migration_report.json"
+    report.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"[部分交付] 已生效 {effective}/{result['total']}(本次落地 {result['landed']}"
+          f" + 此前已迁移 {len(result['skipped'])}),失败 {len(result['failed'])} 个"
+          f"——节点清单与原因已写入包内 tree/migration_report.json。"
+          f"已修的管道副本也随包带走,下一次点优化在这版基础上续迁。"
+          f"注意:回调接口暂无「部分成功」字段,需与平台约定(见 README 待确认)。")
+
+
+def _run(req: dict, workdir: Path | None, fake_store: Path | None,
+         keep: bool, with_model: bool, ctx: dict) -> Path | None:
+    excel, obskey, version_id, cb_url, otype = _check_request(req, ctx)
+    rows = _parse_rows(excel, otype, obskey)
+    work, bundle, skill_dir, out_dir = _prepare_workdir(workdir, ctx)
+
+    if otype == "none":
+        return _run_none(obskey, work, skill_dir, out_dir, version_id, cb_url, fake_store, ctx)
+
+    if not rows and not otype:
+        return _run_empty(obskey, work, out_dir, version_id, cb_url, fake_store, ctx)
+    _check_obs_tangle(rows)
+    _download_bundle(rows, bundle, fake_store)
+    product = _prepare_product(skill_dir, obskey, work, fake_store, ctx)
+
+    cmd = _migrate_cmd(bundle, product, excel, otype)
+    rc, last_out = _run_migrate(cmd)
+    rc, last_out = _fix_tuning(cmd, rc, last_out)
+    if rc != 0 and with_model:
+        rc, last_out = _model_pass(cmd, rc, last_out, work)
     if rc != 0:
-        result = _parse_migrate_result(last_out)
-        effective = (result["landed"] + len(result["skipped"])) if result else 0
-        if not result or effective == 0:
-            tail = "\n".join(l for l in last_out.splitlines() if l.strip())[-1500:]
-            ctx["reason"] = (f"[停] 迁移退出码 {rc},包里没有任何已生效的迁移内容(一行都没落地)。"
-                             f"迁移输出末尾:\n{tail}")
-            print(f"[停] 迁移退出码 {rc},且包里没有任何已生效的迁移内容——不打包新版;"
-                  f"工作目录留在 {work} 供排查。")
-            sys.exit(rc)
-        # 部分交付:已迁入的节点先生效,成功/失败清单连原因写进包内,平台可解包查看
-        result["versionId"] = version_id
-        report = product / "tree" / "migration_report.json"
-        report.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"[部分交付] 已生效 {effective}/{result['total']}(本次落地 {result['landed']}"
-              f" + 此前已迁移 {len(result['skipped'])}),失败 {len(result['failed'])} 个"
-              f"——节点清单与原因已写入包内 tree/migration_report.json。"
-              f"已修的管道副本也随包带走,下一次点优化在这版基础上续迁。"
-              f"注意:回调接口暂无「部分成功」字段,需与平台约定(见 README 待确认)。")
+        _settle_failures(rc, last_out, work, product, version_id, ctx)
 
     out_zip = repack(skill_dir, out_dir / f"skill_{version_id[:8]}.zip")
     print(f"[产物] {out_zip}")
-    if cb_url:
-        ctx["cb_done"] = True
-        post_callback(cb_url, version_id, out_zip)
-    else:
-        print(f"[回调] 未配置 callback_url,只出产物:version_id={version_id},文件见上行")
+    _callback_or_note(cb_url, version_id, out_zip, ctx,
+                      f"[回调] 未配置 callback_url,只出产物:version_id={version_id},文件见上行")
     if not keep and workdir is None:
         pass  # 产物在临时目录里,默认保留供人取走;要清理自行删
     return out_zip

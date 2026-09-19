@@ -49,6 +49,29 @@ def _diagnostic(node: dict) -> bool:
     return _has_cond(node) and not node.get("pass_through")
 
 
+def _dict_unit(el: ast.Dict):
+    """一个绑定字典字面量 → (node_id 字符串或 None, sub 子绑定条数)。"""
+    nid, n_sub = None, 0
+    for k, v in zip(el.keys, el.values):
+        if not isinstance(k, ast.Constant):
+            continue
+        if k.value == "node_id" and isinstance(v, ast.Constant) and isinstance(v.value, str):
+            nid = v.value
+        elif k.value == "sub" and isinstance(v, (ast.List, ast.Tuple)):
+            n_sub = len(v.elts)
+    return nid, n_sub
+
+
+def _units_from_walk(value, units: dict) -> None:
+    """备用做法:CONDITIONS 不是字面量列表 → 只遍历其中的字典节点,按 node_id 计次数。"""
+    for d in ast.walk(value):
+        if isinstance(d, ast.Dict):
+            for k, v in zip(d.keys, d.values):
+                if (isinstance(k, ast.Constant) and k.value == "node_id"
+                        and isinstance(v, ast.Constant) and isinstance(v.value, str)):
+                    units[v.value] = units.get(v.value, 0) + 1
+
+
 def _claims_from_analyzer(path: Path) -> dict:
     """从 <ind>_analyzer.py 静态抽 CONDITIONS:node_id → 绑定单元数(AST 走读,只取字符串字面量)。
     「绑定单元」= 该节点被认领了几个子条件:普通绑定记 1,D 组合按 sub 条数记——
@@ -67,23 +90,11 @@ def _claims_from_analyzer(path: Path) -> dict:
         for el in elems:
             if not isinstance(el, ast.Dict):
                 continue
-            nid, n_sub = None, 0
-            for k, v in zip(el.keys, el.values):
-                if not isinstance(k, ast.Constant):
-                    continue
-                if k.value == "node_id" and isinstance(v, ast.Constant) and isinstance(v.value, str):
-                    nid = v.value
-                elif k.value == "sub" and isinstance(v, (ast.List, ast.Tuple)):
-                    n_sub = len(v.elts)
+            nid, n_sub = _dict_unit(el)
             if nid:
                 units[nid] = units.get(nid, 0) + max(1, n_sub)
         if not elems:                                   # 备用做法:CONDITIONS 不是字面量列表 → 只遍历计次数
-            for d in ast.walk(stmt.value):
-                if isinstance(d, ast.Dict):
-                    for k, v in zip(d.keys, d.values):
-                        if (isinstance(k, ast.Constant) and k.value == "node_id"
-                                and isinstance(v, ast.Constant) and isinstance(v.value, str)):
-                            units[v.value] = units.get(v.value, 0) + 1
+            _units_from_walk(stmt.value, units)
     return units
 
 
@@ -125,6 +136,237 @@ def _renorm(units: dict, code2nid: dict) -> dict:
     return out
 
 
+def _warn_cross_not_passed(args) -> None:
+    """cross_analyzer 漏传点名:它带绑定单元却没传给本检查时提示补传。"""
+    # cross_analyzer 漏传点名:cross 通道的绑定同样认领叶子,漏传它 → 已绑数虚低、"整支未触达"虚高,
+    # 实测就这么误报过 ❌ 逼人白排查。位置按产物布局推(<OUT>/scripts/,与 tree_index 同圈)。
+    cross_ap = Path(args.tree_index).resolve().parent.parent / "scripts" / "cross_analyzer.py"
+    if cross_ap.exists() and cross_ap.resolve() not in {Path(a).resolve() for a in args.analyzer}:
+        n_cx = sum(_claims_from_analyzer(cross_ap).values())
+        if n_cx:
+            print(f"⚠ {cross_ap.name} 带 {n_cx} 个绑定单元却没传给本检查——已绑数会虚低、整支未触达会虚高。"
+                  f"把它也加上再跑:--analyzer \"{cross_ap}\"(有 cross_facts 再加 --facts)。")
+
+
+def _merge_units(per_source: dict, label, units: dict) -> None:
+    """把一个来源的 {node_id: 单元数} 累加进 per_source[label]。"""
+    d = per_source.setdefault(label, {})
+    for k, v in units.items():
+        d[k] = d.get(k, 0) + v
+
+
+def _collect_claims(args, nodes: dict):
+    """各源认领表 {源标签: {node_id: 绑定单元数}}(analyzer + facts 合并,code 写法归一回短 id)与 claimed 全集。"""
+    per_source = {}                                     # 源标签 → {node_id: 绑定单元数}(跨源认领对账用)
+    for a in args.analyzer:
+        p = Path(a)
+        _merge_units(per_source, p.stem.replace("_analyzer", "") or p.stem, _claims_from_analyzer(p))
+    for fp in args.facts:
+        label, units = _claims_from_facts(Path(fp))
+        if label is not None:
+            _merge_units(per_source, label, units)
+    # node_id 兼容 code 形式:把 claimed 里写成 code 的归一回短 id（schema 明确两者都认,本检查也要认,否则误报漏绑）
+    code2nid = {str(n["code"]): nid for nid, n in nodes.items() if n.get("code")}
+    per_source = {lab: _renorm(d, code2nid) for lab, d in per_source.items()}
+    claimed = set().union(*per_source.values()) if per_source else set()
+    return per_source, claimed
+
+
+def _resolve_columns(args) -> list:
+    """--columns 显式给了以给的为准;否则按 --analyzer 对应的概览文件自动取列名(cross 无概览)。"""
+    cols = [c.strip() for c in args.columns.split(",") if c.strip()]
+    if not cols:
+        # 缺省自动读概览列名——"可答"判定的触发条件不再依赖模型手抄 --columns(传空/传错 = 检查永远不会失败,
+        # 号称机械的检查,触发条件却由模型供给,评审时被点名)。--columns 显式给了则以给的为准。
+        auto_from = []
+        for apath in args.analyzer:
+            p = Path(apath)
+            ind = p.stem[:-len("_analyzer")] if p.stem.endswith("_analyzer") else p.stem
+            if ind == "cross":                          # cross 无自己的概览(它吃全部源)
+                continue
+            ov = p.resolve().parent.parent / "overview" / f"{ind}_overview.json"
+            if not ov.exists():
+                continue
+            try:
+                cs = ((json.loads(ov.read_text(encoding="utf-8")).get("summary") or {}).get("columns")) or []
+            except Exception:  # noqa: BLE001
+                continue
+            cols += [str(c) for c in cs if str(c).strip()]
+            auto_from.append(ov.name)
+        cols = sorted(set(cols))
+        if auto_from:
+            print(f"[info] --columns 未给,已自动读概览列名({', '.join(auto_from)};共 {len(cols)} 列)"
+                  "用于「本源大概率可答」标记。")
+    return cols
+
+
+def _mentions(cond: str, col: str) -> bool:
+    """条件正文按**词边界**提到该列名(避免 'Cause' 命中 'DCInnerCause' 内部 → 假漏绑)。"""
+    return re.search(r"(?<![A-Za-z0-9_])" + re.escape(col) + r"(?![A-Za-z0-9_])", cond) is not None
+
+
+def _pick_targets(nodes: dict):
+    """诊断节点集:优先"带条件的叶子";没有 → 退而用全部带条件节点。返回 (targets, 单位名);无法判定 → (None, None)。"""
+    # 诊断节点集:优先"带条件的叶子";若该树把判据挂在中间节点(没有带条件的叶子)→ 退而用全部带条件节点。
+    cond_nodes = {nid: n for nid, n in nodes.items() if _diagnostic(n)}
+    if not cond_nodes:
+        print("⚠ 无法判定:该 tree_index 没有任何「带 condition 的非 pass_through 节点」——"
+              "判据可能没导出到 tree_index,或这棵树结构特殊。请核对建树产物,别把本次当'已全覆盖'。")
+        return None, None
+    leaf_diag = {nid: n for nid, n in cond_nodes.items() if not n.get("children")}
+    if leaf_diag:
+        return leaf_diag, "叶子"
+    print("⚠ 该树的判别条件挂在中间节点(无带条件的叶子)——改用「全部带条件节点」判覆盖度。")
+    return cond_nodes, "带条件节点"
+
+
+def _ancestors(nodes: dict, nid):
+    """节点的祖先链(自下而上,防环)。"""
+    out, cur, seen = [], nodes.get(nid, {}).get("parent"), set()
+    while cur and cur in nodes and cur not in seen:
+        seen.add(cur); out.append(cur); cur = nodes[cur].get("parent")
+    return out
+
+
+def _load_cross_ids(tree_index: str) -> set:
+    """dispatch/cross_candidates.json 里的 node_id 集(软注记原料);没有/坏了 → 空集。"""
+    # 跨源候选清单(软注记原料):dispatch/cross_candidates.json 是"cross 通道正在处理谁"的权威清单
+    # (merge 汇集 cross_source 标记 + make_dispatch --cross 机械补漏扫入无人认领者后写回)。
+    # 未绑节点若在这份清单上 = 流程中(等 cross 合并),不是真漏——路由批上线后每条判据基本只有
+    # 一次绑定机会,这类"已进候选"的未绑会变多,注记就是把它和真漏分开,防止中途跑本检查误判。
+    cross_ids = set()
+    try:
+        cand_p = Path(tree_index).resolve().parent.parent / "dispatch" / "cross_candidates.json"
+        if cand_p.exists():
+            cross_ids = {str(c.get("node_id")) for c in json.loads(cand_p.read_text(encoding="utf-8"))
+                         if isinstance(c, dict) and c.get("node_id")}
+    except (OSError, json.JSONDecodeError, AttributeError):
+        cross_ids = set()
+    return cross_ids
+
+
+def _classify(targets: dict, nodes: dict, claimed: set, cols: list):
+    """逐个需绑节点归类:已绑 / 漏绑(条件提到已喂列)/ 分支已入未细绑 / 整支未触达。"""
+    covered, leaf_only, miss_answerable, miss_branch = [], [], [], []
+    for nid, n in targets.items():
+        if nid in claimed:
+            covered.append(nid)
+            continue
+        branch_entered = any(a in claimed for a in _ancestors(nodes, nid))   # 路径上有祖先被绑 = 该支已进入
+        cond = str(n.get("condition") or "")
+        answerable = any(_mentions(cond, col) for col in cols) if cols else False
+        if answerable:
+            miss_answerable.append((nid, n, branch_entered))          # 条件提到已喂列却没绑 → 高置信漏绑
+        elif branch_entered:
+            leaf_only.append((nid, n))                                # 分支已入、未细绑(多半缺信令/配置定不到具体子因)
+        else:
+            miss_branch.append((nid, n))                              # 整支未触达(根→叶无任何绑定)
+    return covered, leaf_only, miss_answerable, miss_branch
+
+
+def _ds(n):
+    """节点的数据来源摘要(跳过空值/不涉及)。"""
+    d = n.get("data_source") or {}
+    return "/".join(f"{k}:{v}" for k, v in d.items() if v and v != "不涉及") or "—"
+
+
+def _snip(n, k=64):
+    """判据正文压成一行并截到 k 字。"""
+    s = " ".join(str(n.get("condition") or "").split())
+    return s[:k] + ("…" if len(s) > k else "")
+
+
+def _xc(nid, cross_ids: set) -> str:
+    """未绑节点的「跨源候选中」注记。"""
+    return " [跨源候选中]" if nid in cross_ids else ""
+
+
+def _report_missing(miss_answerable, cols, cross_ids: set) -> None:
+    """❌ 漏绑清单(条件提到已喂列却没绑)。"""
+    if miss_answerable:
+        print(f"\n❌ 漏绑(条件正文提到已喂列 {cols},本源能答却没绑)—— 补绑 C 类(没出现就 matched=0)或显式 decision:insufficient_data:")
+        for nid, n, be in sorted(miss_answerable, key=lambda x: x[0]):
+            print(f"  - {nid} 「{n.get('name','')[:34]}」 L{n.get('level')} {'[分支已入]' if be else '[整支未入]'} src={_ds(n)}{_xc(nid, cross_ids)}\n      cond: {_snip(n)}")
+
+
+def _report_branches(miss_branch, nodes: dict, claimed: set, cross_ids: set, unit: str) -> None:
+    """⚠ 整支未触达:按"未触达区域的入口"子树聚合计数。"""
+    if miss_branch:
+        print(f"\n⚠ 整支未触达(根→叶无任何绑定;逐支确认是'缺源(没喂对应信令/配置)'还是'漏判一整支'):")
+        roots_un, roots_xc = {}, {}
+        for nid, n in miss_branch:
+            # 聚到"未触达区域的入口"= 路径上未绑且非根的最高祖先(根本身不直接绑,聚到根没信息量)
+            anc = [a for a in _ancestors(nodes, nid) if a not in claimed and nodes.get(a, {}).get("parent") is not None]
+            top = anc[-1] if anc else nid
+            roots_un[top] = roots_un.get(top, 0) + 1
+            if nid in cross_ids:
+                roots_xc[top] = roots_xc.get(top, 0) + 1
+        for top, cnt in sorted(roots_un.items(), key=lambda x: -x[1])[:40]:
+            tn = nodes.get(top, {})
+            xc = roots_xc.get(top, 0)
+            print(f"  - 子树 {top} 「{tn.get('name','')[:34]}」 src={_ds(tn)} —— 含 {cnt} 个未绑{unit}"
+                  + (f"(其中 {xc} 个在跨源候选中,等 cross 合并)" if xc else ""))
+
+
+def _report_leaf_only(leaf_only, cross_ids: set) -> None:
+    """ℹ 分支已入、未细绑的计数。"""
+    if leaf_only:
+        n_lx = sum(1 for nid, _ in leaf_only if nid in cross_ids)
+        print(f"\nℹ 分支已入、未细绑 {len(leaf_only)} 个(分支级已绑、定不到具体子因;多因缺信令/配置,确认无碍即可)"
+              + (f",其中 {n_lx} 个在跨源候选中。" if n_lx else "。"))
+
+
+def _report_under(covered, targets: dict, per_source: dict) -> None:
+    """(a) 判据像多个子条件,全部源加起来却只有 1 条绑定单元 → 多半只碰了其中一条。"""
+    # (a) 判据像多个子条件(强分隔:换行/;/①…/且),全部源加起来却只有 1 条绑定单元 → 多半只碰了其中一条
+    under = []
+    for nid in covered:
+        n = targets[nid]
+        est = _clause_count(str(n.get("condition") or ""))
+        tot = sum(d.get(nid, 0) for d in per_source.values())
+        if est >= 2 and tot == 1:
+            under.append((nid, n, est))
+    if under:
+        print(f"⚠ 多子条件疑漏 {len(under)} 个:判据看着有 ≥2 段(换行/;/且分隔),却只有 1 条绑定认领——"
+              "逐个确认其余子条件已被 D 组合/其他源覆盖,或确属缺源(decision:insufficient_data 也算认领,别静默丢):")
+        for nid, n, est in sorted(under, key=lambda x: x[0])[:20]:
+            print(f"  - {nid} 「{n.get('name','')[:34]}」 约{est}段/1条绑定\n      cond: {_snip(n, 88)}")
+        if len(under) > 20:
+            print(f"  …(还有 {len(under) - 20} 个,略)")
+
+
+def _report_lonely(covered, targets: dict, per_source: dict) -> None:
+    """(b) 告警类判据在多源在场时只有单源认领 → 谦让漏绑的软提示。"""
+    # (b) 告警类判据在多源在场时只有单源认领 → 告警可能同时落 cmd 回显 / dblg·log Summary / diag Alarm*,
+    #     子代理互相看不见,"让别的源去绑"=谦让漏绑。软提示过一眼,不是硬错。
+    lonely = []
+    for nid in covered:
+        n = targets[nid]
+        srcs = [lab for lab, d in per_source.items() if nid in d]
+        if len(srcs) == 1 and _ALARMISH.search(str(n.get("condition") or "")):
+            lonely.append((nid, n, srcs[0]))
+    if lonely:
+        print(f"ℹ 告警类判据单源认领 {len(lonely)} 个(多源在场;告警常同时落多源,确认其他源是否也该绑——都能答就都绑,不许谦让):")
+        for nid, n, lab in sorted(lonely, key=lambda x: x[0])[:20]:
+            print(f"  - {nid} 「{n.get('name','')[:34]}」 仅 {lab} 认领")
+        if len(lonely) > 20:
+            print(f"  …(还有 {len(lonely) - 20} 个,略)")
+
+
+def _report_claims(per_source: dict, covered, targets: dict) -> None:
+    """跨源认领对账(软提示,不改退出码):认领分布 + 多子条件疑漏 + 告警类单源认领。"""
+    # ---- 跨源认领对账(软提示,不改退出码)----
+    # 子代理按源并行绑、互相看不见:一个节点的判据常是**多个子条件都要满足**、且同一事实可能落在多个源里。
+    # 这里从"谁认领了几条"机械对账,逮两种最隐蔽的漏绑:碰了一条就算认领了整个节点 / 该多源都绑却只有一源绑。
+    if len(per_source) >= 1 and covered:
+        dist = " / ".join(f"{lab} 认领 {len(d)} 个节点" for lab, d in sorted(per_source.items()))
+        multi = sum(1 for nid in covered if sum(1 for d in per_source.values() if nid in d) >= 2)
+        print(f"\n跨源认领分布:{dist}" + (f"(其中 {multi} 个节点被多源同绑)" if len(per_source) >= 2 else ""))
+        _report_under(covered, targets, per_source)
+        if len(per_source) >= 2:
+            _report_lonely(covered, targets, per_source)
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -150,114 +392,14 @@ def main() -> int:
         print("至少给一个 --analyzer 或 --facts", file=sys.stderr)
         return 2
 
-    # cross_analyzer 漏传点名:cross 通道的绑定同样认领叶子,漏传它 → 已绑数虚低、"整支未触达"虚高,
-    # 实测就这么误报过 ❌ 逼人白排查。位置按产物布局推(<OUT>/scripts/,与 tree_index 同圈)。
-    cross_ap = Path(args.tree_index).resolve().parent.parent / "scripts" / "cross_analyzer.py"
-    if cross_ap.exists() and cross_ap.resolve() not in {Path(a).resolve() for a in args.analyzer}:
-        n_cx = sum(_claims_from_analyzer(cross_ap).values())
-        if n_cx:
-            print(f"⚠ {cross_ap.name} 带 {n_cx} 个绑定单元却没传给本检查——已绑数会虚低、整支未触达会虚高。"
-                  f"把它也加上再跑:--analyzer \"{cross_ap}\"(有 cross_facts 再加 --facts)。")
-
-    per_source = {}                                     # 源标签 → {node_id: 绑定单元数}(跨源认领对账用)
-    def _merge(label, units):
-        d = per_source.setdefault(label, {})
-        for k, v in units.items():
-            d[k] = d.get(k, 0) + v
-    for a in args.analyzer:
-        p = Path(a)
-        _merge(p.stem.replace("_analyzer", "") or p.stem, _claims_from_analyzer(p))
-    for fp in args.facts:
-        label, units = _claims_from_facts(Path(fp))
-        if label is not None:
-            _merge(label, units)
-    # node_id 兼容 code 形式:把 claimed 里写成 code 的归一回短 id（schema 明确两者都认,本检查也要认,否则误报漏绑）
-    code2nid = {str(n["code"]): nid for nid, n in nodes.items() if n.get("code")}
-    per_source = {lab: _renorm(d, code2nid) for lab, d in per_source.items()}
-    claimed = set().union(*per_source.values()) if per_source else set()
-
-    cols = [c.strip() for c in args.columns.split(",") if c.strip()]
-    if not cols:
-        # 缺省自动读概览列名——"可答"判定的触发条件不再依赖模型手抄 --columns(传空/传错 = 检查永远不会失败,
-        # 号称机械的检查,触发条件却由模型供给,评审时被点名)。--columns 显式给了则以给的为准。
-        auto_from = []
-        for apath in args.analyzer:
-            p = Path(apath)
-            ind = p.stem[:-len("_analyzer")] if p.stem.endswith("_analyzer") else p.stem
-            if ind == "cross":                          # cross 无自己的概览(它吃全部源)
-                continue
-            ov = p.resolve().parent.parent / "overview" / f"{ind}_overview.json"
-            if not ov.exists():
-                continue
-            try:
-                cs = ((json.loads(ov.read_text(encoding="utf-8")).get("summary") or {}).get("columns")) or []
-            except Exception:  # noqa: BLE001
-                continue
-            cols += [str(c) for c in cs if str(c).strip()]
-            auto_from.append(ov.name)
-        cols = sorted(set(cols))
-        if auto_from:
-            print(f"[info] --columns 未给,已自动读概览列名({', '.join(auto_from)};共 {len(cols)} 列)"
-                  "用于「本源大概率可答」标记。")
-
-    def _mentions(cond: str, col: str) -> bool:
-        """条件正文按**词边界**提到该列名(避免 'Cause' 命中 'DCInnerCause' 内部 → 假漏绑)。"""
-        return re.search(r"(?<![A-Za-z0-9_])" + re.escape(col) + r"(?![A-Za-z0-9_])", cond) is not None
-
-    # 诊断节点集:优先"带条件的叶子";若该树把判据挂在中间节点(没有带条件的叶子)→ 退而用全部带条件节点。
-    cond_nodes = {nid: n for nid, n in nodes.items() if _diagnostic(n)}
-    if not cond_nodes:
-        print("⚠ 无法判定:该 tree_index 没有任何「带 condition 的非 pass_through 节点」——"
-              "判据可能没导出到 tree_index,或这棵树结构特殊。请核对建树产物,别把本次当'已全覆盖'。")
+    _warn_cross_not_passed(args)
+    per_source, claimed = _collect_claims(args, nodes)
+    cols = _resolve_columns(args)
+    targets, unit = _pick_targets(nodes)
+    if targets is None:
         return 2
-    leaf_diag = {nid: n for nid, n in cond_nodes.items() if not n.get("children")}
-    if leaf_diag:
-        targets, unit = leaf_diag, "叶子"
-    else:
-        print("⚠ 该树的判别条件挂在中间节点(无带条件的叶子)——改用「全部带条件节点」判覆盖度。")
-        targets, unit = cond_nodes, "带条件节点"
-
-    def _ancestors(nid):
-        out, cur, seen = [], nodes.get(nid, {}).get("parent"), set()
-        while cur and cur in nodes and cur not in seen:
-            seen.add(cur); out.append(cur); cur = nodes[cur].get("parent")
-        return out
-
-    # 跨源候选清单(软注记原料):dispatch/cross_candidates.json 是"cross 通道正在处理谁"的权威清单
-    # (merge 汇集 cross_source 标记 + make_dispatch --cross 机械补漏扫入无人认领者后写回)。
-    # 未绑节点若在这份清单上 = 流程中(等 cross 合并),不是真漏——路由批上线后每条判据基本只有
-    # 一次绑定机会,这类"已进候选"的未绑会变多,注记就是把它和真漏分开,防止中途跑本检查误判。
-    cross_ids = set()
-    try:
-        cand_p = Path(args.tree_index).resolve().parent.parent / "dispatch" / "cross_candidates.json"
-        if cand_p.exists():
-            cross_ids = {str(c.get("node_id")) for c in json.loads(cand_p.read_text(encoding="utf-8"))
-                         if isinstance(c, dict) and c.get("node_id")}
-    except (OSError, json.JSONDecodeError, AttributeError):
-        cross_ids = set()
-
-    covered, leaf_only, miss_answerable, miss_branch = [], [], [], []
-    for nid, n in targets.items():
-        if nid in claimed:
-            covered.append(nid)
-            continue
-        branch_entered = any(a in claimed for a in _ancestors(nid))   # 路径上有祖先被绑 = 该支已进入
-        cond = str(n.get("condition") or "")
-        answerable = any(_mentions(cond, col) for col in cols) if cols else False
-        if answerable:
-            miss_answerable.append((nid, n, branch_entered))          # 条件提到已喂列却没绑 → 高置信漏绑
-        elif branch_entered:
-            leaf_only.append((nid, n))                                # 分支已入、未细绑(多半缺信令/配置定不到具体子因)
-        else:
-            miss_branch.append((nid, n))                              # 整支未触达(根→叶无任何绑定)
-
-    def _ds(n):
-        d = n.get("data_source") or {}
-        return "/".join(f"{k}:{v}" for k, v in d.items() if v and v != "不涉及") or "—"
-
-    def _snip(n, k=64):
-        s = " ".join(str(n.get("condition") or "").split())
-        return s[:k] + ("…" if len(s) > k else "")
+    cross_ids = _load_cross_ids(args.tree_index)
+    covered, leaf_only, miss_answerable, miss_branch = _classify(targets, nodes, claimed, cols)
 
     total = len(targets)
     n_pending = sum(1 for nid, *_ in (miss_answerable + leaf_only + miss_branch) if nid in cross_ids)
@@ -268,72 +410,10 @@ def main() -> int:
               f"[跨源候选中])——它们在 cross 补绑流程中,不是终态;**先把 --cross 任务说明派完、"
               f"merge 合并进 cross_analyzer.py,再跑本检查收口**(中途跑,未绑数会虚高)。")
 
-    def _xc(nid):
-        return " [跨源候选中]" if nid in cross_ids else ""
-
-    if miss_answerable:
-        print(f"\n❌ 漏绑(条件正文提到已喂列 {cols},本源能答却没绑)—— 补绑 C 类(没出现就 matched=0)或显式 decision:insufficient_data:")
-        for nid, n, be in sorted(miss_answerable, key=lambda x: x[0]):
-            print(f"  - {nid} 「{n.get('name','')[:34]}」 L{n.get('level')} {'[分支已入]' if be else '[整支未入]'} src={_ds(n)}{_xc(nid)}\n      cond: {_snip(n)}")
-
-    if miss_branch:
-        print(f"\n⚠ 整支未触达(根→叶无任何绑定;逐支确认是'缺源(没喂对应信令/配置)'还是'漏判一整支'):")
-        roots_un, roots_xc = {}, {}
-        for nid, n in miss_branch:
-            # 聚到"未触达区域的入口"= 路径上未绑且非根的最高祖先(根本身不直接绑,聚到根没信息量)
-            anc = [a for a in _ancestors(nid) if a not in claimed and nodes.get(a, {}).get("parent") is not None]
-            top = anc[-1] if anc else nid
-            roots_un[top] = roots_un.get(top, 0) + 1
-            if nid in cross_ids:
-                roots_xc[top] = roots_xc.get(top, 0) + 1
-        for top, cnt in sorted(roots_un.items(), key=lambda x: -x[1])[:40]:
-            tn = nodes.get(top, {})
-            xc = roots_xc.get(top, 0)
-            print(f"  - 子树 {top} 「{tn.get('name','')[:34]}」 src={_ds(tn)} —— 含 {cnt} 个未绑{unit}"
-                  + (f"(其中 {xc} 个在跨源候选中,等 cross 合并)" if xc else ""))
-
-    if leaf_only:
-        n_lx = sum(1 for nid, _ in leaf_only if nid in cross_ids)
-        print(f"\nℹ 分支已入、未细绑 {len(leaf_only)} 个(分支级已绑、定不到具体子因;多因缺信令/配置,确认无碍即可)"
-              + (f",其中 {n_lx} 个在跨源候选中。" if n_lx else "。"))
-
-    # ---- 跨源认领对账(软提示,不改退出码)----
-    # 子代理按源并行绑、互相看不见:一个节点的判据常是**多个子条件都要满足**、且同一事实可能落在多个源里。
-    # 这里从"谁认领了几条"机械对账,逮两种最隐蔽的漏绑:碰了一条就算认领了整个节点 / 该多源都绑却只有一源绑。
-    if len(per_source) >= 1 and covered:
-        dist = " / ".join(f"{lab} 认领 {len(d)} 个节点" for lab, d in sorted(per_source.items()))
-        multi = sum(1 for nid in covered if sum(1 for d in per_source.values() if nid in d) >= 2)
-        print(f"\n跨源认领分布:{dist}" + (f"(其中 {multi} 个节点被多源同绑)" if len(per_source) >= 2 else ""))
-        # (a) 判据像多个子条件(强分隔:换行/;/①…/且),全部源加起来却只有 1 条绑定单元 → 多半只碰了其中一条
-        under = []
-        for nid in covered:
-            n = targets[nid]
-            est = _clause_count(str(n.get("condition") or ""))
-            tot = sum(d.get(nid, 0) for d in per_source.values())
-            if est >= 2 and tot == 1:
-                under.append((nid, n, est))
-        if under:
-            print(f"⚠ 多子条件疑漏 {len(under)} 个:判据看着有 ≥2 段(换行/;/且分隔),却只有 1 条绑定认领——"
-                  "逐个确认其余子条件已被 D 组合/其他源覆盖,或确属缺源(decision:insufficient_data 也算认领,别静默丢):")
-            for nid, n, est in sorted(under, key=lambda x: x[0])[:20]:
-                print(f"  - {nid} 「{n.get('name','')[:34]}」 约{est}段/1条绑定\n      cond: {_snip(n, 88)}")
-            if len(under) > 20:
-                print(f"  …(还有 {len(under) - 20} 个,略)")
-        # (b) 告警类判据在多源在场时只有单源认领 → 告警可能同时落 cmd 回显 / dblg·log Summary / diag Alarm*,
-        #     子代理互相看不见,"让别的源去绑"=谦让漏绑。软提示过一眼,不是硬错。
-        if len(per_source) >= 2:
-            lonely = []
-            for nid in covered:
-                n = targets[nid]
-                srcs = [lab for lab, d in per_source.items() if nid in d]
-                if len(srcs) == 1 and _ALARMISH.search(str(n.get("condition") or "")):
-                    lonely.append((nid, n, srcs[0]))
-            if lonely:
-                print(f"ℹ 告警类判据单源认领 {len(lonely)} 个(多源在场;告警常同时落多源,确认其他源是否也该绑——都能答就都绑,不许谦让):")
-                for nid, n, lab in sorted(lonely, key=lambda x: x[0])[:20]:
-                    print(f"  - {nid} 「{n.get('name','')[:34]}」 仅 {lab} 认领")
-                if len(lonely) > 20:
-                    print(f"  …(还有 {len(lonely) - 20} 个,略)")
+    _report_missing(miss_answerable, cols, cross_ids)
+    _report_branches(miss_branch, nodes, claimed, cross_ids, unit)
+    _report_leaf_only(leaf_only, cross_ids)
+    _report_claims(per_source, covered, targets)
 
     print("\n要点:绑定要**树驱动**——遍历每个叶子按树条件要的值绑(C 类 contains 那个码),"
           "不管这次数据出没出现;值没出现=matched=0(确定排除),不是 insufficient_data。"

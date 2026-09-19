@@ -142,6 +142,36 @@ def _put_actual(e: dict, f: dict, key: str = "actual") -> None:
     _put(e, key, _actual(f), _actual(f, "en"))
 
 
+def _fill_fact(e: dict, f, actual_key: str, how_key: str) -> None:
+    """代表事实 → evidence 条目:actual(中英)+ explain(键名按正向侧/反证侧传入)。"""
+    _put_actual(e, f, actual_key)
+    if f and f.get("explain"):
+        e[how_key] = f["explain"]
+
+
+def _ev_holding(e: dict, facts, tri: str) -> None:
+    """成立/冲突节点的证据:正向事实作代表;冲突另记反证一侧,成立则把存在类弱阴性如实记一笔。"""
+    _fill_fact(e, _pick(facts, True), "actual", "how")
+    if tri == "冲突":
+        _fill_fact(e, _pick(facts, False), "conflict_actual", "conflict_how")
+        return
+    misses = [x for x in facts if x.get("status") == "ok" and x.get("predicate_satisfied") is False]
+    if misses:                                   # 存在类弱阴性:如实记一笔,但不拉低判定
+        ex = (misses[0].get('explain') or '')[:80]
+        _put(e, "other_source_note", _t("other_source", "zh", n=len(misses), ex=ex),
+             _t("other_source", "en", n=len(misses), ex=ex))
+
+
+def _ev_insufficient(e: dict, facts) -> None:
+    """数据不足节点的证据:没 facts 写"无任何事实",有 reason 用 reason 原文,再按 gap_kind 分型加前缀。"""
+    _put(e, "actual", "" if facts else _t("no_facts"), "" if facts else _t("no_facts", "en"))
+    rs = [f.get("reason") for f in facts if f.get("reason")]
+    if rs:
+        e["actual"] = str(rs[0])[:160]
+        e.pop("actual_en", None)
+    _apply_gap(e, facts)
+
+
 def _ev(nid: str, n: dict) -> dict:
     """一个路径节点 → 预填的 evidence 条目(judgment 是机械三态,模型可降不可无据升)。"""
     cond = n.get("condition") or ""
@@ -156,33 +186,11 @@ def _ev(nid: str, n: dict) -> dict:
     tri = _tri(facts) if facts else "数据不足"
     e["judgment"] = tri
     if tri in ("成立", "冲突"):
-        f = _pick(facts, True)
-        _put_actual(e, f)
-        if f and f.get("explain"):
-            e["how"] = f["explain"]
-        if tri == "冲突":
-            g = _pick(facts, False)
-            _put_actual(e, g, "conflict_actual")
-            if g and g.get("explain"):
-                e["conflict_how"] = g["explain"]
-        else:
-            misses = [x for x in facts if x.get("status") == "ok" and x.get("predicate_satisfied") is False]
-            if misses:                                   # 存在类弱阴性:如实记一笔,但不拉低判定
-                ex = (misses[0].get('explain') or '')[:80]
-                _put(e, "other_source_note", _t("other_source", "zh", n=len(misses), ex=ex),
-                     _t("other_source", "en", n=len(misses), ex=ex))
+        _ev_holding(e, facts, tri)
     elif tri == "不成立":
-        f = _pick(facts, False)
-        _put_actual(e, f)
-        if f and f.get("explain"):
-            e["how"] = f["explain"]
+        _fill_fact(e, _pick(facts, False), "actual", "how")
     else:
-        _put(e, "actual", "" if facts else _t("no_facts"), "" if facts else _t("no_facts", "en"))
-        rs = [f.get("reason") for f in facts if f.get("reason")]
-        if rs:
-            e["actual"] = str(rs[0])[:160]
-            e.pop("actual_en", None)
-        _apply_gap(e, facts)
+        _ev_insufficient(e, facts)
     return e
 
 
@@ -212,6 +220,148 @@ def _path(nid: str, nodes: dict, limit=400):
     return list(reversed(chain))
 
 
+def _no_own_cond(n: dict) -> bool:
+    """透传节点或无真条件(空/「无条件」/「无判断」)的节点:不进候选清单、不算子节点三态。"""
+    cond = n.get("condition") or ""
+    return bool(n.get("pass_through") or not cond or "无条件" in cond or "无判断" in cond)
+
+
+def _bucket_nodes(nodes: dict) -> tuple:
+    """三态分桶:有事实的真条件节点按 成立/不成立/数据不足/冲突 分四组 id 列表(未覆盖=没 facts 不进清单)。"""
+    holding, refuted, insuf, conflict = [], [], [], []
+    for nid, n in nodes.items():
+        if _no_own_cond(n):
+            continue
+        facts = n.get("facts") or []
+        if not facts:
+            continue                                    # 未覆盖:归 tree_issues,不进候选清单
+        tri = _tri(facts)
+        {"成立": holding, "不成立": refuted, "数据不足": insuf, "冲突": conflict}[tri].append(nid)
+    return holding, refuted, insuf, conflict
+
+
+def _deepest_holding(holding: list, nodes: dict) -> list:
+    """候选=成立节点中"没有成立后代"的(最深的成立);成立的祖先在候选的路径里体现,不重复开条。"""
+    hold_set = set(holding)
+    deepest = []
+    for nid in holding:
+        others = hold_set - {nid}
+        if not any(nid in _path(o, nodes)[:-1] for o in others):
+            deepest.append(nid)
+    return deepest
+
+
+def _ancestor_notes(entry: dict, ev: list) -> tuple:
+    """路径上级三类注记(未验证/不成立/冲突)写进候选条目;返回 (refutes, gaps) 供机械定档。
+    定档规则(机械,模型不参与):
+    ①未绑定/数据不足的上级=默认放行(零信息不当作反证)落 caveats,报告提示"此处无判断"
+      ——判断方法写错的中间节点,正路是调优表清绑定停验,归到这类;
+    ②上级实测「不成立/冲突」=层级矛盾 → 机械降疑似:留着绑定又实测不成立就是有效反证,
+      blocked_at/note 预填卡点与实际值,人复核(上级绑定假阴?候选命中系背景?)前不升确证。"""
+    anc_insuf = [e for e in ev[:-1] if e["judgment"] == "数据不足"]
+    gaps = [e for e in ev[:-1] if e["judgment"] == "冲突"]
+    refutes = [e for e in ev[:-1] if e["judgment"] == "不成立"]
+    if anc_insuf:
+        entry["ancestor_insufficient"] = (
+            "祖先节点未验证(无绑定/数据不足/无法判断):"
+            + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in anc_insuf[:5])
+            + "——默认放行(零信息不当作反证),由本节点成立事实自下而上蕴含;"
+              "finalize 落 caveats,报告提示'此处无判断'")
+    if refutes:
+        entry["ancestor_refuted"] = (
+            "祖先节点判定不成立:"
+            + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in refutes[:5])
+            + "——层级矛盾,已机械降 probable(blocked_at/note 已预填);复核该上级绑定(可能假阴)"
+              "或叶子命中(可能背景)")
+    if gaps:
+        entry["ancestor_conflict"] = (
+            "祖先节点证据冲突(成立与强反证并存):"
+            + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in gaps[:5])
+            + "——层级矛盾,已机械降 probable;冲突两边的实测值在 evidence 该条目的 "
+              "conflict_actual/conflict_how,报告里把冲突点标出来")
+    return refutes, gaps
+
+
+def _children_status(nid: str, nodes: dict, unc, unc_names: dict) -> list:
+    """中间节点候选的直接子节点三态列表(未覆盖子因补在后面,名字从覆盖报告回填)。"""
+    kids = []
+    for cid, c in nodes.items():
+        if c.get("parent") != nid:
+            continue
+        if _no_own_cond(c):
+            continue
+        cf = c.get("facts") or []
+        st = _tri(cf) if cf else _t("uncovered")
+        kid = {"node": c.get("name"), "node_id": cid, "状态": st,
+               "status_en": _TRI_EN.get(st) or _t("uncovered", "en")}
+        if c.get("name_en"):
+            kid["node_en"] = c["name_en"]
+        kids.append(kid)
+    for u in unc:
+        uid = u.get("id") if isinstance(u, dict) else u
+        if uid and not any(k["node_id"] == uid for k in kids):
+            nm = (u.get("name") if isinstance(u, dict) else "") or unc_names.get(uid, "")
+            kids.append({"node": nm, "node_id": uid, "状态": _t("uncovered"),
+                         "status_en": _t("uncovered", "en")})
+    return kids
+
+
+def _auto_tier(entry: dict, n: dict, refutes: list, gaps: list) -> None:
+    """机械定档:层级矛盾(上级不成立/冲突)→ probable 并预填卡点与 note(中英);否则 confirmed。"""
+    if refutes or gaps:
+        # 层级矛盾 → 机械降疑似:卡点=离候选最近的带反证上级(最可指认)
+        worst = (refutes or gaps)[-1]
+        kind_key = "kind_refuted" if refutes else "kind_conflict"
+        entry["auto_verdict"] = "probable"
+        for lang in ("zh", "en"):
+            kind = _t(kind_key, lang)
+            wa = worst.get("actual_en") if lang == "en" and worst.get("actual_en") else worst.get("actual")
+            hint = _t("blocked_hint", lang, node=_name(worst, lang), nid=worst["node_id"], kind=kind)
+            note = _t("note", lang, cand=_name(n, lang), node=_name(worst, lang), kind=kind,
+                      actual=(_t("note_actual", lang, a=str(wa)[:120]) if worst.get("actual") else ""))
+            entry["blocked_at_hint" if lang == "zh" else "blocked_at_hint_en"] = hint
+            entry["note" if lang == "zh" else "note_en"] = note
+        entry["draft_tier"] = "probable_auto(机械降档:候选成立+上级实测不成立/冲突=层级矛盾)"
+        return
+    entry["auto_verdict"] = "confirmed"
+    entry["draft_tier"] = ("confirmed_auto(机械定档:候选自身成立+有判定的上级全成立;"
+                           "未绑定/数据不足上级默认放行落 caveats,报告提示未验证)")
+
+
+def _candidate_entry(nid: str, nodes: dict, unc_names: dict) -> dict:
+    """一个最深成立节点 → 候选条目:路径+证据预填、祖先注记、子节点三态(中间节点)、机械定档。"""
+    n = nodes[nid]
+    ev = [_ev(p, nodes[p]) for p in _path(nid, nodes)]
+    entry = {"node": n.get("name"), "node_id": nid,
+             "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
+             "evidence_prefilled": ev}
+    f = _pick(n.get("facts") or [], True)
+    if f:
+        _put(entry, "support_hint", _actual(f), _actual(f, "en"))
+    refutes, gaps = _ancestor_notes(entry, ev)
+    unc = n.get("uncovered_children") or []
+    if not n.get("is_leaf") or unc:
+        # 中间节点候选:候选=最深成立(下面没有任何成立后代)。用户拍板:叶子没有一个成立时,
+        # 中间层命中就按本层确证——压疑似只会逼模型空转权衡"叶子因是谁"(它也没证据)。
+        # 叶子因待定机械注记落 caveats;直接子节点三态摆出来,数据补齐后重跑可细化到叶子。
+        kids = _children_status(nid, nodes, unc, unc_names)
+        if kids:
+            entry["children_status"] = kids
+        entry["leaf_pending"] = ("非叶子/有未覆盖子因:叶子因待定(下级无一成立)——按本层命中确证,"
+                                 "finalize 自动落 caveats;子节点三态见 children_status,数据补齐后重跑可细化")
+    _auto_tier(entry, n, refutes, gaps)
+    return entry
+
+
+def _conflict_entry(nid: str, nodes: dict) -> dict:
+    """冲突条目(候选自身成立+强反证并存):路径+证据预填,不定档,交模型权衡。"""
+    return {"node": nodes[nid].get("name"), "node_id": nid,
+            **({"node_en": nodes[nid]["name_en"]} if nodes[nid].get("name_en") else {}),
+            "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
+            "evidence_prefilled": [_ev(p, nodes[p]) for p in _path(nid, nodes)],
+            "note": _t("conflict_note"), "note_en": _t("conflict_note", "en")}
+
+
 def draft_pruned(data: dict) -> dict:
     ft = data.get("fault_tree") or {}
     nodes = ft.get("pruned_nodes") or {}
@@ -219,121 +369,19 @@ def draft_pruned(data: dict) -> dict:
     unc_names = {u.get("id"): u.get("name") for u in
                  ((data.get("tree_issues") or {}).get("uncovered_condition_nodes") or [])
                  if isinstance(u, dict)}
-    holding, refuted, insuf, conflict = [], [], [], []
-    for nid, n in nodes.items():
-        cond = n.get("condition") or ""
-        if n.get("pass_through") or not cond or "无条件" in cond or "无判断" in cond:
-            continue
-        facts = n.get("facts") or []
-        if not facts:
-            continue                                    # 未覆盖:归 tree_issues,不进候选清单
-        tri = _tri(facts)
-        {"成立": holding, "不成立": refuted, "数据不足": insuf, "冲突": conflict}[tri].append(nid)
-
-    # 候选=成立节点中"没有成立后代"的(最深的成立);成立的祖先在候选的路径里体现,不重复开条
-    hold_set = set(holding)
-    deepest = []
-    for nid in holding:
-        others = hold_set - {nid}
-        if not any(nid in _path(o, nodes)[:-1] for o in others):
-            deepest.append(nid)
+    holding, refuted, insuf, conflict = _bucket_nodes(nodes)
+    deepest = _deepest_holding(holding, nodes)
 
     confirmed, probable = [], []
     for nid in sorted(deepest, key=lambda x: int(x[1:]) if x[1:].isdigit() else 10 ** 9):
-        n = nodes[nid]
-        ev = [_ev(p, nodes[p]) for p in _path(nid, nodes)]
-        # 定档规则(机械,模型不参与):
-        # ①未绑定/数据不足的上级=默认放行(零信息不当作反证)落 caveats,报告提示"此处无判断"
-        #   ——判断方法写错的中间节点,正路是调优表清绑定停验,归到这类;
-        # ②上级实测「不成立/冲突」=层级矛盾 → 机械降疑似:留着绑定又实测不成立就是有效反证,
-        #   blocked_at/note 预填卡点与实际值,人复核(上级绑定假阴?候选命中系背景?)前不升确证。
-        anc_insuf = [e for e in ev[:-1] if e["judgment"] == "数据不足"]
-        gaps = [e for e in ev[:-1] if e["judgment"] == "冲突"]
-        refutes = [e for e in ev[:-1] if e["judgment"] == "不成立"]
-        entry = {"node": n.get("name"), "node_id": nid,
-                 "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
-                 "evidence_prefilled": ev}
-        f = _pick(n.get("facts") or [], True)
-        if f:
-            _put(entry, "support_hint", _actual(f), _actual(f, "en"))
-        if anc_insuf:
-            entry["ancestor_insufficient"] = (
-                "祖先节点未验证(无绑定/数据不足/无法判断):"
-                + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in anc_insuf[:5])
-                + "——默认放行(零信息不当作反证),由本节点成立事实自下而上蕴含;"
-                  "finalize 落 caveats,报告提示'此处无判断'")
-        if refutes:
-            entry["ancestor_refuted"] = (
-                "祖先节点判定不成立:"
-                + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in refutes[:5])
-                + "——层级矛盾,已机械降 probable(blocked_at/note 已预填);复核该上级绑定(可能假阴)"
-                  "或叶子命中(可能背景)")
-        if gaps:
-            entry["ancestor_conflict"] = (
-                "祖先节点证据冲突(成立与强反证并存):"
-                + "、".join(e["node"] + "(" + e["node_id"] + ")" for e in gaps[:5])
-                + "——层级矛盾,已机械降 probable;冲突两边的实测值在 evidence 该条目的 "
-                  "conflict_actual/conflict_how,报告里把冲突点标出来")
-        unc = n.get("uncovered_children") or []
-        if not n.get("is_leaf") or unc:
-            # 中间节点候选:候选=最深成立(下面没有任何成立后代)。用户拍板:叶子没有一个成立时,
-            # 中间层命中就按本层确证——压疑似只会逼模型空转权衡"叶子因是谁"(它也没证据)。
-            # 叶子因待定机械注记落 caveats;直接子节点三态摆出来,数据补齐后重跑可细化到叶子。
-            kids = []
-            for cid, c in nodes.items():
-                if c.get("parent") != nid:
-                    continue
-                ccond = c.get("condition") or ""
-                if c.get("pass_through") or not ccond or "无条件" in ccond or "无判断" in ccond:
-                    continue
-                cf = c.get("facts") or []
-                st = _tri(cf) if cf else _t("uncovered")
-                kid = {"node": c.get("name"), "node_id": cid, "状态": st,
-                       "status_en": _TRI_EN.get(st) or _t("uncovered", "en")}
-                if c.get("name_en"):
-                    kid["node_en"] = c["name_en"]
-                kids.append(kid)
-            for u in unc:
-                uid = u.get("id") if isinstance(u, dict) else u
-                if uid and not any(k["node_id"] == uid for k in kids):
-                    nm = (u.get("name") if isinstance(u, dict) else "") or unc_names.get(uid, "")
-                    kids.append({"node": nm, "node_id": uid, "状态": _t("uncovered"),
-                                 "status_en": _t("uncovered", "en")})
-            if kids:
-                entry["children_status"] = kids
-            entry["leaf_pending"] = ("非叶子/有未覆盖子因:叶子因待定(下级无一成立)——按本层命中确证,"
-                                     "finalize 自动落 caveats;子节点三态见 children_status,数据补齐后重跑可细化")
-        if refutes or gaps:
-            # 层级矛盾 → 机械降疑似:卡点=离候选最近的带反证上级(最可指认)
-            worst = (refutes or gaps)[-1]
-            kind_key = "kind_refuted" if refutes else "kind_conflict"
-            entry["auto_verdict"] = "probable"
-            for lang in ("zh", "en"):
-                kind = _t(kind_key, lang)
-                wa = worst.get("actual_en") if lang == "en" and worst.get("actual_en") else worst.get("actual")
-                hint = _t("blocked_hint", lang, node=_name(worst, lang), nid=worst["node_id"], kind=kind)
-                note = _t("note", lang, cand=_name(n, lang), node=_name(worst, lang), kind=kind,
-                          actual=(_t("note_actual", lang, a=str(wa)[:120]) if worst.get("actual") else ""))
-                entry["blocked_at_hint" if lang == "zh" else "blocked_at_hint_en"] = hint
-                entry["note" if lang == "zh" else "note_en"] = note
-            entry["draft_tier"] = "probable_auto(机械降档:候选成立+上级实测不成立/冲突=层级矛盾)"
-            probable.append(entry)
-        else:
-            entry["auto_verdict"] = "confirmed"
-            entry["draft_tier"] = ("confirmed_auto(机械定档:候选自身成立+有判定的上级全成立;"
-                                   "未绑定/数据不足上级默认放行落 caveats,报告提示未验证)")
-            confirmed.append(entry)
+        entry = _candidate_entry(nid, nodes, unc_names)
+        (probable if entry["auto_verdict"] == "probable" else confirmed).append(entry)
 
     return {
         "_readme": _README,
         "confirmed_candidates": confirmed,
         "probable_candidates": probable,
-        "conflict_nodes": [{"node": nodes[nid].get("name"), "node_id": nid,
-                            **({"node_en": nodes[nid]["name_en"]} if nodes[nid].get("name_en") else {}),
-                            "path_names": [nodes[p].get("name") for p in _path(nid, nodes)],
-                            "evidence_prefilled": [_ev(p, nodes[p]) for p in _path(nid, nodes)],
-                            "note": _t("conflict_note"), "note_en": _t("conflict_note", "en")}
-                           for nid in sorted(conflict)],
+        "conflict_nodes": [_conflict_entry(nid, nodes) for nid in sorted(conflict)],
         "excluded_candidates": [_ev(nid, nodes[nid]) for nid in sorted(refuted)],
         "undetermined_skeleton": [_ev(nid, nodes[nid]) for nid in sorted(insuf)],
     }

@@ -185,6 +185,43 @@ def _infer_combine(method: Optional[str]) -> Optional[str]:
     return "unknown"
 
 
+def _row_judgment(row: Dict[str, str], judgment_col: Optional[str]) -> Optional[str]:
+    """取本行判断格原文(strip 后);没有判据列、格为空或是 pass-through 标记(不涉及/无条件进入…)→ None。"""
+    if judgment_col:
+        jv = (row.get(judgment_col) or "").strip()
+        if not _is_skip_judgment(jv):
+            return jv
+    return None
+
+
+def _cut_path(items: list, names: List[str], start_level: Optional[int], start_node: Optional[str]):
+    """路径截取规则(build_tree / build_index 共用):给了 start_node 时优先在 start_level 层(默认 L2,
+    背景业务知识)匹配场景名;若该层不是,则在该行任意层找到 start_node 并以它为根(备用做法);都没有 → None。
+    没给 start_node 时从 start_level 层起截。items 与 names 逐位对应(names 为各层名字)。"""
+    if start_node:
+        sl = start_level or 1
+        if len(items) >= sl and names[sl - 1] == start_node:
+            return items[sl - 1:]                       # 优先:场景名在 L2
+        if start_node in names:
+            return items[names.index(start_node):]      # 备用做法:在别的层找到也认
+        return None
+    if start_level and start_level > 1:
+        return items[start_level - 1:]
+    return items
+
+
+def _insert_path(tree: Dict[str, Any], path: List[str], judgment: Optional[str]) -> None:
+    """把一条路径逐层挂进嵌套树;判断条件挂到路径最深的节点上(同一判据不重复挂)。"""
+    cur = tree
+    for i, node in enumerate(path):
+        cur.setdefault(node, {})
+        if i == len(path) - 1 and judgment:
+            cur[node].setdefault("_judgment_", [])
+            if judgment not in cur[node]["_judgment_"]:
+                cur[node]["_judgment_"].append(judgment)
+        cur = cur[node]
+
+
 def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                start_level: Optional[int] = None, start_node: Optional[str] = None,
                judgment_col: Optional[str] = None,
@@ -210,36 +247,62 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
             continue
         if exclude_re and any(exclude_re.search(v) for v in full):
             continue
-        judgment = None
-        if judgment_col:
-            jv = (row.get(judgment_col) or "").strip()
-            if not _is_skip_judgment(jv):
-                judgment = _clean_text(jv)          # md 也清洗(去 HTML/图片、保留运算符)
-
-        if start_node:
-            sl = start_level or 1
-            if len(full) >= sl and full[sl - 1] == start_node:
-                path = full[sl - 1:]                    # 优先:场景名在 L2
-            elif start_node in full:
-                path = full[full.index(start_node):]    # 备用做法:在别的层找到也认
-            else:
-                continue
-        elif start_level and start_level > 1:
-            path = full[start_level - 1:]
-        else:
-            path = full
+        jv = _row_judgment(row, judgment_col)
+        judgment = _clean_text(jv) if jv is not None else None   # md 也清洗(去 HTML/图片、保留运算符)
+        path = _cut_path(full, full, start_level, start_node)
         if not path:
             continue
-
-        cur = tree
-        for i, node in enumerate(path):
-            cur.setdefault(node, {})
-            if i == len(path) - 1 and judgment:
-                cur[node].setdefault("_judgment_", [])
-                if judgment not in cur[node]["_judgment_"]:
-                    cur[node]["_judgment_"].append(judgment)
-            cur = cur[node]
+        _insert_path(tree, path, judgment)
     return tree
+
+
+def _row_triples(row: Dict[str, str], level_cols: List[Tuple[str, int]],
+                 code_cols: Dict[int, str]) -> List[Tuple[int, str, str]]:
+    """一行 → [(层级, 名字, 编码)],名字为空的层跳过;
+    相邻同名层折叠(与 build_tree 同款,防右向填充数据建出千级重名链)。"""
+    triples: List[Tuple[int, str, str]] = []
+    for col, lvl in level_cols:
+        nm = (row.get(col) or "").strip()
+        if not nm:
+            continue
+        cd = (row.get(code_cols.get(lvl, "")) or "").strip()
+        triples.append((lvl, nm, cd))
+    return [t for i, t in enumerate(triples) if i == 0 or t[1] != triples[i - 1][1]]
+
+
+def _row_judgment_en(row: Dict[str, str], judgment_en_col: Optional[str],
+                     judgment: Optional[str]) -> Optional[str]:
+    """英文判据只在中文判据成立时跟着存(中英成对);清洗后为空或是 pass-through 标记 → None。"""
+    if judgment_en_col and judgment:
+        jev = _clean_text(row.get(judgment_en_col))
+        if jev and not _is_skip_judgment(jev):
+            return jev
+    return None
+
+
+def _set_name_en(node: Dict[str, Any], row: Dict[str, str], en_cols: Dict[int, str], lvl: int, nm: str) -> None:
+    """节点还没有英文名且该层有英文列时,取本行该层英文格存为 name_en(空或与中文名相同就不存)。"""
+    if not node.get("name_en") and lvl in en_cols:
+        en_name = (row.get(en_cols[lvl]) or "").strip()
+        if en_name and en_name != nm:
+            node["name_en"] = en_name
+
+
+def _attach_judgment(node: Dict[str, Any], judgment: str, judgment_en: Optional[str]) -> None:
+    """把一行的判断条件挂到路径最深节点:方法正文累加进 condition(并重推 combine)、数据源合并、英文判据去重累加。"""
+    method, src = _split_judgment(judgment)
+    if method:
+        node["condition"] = (node["condition"] + "\n" + method) if node["condition"] else method
+        node["combine"] = _infer_combine(node["condition"])
+        node["pass_through"] = False
+    if src:
+        node["data_source"].update(src)
+    if judgment_en:
+        prev = node.get("condition_en")
+        if not prev:
+            node["condition_en"] = judgment_en
+        elif judgment_en not in prev:
+            node["condition_en"] = prev + "\n" + judgment_en
 
 
 def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
@@ -262,43 +325,15 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
             short_map[chain] = "n" + str(len(short_map) + 1)
         return short_map[chain]
     for row in rows:
-        triples: List[Tuple[int, str, str]] = []  # (层级, 名字, 编码)
-        for col, lvl in level_cols:
-            nm = (row.get(col) or "").strip()
-            if not nm:
-                continue
-            cd = (row.get(code_cols.get(lvl, "")) or "").strip()
-            triples.append((lvl, nm, cd))
+        triples = _row_triples(row, level_cols, code_cols)
         if not triples:
             continue
-        # 相邻同名层折叠(与 build_tree 同款,防右向填充数据建出千级重名链)
-        triples = [t for i, t in enumerate(triples) if i == 0 or t[1] != triples[i - 1][1]]
         names = [t[1] for t in triples]
         if exclude_re and any(exclude_re.search(n) for n in names):
             continue
-        judgment = None
-        if judgment_col:
-            jv = (row.get(judgment_col) or "").strip()
-            if not _is_skip_judgment(jv):
-                judgment = jv                       # 原文交给 _split_judgment(内部 _clean_text)
-        judgment_en = None
-        if judgment_en_col and judgment:            # 英文判据只在中文判据成立时跟着存(中英成对)
-            jev = _clean_text(row.get(judgment_en_col))
-            if jev and not _is_skip_judgment(jev):
-                judgment_en = jev
-        # 截取(镜像 build_tree)
-        if start_node:
-            sl = start_level or 1
-            if len(triples) >= sl and triples[sl - 1][1] == start_node:
-                path = triples[sl - 1:]
-            elif start_node in names:
-                path = triples[names.index(start_node):]
-            else:
-                continue
-        elif start_level and start_level > 1:
-            path = triples[start_level - 1:]
-        else:
-            path = triples
+        judgment = _row_judgment(row, judgment_col)         # 原文交给 _split_judgment(内部 _clean_text)
+        judgment_en = _row_judgment_en(row, judgment_en_col, judgment)
+        path = _cut_path(triples, names, start_level, start_node)   # 截取(镜像 build_tree)
         if not path:
             continue
         parent_id, id_parts = None, []
@@ -313,24 +348,9 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                 nodes[parent_id]["children"].append(nid)
             if j == 0:
                 root_id = nid
-            if not node.get("name_en") and lvl in en_cols:
-                en_name = (row.get(en_cols[lvl]) or "").strip()
-                if en_name and en_name != nm:
-                    node["name_en"] = en_name
+            _set_name_en(node, row, en_cols, lvl, nm)
             if j == len(path) - 1 and judgment:
-                method, src = _split_judgment(judgment)
-                if method:
-                    node["condition"] = (node["condition"] + "\n" + method) if node["condition"] else method
-                    node["combine"] = _infer_combine(node["condition"])
-                    node["pass_through"] = False
-                if src:
-                    node["data_source"].update(src)
-                if judgment_en:
-                    prev = node.get("condition_en")
-                    if not prev:
-                        node["condition_en"] = judgment_en
-                    elif judgment_en not in prev:
-                        node["condition_en"] = prev + "\n" + judgment_en
+                _attach_judgment(node, judgment, judgment_en)
             parent_id = nid
     return {"scenario": start_node, "root": root_id, "nodes": nodes}
 

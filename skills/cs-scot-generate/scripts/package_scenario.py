@@ -88,6 +88,75 @@ def rewrite_skill_md(path: Path, name: str, scenario: str) -> None:
     path.write_text(f"---\n{fm}\n---\n" + txt[m.end():], encoding="utf-8")
 
 
+def _read_identity(out: Path):
+    """场景名与英文短名:优先 manifest.json;老产物没有 manifest 则从 tree/*.tree_index.json 取。"""
+    scenario, slug = None, None
+    mf = out / "manifest.json"
+    if mf.exists():
+        try:
+            d = json.loads(mf.read_text(encoding="utf-8"))
+            scenario, slug = d.get("scenario"), d.get("slug")
+        except Exception:
+            pass
+    if not scenario:                                     # 老产物没有 manifest:改从 tree_index 取名
+        for ti in sorted((out / "tree").glob("*.tree_index.json")):
+            try:
+                d = json.loads(ti.read_text(encoding="utf-8"))
+                scenario, slug = d.get("scenario"), d.get("slug")
+                break
+            except Exception:
+                continue
+    return scenario, slug
+
+
+def _resolve_name(args, slug, scenario: str) -> str:
+    """技能名:--name 覆盖(须能转成英文短名),否则用产物的 slug;都没有 → 退出 2。"""
+    name = slugify(args.name) if args.name else slug
+    if args.name and not name:
+        print(f"--name「{args.name}」不可用:须为英文(会转成小写连字符)。", file=sys.stderr)
+        sys.exit(2)
+    if not name:
+        print(f"产物没有英文短名(步骤1没取到英文列):用 --name <english-name> 指定技能名,"
+              f"或回步骤1加 --slug 重跑。场景:「{scenario}」", file=sys.stderr)
+        sys.exit(2)
+    return name
+
+
+def _resolve_dest(args, out: Path, name: str, exe: Path, rca: Path) -> Path:
+    """目标技能目录:--dest 或默认「scot技能」容器;与源目录重叠/已存在(无 --force)→ 退出 2。"""
+    # 默认放到与「scot产物」平级的「scot技能」容器下——绝不能默认到 out.parent:
+    # 产物目录名=slug=技能名,dest 会与产物目录本身同路径,--force 一开就是先删产物再打空包(实测过)。
+    if args.dest:
+        dest_root = Path(args.dest).expanduser().resolve()
+    elif out.parent.name == "scot产物":
+        dest_root = out.parent.parent / "scot技能"
+    else:
+        dest_root = out.parent / "scot技能"
+    dest = (dest_root / name).resolve()
+    for src, what in ((out, "场景产物目录"), (exe, "execute 技能源"), (rca, "fault-tree-rca 技能源")):
+        if dest == src or dest in src.parents or src in dest.parents:
+            print(f"目标目录与{what}重叠:{dest} ↔ {src}——继续会把源删掉/套娃,换个 --dest。",
+                  file=sys.stderr)
+            sys.exit(2)
+    if dest.exists():
+        if not args.force:
+            print(f"目标已存在:{dest}(确认要覆盖就加 --force)", file=sys.stderr)
+            sys.exit(2)
+        shutil.rmtree(dest)
+    return dest
+
+
+def _copy_product(out: Path, dest: Path) -> None:
+    """诊断产物并进 assets/(排除临时物;--out 是已打包技能的 assets/ 时剔除上次放的 rca 副本)。"""
+    def _ignore_out(d, names):                           # --out 若是"已打包技能的 assets/"(就地调优/迁移后再克隆),
+        ig = set(_ignore(d, names))                      # 里面已带上次打包放的 fault-tree-rca 副本——拷贝时剔除
+        if Path(d).resolve() == out.resolve():           # (框架里已放新副本,同名目录冲突实测会在 copytree 报错)
+            ig |= {n for n in names if n in ("fault-tree-rca", "fault-tree-rca-debate")}
+        return ig                                        # debate 名留在剔除表:历史上带过副本的包克隆时清干净
+    shutil.copytree(out, dest / "assets", ignore=_ignore_out,        # 诊断产物并进 assets(排除临时物;
+                    dirs_exist_ok=True)                              # 框架已建 assets,允许合并)
+
+
 def main() -> None:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -113,35 +182,13 @@ def main() -> None:
               "没有计划的技能包上传了也跑不了。", file=sys.stderr)
         sys.exit(1)
 
-    scenario, slug = None, None
-    mf = out / "manifest.json"
-    if mf.exists():
-        try:
-            d = json.loads(mf.read_text(encoding="utf-8"))
-            scenario, slug = d.get("scenario"), d.get("slug")
-        except Exception:
-            pass
-    if not scenario:                                     # 老产物没有 manifest:改从 tree_index 取名
-        for ti in sorted((out / "tree").glob("*.tree_index.json")):
-            try:
-                d = json.loads(ti.read_text(encoding="utf-8"))
-                scenario, slug = d.get("scenario"), d.get("slug")
-                break
-            except Exception:
-                continue
+    scenario, slug = _read_identity(out)
     if not scenario:
         print(f"不合格:读不到场景名(manifest.json / tree/*.tree_index.json 都没有)——产物不完整。",
               file=sys.stderr)
         sys.exit(1)
 
-    name = slugify(args.name) if args.name else slug
-    if args.name and not name:
-        print(f"--name「{args.name}」不可用:须为英文(会转成小写连字符)。", file=sys.stderr)
-        sys.exit(2)
-    if not name:
-        print(f"产物没有英文短名(步骤1没取到英文列):用 --name <english-name> 指定技能名,"
-              f"或回步骤1加 --slug 重跑。场景:「{scenario}」", file=sys.stderr)
-        sys.exit(2)
+    name = _resolve_name(args, slug, scenario)
 
     exe = Path(args.execute_skill).expanduser().resolve()
     rca = Path(args.rca_skill).expanduser().resolve()
@@ -151,25 +198,7 @@ def main() -> None:
                   file=sys.stderr)
             sys.exit(2)
 
-    # 默认放到与「scot产物」平级的「scot技能」容器下——绝不能默认到 out.parent:
-    # 产物目录名=slug=技能名,dest 会与产物目录本身同路径,--force 一开就是先删产物再打空包(实测过)。
-    if args.dest:
-        dest_root = Path(args.dest).expanduser().resolve()
-    elif out.parent.name == "scot产物":
-        dest_root = out.parent.parent / "scot技能"
-    else:
-        dest_root = out.parent / "scot技能"
-    dest = (dest_root / name).resolve()
-    for src, what in ((out, "场景产物目录"), (exe, "execute 技能源"), (rca, "fault-tree-rca 技能源")):
-        if dest == src or dest in src.parents or src in dest.parents:
-            print(f"目标目录与{what}重叠:{dest} ↔ {src}——继续会把源删掉/套娃,换个 --dest。",
-                  file=sys.stderr)
-            sys.exit(2)
-    if dest.exists():
-        if not args.force:
-            print(f"目标已存在:{dest}(确认要覆盖就加 --force)", file=sys.stderr)
-            sys.exit(2)
-        shutil.rmtree(dest)
+    dest = _resolve_dest(args, out, name, exe, rca)
 
     # 打包前刷新调优表(产物→Excel,业务同事的工作台;失败不阻断打包,明确提示即可)
     try:
@@ -179,14 +208,7 @@ def main() -> None:
         print(f"[package] ⚠ 调优表导出失败(不阻断打包): {e}", file=sys.stderr)
 
     scaffold_skill(dest, scenario, name, exe, rca)                   # 技能目录框架+身份+rca 副本+zip2csv
-
-    def _ignore_out(d, names):                           # --out 若是"已打包技能的 assets/"(就地调优/迁移后再克隆),
-        ig = set(_ignore(d, names))                      # 里面已带上次打包放的 fault-tree-rca 副本——拷贝时剔除
-        if Path(d).resolve() == out.resolve():           # (框架里已放新副本,同名目录冲突实测会在 copytree 报错)
-            ig |= {n for n in names if n in ("fault-tree-rca", "fault-tree-rca-debate")}
-        return ig                                        # debate 名留在剔除表:历史上带过副本的包克隆时清干净
-    shutil.copytree(out, dest / "assets", ignore=_ignore_out,        # 诊断产物并进 assets(排除临时物;
-                    dirs_exist_ok=True)                              # 框架已建 assets,允许合并)
+    _copy_product(out, dest)
 
     n_scripts = len(list((dest / "assets" / "scripts").glob("*_analyzer.py")))
     has_sol = (dest / "assets" / "tree" / "solutions.json").exists()

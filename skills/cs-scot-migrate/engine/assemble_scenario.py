@@ -409,11 +409,8 @@ def copy_into(src: Path, dst: Path) -> None:
     shutil.copy2(src, dst)
 
 
-def main() -> None:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+def _build_parser() -> argparse.ArgumentParser:
+    """CLI 参数定义(--scenario/--indicators/--out/--out-base/--xlsx/--work/--keep)。"""
     ap = argparse.ArgumentParser(description="组装场景诊断产物")
     ap.add_argument("--scenario", required=True)
     ap.add_argument("--indicators", required=True, help="逗号分隔,如 kpi,chr")
@@ -424,51 +421,54 @@ def main() -> None:
     ap.add_argument("--keep", action="store_true",
                     help="保留已存在的 <ind>_analyzer.py(即便已填/是旧版),不刷新脚本框架;"
                          "默认:重跑会用当前的空白脚本覆盖、旧脚本备份为 .py.bak,以便用上新拷进来的 kernels/mo_config")
-    args = ap.parse_args()
+    return ap
 
-    scenario = args.scenario
-    indicators = [s.strip() for s in args.indicators.split(",") if s.strip()]
-    if "cross" in indicators:
-        print("不合格:「cross」是保留源名(跨源判据脚本 cross_analyzer.py 自动生成)——给数据源换个名字。",
-              file=sys.stderr)
-        sys.exit(1)
 
-    # 统一产物目录:--out 优先;否则按 <out-base 或 xlsx 所在目录>/scot产物/<场景> 推导(与步骤1一致)。
+def _scan_containers(anchor: Path, scenario: str) -> list:
+    """扫两个容器(scot产物/<场景>/ 与 scot技能/<短名>/assets/)里声称本场景的 tree_index,返回产物目录列表。"""
+    hits = []
+    for ti in sorted(list((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json"))
+                     + list((Path(anchor) / "scot技能").glob("*/assets/tree/*.tree_index.json"))):
+        # 两个容器都扫:老形态 scot产物/<场景>/,新默认 scot技能/<短名>/assets/(步骤1直接生成技能)
+        try:
+            d = json.loads(ti.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if scenario in (d.get("scenario"), d.get("slug")):
+            hits.append(ti.parent.parent)
+    return hits
+
+
+def _resolve_out(args, scenario: str) -> Path:
+    """统一产物目录:--out 优先;否则按 <out-base 或 xlsx 所在目录>/scot产物/<场景> 推导并按 tree_index 内容对账。"""
     if args.out:
-        out = Path(args.out)
+        return Path(args.out)
+    if args.out_base:
+        anchor: Path = Path(args.out_base).expanduser()
+    elif args.xlsx:
+        anchor = Path(args.xlsx).expanduser().resolve().parent
     else:
-        if args.out_base:
-            anchor: Path = Path(args.out_base).expanduser()
-        elif args.xlsx:
-            anchor = Path(args.xlsx).expanduser().resolve().parent
-        else:
-            print("需要 --out,或用 --xlsx/--out-base 让我推导默认产物目录", file=sys.stderr)
-            sys.exit(2)
-        out = scenario_out_dir(anchor, scenario)
-        # 扫容器对账(**无条件**,不能只在推导目录缺失时扫):步骤1目录名可能是英文短名(slug)
-        # 而 --scenario 输的是中文名;更危险的是**新旧两代产物并存**(升级后旧中文名目录没删)——
-        # 若只在"推导目录不存在"时才扫,旧中文名目录恰好存在就会被静默选中、组装出过期的树。
-        # 按 tree_index 内容认领:恰一个 → 用它;多个 → 直接拦下;零个 → 沿用推导目录(下游检查会给指引)。
-        hits = []
-        for ti in sorted(list((Path(anchor) / DEFAULT_OUT_CONTAINER).glob("*/tree/*.tree_index.json"))
-                         + list((Path(anchor) / "scot技能").glob("*/assets/tree/*.tree_index.json"))):
-            # 两个容器都扫:老形态 scot产物/<场景>/,新默认 scot技能/<短名>/assets/(步骤1直接生成技能)
-            try:
-                d = json.loads(ti.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if scenario in (d.get("scenario"), d.get("slug")):
-                hits.append(ti.parent.parent)
-        if len(hits) == 1:
-            out = hits[0]
-        elif len(hits) > 1:
-            print(f"歧义:多个产物目录都声称场景「{scenario}」:{[str(h) for h in hits]}\n"
-                  "  多半是新旧两代产物并存(如旧中文名目录没删)——删掉过期目录再组装,"
-                  "或用 --out 明确指定。静默选错的代价是组装出过期的树,所以这里必须停。",
-                  file=sys.stderr)
-            sys.exit(2)
-    work = Path(args.work) if args.work else out  # 默认 work==out,产物只此一处
+        print("需要 --out,或用 --xlsx/--out-base 让我推导默认产物目录", file=sys.stderr)
+        sys.exit(2)
+    out = scenario_out_dir(anchor, scenario)
+    # 扫容器对账(**无条件**,不能只在推导目录缺失时扫):步骤1目录名可能是英文短名(slug)
+    # 而 --scenario 输的是中文名;更危险的是**新旧两代产物并存**(升级后旧中文名目录没删)——
+    # 若只在"推导目录不存在"时才扫,旧中文名目录恰好存在就会被静默选中、组装出过期的树。
+    # 按 tree_index 内容认领:恰一个 → 用它;多个 → 直接拦下;零个 → 沿用推导目录(下游检查会给指引)。
+    hits = _scan_containers(anchor, scenario)
+    if len(hits) == 1:
+        out = hits[0]
+    elif len(hits) > 1:
+        print(f"歧义:多个产物目录都声称场景「{scenario}」:{[str(h) for h in hits]}\n"
+              "  多半是新旧两代产物并存(如旧中文名目录没删)——删掉过期目录再组装,"
+              "或用 --out 明确指定。静默选错的代价是组装出过期的树,所以这里必须停。",
+              file=sys.stderr)
+        sys.exit(2)
+    return out
 
+
+def _load_tree_index(work: Path, scenario: str):
+    """定位并核验步骤1产物:唯一的 tree/*.tree_index.json、场景名相符、判据数 > 0。返回 (index 文档, 短名)。"""
     # 硬性检查:0 判据的树不许组装——判据是整条流水线的原料,0 判据多半是步骤1格式识别问题
     # (判据列没被认出被静默丢弃)。此时继续会诱发"模型自由发挥硬绑/写脚本量产绑定"的事故,
     # 必须在这里停下、回去查 Excel 表头,而不是往下走。
@@ -486,7 +486,6 @@ def main() -> None:
         sys.exit(2)
     ti_path = tis[0]
     stem = ti_path.name[: -len(".tree_index.json")]      # 文件短名(slug 或中文场景名),树文件同名
-    tree_rel = f"tree/{stem}.md"
     try:
         _ti = json.loads(ti_path.read_text(encoding="utf-8"))
         _n_cond = sum(1 for nd in (_ti.get("nodes") or {}).values() if nd.get("condition"))
@@ -504,11 +503,11 @@ def main() -> None:
               "  **不要**继续绑定、更不要自己读 Excel 写脚本量产绑定(那会产出无法审计的假绑定)。",
               file=sys.stderr)
         sys.exit(1)
+    return _ti, stem
 
-    for sub in ("scripts", "tree"):
-        (out / sub).mkdir(parents=True, exist_ok=True)
 
-    copy_into(work / "tree" / f"{stem}.md", out / "tree" / f"{stem}.md")
+def _merge_solutions(work: Path, out: Path) -> None:
+    """推荐解决方案表:树侧为准、增量并入 out 侧既有条目(adopt 并入的方案不丢);树侧没有则 out 侧保留。"""
     # 推荐解决方案表(可选,RCA 报根因时点查):树侧为准、**增量并入**——out 侧可能有 cs-scot-adopt
     # 从平台脚本并入的方案,整表覆盖/删除都会把导入成果静默清掉(实测审计发现);
     # 树上已不存在的节点条目留着无害(点查不中)。
@@ -529,8 +528,11 @@ def main() -> None:
             print(f"solutions.json:树侧 {len(merged_sol) - kept} 条 + 保留 out 侧既有 {kept} 条(如 adopt 并入的方案)")
     elif osol.exists():
         print("solutions.json:树侧本次没有,out 侧既有的**保留不删**(可能含 adopt 并入的方案)")
+
+
+def _copy_engine(here: Path, out: Path) -> None:
+    """复制公共脚本(预制函数库、概览引擎、绑定契约、调优表工具)进产物 scripts/;外挂知识首次组装时预置。"""
     # 复制公共脚本(预制函数库、概览引擎、绑定契约)进产物;再为每个指标写一份待填写的"逐条件分析脚本"。
-    here = Path(__file__).parent
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # 类别模板库
     copy_into(here / "xlsx_reader.py", out / "scripts" / "xlsx_reader.py")              # 零依赖 xlsx 读取器(内核/导入都靠它读表)
     copy_into(here / "custom_lib.py", out / "scripts" / "custom_lib.py")                # S 类预制函数库(人手调优用)
@@ -549,6 +551,42 @@ def main() -> None:
         else:
             kn.write_text(KNOWLEDGE_TEMPLATE, encoding="utf-8")
             print(f"已建外挂知识模板 → {kn}(业务同事可编辑;绑定任务说明与 RCA 输入会按分支自动载入)")
+
+
+def _refresh_cross(target: Path, existing: str, pristine: str) -> None:
+    """已填过的 cross_analyzer.py:引擎部分能升级就升级(备份 .bak),否则原样保留——绑定绝不清空。"""
+    upgraded, why = _upgrade_cross_scaffold(existing, pristine)
+    if upgraded is not None and upgraded != existing:
+        bakc = target.with_name("cross_analyzer.py.bak")
+        try:
+            shutil.copy2(target, bakc)
+        except Exception:
+            pass
+        target.write_text(upgraded, encoding="utf-8")
+        print(f"  [upgrade] cross_analyzer.py 脚本框架已升级到当前版本,**已填绑定原样保留**"
+              f"(旧文件备份 → {bakc.name})")
+    elif upgraded is None:
+        print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 脚本框架无法自动升级:{why};"
+              f"绑定不动。若需 S 类/raw 通道等新能力,先手工迁出 CONDITIONS 再删文件重铺): {target}")
+    else:
+        print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 脚本框架已是当前版本,不重新生成): {target}")
+
+
+def _regen_analyzer(target: Path, ind: str, pristine: str) -> None:
+    """单源脚本重新生成:旧脚本备份成 .py.bak(失败则直接覆盖),写入当前版本的空白脚本。"""
+    bak = target.with_name(f"{ind}_analyzer.py.bak")
+    try:
+        shutil.copy2(target, bak)                    # 旧脚本(可能含模型填的 CONDITIONS)留个底
+        note = f"  (旧脚本已备份 → {bak.name})"
+    except Exception:
+        note = "  (备份失败,已直接覆盖)"
+    target.write_text(pristine, encoding="utf-8")   # 写入当前版本的空白脚本,模型在步骤2.5重新填
+    print(f"  [regen] 重新生成空白脚本: {target}{note}")
+
+
+def _scaffold_analyzers(out: Path, indicators: List[str], keep: bool):
+    """为每个指标(+cross)铺待填写的分析脚本:新建 / 空白不动 / cross 升级或保留 / --keep 保留 / 备份后重铺。
+    返回 (新建的源, 重新生成的源)。"""
     # 重跑 = 重新编译:默认用当前版本的空白脚本覆盖旧脚本(这样才能用上刚拷进来的新 condition_kernels/mo_config);
     # 覆盖前若旧脚本不是"全新空白脚本"(填过/手改过/上一版框架)→ 先备份成 .py.bak,绝不静默丢失。
     # 想原样保留已填脚本:加 --keep(老的 skip-if-exists 行为)。
@@ -567,45 +605,19 @@ def main() -> None:
         if existing == pristine:
             continue                                    # 还是全新空白脚本,没填过 → 无需动
         if ind == "cross":                              # 已填过的跨源绑定是补绑环节的手工产物,重跑 assemble
-            upgraded, why = _upgrade_cross_scaffold(existing, pristine)
-            if upgraded is not None and upgraded != existing:
-                bakc = target.with_name("cross_analyzer.py.bak")
-                try:
-                    shutil.copy2(target, bakc)
-                except Exception:
-                    pass
-                target.write_text(upgraded, encoding="utf-8")
-                print(f"  [upgrade] cross_analyzer.py 脚本框架已升级到当前版本,**已填绑定原样保留**"
-                      f"(旧文件备份 → {bakc.name})")
-            elif upgraded is None:
-                print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 脚本框架无法自动升级:{why};"
-                      f"绑定不动。若需 S 类/raw 通道等新能力,先手工迁出 CONDITIONS 再删文件重铺): {target}")
-            else:
-                print(f"  [keep] 保留已填的跨源绑定(cross_analyzer.py 脚本框架已是当前版本,不重新生成): {target}")
+            _refresh_cross(target, existing, pristine)
             continue                                    # 绑定绝不清空——此前重新生成会把 param_from 链静默打回空白
-        if args.keep:
+        if keep:
             print(f"  [keep] 保留已存在脚本(--keep,未刷新脚本框架/库依赖): {target}")
             continue
-        bak = target.with_name(f"{ind}_analyzer.py.bak")
-        try:
-            shutil.copy2(target, bak)                    # 旧脚本(可能含模型填的 CONDITIONS)留个底
-            note = f"  (旧脚本已备份 → {bak.name})"
-        except Exception:
-            note = "  (备份失败,已直接覆盖)"
-        target.write_text(pristine, encoding="utf-8")   # 写入当前版本的空白脚本,模型在步骤2.5重新填
+        _regen_analyzer(target, ind, pristine)
         regenerated.append(ind)
-        print(f"  [regen] 重新生成空白脚本: {target}{note}")
+    return scaffolded, regenerated
 
-    plan = build_plan(scenario, indicators, tree_rel, stem)
-    (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 产物清单 manifest:这批产物由哪版格式契约、何时编译。execute/benchmark 启动时比对,旧产物只告警不阻断。
-    manifest = {"product_format_version": PRODUCT_FORMAT_VERSION,
-                "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                "scenario": scenario, "slug": _ti.get("slug"),
-                "indicators": indicators, "tree": tree_rel}
-    (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-
+def _print_next_steps(out: Path, here: Path, indicators: List[str], scaffolded: list, regenerated: list,
+                      stem: str) -> None:
+    """收尾打印:产物清单、待填脚本的下一步指引、执行命令。"""
     print(f"已组装场景产物: {out}")
     print(f"  plan.json(SCoT v4.0)+ manifest.json(产物清单,产物格式版本 {PRODUCT_FORMAT_VERSION})"
           f"+ scripts/condition_kernels.py(类别模板库)"
@@ -627,6 +639,49 @@ def main() -> None:
             print("  标记 → python make_dispatch.py --out \"<OUT>\" --cross 生成跨源补绑任务说明,补绑后再 merge。")
     run_hint = " ".join(f"--data {ind}=<文件>" for ind in indicators)
     print(f"\n填好后执行: python <cs-scot-execute>/scripts/runner.py --plan {out}/plan.json {run_hint}")
+
+
+def main() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    args = _build_parser().parse_args()
+
+    scenario = args.scenario
+    indicators = [s.strip() for s in args.indicators.split(",") if s.strip()]
+    if "cross" in indicators:
+        print("不合格:「cross」是保留源名(跨源判据脚本 cross_analyzer.py 自动生成)——给数据源换个名字。",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # 统一产物目录:--out 优先;否则按 <out-base 或 xlsx 所在目录>/scot产物/<场景> 推导(与步骤1一致)。
+    out = _resolve_out(args, scenario)
+    work = Path(args.work) if args.work else out  # 默认 work==out,产物只此一处
+
+    _ti, stem = _load_tree_index(work, scenario)
+    tree_rel = f"tree/{stem}.md"
+
+    for sub in ("scripts", "tree"):
+        (out / sub).mkdir(parents=True, exist_ok=True)
+
+    copy_into(work / "tree" / f"{stem}.md", out / "tree" / f"{stem}.md")
+    _merge_solutions(work, out)
+    here = Path(__file__).parent
+    _copy_engine(here, out)
+    scaffolded, regenerated = _scaffold_analyzers(out, indicators, args.keep)
+
+    plan = build_plan(scenario, indicators, tree_rel, stem)
+    (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 产物清单 manifest:这批产物由哪版格式契约、何时编译。execute/benchmark 启动时比对,旧产物只告警不阻断。
+    manifest = {"product_format_version": PRODUCT_FORMAT_VERSION,
+                "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "scenario": scenario, "slug": _ti.get("slug"),
+                "indicators": indicators, "tree": tree_rel}
+    (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    _print_next_steps(out, here, indicators, scaffolded, regenerated, stem)
 
 
 if __name__ == "__main__":

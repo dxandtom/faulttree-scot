@@ -163,6 +163,142 @@ def _zip_datetime(repo: Path):
     return (2020, 1, 1, 0, 0, 0)
 
 
+def _check_sources(skills_dir: Path, pkg_dir: Path):
+    """0a/0b:源技能目录齐备检查与输出目录重叠防护;返回 (sources, 退出码|None)。"""
+    # 0a. 源目录齐备检查(素材认两级:skills 层 / generate 内嵌)
+    sources = {name: _resolve_src(skills_dir, name) for name in LAYOUT}
+    missing_src = [name for name, p in sources.items() if p is None]
+    if missing_src:
+        print(f"✗ 缺源技能目录:{', '.join(missing_src)}(应在 {skills_dir} 下,"
+              f"素材也可内嵌在 cs-scot-generate/ 内)")
+        return sources, 1
+
+    # 0b. 重叠防护:输出目录与任何源目录相同/互为父子 → 拒绝(rmtree 会毁源文件)
+    for src in sources.values():
+        if _overlaps(pkg_dir.resolve(), src.resolve()):
+            print(f"✗ 输出目录与源目录重叠:{pkg_dir} ↔ {src}——拒绝执行(会毁源文件),换个 --out")
+            return sources, 2
+    return sources, None
+
+
+def _reset_pkg_dir(pkg_dir: Path):
+    """1:清掉旧包重建(只删自己上次打的包),并先落 MANIFEST 占位;目标不是本工具的包返回退出码 2。"""
+    # 1. 清掉旧包重建——只删自己上次打的包(有 MANIFEST.txt 才认),别的目录一概不动
+    if pkg_dir.exists():
+        if not (pkg_dir / "MANIFEST.txt").is_file():
+            print(f"✗ 目标已存在且不是本工具打的包(无 MANIFEST.txt):{pkg_dir}——拒删,挪走或换 --out")
+            return 2
+        shutil.rmtree(pkg_dir)
+    pkg_dir.mkdir(parents=True)
+    # 先落 MANIFEST 占位:万一中途崩掉留下半个包,重跑能认出是自己的残骸并自动清理
+    (pkg_dir / "MANIFEST.txt").write_text(
+        "(打包进行中——看到本行说明上次构建中断,重跑会自动清理重建)\n", encoding="utf-8")
+    return None
+
+
+def _copy_flat(src: Path, dst: Path, rel: str) -> None:
+    """统一入口的内容平铺到包根(目标已存在,不能整目录 copytree)。"""
+    for item in sorted(src.iterdir()):
+        if item.name in EXCLUDE_DIRS or item.name in EXCLUDE_NAMES:
+            continue
+        if item.is_dir():
+            shutil.copytree(item, dst / item.name, ignore=_ignore(src, rel))
+        elif item.suffix not in EXCLUDE_SUFFIX and \
+                item.relative_to(src).as_posix() not in EXCLUDE_REL:
+            shutil.copy2(item, dst / item.name)
+    # 平铺后清一层:scripts/ 里只有打包器时会剩空目录,删掉
+    sdir = dst / "scripts"
+    if sdir.is_dir() and not any(sdir.iterdir()):
+        sdir.rmdir()
+
+
+def _copy_tree(src_name: str, src: Path, dst: Path, rel: str) -> None:
+    """整目录复制到包内子目录;generate 剔除其内嵌素材目录;目标已存在则明确报错不静默合并。"""
+    ig = _ignore(src, rel)
+    if src_name == "cs-scot-generate":
+        # 源 generate 若是"单交付内嵌"形态(素材长在技能内),拷贝时剔除其顶层素材目录:
+        # 包内素材统一放包根一份,不重复、也不会与后续素材复制冲突(Windows 实测事故)
+        base_ig = ig
+
+        def ig(dirpath, names, _src=src, _base=base_ig):   # noqa: PLW0642
+            skip = set(_base(dirpath, names))
+            if Path(dirpath).resolve() == _src.resolve():
+                skip |= {n for n in names if n in MATERIALS}
+            return skip
+    if dst.exists():
+        # 正确代码到不了这里(每轮都是清空重建)。真遇到=脚本被改过/新旧混装。
+        # 明确自解释,不留裸 traceback——traceback 会诱导弱模型拿 dirs_exist_ok
+        # 之类的静默合并去"修"(实测发生过),那会把两份来源的文件混进包里。
+        raise SystemExit(
+            f"✗ 包内目标已存在:{dst}(复制 {src_name} 时冲突)。\n"
+            "  这不该发生——说明本脚本被改动过或本地版本新旧混装。处置:\n"
+            "  1) 用仓库最新的 package_skill.py 整文件覆盖本脚本(勿手改);\n"
+            "  2) 删掉输出目录 dist/ 后重跑。\n"
+            "  禁止用 dirs_exist_ok=True 之类静默合并来绕过:两份来源的文件会悄悄混进包里。")
+    shutil.copytree(src, dst, ignore=ig)
+
+
+def _copy_layout(sources: dict, pkg_dir: Path) -> None:
+    """2:按 LAYOUT 纯复制(包根平铺 / 子目录整拷)。"""
+    for src_name, dests in LAYOUT.items():
+        src = sources[src_name]
+        for rel in dests:
+            dst = pkg_dir if rel == "." else pkg_dir / rel
+            if rel == ".":
+                _copy_flat(src, dst, rel)
+            else:
+                _copy_tree(src_name, src, dst, rel)
+
+
+def _verify_required(pkg_dir: Path, out_root: Path):
+    """3:关键文件核验——缺一即失败,并清掉残局(不完整目录 + 旧 zip);缺则返回退出码 1。"""
+    missing = [r for r in REQUIRED if not (pkg_dir / r).is_file()]
+    if not missing:
+        return None
+    print("✗ 打包不完整,缺关键文件:")
+    for m in missing:
+        print(f"    {m}")
+    shutil.rmtree(pkg_dir, ignore_errors=True)
+    stale_zip = out_root / f"{PKG_NAME}.zip"
+    if stale_zip.exists():
+        stale_zip.unlink()
+    print("  已清理不完整包目录与旧 zip(避免残局被误当成品)。")
+    return 1
+
+
+def _write_manifest(pkg_dir: Path, repo: Path):
+    """4:MANIFEST(全部文件 + 尺寸 + 来源提交);返回 (文件列表, 总字节数)。"""
+    files = sorted(p for p in pkg_dir.rglob("*") if p.is_file())
+    total = sum(p.stat().st_size for p in files)
+    lines = [
+        f"# {PKG_NAME} 发行包清单",
+        f"# 来源提交: {_git_rev(repo)}",
+        f"# 文件数: {len(files)+1}  总大小: {total} 字节(不含本清单)",
+        "",
+    ]
+    lines += [f"{p.stat().st_size:>10}  {p.relative_to(pkg_dir).as_posix()}" for p in files]
+    (pkg_dir / "MANIFEST.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return files, total
+
+
+def _write_zip(pkg_dir: Path, out_root: Path, repo: Path):
+    """5:zip 条目按路径排序、时间戳统一用来源提交时间 → 同一提交两次打包字节一致;返回 (zip 路径, 摘要)。"""
+    zip_path = out_root / f"{PKG_NAME}.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+    dt = _zip_datetime(repo)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in sorted(pkg_dir.rglob("*")):
+            if p.is_file():
+                zi = zipfile.ZipInfo(
+                    f"{PKG_NAME}/{p.relative_to(pkg_dir).as_posix()}", date_time=dt)
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                zi.external_attr = 0o644 << 16
+                zf.writestr(zi, p.read_bytes())
+    digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()[:16]
+    return zip_path, digest
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")         # Windows GBK 控制台打 ✓/✗ 不再炸编码
@@ -179,115 +315,20 @@ def main() -> int:
     out_root = Path(args.out).resolve() if args.out else repo / "dist"
     pkg_dir = out_root / PKG_NAME
 
-    # 0a. 源目录齐备检查(素材认两级:skills 层 / generate 内嵌)
-    sources = {name: _resolve_src(skills_dir, name) for name in LAYOUT}
-    missing_src = [name for name, p in sources.items() if p is None]
-    if missing_src:
-        print(f"✗ 缺源技能目录:{', '.join(missing_src)}(应在 {skills_dir} 下,"
-              f"素材也可内嵌在 cs-scot-generate/ 内)")
-        return 1
-
-    # 0b. 重叠防护:输出目录与任何源目录相同/互为父子 → 拒绝(rmtree 会毁源文件)
-    for src in sources.values():
-        if _overlaps(pkg_dir.resolve(), src.resolve()):
-            print(f"✗ 输出目录与源目录重叠:{pkg_dir} ↔ {src}——拒绝执行(会毁源文件),换个 --out")
-            return 2
-
-    # 1. 清掉旧包重建——只删自己上次打的包(有 MANIFEST.txt 才认),别的目录一概不动
-    if pkg_dir.exists():
-        if not (pkg_dir / "MANIFEST.txt").is_file():
-            print(f"✗ 目标已存在且不是本工具打的包(无 MANIFEST.txt):{pkg_dir}——拒删,挪走或换 --out")
-            return 2
-        shutil.rmtree(pkg_dir)
-    pkg_dir.mkdir(parents=True)
-    # 先落 MANIFEST 占位:万一中途崩掉留下半个包,重跑能认出是自己的残骸并自动清理
-    (pkg_dir / "MANIFEST.txt").write_text(
-        "(打包进行中——看到本行说明上次构建中断,重跑会自动清理重建)\n", encoding="utf-8")
-
-    # 2. 纯复制
-    for src_name, dests in LAYOUT.items():
-        src = sources[src_name]
-        for rel in dests:
-            dst = pkg_dir if rel == "." else pkg_dir / rel
-            if rel == ".":
-                # 统一入口的内容平铺到包根(目标已存在,不能整目录 copytree)
-                for item in sorted(src.iterdir()):
-                    if item.name in EXCLUDE_DIRS or item.name in EXCLUDE_NAMES:
-                        continue
-                    if item.is_dir():
-                        shutil.copytree(item, dst / item.name, ignore=_ignore(src, rel))
-                    elif item.suffix not in EXCLUDE_SUFFIX and \
-                            item.relative_to(src).as_posix() not in EXCLUDE_REL:
-                        shutil.copy2(item, dst / item.name)
-                # 平铺后清一层:scripts/ 里只有打包器时会剩空目录,删掉
-                sdir = dst / "scripts"
-                if sdir.is_dir() and not any(sdir.iterdir()):
-                    sdir.rmdir()
-            else:
-                ig = _ignore(src, rel)
-                if src_name == "cs-scot-generate":
-                    # 源 generate 若是"单交付内嵌"形态(素材长在技能内),拷贝时剔除其顶层素材目录:
-                    # 包内素材统一放包根一份,不重复、也不会与后续素材复制冲突(Windows 实测事故)
-                    base_ig = ig
-
-                    def ig(dirpath, names, _src=src, _base=base_ig):   # noqa: PLW0642
-                        skip = set(_base(dirpath, names))
-                        if Path(dirpath).resolve() == _src.resolve():
-                            skip |= {n for n in names if n in MATERIALS}
-                        return skip
-                if dst.exists():
-                    # 正确代码到不了这里(每轮都是清空重建)。真遇到=脚本被改过/新旧混装。
-                    # 明确自解释,不留裸 traceback——traceback 会诱导弱模型拿 dirs_exist_ok
-                    # 之类的静默合并去"修"(实测发生过),那会把两份来源的文件混进包里。
-                    raise SystemExit(
-                        f"✗ 包内目标已存在:{dst}(复制 {src_name} 时冲突)。\n"
-                        "  这不该发生——说明本脚本被改动过或本地版本新旧混装。处置:\n"
-                        "  1) 用仓库最新的 package_skill.py 整文件覆盖本脚本(勿手改);\n"
-                        "  2) 删掉输出目录 dist/ 后重跑。\n"
-                        "  禁止用 dirs_exist_ok=True 之类静默合并来绕过:两份来源的文件会悄悄混进包里。")
-                shutil.copytree(src, dst, ignore=ig)
-
-    # 3. 关键文件核验——缺一即失败,并清掉残局(不完整目录 + 旧 zip),不留半个包
-    missing = [r for r in REQUIRED if not (pkg_dir / r).is_file()]
-    if missing:
-        print("✗ 打包不完整,缺关键文件:")
-        for m in missing:
-            print(f"    {m}")
-        shutil.rmtree(pkg_dir, ignore_errors=True)
-        stale_zip = out_root / f"{PKG_NAME}.zip"
-        if stale_zip.exists():
-            stale_zip.unlink()
-        print("  已清理不完整包目录与旧 zip(避免残局被误当成品)。")
-        return 1
-
-    # 4. MANIFEST(全部文件 + 尺寸 + 来源提交)
-    files = sorted(p for p in pkg_dir.rglob("*") if p.is_file())
-    total = sum(p.stat().st_size for p in files)
-    lines = [
-        f"# {PKG_NAME} 发行包清单",
-        f"# 来源提交: {_git_rev(repo)}",
-        f"# 文件数: {len(files)+1}  总大小: {total} 字节(不含本清单)",
-        "",
-    ]
-    lines += [f"{p.stat().st_size:>10}  {p.relative_to(pkg_dir).as_posix()}" for p in files]
-    (pkg_dir / "MANIFEST.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    # 5. zip:条目按路径排序、时间戳统一用来源提交时间 → 同一提交两次打包字节一致
+    sources, rc = _check_sources(skills_dir, pkg_dir)
+    if rc is not None:
+        return rc
+    rc = _reset_pkg_dir(pkg_dir)
+    if rc is not None:
+        return rc
+    _copy_layout(sources, pkg_dir)
+    rc = _verify_required(pkg_dir, out_root)
+    if rc is not None:
+        return rc
+    files, total = _write_manifest(pkg_dir, repo)
     zip_path = digest = None
     if not args.no_zip:
-        zip_path = out_root / f"{PKG_NAME}.zip"
-        if zip_path.exists():
-            zip_path.unlink()
-        dt = _zip_datetime(repo)
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for p in sorted(pkg_dir.rglob("*")):
-                if p.is_file():
-                    zi = zipfile.ZipInfo(
-                        f"{PKG_NAME}/{p.relative_to(pkg_dir).as_posix()}", date_time=dt)
-                    zi.compress_type = zipfile.ZIP_DEFLATED
-                    zi.external_attr = 0o644 << 16
-                    zf.writestr(zi, p.read_bytes())
-        digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()[:16]
+        zip_path, digest = _write_zip(pkg_dir, out_root, repo)
 
     # 6. 汇报
     print(f"✓ 包目录: {pkg_dir}")

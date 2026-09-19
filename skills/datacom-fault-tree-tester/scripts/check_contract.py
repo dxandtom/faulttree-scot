@@ -126,113 +126,140 @@ def _find_entry(tree):
     return None, None
 
 
-def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
-    """返回 (items, 试跑入口名)。local_names=同包可 import 的模块名集合;
-    entry_hint=下游仲裁选定的入口(给了就按它试跑/扫可达路径——S1 仍按契约命名评判)。"""
-    items = []
-    src = script.read_text(encoding="utf-8", errors="replace")
-    try:
-        tree = ast.parse(src)
-    except SyntaxError as e:
-        return [_fail("S0", f"脚本语法错误:{e}", "先把脚本改到能通过 python 编译")], None
-
-    # S1 入口
-    entry_name, entry_def = _find_entry(tree)
-    tops = {n.name for n in tree.body
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+def _check_entry(entry_name, entry_def, tops):
+    """S1 入口:认不出入口记 FAIL(点名内部帮手),认出则按签名契约评 FAIL/WARN/PASS。"""
     if entry_name is None:
         helper = tops & {"check_ne", "diagnose_ne"}
         hint = (f"(只有内部帮手 {'/'.join(sorted(helper))},帮手不算入口)" if helper else "")
-        items.append(_fail("S1", f"没有可识别的入口函数{hint}",
-                           "补顶层 def fault_check(data_dir):做全局诊断入口(规范附录5)"))
-    else:
-        args = entry_def.args
-        pos = list(args.posonlyargs) + list(args.args)
-        n_default = len(args.defaults)
-        required = pos[: len(pos) - n_default] if len(pos) >= n_default else pos
-        extra_required = [a.arg for a in required[1:]]
-        if not pos:
-            items.append(_fail("S1", f"入口 {entry_name}() 没有位置参数",
-                               "入口签名必须是 fault_check(data_dir)(规范附录5)"))
-        elif extra_required:
-            items.append(_fail(
-                "S1", f"入口 {entry_name} 的额外参数 {extra_required} 没有默认值",
-                "额外参数一律具名+字面量默认值——下游只传 data_dir,缺省必须能跑(规范附录5)"))
-        elif entry_name != "fault_check":
-            items.append(_warn(
-                "S1", f"入口名是 {entry_name},不是约定的 fault_check(适配函数认旧名,可以处理)",
-                "改名为 fault_check(data_dir),与文件名前缀同名(规范附录5)"))
-        else:
-            note = "" if pos[0].arg == "data_dir" else f"(首参名是 {pos[0].arg},下游按位置传,能跑)"
-            items.append(_pass("S1", f"入口 fault_check({pos[0].arg}) 签名合规{note}"))
+        return _fail("S1", f"没有可识别的入口函数{hint}",
+                     "补顶层 def fault_check(data_dir):做全局诊断入口(规范附录5)")
+    args = entry_def.args
+    pos = list(args.posonlyargs) + list(args.args)
+    n_default = len(args.defaults)
+    required = pos[: len(pos) - n_default] if len(pos) >= n_default else pos
+    extra_required = [a.arg for a in required[1:]]
+    if not pos:
+        return _fail("S1", f"入口 {entry_name}() 没有位置参数",
+                     "入口签名必须是 fault_check(data_dir)(规范附录5)")
+    if extra_required:
+        return _fail(
+            "S1", f"入口 {entry_name} 的额外参数 {extra_required} 没有默认值",
+            "额外参数一律具名+字面量默认值——下游只传 data_dir,缺省必须能跑(规范附录5)")
+    if entry_name != "fault_check":
+        return _warn(
+            "S1", f"入口名是 {entry_name},不是约定的 fault_check(适配函数认旧名,可以处理)",
+            "改名为 fault_check(data_dir),与文件名前缀同名(规范附录5)")
+    note = "" if pos[0].arg == "data_dir" else f"(首参名是 {pos[0].arg},下游按位置传,能跑)"
+    return _pass("S1", f"入口 fault_check({pos[0].arg}) 签名合规{note}")
 
-    # S2 argv/print/exit 规则:入口可达函数 + 模块级(守卫分支外)
-    smoke_entry = entry_hint if entry_hint and entry_hint in tops else entry_name
-    guarded = _guarded_nodes(tree)
+
+def _scan_nodes(tree, smoke_entry, guarded):
+    """S2 扫描范围:入口可达函数的全部节点 + 模块级(守卫分支外、非函数定义)节点。"""
     scan_funcs = _reachable_funcs(tree, smoke_entry) if smoke_entry else set()
-    scan_nodes = []
+    nodes = []
     for f in scan_funcs:
-        scan_nodes.extend(ast.walk(f))
+        nodes.extend(ast.walk(f))
     for node in tree.body:
         if id(node) in guarded or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        scan_nodes.extend(ast.walk(node))
-    argv_aliases = set()                                 # from sys import argv [as x] 的别名也要认
+        nodes.extend(ast.walk(node))
+    return nodes
+
+
+def _argv_aliases(tree):
+    """from sys import argv [as x] 的别名集合(别名引用也要认作 argv)。"""
+    aliases = set()                                      # from sys import argv [as x] 的别名也要认
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "sys" and not node.level:
-            argv_aliases.update(al.asname or "argv" for al in node.names if al.name == "argv")
+            aliases.update(al.asname or "argv" for al in node.names if al.name == "argv")
+    return aliases
+
+
+def _is_sys_argv(node):
+    """节点是否 sys.argv 属性引用。"""
+    return isinstance(node, ast.Attribute) and node.attr == "argv" and \
+        isinstance(node.value, ast.Name) and node.value.id == "sys"
+
+
+def _is_argv_alias(node, argv_aliases):
+    """节点是否 argv 别名的读取引用。"""
+    return isinstance(node, ast.Name) and node.id in argv_aliases \
+        and isinstance(node.ctx, ast.Load)
+
+
+def _is_print_call(node):
+    """节点是否 print(...) 调用。"""
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+        and node.func.id == "print"
+
+
+def _is_exit_call(node):
+    """节点是否 sys.exit(...) / exit(...) 调用。"""
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Attribute) and node.func.attr == "exit"
+         and isinstance(node.func.value, ast.Name) and node.func.value.id == "sys")
+        or (isinstance(node.func, ast.Name) and node.func.id == "exit"))
+
+
+def _rule_hits(scan_nodes, guarded, argv_aliases):
+    """统计扫描范围内(守卫外)argv/print/exit 各出现几次。"""
     hits = {"argv": 0, "print": 0, "exit": 0}
     for node in scan_nodes:
         if id(node) in guarded:
             continue
-        if isinstance(node, ast.Attribute) and node.attr == "argv" and \
-                isinstance(node.value, ast.Name) and node.value.id == "sys":
+        if _is_sys_argv(node):
             hits["argv"] += 1
-        elif isinstance(node, ast.Name) and node.id in argv_aliases \
-                and isinstance(node.ctx, ast.Load):
+        elif _is_argv_alias(node, argv_aliases):
             hits["argv"] += 1
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                and node.func.id == "print":
+        elif _is_print_call(node):
             hits["print"] += 1
-        elif isinstance(node, ast.Call) and (
-                (isinstance(node.func, ast.Attribute) and node.func.attr == "exit"
-                 and isinstance(node.func.value, ast.Name) and node.func.value.id == "sys")
-                or (isinstance(node.func, ast.Name) and node.func.id == "exit")):
+        elif _is_exit_call(node):
             hits["exit"] += 1
+    return hits
+
+
+def _check_main_guard(tree, smoke_entry):
+    """S2 argv/print/exit 规则:入口可达函数 + 模块级(守卫分支外)。"""
+    guarded = _guarded_nodes(tree)
+    scan_nodes = _scan_nodes(tree, smoke_entry, guarded)
+    hits = _rule_hits(scan_nodes, guarded, _argv_aliases(tree))
     bads = [f"{k}×{v}" for k, v in hits.items() if v]
     if bads:
-        items.append(_warn(
+        return _warn(
             "S2", f"__main__ 守卫外发现 {'、'.join(bads)}(入口可达路径/模块级;适配函数隔离 argv、"
                   "收走 stdout、拦 SystemExit,兜得住)",
             "sys.argv/print/sys.exit 全部挪进 if __name__ == '__main__' 分支;"
-            "库调用出错走 undetermined(规范附录5)"))
-    else:
-        items.append(_pass("S2", "argv/print/exit 规则合规(守卫外无)"))
+            "库调用出错走 undetermined(规范附录5)")
+    return _pass("S2", "argv/print/exit 规则合规(守卫外无)")
 
-    # S3 文件发现 .txt/.log 双吃
+
+def _check_file_discovery(src):
+    """S3 文件发现 .txt/.log 双吃(只看源码里有没有后缀常量)。"""
     low = src.lower()
     if ".log" in low:
-        items.append(_pass("S3", "文件发现见 .log 处理(与 .txt 双吃)"))
-    elif ".txt" in low:
-        items.append(_fail(
+        return _pass("S3", "文件发现见 .log 处理(与 .txt 双吃)")
+    if ".txt" in low:
+        return _fail(
             "S3", "文件发现只认 .txt,未见 .log 处理——现场常见 log.log,整目录漏掉(实测事故)",
-            "目录扫描改成 .txt/.log 双后缀、大小写不敏感收(规范附录5)"))
-    else:
-        items.append(_warn(
-            "S3", "源码里未见 .txt/.log 后缀常量,无法静态确认文件发现方式",
-            "确认数据文件发现对 .txt/.log 双吃、大小写不敏感(规范附录5);以烟测为准"))
+            "目录扫描改成 .txt/.log 双后缀、大小写不敏感收(规范附录5)")
+    return _warn(
+        "S3", "源码里未见 .txt/.log 后缀常量,无法静态确认文件发现方式",
+        "确认数据文件发现对 .txt/.log 双吃、大小写不敏感(规范附录5);以烟测为准")
 
-    # S4 多网元探测痕迹
+
+def _check_ne_probe(src):
+    """S4 多网元探测痕迹(有没有目录遍历调用)。"""
     if re.search(r"iterdir|listdir|scandir|os\.walk|glob\(", src):
-        items.append(_pass("S4", "见目录遍历调用(多网元子目录探测有痕迹)"))
-    else:
-        items.append(_warn(
-            "S4", "未见目录遍历调用(iterdir/listdir/scandir/walk/glob)——多网元根目录喂进来"
-                  "可能零判定(适配函数会改为逐网元重调)",
-            "入口自带多网元/单网元自动探测:data_dir 下有网元子目录→逐网元;"
-            "直接是 CONFIG/CMD/LOG→单网元(规范附录5)"))
+        return _pass("S4", "见目录遍历调用(多网元子目录探测有痕迹)")
+    return _warn(
+        "S4", "未见目录遍历调用(iterdir/listdir/scandir/walk/glob)——多网元根目录喂进来"
+              "可能零判定(适配函数会改为逐网元重调)",
+        "入口自带多网元/单网元自动探测:data_dir 下有网元子目录→逐网元;"
+        "直接是 CONFIG/CMD/LOG→单网元(规范附录5)")
 
-    # S5/S6 依赖:禁止第三方库 + 自包含
+
+def _collect_imports(tree, local_names):
+    """遍历 import,分出第三方/包外模块与缺席的 search_* 共享模块。返回 (third, missing_local)。"""
     third, missing_local = [], []
     for node in ast.walk(tree):
         mods = []
@@ -248,6 +275,13 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
                 missing_local.append(top)
             else:
                 third.append(top)
+    return third, missing_local
+
+
+def _check_deps(tree, local_names, pkg_files):
+    """S5/S6 依赖:禁止第三方库 + 自包含。返回 items 列表。"""
+    items = []
+    third, missing_local = _collect_imports(tree, local_names)
     if third:
         items.append(_fail(
             "S5", f"import 了第三方库/包外模块:{sorted(set(third))}——三方件平台装不上,"
@@ -264,6 +298,37 @@ def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
             "cs-scot-migrate 导入时可自动补库,但正本必须自包含"))
     elif pkg_files is not None:
         items.append(_pass("S6", "自包含合规(本地 import 的模块都在包里)"))
+    return items
+
+
+def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
+    """返回 (items, 试跑入口名)。local_names=同包可 import 的模块名集合;
+    entry_hint=下游仲裁选定的入口(给了就按它试跑/扫可达路径——S1 仍按契约命名评判)。"""
+    items = []
+    src = script.read_text(encoding="utf-8", errors="replace")
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as e:
+        return [_fail("S0", f"脚本语法错误:{e}", "先把脚本改到能通过 python 编译")], None
+
+    # S1 入口
+    entry_name, entry_def = _find_entry(tree)
+    tops = {n.name for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    items.append(_check_entry(entry_name, entry_def, tops))
+
+    # S2 argv/print/exit 规则:入口可达函数 + 模块级(守卫分支外)
+    smoke_entry = entry_hint if entry_hint and entry_hint in tops else entry_name
+    items.append(_check_main_guard(tree, smoke_entry))
+
+    # S3 文件发现 .txt/.log 双吃
+    items.append(_check_file_discovery(src))
+
+    # S4 多网元探测痕迹
+    items.append(_check_ne_probe(src))
+
+    # S5/S6 依赖:禁止第三方库 + 自包含
+    items.extend(_check_deps(tree, local_names, pkg_files))
 
     return items, smoke_entry
 
@@ -325,11 +390,9 @@ def _import_script(script: Path, timeout):
     return status, val
 
 
-def _tri_of(result):
-    """把四形态结果压成一个三态字符串 + 形态标签(与适配函数 _fc_normalize 同一规则:
-    details.devices 包裹 → results 信封 → 全局 matched → 按网元字典;只看不改)。"""
-    if not isinstance(result, dict):
-        return None, "non-dict"
+def _tri_values(result):
+    """认形态并取出各 matched 原值:details.devices 包裹 → results 信封 → 全局 matched → 按网元字典。
+    返回 (原值列表, 形态标签)。"""
     det = result.get("details")
     if isinstance(det, dict) and isinstance(det.get("devices"), dict):
         vals = [v.get("matched") for v in det["devices"].values() if isinstance(v, dict)]
@@ -344,6 +407,11 @@ def _tri_of(result):
         shape = "per-ne"
     else:
         vals, shape = [], "empty" if not result else "unknown"
+    return vals, shape
+
+
+def _tri_normalize(vals, shape):
+    """把各 matched 原值归一成四态字符串(布尔值每出现一次形态标签追加一个 +bool)。返回 (归一列表, 形态标签)。"""
     norm = []
     for v in vals:
         if isinstance(v, bool):
@@ -353,13 +421,28 @@ def _tri_of(result):
             norm.append(v.lower())
         else:
             norm.append("undetermined")
+    return norm, shape
+
+
+def _tri_merge(norm):
+    """多个归一值合成一个三态:有 true 取 true,再看 false,纯缺数据取 insufficient_data,其余 undetermined。"""
     if "true" in norm:
-        return "true", shape
+        return "true"
     if "false" in norm:
-        return "false", shape
+        return "false"
     if "insufficient_data" in norm and "undetermined" not in norm:
-        return "insufficient_data", shape                # 纯缺数据;混"判不动"时按 undetermined 归并
-    return "undetermined", shape
+        return "insufficient_data"                      # 纯缺数据;混"判不动"时按 undetermined 归并
+    return "undetermined"
+
+
+def _tri_of(result):
+    """把四形态结果压成一个三态字符串 + 形态标签(与适配函数 _fc_normalize 同一规则:
+    details.devices 包裹 → results 信封 → 全局 matched → 按网元字典;只看不改)。"""
+    if not isinstance(result, dict):
+        return None, "non-dict"
+    vals, shape = _tri_values(result)
+    norm, shape = _tri_normalize(vals, shape)
+    return _tri_merge(norm), shape
 
 
 def _shape_items(iid, result, expect_undetermined, label):
@@ -481,6 +564,60 @@ def _md_check(md: Path):
     return [_pass("M1", f"{md.name} 必填字段齐({'/'.join(MD_REQUIRED)})")]
 
 
+def _pkg_doc_items(mds):
+    """包级文档检查:没有判断方法文档记 M0,有则逐个查必填字段(M1)。返回 dict 列表。"""
+    out = []
+    if not mds:
+        out.append(_fail("M0", "包里没有 判断方法*.md",
+                         "交付包必须带判断方法文档(SKILL.md 打包清单)").to_dict())
+    for md in mds:
+        out.extend(i.to_dict() for i in _md_check(md))
+    return out
+
+
+def _pkg_layout_items(pkg, fcs, other_py):
+    """包布局检查:没有 fault_check_*.py 时找错命名的入口(P1)或记纯文档包,再点名 verify_*.py 调试遗留。
+    返回 (md 项列表, notes 列表)。"""
+    md_items, notes = [], []
+    if not fcs:
+        stray = [p.name for p in other_py
+                 if "def fault_check" in p.read_text(encoding="utf-8", errors="replace")]
+        if stray:
+            md_items.append(_fail(
+                "P1", f"没有 fault_check_*.py 命名的脚本,但 {stray} 里有入口——命名不符合约定,下游收不到",
+                "脚本改名为 fault_check_<节点名>.py(SKILL.md 步骤5)").to_dict())
+        else:
+            notes.append("包里没有诊断脚本(纯文档包):只检查判断方法文档")
+    for p in sorted(pkg.rglob("verify_*.py")):
+        notes.append(f"调试遗留 {p.name} 混在包里(下游忽略它,建议打包时清掉)")
+    return md_items, notes
+
+
+def _find_test_data(pkg, data_dir):
+    """试跑基线用的数据目录:--data 指定的优先,否则找包内 测试数据/;都没有返回 None。"""
+    if data_dir is not None:
+        return data_dir
+    cands = [p for p in pkg.rglob("测试数据") if p.is_dir()]
+    return cands[0] if cands else None
+
+
+def _check_pkg_script(fc, pkg_mods, test_data, timeout):
+    """包内单个脚本:静态检查 → 烟测 → 有测试数据再记基线;依赖检查未过则只留一条 note。
+    返回 (items, baseline 或 None, note 或 None)。"""
+    baseline, note = None, None
+    items, entry = _static_check(fc, pkg_mods, pkg_files=pkg_mods)
+    fatal_static = any(i.tier == "FAIL" and i.id in ("S0", "S5", "S6") for i in items)
+    if entry and not fatal_static:
+        smoke, fn = _smoke_check(fc, entry, timeout)
+        items.extend(smoke)
+        if fn and test_data is not None:
+            bitems, baseline = _baseline_run(fn, test_data, timeout)
+            items.extend(bitems)
+    elif entry:
+        note = f"{fc.name}:依赖检查未过,烟测跳过(先修 S5/S6)"
+    return items, baseline, note
+
+
 def check_package(pkg: Path, data_dir=None, timeout=120):
     """检查一个交付包目录。返回 report dict。"""
     report = {"target": str(pkg), "mode": "package", "scripts": [], "md": [],
@@ -494,42 +631,19 @@ def check_package(pkg: Path, data_dir=None, timeout=120):
                 if p.name.startswith(("fault_check_", "search_"))}
     mds = [p for p in sorted(pkg.rglob("判断方法*.md")) if "规范" not in p.name]
 
-    if not mds:
-        report["md"].append(_fail("M0", "包里没有 判断方法*.md",
-                                  "交付包必须带判断方法文档(SKILL.md 打包清单)").to_dict())
-    for md in mds:
-        report["md"].extend(i.to_dict() for i in _md_check(md))
+    report["md"].extend(_pkg_doc_items(mds))
+    md_items, notes = _pkg_layout_items(pkg, fcs, other_py)
+    report["md"].extend(md_items)
+    report["notes"].extend(notes)
 
-    if not fcs:
-        stray = [p.name for p in other_py
-                 if "def fault_check" in p.read_text(encoding="utf-8", errors="replace")]
-        if stray:
-            report["md"].append(_fail(
-                "P1", f"没有 fault_check_*.py 命名的脚本,但 {stray} 里有入口——命名不符合约定,下游收不到",
-                "脚本改名为 fault_check_<节点名>.py(SKILL.md 步骤5)").to_dict())
-        else:
-            report["notes"].append("包里没有诊断脚本(纯文档包):只检查判断方法文档")
-    for p in sorted(pkg.rglob("verify_*.py")):
-        report["notes"].append(f"调试遗留 {p.name} 混在包里(下游忽略它,建议打包时清掉)")
-
-    test_data = data_dir
-    if test_data is None:
-        cands = [p for p in pkg.rglob("测试数据") if p.is_dir()]
-        test_data = cands[0] if cands else None
+    test_data = _find_test_data(pkg, data_dir)
 
     for fc in fcs:
-        items, entry = _static_check(fc, pkg_mods, pkg_files=pkg_mods)
-        fatal_static = any(i.tier == "FAIL" and i.id in ("S0", "S5", "S6") for i in items)
-        if entry and not fatal_static:
-            smoke, fn = _smoke_check(fc, entry, timeout)
-            items.extend(smoke)
-            if fn and test_data is not None:
-                bitems, baseline = _baseline_run(fn, test_data, timeout)
-                items.extend(bitems)
-                if baseline:
-                    report["baseline"] = dict(baseline, script=fc.name)
-        elif entry:
-            report["notes"].append(f"{fc.name}:依赖检查未过,烟测跳过(先修 S5/S6)")
+        items, baseline, note = _check_pkg_script(fc, pkg_mods, test_data, timeout)
+        if baseline:
+            report["baseline"] = dict(baseline, script=fc.name)
+        if note:
+            report["notes"].append(note)
         report["scripts"].append({"script": fc.name, "items": [i.to_dict() for i in items]})
     return report
 

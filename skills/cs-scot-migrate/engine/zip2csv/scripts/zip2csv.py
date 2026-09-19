@@ -364,13 +364,8 @@ def pack_csv_to_zip(csv_dir, output_dir, zip_basename):
     print(f"  打包完成: {zip_path} ({file_count} 个文件, {zip_size/1024:.1f} KB)")
 
 
-def main():
-    global DEFAULT_NE
-    try:                                                  # Windows GBK 控制台下中文输出乱码 → 统一 utf-8
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+def _parse_cli():
+    """解析命令行:src 必填,输出目录位置参数与 -o 二选一(都给要明确报错退出)。返回 (src 原样, 输出目录参数或 None)。"""
     # 用 argparse 而不是直接解析 sys.argv:实测直接解析时 `-o <目录>` 被当成第二个位置参数,输出静默写进
     # 名字就叫 "-o" 的目录——参数写错要明确报错,不能静默接收
     ap = argparse.ArgumentParser(
@@ -384,9 +379,13 @@ def main():
     if args.out_pos and args.out_opt:
         print(f"错误: 输出目录给了两次(位置参数「{args.out_pos}」和 -o「{args.out_opt}」)——留一个")
         sys.exit(2)
-    out_arg = args.out_pos or args.out_opt
+    return args.src, args.out_pos or args.out_opt
 
-    src = os.path.abspath(args.src)
+
+def _resolve_input(src, out_arg):
+    """按输入形态(目录 / 单个散文件 / zip)定出 (extract_dir, output_dir, csv_dir, zip_basename):
+    目录与单文件形态把 DEFAULT_NE 改成输入名,zip 形态顺手解压(Step 1);不存在则报错退出。"""
+    global DEFAULT_NE
     if os.path.isdir(src):
         # 输入是目录:不用解压直接扫描(此前只接受 zip,现场不得不先 make_archive 压包再转,是多余步骤)
         extract_dir = src
@@ -426,13 +425,12 @@ def main():
     else:
         print(f"错误: 文件/目录不存在 - {src}")
         sys.exit(1)
+    return extract_dir, output_dir, csv_dir, zip_basename
 
-    # Step 2: 自动扫描 LOG/CONFIG/DIAG 目录
-    data_dirs = find_data_dirs(extract_dir)
-    print(f"[2/7] 扫描结果: LOG={len(data_dirs['LOG'])}, CONFIG={len(data_dirs['CONFIG'])}, "
-          f"DIAG={len(data_dirs['DIAG'])}, CMD={len(data_dirs['CMD'])}")
 
-    # Step 2b: 一个分类目录都没有 = 原始散文件形态 → 先用 ifilter 归类再转换
+def _ensure_category_dirs(extract_dir, data_dirs):
+    """Step 2b:一个分类目录都没有 = 原始散文件形态 → 先用 ifilter 归类再重扫(失败退出 3);
+    已有分类目录 → 看是否复用了上次的 formated_result 并提示。返回 (extract_dir, raw_hint, data_dirs)。"""
     # (有分类目录就按分类目录处理,零散的杂文件不再另行归类——两种混在一起时以分类目录为准)
     raw_hint = extract_dir                               # S 类脚本(直接读原始文本的脚本)的原始日志目录参数(--data raw=)应指向的目录(经 ifilter 归类则指 formated_result)
     if not any(data_dirs.values()):
@@ -457,8 +455,11 @@ def main():
                   "不重新归类——原始数据有更新时,删掉 formated_result 目录后重跑")
             if len(fr_roots) == 1 and all(_formated_root(p) for lst in data_dirs.values() for p in lst):
                 raw_hint = next(iter(fr_roots))          # 全部类别都在同一份归类产物里:原始日志目录参数指向它
+    return extract_dir, raw_hint, data_dirs
 
-    # 归类产物里可能还有 KPI/LSDB/MOP 等类别——不在三表转换范围,逐个点名提示,不要静默地当作全部转换完成
+
+def _report_other_types(data_dirs):
+    """归类产物里可能还有 KPI/LSDB/MOP 等类别——不在三表转换范围,逐个点名提示,不要静默地当作全部转换完成。"""
     known = ('LOG', 'CONFIG', 'DIAG', 'CMD')
     noise = ('extracted', 'csv', 'raw', 'formated_result')
     other_types = set()
@@ -471,6 +472,29 @@ def main():
     if other_types:
         print(f"  ℹ 类别目录 {'、'.join(sorted(other_types))} 不在三表转换范围,已跳过"
               "(KPI/LSDB 等如需使用请另行处理)")
+
+
+def main():
+    try:                                                  # Windows GBK 控制台下中文输出乱码 → 统一 utf-8
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    src_arg, out_arg = _parse_cli()
+
+    src = os.path.abspath(src_arg)
+    extract_dir, output_dir, csv_dir, zip_basename = _resolve_input(src, out_arg)
+
+    # Step 2: 自动扫描 LOG/CONFIG/DIAG 目录
+    data_dirs = find_data_dirs(extract_dir)
+    print(f"[2/7] 扫描结果: LOG={len(data_dirs['LOG'])}, CONFIG={len(data_dirs['CONFIG'])}, "
+          f"DIAG={len(data_dirs['DIAG'])}, CMD={len(data_dirs['CMD'])}")
+
+    # Step 2b: 一个分类目录都没有 = 原始散文件形态 → 先用 ifilter 归类再转换
+    extract_dir, raw_hint, data_dirs = _ensure_category_dirs(extract_dir, data_dirs)
+
+    # 归类产物里的其它类别(KPI/LSDB/MOP 等)逐个点名提示
+    _report_other_types(data_dirs)
 
     # Step 3: 处理 LOG
     process_log_dirs(data_dirs['LOG'], csv_dir, extract_dir)

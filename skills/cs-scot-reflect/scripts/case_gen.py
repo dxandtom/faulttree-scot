@@ -274,6 +274,27 @@ def _pkg_label(p: Dict[str, Any]) -> str:
     return "/".join(parts[-2:]) if len(parts) >= 2 else p["dir"].name
 
 
+def _match_tiers(pkgs: List[Dict[str, Any]], key: str) -> tuple:
+    """按归一化名取三级候选:①别名精确相等 ②别名包含包名 ③包名包含别名(别名≥4字,防止短名误配)。"""
+    return (
+        [p for p in pkgs if key in p["aliases"]],
+        [p for p in pkgs if any(key in a for a in p["aliases"])],
+        [p for p in pkgs if any(a and len(a) >= 4 and a in key for a in p["aliases"])],
+    )
+
+
+def _pick_from_tier(tier: List[Dict[str, Any]]):
+    """同级多个命中:正名相同=同包不同批次,机械取最新并注记;正名不同=真歧义,点名交人。返回 (包或None, 说明)。"""
+    titles = {p.get("title") or "" for p in tier}
+    if len(titles) == 1 and "" not in titles:
+        pick = max(tier, key=_version_stamp)
+        others = "、".join(_pkg_label(p) for p in tier if p is not pick)
+        return pick, (f"同名多版本 {len(tier)} 个(判断方法标题一致=同包不同批次),"
+                      f"机械取最新 {_pkg_label(pick)};忽略:{others}")
+    names = ", ".join(_pkg_label(p) for p in tier[:4])
+    return None, f"多个候选包都对得上（{names}…）——歧义不瞎猜，把包目录名改唯一或人工指认"
+
+
 def match_package(pkgs: List[Dict[str, Any]], package_node: str):
     """按归一化后的三级规则匹配：①别名精确相等 ②别名包含包名 ③包名包含别名(别名≥4字,防止短名误配)。
 
@@ -285,24 +306,50 @@ def match_package(pkgs: List[Dict[str, Any]], package_node: str):
     key = _norm(package_node)
     if not key:
         return None, "包名为空"
-    tiers = (
-        [p for p in pkgs if key in p["aliases"]],
-        [p for p in pkgs if any(key in a for a in p["aliases"])],
-        [p for p in pkgs if any(a and len(a) >= 4 and a in key for a in p["aliases"])],
-    )
-    for tier in tiers:
+    for tier in _match_tiers(pkgs, key):
         if len(tier) == 1:
             return tier[0], None
         if len(tier) > 1:
-            titles = {p.get("title") or "" for p in tier}
-            if len(titles) == 1 and "" not in titles:
-                pick = max(tier, key=_version_stamp)
-                others = "、".join(_pkg_label(p) for p in tier if p is not pick)
-                return pick, (f"同名多版本 {len(tier)} 个(判断方法标题一致=同包不同批次),"
-                              f"机械取最新 {_pkg_label(pick)};忽略:{others}")
-            names = ", ".join(_pkg_label(p) for p in tier[:4])
-            return None, f"多个候选包都对得上（{names}…）——歧义不瞎猜，把包目录名改唯一或人工指认"
+            return _pick_from_tier(tier)
     return None, "找不到能对上的包（目录名/判断方法md标题都不匹配）"
+
+
+def _read_map_rows(path: Path) -> List[list]:
+    """读对应表全部行:csv 用标准库;xlsx 用 openpyxl(migrate 调优表同款依赖),多页取第一页。"""
+    if path.suffix.lower() == ".csv":
+        import csv
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            return [list(r) for r in csv.reader(f)]
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        raise SystemExit("--map 读 xlsx 需要 openpyxl(migrate 调优表同款依赖);"
+                         "装不上就把对应表另存为 csv 再传")
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb.worksheets[0]
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    wb.close()
+    return rows
+
+
+def _map_columns(header: list) -> Tuple[int, Optional[int]]:
+    """列识别:node_id 列=表头恰为 node_id(没有即停);zip 列=表头含 zip/产物/文件名/优化包/package(可无)。"""
+    low = [str(h or "").strip().lower() for h in header]
+    if "node_id" not in low:
+        raise SystemExit("--map 表头里找不到 node_id 列——用带 node_id 的表(调优表导出即有)")
+    nid_col = low.index("node_id")
+    zip_col = next((i for i, h in enumerate(low)
+                    if any(k in h for k in ("zip", "产物", "文件名", "优化包", "package"))), None)
+    return nid_col, zip_col
+
+
+def _row_zip_name(r: list, zip_col: Optional[int]) -> str:
+    """取该行的 zip 文件名:zip 列优先;识别不出就退化为"该行里以 .zip 结尾的单元格"。"""
+    val = str(r[zip_col] or "").strip() if zip_col is not None and zip_col < len(r) else ""
+    if not val.lower().endswith(".zip"):
+        val = next((str(c).strip() for c in r
+                    if isinstance(c, str) and c.strip().lower().endswith(".zip")), "")
+    return val
 
 
 def load_node_zip_map(path: Path) -> Dict[str, str]:
@@ -312,38 +359,16 @@ def load_node_zip_map(path: Path) -> Dict[str, str]:
     xlsx 用 openpyxl(migrate 调优表同款依赖);csv 用标准库。列识别:node_id 列=表头恰为
     node_id;zip 列=表头含 zip/产物/文件名/优化包/package,识别不出就退化为"该行里以 .zip 结尾
     的单元格"。值可带全路径,只取文件名。多页 xlsx 取第一页(调优表导出的汇总页)。"""
-    rows: List[list] = []
-    if path.suffix.lower() == ".csv":
-        import csv
-        with path.open(encoding="utf-8-sig", newline="") as f:
-            rows = [list(r) for r in csv.reader(f)]
-    else:
-        try:
-            from openpyxl import load_workbook
-        except ImportError:
-            raise SystemExit("--map 读 xlsx 需要 openpyxl(migrate 调优表同款依赖);"
-                             "装不上就把对应表另存为 csv 再传")
-        wb = load_workbook(path, read_only=True, data_only=True)
-        ws = wb.worksheets[0]
-        rows = [list(r) for r in ws.iter_rows(values_only=True)]
-        wb.close()
+    rows = _read_map_rows(path)
     if not rows:
         raise SystemExit(f"--map 空表：{path}")
-    low = [str(h or "").strip().lower() for h in rows[0]]
-    if "node_id" not in low:
-        raise SystemExit("--map 表头里找不到 node_id 列——用带 node_id 的表(调优表导出即有)")
-    nid_col = low.index("node_id")
-    zip_col = next((i for i, h in enumerate(low)
-                    if any(k in h for k in ("zip", "产物", "文件名", "优化包", "package"))), None)
+    nid_col, zip_col = _map_columns(rows[0])
     out: Dict[str, str] = {}
     for r in rows[1:]:
         nid = str(r[nid_col] or "").strip() if nid_col < len(r) else ""
         if not nid:
             continue
-        val = str(r[zip_col] or "").strip() if zip_col is not None and zip_col < len(r) else ""
-        if not val.lower().endswith(".zip"):
-            val = next((str(c).strip() for c in r
-                        if isinstance(c, str) and c.strip().lower().endswith(".zip")), "")
+        val = _row_zip_name(r, zip_col)
         if not val:
             continue
         stem = _norm(re.sub(r"\.zip$", "", Path(val.replace("\\", "/")).name, flags=re.I))
@@ -381,11 +406,8 @@ def build_expected(case_id: str, scenario: str, nid: str, node_name: str,
     }
 
 
-def main() -> None:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+def _parse_args() -> argparse.Namespace:
+    """命令行参数。"""
     ap = argparse.ArgumentParser(description="从 migrate 台账 + 交付包机械生成评估用例库")
     ap.add_argument("--product", required=True, help="场景产物目录（或打包技能根目录）")
     ap.add_argument("--packages", required=True,
@@ -401,7 +423,194 @@ def main() -> None:
                     help="节点↔zip 对应表(xlsx/csv,须含 node_id 列 + zip 文件名列,如调优表导出的"
                          "「产物文件名」)。给了它,台账节点优先按表精确匹配——治「互补」变体/多时间戳"
                          "版本/改名 zip 造成的名字匹配歧义;表里没有的节点回落名字匹配")
-    a = ap.parse_args()
+    return ap.parse_args()
+
+
+def _plan_items(ledgerless: bool, ledger: Dict[str, Any], nodes: Dict[str, Any]) -> Tuple[list, Dict[str, int]]:
+    """待配对清单:有台账按台账项;无台账逐树节点试配(按 nX 序号排),并统计同名节点数。返回 (items, name_dup)。"""
+    if not ledgerless:
+        return sorted(ledger.items()), {}
+    # 无台账:逐树节点试配包(按名字匹配);先统计同名节点数,配上包但名字重复的不猜
+    name_dup: Dict[str, int] = {}
+    for nd in nodes.values():
+        nm = str(nd.get("name") or "").strip()
+        if nm:
+            name_dup[nm] = name_dup.get(nm, 0) + 1
+    items = [(nid, {"package_node": str(nd.get("name") or "").strip()})
+             for nid, nd in sorted(nodes.items(),
+                                   key=lambda kv: int(kv[0][1:]) if kv[0][1:].isdigit() else 10 ** 9)
+             if str(nd.get("name") or "").strip()]
+    return items, name_dup
+
+
+def _match_by_map(pkg_index: List[Dict[str, Any]], want: str, nid: str, package_node: str):
+    """--map 是权威依据:按来源 zip 精确匹配;同一个 zip 解出多个子包时在子集内再按名字分。
+    返回 (包, 注记, 问题说明);包为 None 时问题说明非空。"""
+    hits = [p for p in pkg_index if p.get("src_zip") == want]
+    if not hits:
+        return None, None, (f"{nid}「{package_node}」：--map 指到 zip「{want}」,但 --packages 里"
+                            f"没有这个 zip(或没解出内容)——核对表/补包;跳过")
+    if len(hits) == 1:
+        pkg, why = hits[0], None
+    else:                                              # 同一个 zip 解出多个子包:在子集内再按名字分
+        pkg, why = match_package(hits, package_node)
+        if pkg is None:
+            return None, None, (f"{nid}「{package_node}」：--map 的 zip「{want}」里有多个子包"
+                                f"且分不开({why})——跳过")
+    return pkg, _join_notes(f"按 --map 匹配 zip「{want}」", why), None
+
+
+def _match_item(pkg_index: List[Dict[str, Any]], want, nid: str, package_node: str, ledgerless: bool):
+    """给一条台账/树节点配包:--map 指到 zip 就按 zip 精确匹配,否则名字三级匹配。
+    返回 (包, 注记, 问题说明);包为 None 且问题为 None = 静默跳过(无台账模式树节点没配到包是常态)。"""
+    if want:                                           # --map 是权威依据:按来源 zip 精确匹配
+        return _match_by_map(pkg_index, want, nid, package_node)
+    pkg, why = match_package(pkg_index, package_node)
+    if pkg is None:
+        if not ledgerless:                             # 无台账模式:树节点没配到包是常态,不点名
+            return None, None, f"{nid}「{package_node}」：{why}——跳过"
+        return None, None, None
+    return pkg, why, None
+
+
+def _pick_same_name_node(nodes: Dict[str, Any], pkg: Dict[str, Any], package_node: str) -> Optional[str]:
+    """同名冲突:包内有「## 节点路径」就机械消歧(路径须是树上该节点祖先链的子序列),唯一命中才返回 node_id,否则 None(不猜)。"""
+    ppath = [s for s in (pkg.get("path") or []) if s]
+    if not ppath:
+        return None
+    full = ppath if _norm(ppath[-1]) == _norm(package_node) else ppath + [package_node]
+    fulln = [_norm(x) for x in full]
+
+    def _chain(k):
+        out, cur = [], k
+        while cur and cur in nodes:
+            out.append(_norm(str(nodes[cur].get("name") or "")))
+            cur = nodes[cur].get("parent")
+        return list(reversed(out))
+
+    def _sub(subseq, fullseq):
+        it = iter(fullseq)
+        return all(any(x == y for y in it) for x in subseq)
+
+    same = [k for k, nd2 in nodes.items()
+            if str(nd2.get("name") or "").strip() == package_node]
+    hits = [k for k in same if _sub(_chain(k), fulln)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _join_notes(*parts) -> str:
+    """把若干条注记(可为 None/空)用「; 」拼成一条。"""
+    return "; ".join(x for x in parts if x)
+
+
+def _write_case(case_dir: Path, data_dir: Path, copy_data: bool, why: Optional[str], case_id: str,
+                scenario: str, nid: str, node_name: str, package_node: str, entry: dict) -> None:
+    """落一个用例目录:按需把测试数据拷进 data/,写 expected.json(匹配注记进留痕)。"""
+    case_dir.mkdir(parents=True, exist_ok=True)
+    if copy_data:
+        dest = case_dir / "data"
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(data_dir, dest)
+        data_note = "数据已拷入 data/"
+    else:
+        data_note = f"数据在包内：{data_dir}"
+    if why:
+        data_note += f"；{why}"                        # 版本取舍进留痕,审计时知道数据来自哪一版
+
+    expected = build_expected(case_id, scenario, nid, node_name,
+                              package_node, entry, data_note)
+    expected["data_source"] = str(case_dir / "data") if copy_data else str(data_dir)
+    (case_dir / "expected.json").write_text(
+        json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _generate_cases(items: list, nodes: Dict[str, Any], pkg_index: List[Dict[str, Any]],
+                    nid_zip: Dict[str, str], ledgerless: bool, name_dup: Dict[str, int],
+                    cases_out: Path, copy_data: bool, force: bool, scenario: str):
+    """逐条配包并落用例。返回 (生成的 case_id, 跳过的 case_id, 问题清单, 用到的包目录集合)。"""
+    made, skipped, problems = [], [], []
+    dup_reported: set = set()
+    used_pkg_dirs = set()
+    for nid, entry in items:
+        package_node = entry.get("package_node", "")
+        node = nodes.get(nid)
+        if node is None:
+            problems.append(f"{nid}「{package_node}」：台账里有但树上已不存在"
+                            f"（结构调整后的孤儿台账项）——跳过，待人工确认")
+            continue
+        node_name = node.get("name", package_node)
+
+        want = nid_zip.get(nid)
+        pkg, why, problem = _match_item(pkg_index, want, nid, package_node, ledgerless)
+        if problem:
+            problems.append(problem)
+        if pkg is None:
+            continue
+        if ledgerless and want is None and name_dup.get(package_node, 0) > 1:
+            # 同名冲突(--map 显式给了 node_id 的行不做此检查——表是权威依据):
+            # 包内有「## 节点路径」就机械消歧(子序列),否则不猜
+            picked = _pick_same_name_node(nodes, pkg, package_node)
+            if picked is None:
+                if package_node not in dup_reported:
+                    dup_reported.add(package_node)
+                    problems.append(f"包对上节点名「{package_node}」,但树上有多个同名节点且包内无"
+                                    "「节点路径」可消歧——不猜,跳过(交付包补 ## 节点路径,"
+                                    "或先对技能跑一次 migrate 按台账精确匹配)")
+                continue
+            if picked != nid:
+                continue                                 # 这个同名 nid 不是路径指向的那个:静默让位
+            why = _join_notes(f"同名 {name_dup[package_node]} 个,包内节点路径消歧", why)
+        if ledgerless:
+            why = _join_notes("无台账,按节点名匹配", why)
+        used_pkg_dirs.add(str(pkg["dir"]))
+        if why:                                            # 匹配上了但带注记(按 map 匹配/同名多版本取最新)
+            print(f"  ⚠ {nid}「{package_node}」：{why}")
+        data_dir = pkg["data"]
+        if data_dir is None:
+            problems.append(f"{nid}「{package_node}」：对上了包 {pkg['dir'].name}，但里面没有"
+                            f"测试数据目录（找了 *测试数据* 和 formated_result）——跳过")
+            continue
+
+        case_id = f"{nid}-{sanitize(package_node)}"
+        case_dir = cases_out / case_id
+        if case_dir.exists() and not force:
+            skipped.append(case_id)
+            continue
+        _write_case(case_dir, data_dir, copy_data, why, case_id, scenario, nid, node_name, package_node, entry)
+        made.append(case_id)
+    return made, skipped, problems, used_pkg_dirs
+
+
+def _leftover_problems(pkg_index: List[Dict[str, Any]], used_pkg_dirs: set) -> List[str]:
+    """无台账模式:带测试数据却在树上没配到同名节点的包,逐个点名。"""
+    left = [p for p in pkg_index if str(p["dir"]) not in used_pkg_dirs and p.get("data")]
+    return [f"包「{_pkg_label(p)}」在树上找不到同名节点(按名字匹配失败)——"
+            "确认该包属于本场景;或先对技能跑一次 migrate,用台账精确匹配" for p in left]
+
+
+def _report(made: list, skipped: list, problems: list, cases_out: Path) -> None:
+    """收尾播报:生成/跳过/未能生成清单;一个都没生成也没跳过 → 退出码 1。"""
+    print(f"[case_gen] 生成 {len(made)} 个用例 → {cases_out}")
+    for c in made:
+        print(f"  + {c}")
+    if skipped:
+        print(f"[case_gen] 跳过已存在 {len(skipped)} 个（重生成加 --force）：{', '.join(skipped[:8])}"
+              + ("…" if len(skipped) > 8 else ""))
+    if problems:
+        print(f"\n[case_gen] ⚠ 未能生成 {len(problems)} 项（不影响已生成的）：")
+        for p in problems:
+            print(f"  - {p}")
+    if not made and not skipped:
+        sys.exit(1)
+
+
+def main() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    a = _parse_args()
 
     product = locate_product(Path(a.product).expanduser().resolve())
     given_packages = Path(a.packages).expanduser().resolve()
@@ -435,143 +644,12 @@ def main() -> None:
     if nid_zip:
         print(f"[case_gen] --map 载入 {len(nid_zip)} 条节点↔zip 对应——这些节点按表精确匹配,不走名字匹配")
 
-    made, skipped, problems = [], [], []
-    dup_reported: set = set()
+    items, name_dup = _plan_items(ledgerless, ledger, nodes)
+    made, skipped, problems, used_pkg_dirs = _generate_cases(
+        items, nodes, pkg_index, nid_zip, ledgerless, name_dup, cases_out, copy_data, a.force, scenario)
     if ledgerless:
-        # 无台账:逐树节点试配包(按名字匹配);先统计同名节点数,配上包但名字重复的不猜
-        name_dup: Dict[str, int] = {}
-        for nd in nodes.values():
-            nm = str(nd.get("name") or "").strip()
-            if nm:
-                name_dup[nm] = name_dup.get(nm, 0) + 1
-        items = [(nid, {"package_node": str(nd.get("name") or "").strip()})
-                 for nid, nd in sorted(nodes.items(),
-                                       key=lambda kv: int(kv[0][1:]) if kv[0][1:].isdigit() else 10 ** 9)
-                 if str(nd.get("name") or "").strip()]
-    else:
-        name_dup = {}
-        items = sorted(ledger.items())
-    used_pkg_dirs = set()
-    for nid, entry in items:
-        package_node = entry.get("package_node", "")
-        node = nodes.get(nid)
-        if node is None:
-            problems.append(f"{nid}「{package_node}」：台账里有但树上已不存在"
-                            f"（结构调整后的孤儿台账项）——跳过，待人工确认")
-            continue
-        node_name = node.get("name", package_node)
-
-        pkg, why = None, None
-        want = nid_zip.get(nid)
-        if want:                                           # --map 是权威依据:按来源 zip 精确匹配
-            hits = [p for p in pkg_index if p.get("src_zip") == want]
-            if not hits:
-                problems.append(f"{nid}「{package_node}」：--map 指到 zip「{want}」,但 --packages 里"
-                                f"没有这个 zip(或没解出内容)——核对表/补包;跳过")
-                continue
-            if len(hits) == 1:
-                pkg = hits[0]
-            else:                                          # 同一个 zip 解出多个子包:在子集内再按名字分
-                pkg, why = match_package(hits, package_node)
-                if pkg is None:
-                    problems.append(f"{nid}「{package_node}」：--map 的 zip「{want}」里有多个子包"
-                                    f"且分不开({why})——跳过")
-                    continue
-            why = "; ".join(x for x in (f"按 --map 匹配 zip「{want}」", why) if x)
-        else:
-            pkg, why = match_package(pkg_index, package_node)
-            if pkg is None:
-                if not ledgerless:                         # 无台账模式:树节点没配到包是常态,不点名
-                    problems.append(f"{nid}「{package_node}」：{why}——跳过")
-                continue
-        if ledgerless and want is None and name_dup.get(package_node, 0) > 1:
-            # 同名冲突(--map 显式给了 node_id 的行不做此检查——表是权威依据):
-            # 包内有「## 节点路径」就机械消歧(子序列),否则不猜
-            ppath = [s for s in (pkg.get("path") or []) if s]
-            picked = None
-            if ppath:
-                full = ppath if _norm(ppath[-1]) == _norm(package_node) else ppath + [package_node]
-                fulln = [_norm(x) for x in full]
-
-                def _chain(k):
-                    out, cur = [], k
-                    while cur and cur in nodes:
-                        out.append(_norm(str(nodes[cur].get("name") or "")))
-                        cur = nodes[cur].get("parent")
-                    return list(reversed(out))
-
-                def _sub(subseq, fullseq):
-                    it = iter(fullseq)
-                    return all(any(x == y for y in it) for x in subseq)
-
-                same = [k for k, nd2 in nodes.items()
-                        if str(nd2.get("name") or "").strip() == package_node]
-                hits = [k for k in same if _sub(_chain(k), fulln)]
-                if len(hits) == 1:
-                    picked = hits[0]
-            if picked is None:
-                if package_node not in dup_reported:
-                    dup_reported.add(package_node)
-                    problems.append(f"包对上节点名「{package_node}」,但树上有多个同名节点且包内无"
-                                    "「节点路径」可消歧——不猜,跳过(交付包补 ## 节点路径,"
-                                    "或先对技能跑一次 migrate 按台账精确匹配)")
-                continue
-            if picked != nid:
-                continue                                 # 这个同名 nid 不是路径指向的那个:静默让位
-            why = "; ".join(x for x in (f"同名 {name_dup[package_node]} 个,包内节点路径消歧", why) if x)
-        if ledgerless:
-            why = "; ".join(x for x in ("无台账,按节点名匹配", why) if x)
-        used_pkg_dirs.add(str(pkg["dir"]))
-        if why:                                            # 匹配上了但带注记(按 map 匹配/同名多版本取最新)
-            print(f"  ⚠ {nid}「{package_node}」：{why}")
-        data_dir = pkg["data"]
-        if data_dir is None:
-            problems.append(f"{nid}「{package_node}」：对上了包 {pkg['dir'].name}，但里面没有"
-                            f"测试数据目录（找了 *测试数据* 和 formated_result）——跳过")
-            continue
-
-        case_id = f"{nid}-{sanitize(package_node)}"
-        case_dir = cases_out / case_id
-        if case_dir.exists() and not a.force:
-            skipped.append(case_id)
-            continue
-
-        case_dir.mkdir(parents=True, exist_ok=True)
-        if copy_data:
-            dest = case_dir / "data"
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.copytree(data_dir, dest)
-            data_note = "数据已拷入 data/"
-        else:
-            data_note = f"数据在包内：{data_dir}"
-        if why:
-            data_note += f"；{why}"                        # 版本取舍进留痕,审计时知道数据来自哪一版
-
-        expected = build_expected(case_id, scenario, nid, node_name,
-                                  package_node, entry, data_note)
-        expected["data_source"] = str(case_dir / "data") if copy_data else str(data_dir)
-        (case_dir / "expected.json").write_text(
-            json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8")
-        made.append(case_id)
-
-    if ledgerless:
-        left = [p for p in pkg_index if str(p["dir"]) not in used_pkg_dirs and p.get("data")]
-        for p in left:
-            problems.append(f"包「{_pkg_label(p)}」在树上找不到同名节点(按名字匹配失败)——"
-                            "确认该包属于本场景;或先对技能跑一次 migrate,用台账精确匹配")
-    print(f"[case_gen] 生成 {len(made)} 个用例 → {cases_out}")
-    for c in made:
-        print(f"  + {c}")
-    if skipped:
-        print(f"[case_gen] 跳过已存在 {len(skipped)} 个（重生成加 --force）：{', '.join(skipped[:8])}"
-              + ("…" if len(skipped) > 8 else ""))
-    if problems:
-        print(f"\n[case_gen] ⚠ 未能生成 {len(problems)} 项（不影响已生成的）：")
-        for p in problems:
-            print(f"  - {p}")
-    if not made and not skipped:
-        sys.exit(1)
+        problems += _leftover_problems(pkg_index, used_pkg_dirs)
+    _report(made, skipped, problems, cases_out)
 
 
 if __name__ == "__main__":

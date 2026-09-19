@@ -84,6 +84,100 @@ def _sub_explains(subs) -> str:
     return ";".join(parts)
 
 
+def _explain_prefix(f: dict) -> str:
+    """解释的前缀:参数化查询代入了什么参数、filter 先筛出了多少行(拼不出的部分留空)。"""
+    pre = ""
+    if f.get("params"):                                  # 参数化查询(X):先说清代入了什么参数
+        pv = "、".join(f"{k}=「{v}」" for k, v in list(f.get("params").items())[:3])
+        pre += f"先从数据里抽出参数({pv})代入,"
+    if f.get("filter") and f.get("filter_rows") is not None:
+        fd = _filter_zh(f.get("filter"))
+        if fd:
+            pre += f"先按「{fd}」筛出 {f.get('filter_rows')} 行,"
+    return pre
+
+
+def _explain_expand(f: dict, ex_info: dict, pre: str, verdict: str) -> str:
+    """expand 逐值展开:按值说结果,点名违规/命中的值。"""
+    need = "每个值都要满足" if ex_info.get("mode") == "all" else "任一值满足即可"
+    head = (pre + f"参数「{ex_info.get('param')}」共 {ex_info.get('n')} 个值逐个代入查({need}):"
+            f"{ex_info.get('n_true')} 个成立、{ex_info.get('n_false')} 个不成立")
+    if ex_info.get("n_insuf"):
+        head += f"、{ex_info.get('n_insuf')} 个查不了"
+    if f.get("fail_values"):
+        head += f";不满足的值:「{'」「'.join(f['fail_values'])}」"
+    if f.get("hit_values"):
+        head += f";命中的值:「{'」「'.join(f['hit_values'])}」"
+    return head + f" → {verdict}"
+
+
+def _explain_match(f: dict, col, pre: str, verdict: str) -> str:
+    """C/G 字段匹配:在哪列多少行里找什么、命中几行;absent 反向判(命中 0 行=未配置=成立)。"""
+    ex = f" 每格抽{_extract_zh(f['extract'])}后" if f.get("extract") else ""
+    verb = "按正则匹配" if f.get("match") == "regex" else "找"
+    tgt = "、".join(f"「{t}」" for t in (f.get("targets") or [])[:3])
+    quote = f";命中原文:「{f['hits'][0]}」" if f.get("hits") else ""
+    if f.get("absent"):
+        hit = f.get("matched", 0)
+        return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {hit} 行"
+                + ("(没有这项内容,即「未配置」)→ 成立" if hit == 0
+                   else f"(该内容存在)→ 不成立{quote}"))
+    return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {f.get('matched')} 行"
+            f" → {verdict}{quote}")
+
+
+def _explain_threshold(f: dict, col, pre: str, verdict: str) -> str:
+    """A 阈值:逐行计数(count_rows)或聚合值与阈值比较。"""
+    ex = f"每格抽{_extract_zh(f['extract'])},再" if f.get("extract") else ""
+    op, thr = f.get("op"), f.get("threshold")
+    quote = f";命中原文:「{f['hits'][0]}」" if f.get("hits") else ""
+    if f.get("scope") == "count_rows":
+        return (pre + f"「{col}」{ex}逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足"
+                f" → {verdict}{quote}")
+    agg = _AGG_ZH.get(f.get("agg"), f.get("agg") or "")
+    return (pre + f"「{col}」{ex}{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}{quote}")
+
+
+def _explain_pair(f: dict, col, pre: str, verdict: str) -> str:
+    """P 两侧对比:本端/对端各取什么值、一致与否、按哪条规则判。"""
+    ex = f"(每格抽{_extract_zh(f['extract'])})" if f.get("extract") else ""
+    rule = "不一致即故障" if f.get("fault_when") == "not_equal" else "一致即故障"
+    side = "不一致" if not f.get("equal") else "一致"
+    src = (f"(本端取自「{f.get('local_source')}」、对端取自「{f.get('peer_source')}」)"
+           if f.get("local_source") or f.get("peer_source") else "")
+    return (pre + f"对比两侧的「{col}」{ex}{src}:本端=「{f.get('local')}」、对端=「{f.get('peer')}」"
+            f"→ 两侧{side},按「{rule}」→ {verdict}")
+
+
+def _explain_grouped(f: dict, need: str, pred) -> str:
+    """D 组合的 group_by 分组说明:分了几组、哪些组满足,并以样例组展开各子条件。"""
+    mg = f.get("matched_groups") or []
+    detail = _sub_explains(f.get("sub_facts"))
+    sample = f.get("sample_group")
+    if pred is True:
+        head = (f"按「{f.get('group_by')}」分成 {f.get('groups')} 组,每组单独查全部子条件:"
+                f"「{'」「'.join(mg)}」{'等 ' + str(f.get('matched_groups_total')) + ' 个' if f.get('matched_groups_total') else ''}组满足")
+        if detail and sample:
+            head += f"——以「{sample}」组为例:{detail} → 组内{need}满足"
+        return head + " → 成立"
+    head = (f"按「{f.get('group_by')}」分成 {f.get('groups')} 组,每组单独查全部子条件:"
+            f"没有任何一组{need}满足")
+    if detail and sample:
+        head += f"(以「{sample}」组为例:{detail})"
+    return head + " → 不成立"
+
+
+def _explain_combo(f: dict, verdict: str, pred) -> str:
+    """D 组合:含 group_by 时按组说明,否则列出各子条件(递归拼各子条件的解释)。"""
+    need = "全部" if f.get("combine", "AND") == "AND" else "任一"
+    if f.get("group_by"):
+        return _explain_grouped(f, need, pred)
+    subs = f.get("sub_facts") or []
+    detail = _sub_explains(subs)
+    return (f"{len(subs)} 个子条件须{need}满足:{detail} → {verdict}" if detail
+            else f"{len(subs)} 个子条件须{need}满足(各子条件详见 sub_facts)→ {verdict}")
+
+
 def _explain(f: dict) -> str:
     """把一条事实拼成"怎么判的"易懂说明(给不懂判据分类的人看,也给 RCA 报告直接引用)。
     机械生成、数字取自事实原字段——弱模型引用它就不会把数值/规则改写编错。拼不出的类返回空串。
@@ -96,77 +190,19 @@ def _explain(f: dict) -> str:
     if st == "manual":
         return "需人工现场确认,自动数据判不了"
     cls, col = f.get("class"), f.get("resolved_column")
-    pre = ""
-    if f.get("params"):                                  # 参数化查询(X):先说清代入了什么参数
-        pv = "、".join(f"{k}=「{v}」" for k, v in list(f.get("params").items())[:3])
-        pre += f"先从数据里抽出参数({pv})代入,"
-    if f.get("filter") and f.get("filter_rows") is not None:
-        fd = _filter_zh(f.get("filter"))
-        if fd:
-            pre += f"先按「{fd}」筛出 {f.get('filter_rows')} 行,"
+    pre = _explain_prefix(f)
     try:
         ex_info = f.get("expand")
         if ex_info:                                      # expand 逐值展开:按值说结果,点名违规/命中的值
-            need = "每个值都要满足" if ex_info.get("mode") == "all" else "任一值满足即可"
-            head = (pre + f"参数「{ex_info.get('param')}」共 {ex_info.get('n')} 个值逐个代入查({need}):"
-                    f"{ex_info.get('n_true')} 个成立、{ex_info.get('n_false')} 个不成立")
-            if ex_info.get("n_insuf"):
-                head += f"、{ex_info.get('n_insuf')} 个查不了"
-            if f.get("fail_values"):
-                head += f";不满足的值:「{'」「'.join(f['fail_values'])}」"
-            if f.get("hit_values"):
-                head += f";命中的值:「{'」「'.join(f['hit_values'])}」"
-            return head + f" → {verdict}"
+            return _explain_expand(f, ex_info, pre, verdict)
         if cls in ("C", "G"):
-            ex = f" 每格抽{_extract_zh(f['extract'])}后" if f.get("extract") else ""
-            verb = "按正则匹配" if f.get("match") == "regex" else "找"
-            tgt = "、".join(f"「{t}」" for t in (f.get("targets") or [])[:3])
-            quote = f";命中原文:「{f['hits'][0]}」" if f.get("hits") else ""
-            if f.get("absent"):
-                hit = f.get("matched", 0)
-                return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {hit} 行"
-                        + ("(没有这项内容,即「未配置」)→ 成立" if hit == 0
-                           else f"(该内容存在)→ 不成立{quote}"))
-            return (pre + f"在「{col}」列的 {f.get('total')} 行里{ex}{verb} {tgt} → 命中 {f.get('matched')} 行"
-                    f" → {verdict}{quote}")
+            return _explain_match(f, col, pre, verdict)
         if cls == "A":
-            ex = f"每格抽{_extract_zh(f['extract'])},再" if f.get("extract") else ""
-            op, thr = f.get("op"), f.get("threshold")
-            quote = f";命中原文:「{f['hits'][0]}」" if f.get("hits") else ""
-            if f.get("scope") == "count_rows":
-                return (pre + f"「{col}」{ex}逐行判「{op} {thr}」:{f.get('count_satisfied')}/{f.get('valid')} 行满足"
-                        f" → {verdict}{quote}")
-            agg = _AGG_ZH.get(f.get("agg"), f.get("agg") or "")
-            return (pre + f"「{col}」{ex}{f.get('valid')} 个有效值取{agg} = {f.get('value')},判「{op} {thr}」→ {verdict}{quote}")
+            return _explain_threshold(f, col, pre, verdict)
         if cls == "P":
-            ex = f"(每格抽{_extract_zh(f['extract'])})" if f.get("extract") else ""
-            rule = "不一致即故障" if f.get("fault_when") == "not_equal" else "一致即故障"
-            side = "不一致" if not f.get("equal") else "一致"
-            src = (f"(本端取自「{f.get('local_source')}」、对端取自「{f.get('peer_source')}」)"
-                   if f.get("local_source") or f.get("peer_source") else "")
-            return (pre + f"对比两侧的「{col}」{ex}{src}:本端=「{f.get('local')}」、对端=「{f.get('peer')}」"
-                    f"→ 两侧{side},按「{rule}」→ {verdict}")
+            return _explain_pair(f, col, pre, verdict)
         if cls == "D":
-            need = "全部" if f.get("combine", "AND") == "AND" else "任一"
-            if f.get("group_by"):
-                mg = f.get("matched_groups") or []
-                detail = _sub_explains(f.get("sub_facts"))
-                sample = f.get("sample_group")
-                if pred is True:
-                    head = (f"按「{f.get('group_by')}」分成 {f.get('groups')} 组,每组单独查全部子条件:"
-                            f"「{'」「'.join(mg)}」{'等 ' + str(f.get('matched_groups_total')) + ' 个' if f.get('matched_groups_total') else ''}组满足")
-                    if detail and sample:
-                        head += f"——以「{sample}」组为例:{detail} → 组内{need}满足"
-                    return head + " → 成立"
-                head = (f"按「{f.get('group_by')}」分成 {f.get('groups')} 组,每组单独查全部子条件:"
-                        f"没有任何一组{need}满足")
-                if detail and sample:
-                    head += f"(以「{sample}」组为例:{detail})"
-                return head + " → 不成立"
-            subs = f.get("sub_facts") or []
-            detail = _sub_explains(subs)
-            return (f"{len(subs)} 个子条件须{need}满足:{detail} → {verdict}" if detail
-                    else f"{len(subs)} 个子条件须{need}满足(各子条件详见 sub_facts)→ {verdict}")
+            return _explain_combo(f, verdict, pred)
     except Exception:  # noqa: BLE001
         return ""                                        # 解释拼不出绝不能影响剪枝主流程
     return ""
@@ -236,17 +272,18 @@ def _coarse(entry_list, pass_through) -> str:
     return "?"
 
 
-def prune(index: dict, results: dict) -> dict:
-    """index + 各源事实 → 剪枝后的局部子树 + 覆盖报告。精简:outline(导航)+ 精简后的事实。"""
-    nodes = index.get("nodes", {})
-    # 别名表:节点 key(nN)和 code 都指向同一节点 → 绑定填哪个 node_id 都能挂上
+def _alias_table(nodes: dict) -> dict:
+    """别名表:节点 key(nN)和 code 都指向同一节点 → 绑定填哪个 node_id 都能挂上。"""
     alias = {}
     for nid, n in nodes.items():
         alias[nid] = nid
         if n.get("code"):
             alias[n["code"]] = nid
-    facts = _facts_by_node(results, alias)
+    return alias
 
+
+def _kept_node_ids(index: dict, nodes: dict, facts: dict) -> set:
+    """要保留的节点集合:有事实的真实节点 + 它们到根的祖先 + 根 + 保留节点下的"其他"类子节点。"""
     keep = set()
     for nid in [k for k in facts if k in nodes]:        # 有事实的真实节点
         cur = nid
@@ -267,54 +304,57 @@ def prune(index: dict, results: dict) -> dict:
         for c in (nodes[nid].get("children") or []):
             if c in nodes and _is_catchall(nodes[c]):
                 keep.add(c)
+    return keep
 
-    pruned, outline = {}, {}
-    for nid in keep:
-        n = nodes[nid]
-        ent = facts.get(nid, [])
-        # 多源合成剔噪:节点已被真凭实据确立(存在 ok+成立 事实)时,剔掉同节点的 insufficient_data
-        # 事实——"某源答不了/没查到"是**没来作证**,不是反证,留着会诱导 RCA 把已确立节点降档
-        # (实测:dblg 声明"本源无法提供"+ config 实测确立,模型写 blocked_at="dblg insufficient"
-        # 赖在疑似档不肯升确证)。ok+不成立(真冲突)与 manual 照留;未确立节点的 insufficient
-        # 原样保留(那是 undetermined/疑似 的依据)。要件覆盖是否齐全仍由 RCA 按判据原文语义判。
-        if any((e.get("fact") or {}).get("status") == "ok"
-               and (e.get("fact") or {}).get("predicate_satisfied") is True for e in ent):
-            ent = [e for e in ent if (e.get("fact") or {}).get("status") != "insufficient_data"]
-        rec = {"name": n.get("name"), "parent": n.get("parent"), "level": n.get("level")}
-        if n.get("name_en"):                                        # 英文名(树里有才带):候选清单与 rca.json 的英文说明用
-            rec["name_en"] = n["name_en"]
-        ch = n.get("children") or []
-        if ch:                                                      # 非叶子:RCA 据此知道"这不是根因、下面还有更深的因"
-            unc = [c for c in ch if c in nodes and not nodes[c].get("pass_through")
-                   and c not in facts and nodes[c].get("condition")]
-            if unc:                                                 # 带条件却没人绑的子节点 = 还没查到的叶子因
-                rec["uncovered_children"] = unc
-        else:
-            rec["is_leaf"] = True
-        for k in ("condition", "combine"):
-            if n.get(k):                                            # 稀疏:有才写
-                rec[k] = n[k]
-        if n.get("pass_through"):
-            rec["pass_through"] = True
-        if ent:
-            rec["facts"] = [_slim_fact(e) for e in ent]
-        pruned[nid] = rec
-        outline[nid] = _coarse(ent, n.get("pass_through"))          # outline 只存状态(name/parent 去 pruned_nodes 取)
 
-    # 未覆盖清单只留 id+name(给人/RCA 当"没查到的分支"线索):条件文本无任何逻辑消费,
-    # 越稀疏这张表越长,带 60 字条件会把 payload 顶大 → 去掉(要看细节有每个保留节点的 uncovered_children)。
-    uncovered = [{"id": nid, "name": n.get("name")}
-                 for nid, n in nodes.items() if not n.get("pass_through") and nid not in facts]
+def _drop_insufficient_if_established(ent: list) -> list:
+    """多源合成剔噪:节点已被 ok+成立 事实确立时,剔掉同节点的 insufficient_data 事实。"""
+    # 多源合成剔噪:节点已被真凭实据确立(存在 ok+成立 事实)时,剔掉同节点的 insufficient_data
+    # 事实——"某源答不了/没查到"是**没来作证**,不是反证,留着会诱导 RCA 把已确立节点降档
+    # (实测:dblg 声明"本源无法提供"+ config 实测确立,模型写 blocked_at="dblg insufficient"
+    # 赖在疑似档不肯升确证)。ok+不成立(真冲突)与 manual 照留;未确立节点的 insufficient
+    # 原样保留(那是 undetermined/疑似 的依据)。要件覆盖是否齐全仍由 RCA 按判据原文语义判。
+    if any((e.get("fact") or {}).get("status") == "ok"
+           and (e.get("fact") or {}).get("predicate_satisfied") is True for e in ent):
+        ent = [e for e in ent if (e.get("fact") or {}).get("status") != "insufficient_data"]
+    return ent
+
+
+def _node_record(n: dict, ent: list, nodes: dict, facts: dict) -> dict:
+    """一个保留节点在 pruned_nodes 里的记录:名称/父/层级、英文名、未覆盖子节点或叶子标记、条件、免检、精简后的事实。"""
+    rec = {"name": n.get("name"), "parent": n.get("parent"), "level": n.get("level")}
+    if n.get("name_en"):                                        # 英文名(树里有才带):候选清单与 rca.json 的英文说明用
+        rec["name_en"] = n["name_en"]
+    ch = n.get("children") or []
+    if ch:                                                      # 非叶子:RCA 据此知道"这不是根因、下面还有更深的因"
+        unc = [c for c in ch if c in nodes and not nodes[c].get("pass_through")
+               and c not in facts and nodes[c].get("condition")]
+        if unc:                                                 # 带条件却没人绑的子节点 = 还没查到的叶子因
+            rec["uncovered_children"] = unc
+    else:
+        rec["is_leaf"] = True
+    for k in ("condition", "combine"):
+        if n.get(k):                                            # 稀疏:有才写
+            rec[k] = n[k]
+    if n.get("pass_through"):
+        rec["pass_through"] = True
+    if ent:
+        rec["facts"] = [_slim_fact(e) for e in ent]
+    return rec
+
+
+def _unmapped_facts(facts: dict, nodes: dict) -> tuple:
+    """挂不上节点的事实:返回 (孤儿 node_id 列表, 没填 node_id 与孤儿的事实精简后合并的列表)。"""
     orphans = sorted(k for k in facts if k != "__no_node_id__" and k not in nodes)
     unmapped = list(facts.get("__no_node_id__", []))
     for oid in orphans:
         unmapped.extend(facts[oid])
     unmapped = [_slim_fact(e) for e in unmapped]   # 孤儿事实也精简(同 pruned_nodes):去整条 condition_text、截 mapping_reason
+    return orphans, unmapped
 
-    # 覆盖度:分类列(C/G)里出现、却没被任何绑定 targets 认领的取值 + 记录数 → 显式喂给 RCA,
-    # 这样即便 bind 时漏绑/忽略告警,RCA 也拿到"这 N 条没着落",可归到上面保留的"其他"类节点、不致漏诊。
-    # 去噪:跳过占比≥50% 的取值(多半是该列"正常/健康"值,如 Fault/Normal 的 Normal),
-    # 但**不**按"认领值个数"去噪——只绑了 1 个值却漏了一堆失败码,正是最该报的(别误伤)。
+
+def _column_claims(facts: dict) -> tuple:
+    """按分类列(C/G 的 ok 事实)汇总:各列被绑定认领的取值、取值分布 top、匹配模式、总行数。"""
     col_claims, col_top, col_mode, col_total = defaultdict(set), defaultdict(dict), {}, defaultdict(int)
     for ent_list in facts.values():
         for e in ent_list:
@@ -331,6 +371,16 @@ def prune(index: dict, results: dict) -> dict:
             col_total[col] = max(col_total[col], f.get("total") or 0)
             for val, cnt in (f.get("top") or []):
                 col_top[col][str(val)] = max(col_top[col].get(str(val), 0), cnt)
+    return col_claims, col_top, col_mode, col_total
+
+
+def _uncovered_values(facts: dict) -> dict:
+    """覆盖度:分类列里出现、却没被任何绑定 targets 认领的取值 + 记录数(每列最多 8 个)。"""
+    # 覆盖度:分类列(C/G)里出现、却没被任何绑定 targets 认领的取值 + 记录数 → 显式喂给 RCA,
+    # 这样即便 bind 时漏绑/忽略告警,RCA 也拿到"这 N 条没着落",可归到上面保留的"其他"类节点、不致漏诊。
+    # 去噪:跳过占比≥50% 的取值(多半是该列"正常/健康"值,如 Fault/Normal 的 Normal),
+    # 但**不**按"认领值个数"去噪——只绑了 1 个值却漏了一堆失败码,正是最该报的(别误伤)。
+    col_claims, col_top, col_mode, col_total = _column_claims(facts)
     uncovered_values = {}
     for col, claims in col_claims.items():
         mode = col_mode.get(col, "contains")
@@ -345,6 +395,29 @@ def prune(index: dict, results: dict) -> dict:
                 miss.append({"value": val, "count": cnt})
         if miss:
             uncovered_values[col] = miss[:8]
+    return uncovered_values
+
+
+def prune(index: dict, results: dict) -> dict:
+    """index + 各源事实 → 剪枝后的局部子树 + 覆盖报告。精简:outline(导航)+ 精简后的事实。"""
+    nodes = index.get("nodes", {})
+    alias = _alias_table(nodes)
+    facts = _facts_by_node(results, alias)
+    keep = _kept_node_ids(index, nodes, facts)
+
+    pruned, outline = {}, {}
+    for nid in keep:
+        n = nodes[nid]
+        ent = _drop_insufficient_if_established(facts.get(nid, []))
+        pruned[nid] = _node_record(n, ent, nodes, facts)
+        outline[nid] = _coarse(ent, n.get("pass_through"))          # outline 只存状态(name/parent 去 pruned_nodes 取)
+
+    # 未覆盖清单只留 id+name(给人/RCA 当"没查到的分支"线索):条件文本无任何逻辑消费,
+    # 越稀疏这张表越长,带 60 字条件会把 payload 顶大 → 去掉(要看细节有每个保留节点的 uncovered_children)。
+    uncovered = [{"id": nid, "name": n.get("name")}
+                 for nid, n in nodes.items() if not n.get("pass_through") and nid not in facts]
+    orphans, unmapped = _unmapped_facts(facts, nodes)
+    uncovered_values = _uncovered_values(facts)
 
     return {"scenario": index.get("scenario"), "root": index.get("root"),
             "outline": outline, "pruned_nodes": pruned, "unmapped": unmapped,

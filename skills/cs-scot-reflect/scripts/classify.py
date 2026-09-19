@@ -155,6 +155,36 @@ def _source_forms(k, names: set):
     return bool(hit), any(n.endswith(_TABLE_SUFFIXES) for n in hit)
 
 
+def _absent_sources(missing: List[str], run_data: Dict[str, Any], names: Optional[set]) -> set:
+    """缺源里"本就不可提供"的部分:①runner 标 collection_absent;②用例数据里本来就没有该类内容(names 已知时)。"""
+    kind = run_data.get("missing_kind") or {}
+    absent = {k for k in missing if kind.get(k) == "collection_absent"}
+    if names is not None:
+        absent |= {k for k in missing if k not in absent and not _source_forms(k, names)[0]}
+    return absent
+
+
+def _only_raw_form(supportable: List[str], names: set) -> bool:
+    """可提供的缺源是否全部只以 raw 形态在场(目录/txt 可见,没有表文件)——是则属绑定形态不匹配。"""
+    forms = [_source_forms(k, names) for k in supportable]
+    return all(p for p, _t in forms) and not any(t for _p, t in forms)
+
+
+def _binding_form_mismatch(supportable: List[str]) -> Dict[str, Any]:
+    """类1 检测改判为类2 的结果对象:现绑定(表类)吃不了在场的 raw,修复在绑定层。"""
+    return {
+        "class": 2,
+        "error_category": "BINDING_GAP",
+        "verdict": VERDICTS["BINDING_GAP"],
+        "reason": (f"绑定形态不匹配:数据源 {supportable} 的内容在用例数据里以 raw 形态"
+                   "在场(无表文件),执行缺的是表——现绑定(表类)吃不了在场的 raw。"
+                   "有该节点交付包→migrate 重迁(fault_check 脚本直接吃 raw);"
+                   "无包→zip2csv 转表 + data_map.json 映射,或给 tester 出脚本需求单"),
+        "binding_form_mismatch": True,
+        "missing_inputs": supportable
+    }
+
+
 def check_input_gap(run_data: Dict[str, Any], missed_count: int,
                     expected_data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """类1: INPUT_GAP 检测
@@ -176,32 +206,17 @@ def check_input_gap(run_data: Dict[str, Any], missed_count: int,
     missing = run_data.get("missing_inputs", [])
     if not (missing and missed_count > 0):
         return None
-    kind = run_data.get("missing_kind") or {}
-    absent = {k for k in missing if kind.get(k) == "collection_absent"}
     names = _case_data_names(expected_data) if expected_data is not None else None
-    if names is not None:
-        absent |= {k for k in missing if k not in absent and not _source_forms(k, names)[0]}
+    absent = _absent_sources(missing, run_data, names)
     supportable = [k for k in missing if k not in absent]
     if not supportable:
         print(f"[classify] 缺源 {sorted(absent)} 为数据形态天然不含(用例数据即如此,期望仍要求命中)"
               "→ 不构成 INPUT_GAP,穿透继续查绑定层")
         return None
-    if names is not None:
-        forms = [_source_forms(k, names) for k in supportable]
-        if all(p for p, _t in forms) and not any(t for _p, t in forms):
-            print(f"[classify] 缺源 {supportable} 在用例数据里只有 raw 形态在场(无表文件)"
-                  "→ 绑定形态不匹配,按类2 处置(migrate 重迁/转表映射),不开补数据死指令")
-            return {
-                "class": 2,
-                "error_category": "BINDING_GAP",
-                "verdict": VERDICTS["BINDING_GAP"],
-                "reason": (f"绑定形态不匹配:数据源 {supportable} 的内容在用例数据里以 raw 形态"
-                           "在场(无表文件),执行缺的是表——现绑定(表类)吃不了在场的 raw。"
-                           "有该节点交付包→migrate 重迁(fault_check 脚本直接吃 raw);"
-                           "无包→zip2csv 转表 + data_map.json 映射,或给 tester 出脚本需求单"),
-                "binding_form_mismatch": True,
-                "missing_inputs": supportable
-            }
+    if names is not None and _only_raw_form(supportable, names):
+        print(f"[classify] 缺源 {supportable} 在用例数据里只有 raw 形态在场(无表文件)"
+              "→ 绑定形态不匹配,按类2 处置(migrate 重迁/转表映射),不开补数据死指令")
+        return _binding_form_mismatch(supportable)
     reason = f"缺失数据源: {supportable}，且有期望根因漏判"
     if absent:
         reason += f"(另有 {sorted(absent)} 为数据形态天然不含,不计入)"

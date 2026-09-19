@@ -173,6 +173,110 @@ def _solution(c: dict, lang: str, solutions: dict | None) -> str:
     return _txt(c, "recommend_solution", lang) or ""
 
 
+def _confirmed_row(i: int, c: dict, nm: "_Names", lang: str, solutions: dict | None) -> str:
+    """确证根因表一行:根因 | 关键证据摘要(候选实测,其次依据,再次 support) | 推荐方案。"""
+    ev = c.get("evidence_path") or []
+    cand = (ev or [{}])[-1]
+    brief = _cell(_txt(cand, "actual", lang) or cand.get("how") or _txt(c, "support", lang), 120)
+    return f"| {i} | {_cell(nm(c.get('Root_cause'), c.get('node_id')), 80)} | {brief} | {_cell(_solution(c, lang, solutions), 90) or '—'} |"
+
+
+def _confirmed_detail(i: int, c: dict, T: dict, nm: "_Names", lang: str, solutions: dict | None) -> list:
+    """一条确证根因的详情段:路径、候选证据、未验证上级提示、注意、建议方案。"""
+    ev = c.get("evidence_path") or []
+    L = [f"### {i}. {nm(c.get('Root_cause'), c.get('node_id'))} ✅", "",
+         T["path"].format(p=_path_line(ev, lang, nm))]
+    if ev:
+        L.append(T["cand"])
+        L += _ev_block(ev[-1], "    ", lang)
+    # 未验证的上级(无绑定/数据不足)提示出来:默认放行≠验证过,此处没有做判断
+    unv = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) == "?"]
+    if unv:
+        L.append(T["unv"]
+                 + "、".join(f"「{nm(u.get('node'), u.get('node_id'))}」" for u in unv[:5])
+                 + ("…" if len(unv) > 5 else ""))
+    if c.get("caveats"):
+        L.append(T["caveat"].format(t=_one(_txt(c, "caveats", lang), 500)))
+    if _solution(c, lang, solutions):
+        L.append(T["sol"].format(t=_one(_solution(c, lang, solutions), 400)))
+    L.append("")
+    return L
+
+
+def _render_confirmed(conf: list, T: dict, nm: "_Names", lang: str, solutions: dict | None) -> list:
+    """确证根因节:先摘要表,再逐条详情。"""
+    L = [T["conf"], "", T["conf_hdr"], "|---|---|---|---|"]
+    for i, c in enumerate(conf, 1):
+        L.append(_confirmed_row(i, c, nm, lang, solutions))
+    L.append("")
+    for i, c in enumerate(conf, 1):
+        L += _confirmed_detail(i, c, T, nm, lang, solutions)
+    return L
+
+
+def _probable_detail(i: int, c: dict, T: dict, nm: "_Names", lang: str) -> list:
+    """一条疑似根因的详情段:卡点、路径、原因/注意、候选证据、矛盾上级(不成立/冲突)。"""
+    ev = c.get("evidence_path") or []
+    L = [f"### {i}. {nm(c.get('Root_cause'), c.get('node_id'))} ⚠(confidence={c.get('confidence', '?')})", "",
+         T["blocked"].format(t=_one(_txt(c, "blocked_at", lang), 300) or T["unmarked"]),
+         T["ppath"].format(p=_path_line(ev, lang, nm))]
+    if c.get("caveats"):
+        L.append(T["reason"].format(t=_one(_txt(c, "caveats", lang), 600)))
+    if ev:
+        L.append(T["cand"])
+        L += _ev_block(ev[-1], "    ", lang)
+        bad = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) in "✗⚠"]
+        for b in bad[:3]:
+            L.append(T["contra"].format(n=nm(b.get('node'), b.get('node_id'))))
+            L += _ev_block(b, "    ", lang)
+    L.append("")
+    return L
+
+
+def _gap_kind(c: dict) -> str:
+    """四态分型:优先按结构化 gap_kind 计数,老产物没有该字段时按 reason 文本推断。"""
+    gk = c.get("gap_kind")
+    if gk in ("no_data", "cannot_judge", "mixed"):
+        return gk
+    r = str(c.get("reason") or "")
+    if r.startswith("部分缺"):
+        return "mixed"
+    return "cannot_judge" if r.startswith("数据在,无法判断") else "no_data"
+
+
+def _render_undetermined(und: list, T: dict, nm: "_Names", lang: str) -> list:
+    """待确认节:标题带四态分型计数,最多列 30 条,其余指向 rca.json。"""
+    ks = [_gap_kind(c) for c in und]
+    cj, mx = ks.count("cannot_judge"), ks.count("mixed")
+    split = (T["und_split"].format(a=len(und) - cj - mx, b=cj)
+             + (T["und_mixed"].format(m=mx) if mx else "") + ")") if (cj or mx) else ""
+    L = [T["und"].format(s=split), ""]
+    for c in und[:30]:
+        L.append(f"- {nm((c.get('Fault_tree_path') or ['?'])[-1], c.get('node_id'))}:{_one(_txt(c, 'reason', lang), 200)}")
+    if len(und) > 30:
+        L.append(T["und_more"].format(n=len(und) - 30))
+    L.append("")
+    return L
+
+
+def _render_tail(doc: dict, T: dict, lang: str) -> list:
+    """报告尾部:排除留痕、树面问题(无事实节点/孤儿节点)、补充说明占位。"""
+    L = []
+    if doc.get("excluded_note"):
+        L += [T["excl"], "", _one(_txt(doc, "excluded_note", lang), 1500), ""]
+
+    ti = doc.get("tree_issues") or {}
+    unc = ti.get("uncovered_condition_nodes") or []
+    orp = ti.get("orphan_node_ids") or []
+    if unc or orp:
+        L += [T["issues"], "",
+              T["no_fact"].format(n=len(unc)) if unc else "",
+              T["orphan"].format(n=len(orp)) if orp else "", ""]
+
+    L += [T["notes"], "", T["notes_ph"], ""]
+    return L
+
+
 def render(doc: dict, tree_text: str | None = None, lang: str = "zh",
            nodes: dict | None = None, solutions: dict | None = None) -> str:
     T = _T.get(lang) or _T["zh"]
@@ -180,7 +284,6 @@ def render(doc: dict, tree_text: str | None = None, lang: str = "zh",
     conf = doc.get("rca_result") or []
     prob = doc.get("probable_causes") or []
     und = doc.get("undetermined") or []
-    ti = doc.get("tree_issues") or {}
     eng = next((c.get("_engine", {}).get("name") for c in conf + prob if isinstance(c, dict) and c.get("_engine")), None)
 
     L = [T["title"], "",
@@ -190,82 +293,17 @@ def render(doc: dict, tree_text: str | None = None, lang: str = "zh",
         L += [T["tree"], "", "```text", tree_text, "```", ""]
 
     if conf:
-        L += [T["conf"], "", T["conf_hdr"], "|---|---|---|---|"]
-        for i, c in enumerate(conf, 1):
-            ev = c.get("evidence_path") or []
-            cand = (ev or [{}])[-1]
-            brief = _cell(_txt(cand, "actual", lang) or cand.get("how") or _txt(c, "support", lang), 120)
-            L.append(f"| {i} | {_cell(nm(c.get('Root_cause'), c.get('node_id')), 80)} | {brief} | {_cell(_solution(c, lang, solutions), 90) or '—'} |")
-        L.append("")
-        for i, c in enumerate(conf, 1):
-            ev = c.get("evidence_path") or []
-            L += [f"### {i}. {nm(c.get('Root_cause'), c.get('node_id'))} ✅", "",
-                  T["path"].format(p=_path_line(ev, lang, nm))]
-            if ev:
-                L.append(T["cand"])
-                L += _ev_block(ev[-1], "    ", lang)
-            # 未验证的上级(无绑定/数据不足)提示出来:默认放行≠验证过,此处没有做判断
-            unv = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) == "?"]
-            if unv:
-                L.append(T["unv"]
-                         + "、".join(f"「{nm(u.get('node'), u.get('node_id'))}」" for u in unv[:5])
-                         + ("…" if len(unv) > 5 else ""))
-            if c.get("caveats"):
-                L.append(T["caveat"].format(t=_one(_txt(c, "caveats", lang), 500)))
-            if _solution(c, lang, solutions):
-                L.append(T["sol"].format(t=_one(_solution(c, lang, solutions), 400)))
-            L.append("")
+        L += _render_confirmed(conf, T, nm, lang, solutions)
 
     if prob:
         L += [T["prob"], ""]
         for i, c in enumerate(prob, 1):
-            ev = c.get("evidence_path") or []
-            L += [f"### {i}. {nm(c.get('Root_cause'), c.get('node_id'))} ⚠(confidence={c.get('confidence', '?')})", "",
-                  T["blocked"].format(t=_one(_txt(c, "blocked_at", lang), 300) or T["unmarked"]),
-                  T["ppath"].format(p=_path_line(ev, lang, nm))]
-            if c.get("caveats"):
-                L.append(T["reason"].format(t=_one(_txt(c, "caveats", lang), 600)))
-            if ev:
-                L.append(T["cand"])
-                L += _ev_block(ev[-1], "    ", lang)
-                bad = [e for e in ev[:-1] if _sym(str(e.get("judgment") or "")) in "✗⚠"]
-                for b in bad[:3]:
-                    L.append(T["contra"].format(n=nm(b.get('node'), b.get('node_id'))))
-                    L += _ev_block(b, "    ", lang)
-            L.append("")
+            L += _probable_detail(i, c, T, nm, lang)
 
     if und:
-        # 四态分型:优先按结构化 gap_kind 计数,老产物没有该字段时按 reason 文本推断
-        def _gk(c):
-            gk = c.get("gap_kind")
-            if gk in ("no_data", "cannot_judge", "mixed"):
-                return gk
-            r = str(c.get("reason") or "")
-            if r.startswith("部分缺"):
-                return "mixed"
-            return "cannot_judge" if r.startswith("数据在,无法判断") else "no_data"
-        ks = [_gk(c) for c in und]
-        cj, mx = ks.count("cannot_judge"), ks.count("mixed")
-        split = (T["und_split"].format(a=len(und) - cj - mx, b=cj)
-                 + (T["und_mixed"].format(m=mx) if mx else "") + ")") if (cj or mx) else ""
-        L += [T["und"].format(s=split), ""]
-        for c in und[:30]:
-            L.append(f"- {nm((c.get('Fault_tree_path') or ['?'])[-1], c.get('node_id'))}:{_one(_txt(c, 'reason', lang), 200)}")
-        if len(und) > 30:
-            L.append(T["und_more"].format(n=len(und) - 30))
-        L.append("")
+        L += _render_undetermined(und, T, nm, lang)
 
-    if doc.get("excluded_note"):
-        L += [T["excl"], "", _one(_txt(doc, "excluded_note", lang), 1500), ""]
-
-    unc = ti.get("uncovered_condition_nodes") or []
-    orp = ti.get("orphan_node_ids") or []
-    if unc or orp:
-        L += [T["issues"], "",
-              T["no_fact"].format(n=len(unc)) if unc else "",
-              T["orphan"].format(n=len(orp)) if orp else "", ""]
-
-    L += [T["notes"], "", T["notes_ph"], ""]
+    L += _render_tail(doc, T, lang)
     return "\n".join(x for x in L if x is not None)
 
 
@@ -273,6 +311,43 @@ def _cell_full(s, n=400, lang: str = "zh") -> str:
     """回复稿表格单元格:去换行、转义竖线;超长截到 n 并指向报告全文。"""
     t = " ".join(str(s or "").split()).replace("|", "\\|")
     return t if len(t) <= n else t[: n - 1] + _T[lang]["cell_more"]
+
+
+def _reply_confirmed(conf: list, T: dict, nm: "_Names", lang: str, solutions: dict | None) -> list:
+    """回复稿确证根因表:根因 | 根因路径 | 原文匹配(实测 / 依据) | 推荐方案。"""
+    L = [T["r_conf"], "", T["r_conf_hdr"], "|---|---|---|---|---|"]
+    for i, c in enumerate(conf, 1):
+        ev = c.get("evidence_path") or []
+        cand = (ev or [{}])[-1]
+        match = " / ".join(x for x in (_txt(cand, "actual", lang), cand.get("how")) if x) or _txt(c, "support", lang) or "—"
+        path_names = [nm(p, None) for p in (c.get("Fault_tree_path") or [])]
+        L.append(f"| {i} | {_cell_full(nm(c.get('Root_cause'), c.get('node_id')), 80, lang)} | {_cell_full(' → '.join(path_names), 160, lang)} "
+                 f"| {_cell_full(match, lang=lang)} | {_cell_full(_solution(c, lang, solutions), 200, lang) or '—'} |")
+    L.append("")
+    return L
+
+
+def _reply_probable(prob: list, T: dict, nm: "_Names", lang: str) -> list:
+    """回复稿疑似表:根因 | 卡点 | 证据(候选实测,其次 support) | 注意。"""
+    L = [T["r_prob"], "", T["r_prob_hdr"], "|---|---|---|---|---|"]
+    for i, c in enumerate(prob, 1):
+        ev = c.get("evidence_path") or []
+        cand = (ev or [{}])[-1]
+        L.append(f"| {i} | {_cell_full(nm(c.get('Root_cause'), c.get('node_id')), 80, lang)} | {_cell_full(_txt(c, 'blocked_at', lang), 160, lang) or '—'} "
+                 f"| {_cell_full(_txt(cand, 'actual', lang) or _txt(c, 'support', lang), lang=lang)} | {_cell_full(_txt(c, 'caveats', lang), 300, lang) or '—'} |")
+    L.append("")
+    return L
+
+
+def _reply_undetermined(und: list, T: dict, nm: "_Names", lang: str) -> list:
+    """回复稿待确认列表:最多 20 条,其余指向报告全文。"""
+    L = [T["r_und"], ""]
+    for c in und[:20]:
+        L.append(f"- {nm((c.get('Fault_tree_path') or ['?'])[-1], c.get('node_id'))}:{_cell_full(_txt(c, 'reason', lang), 200, lang)}")
+    if len(und) > 20:
+        L.append(T["r_und_more"].format(n=len(und) - 20))
+    L.append("")
+    return L
 
 
 def render_reply(doc: dict, tree_text: str | None = None, lang: str = "zh",
@@ -288,30 +363,11 @@ def render_reply(doc: dict, tree_text: str | None = None, lang: str = "zh",
     if tree_text:
         L += [T["r_tree"], "", "```text", tree_text, "```", ""]
     if conf:
-        L += [T["r_conf"], "", T["r_conf_hdr"], "|---|---|---|---|---|"]
-        for i, c in enumerate(conf, 1):
-            ev = c.get("evidence_path") or []
-            cand = (ev or [{}])[-1]
-            match = " / ".join(x for x in (_txt(cand, "actual", lang), cand.get("how")) if x) or _txt(c, "support", lang) or "—"
-            path_names = [nm(p, None) for p in (c.get("Fault_tree_path") or [])]
-            L.append(f"| {i} | {_cell_full(nm(c.get('Root_cause'), c.get('node_id')), 80, lang)} | {_cell_full(' → '.join(path_names), 160, lang)} "
-                     f"| {_cell_full(match, lang=lang)} | {_cell_full(_solution(c, lang, solutions), 200, lang) or '—'} |")
-        L.append("")
+        L += _reply_confirmed(conf, T, nm, lang, solutions)
     if prob:
-        L += [T["r_prob"], "", T["r_prob_hdr"], "|---|---|---|---|---|"]
-        for i, c in enumerate(prob, 1):
-            ev = c.get("evidence_path") or []
-            cand = (ev or [{}])[-1]
-            L.append(f"| {i} | {_cell_full(nm(c.get('Root_cause'), c.get('node_id')), 80, lang)} | {_cell_full(_txt(c, 'blocked_at', lang), 160, lang) or '—'} "
-                     f"| {_cell_full(_txt(cand, 'actual', lang) or _txt(c, 'support', lang), lang=lang)} | {_cell_full(_txt(c, 'caveats', lang), 300, lang) or '—'} |")
-        L.append("")
+        L += _reply_probable(prob, T, nm, lang)
     if und:
-        L += [T["r_und"], ""]
-        for c in und[:20]:
-            L.append(f"- {nm((c.get('Fault_tree_path') or ['?'])[-1], c.get('node_id'))}:{_cell_full(_txt(c, 'reason', lang), 200, lang)}")
-        if len(und) > 20:
-            L.append(T["r_und_more"].format(n=len(und) - 20))
-        L.append("")
+        L += _reply_undetermined(und, T, nm, lang)
     if not (conf or prob or und):
         L += [T["r_none"], ""]
     L += [T["r_notes"], "", T["r_notes_ph"], ""]

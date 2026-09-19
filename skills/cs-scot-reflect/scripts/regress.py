@@ -190,11 +190,8 @@ def find_eval_report(eval_out: Path, case_id: str):
             "quality_score": qs, "dimensions": dims}
 
 
-def main() -> int:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:  # noqa: BLE001
-        pass
+def _parse_args() -> argparse.Namespace:
+    """命令行参数。"""
     ap = argparse.ArgumentParser(description="一键回归:逐用例[确定性执行+机械RCA]→判卷→汇总(冲突挂起,不代裁)")
     ap.add_argument("--skill-dir", required=True, help="场景技能根(或裸产物目录)")
     ap.add_argument("--case-dir", required=True, help="用例库目录(入口A时=case_gen 的输出落点)")
@@ -210,132 +207,140 @@ def main() -> int:
                          "默认不挂起——机械链定不了档=这轮没优化好,直接按不通过计(无人值守规则)")
     ap.add_argument("--result-dir", help="入口C:既有结果根目录(--eval-only 时必填)")
     ap.add_argument("--case", action="append", default=[], help="只跑这些用例(可多次;默认=库里全部)")
-    a = ap.parse_args()
+    return ap.parse_args()
 
-    skill_dir = Path(a.skill_dir).resolve()
-    case_dir = Path(a.case_dir).resolve()
-    out = Path(a.out).resolve()
-    logs = out / "logs"
-    out.mkdir(parents=True, exist_ok=True)
 
-    # 入口A:先建库(一次性资产动作;库已在时别重复建——case_gen 自身有 --force 语义,这里不透传)
-    if a.packages:
-        cg = [SCRIPTS_DIR / "case_gen.py", "--product", skill_dir, "--packages", a.packages,
-              "--cases-out", case_dir] + (["--map", a.map_path] if a.map_path else [])
-        print(f"[regress] 入口A:先从交付包建用例库 → {case_dir}")
-        code, tail = _run(cg, 900, logs / "case_gen.log")
-        print(tail)
-        if code != 0:
-            print(f"[regress] case_gen 失败(exit {code},日志 {logs / 'case_gen.log'}),回归终止")
-            return 2
+def _build_case_library(a, skill_dir: Path, case_dir: Path, logs: Path):
+    """入口A:先建库(一次性资产动作;库已在时别重复建——case_gen 自身有 --force 语义,这里不透传)。
+    失败返回退出码,成功返回 None。"""
+    cg = [SCRIPTS_DIR / "case_gen.py", "--product", skill_dir, "--packages", a.packages,
+          "--cases-out", case_dir] + (["--map", a.map_path] if a.map_path else [])
+    print(f"[regress] 入口A:先从交付包建用例库 → {case_dir}")
+    code, tail = _run(cg, 900, logs / "case_gen.log")
+    print(tail)
+    if code != 0:
+        print(f"[regress] case_gen 失败(exit {code},日志 {logs / 'case_gen.log'}),回归终止")
+        return 2
+    return None
+
+
+def _collect_cases(case_dir: Path, picks: list):
+    """库里带 expected.json 的用例(按名排序);--case 指定时只取这些。库/用例有问题打印原因并返回 None。"""
     if not case_dir.exists():
         print(f"[regress] 用例库不存在:{case_dir}(先用 --packages 建库,或核对路径)")
-        return 2
+        return None
 
     cases = sorted(d.name for d in case_dir.iterdir()
                    if d.is_dir() and (d / "expected.json").exists())
-    if a.case:
-        pick = set(a.case)
+    if picks:
+        pick = set(picks)
         missing_pick = pick - set(cases)
         if missing_pick:
             print(f"[regress] --case 指定的用例不在库里:{', '.join(sorted(missing_pick))}")
-            return 2
+            return None
         cases = [c for c in cases if c in pick]
     if not cases:
         print(f"[regress] 用例库里没有带 expected.json 的用例:{case_dir}")
-        return 2
-    print(f"[regress] 用例 {len(cases)} 个;工作目录 {out}")
+        return None
+    return cases
 
+
+def _resolve_exec_chain(a, skill_dir: Path, out: Path):
+    """执行段所需的结果根/产物/执行器/RCA 脚本(--eval-only 只需既有结果根)。缺什么打印原因并返回 None。"""
     if a.eval_only:
         if not a.result_dir:
             print("[regress] --eval-only 需要 --result-dir(既有结果根)")
-            return 2
-        result_root = Path(a.result_dir).resolve()
-    else:
-        result_root = out / "results"
-        result_root.mkdir(parents=True, exist_ok=True)
-        assets = find_assets(skill_dir)
-        if assets is None:
-            print(f"[regress] {skill_dir} 下找不到 plan.json(assets/ 或根)——不是可执行产物;"
-                  "只判卷请用 --eval-only --result-dir")
-            return 2
-        runner = find_runner(skill_dir)
-        rca_scripts = find_rca_scripts(assets)
-        solutions = assets / "tree" / "solutions.json"
+            return None
+        return {"result_root": Path(a.result_dir).resolve()}
+    result_root = out / "results"
+    result_root.mkdir(parents=True, exist_ok=True)
+    assets = find_assets(skill_dir)
+    if assets is None:
+        print(f"[regress] {skill_dir} 下找不到 plan.json(assets/ 或根)——不是可执行产物;"
+              "只判卷请用 --eval-only --result-dir")
+        return None
+    runner = find_runner(skill_dir)
+    rca_scripts = find_rca_scripts(assets)
+    return {"result_root": result_root, "assets": assets, "runner": runner,
+            "rca_scripts": rca_scripts, "solutions": assets / "tree" / "solutions.json"}
 
-    eval_out = out / "eval"
-    rows = []
-    for i, cid in enumerate(cases):
-        data_dir = case_dir / cid / "data"
-        row = {"case_id": cid, "stage": "", "detail": ""}
-        rows.append(row)
-        print(f"\n===== [{i + 1}/{len(cases)}] {cid} =====")
 
-        if not a.eval_only:
-            if not data_dir.is_dir():
-                row.update(stage="exec_fail", detail="用例没有 data/ 目录")
-                print(f"  ✗ {row['detail']}")
-                continue
-            sfx = case_suffix(cid, i)
-            before = {p.name for p in result_root.glob("result-*")}
-            cmd = [runner, "--plan", assets / "plan.json", "--result-base", result_root,
-                   "--result-suffix", sfx] + build_data_args(data_dir)
-            code, tail = _run(cmd, 900, logs / f"{sfx}-runner.log")
-            rdir = newest_result_dir(result_root, before)
-            if code != 0 or rdir is None:
-                row.update(stage="exec_fail",
-                           detail=f"runner exit {code}(日志 {logs / f'{sfx}-runner.log'}):{tail[-300:]}")
-                print(f"  ✗ 执行失败:{row['detail'][:200]}")
-                continue
-            ri = find_rca_input(rdir)
-            if ri is None:
-                row.update(stage="exec_fail", detail=f"{rdir.name} 里没有 rca_input(plan 无 RCA 步?)")
-                print(f"  ✗ {row['detail']}")
-                continue
-            code, tail = _run([rca_scripts / "draft_rca.py", ri, "-o", rdir / "rca_draft.json"],
-                              300, logs / f"{sfx}-draft.log")
-            if code != 0:
-                row.update(stage="exec_fail", detail=f"draft_rca exit {code}:{tail[-300:]}")
-                print(f"  ✗ 起草失败:{row['detail'][:200]}")
-                continue
-            fin = [rca_scripts / "finalize_rca.py", rdir / "rca_draft.json",
-                   "-o", rdir / "rca.json", "--rca-input", ri] \
-                + (["--solutions", solutions] if solutions.exists() else [])
-            code, tail = _run(fin, 300, logs / f"{sfx}-finalize.log")
-            if code != 0:
-                # finalize 的硬性检查:有候选未机械定档(真冲突要权衡)→ 绝不代裁。
-                # 默认(无人值守规则):裁决做不了=这轮没优化好,按不通过计——没替它定档,
-                # 只是把"验证不了"如实记为不通过;--pending-hold 恢复挂起等人裁决的旧规则
-                if not a.pending_hold:
-                    row.update(stage="evaluated", verdict="FAIL",
-                               error_category="pending_adjudication",
-                               detail=f"机械链定不了档(待裁决);无人值守规则按不通过计。"
-                                      f"结果目录 {rdir.name};清单见日志 {logs / f'{sfx}-finalize.log'}")
-                    print("  ✗ 待裁决 → 按不通过计(默认无人值守规则;要挂起等人裁决加 --pending-hold)")
-                    continue
-                row.update(stage="pending_adjudication",
-                           detail=f"结果目录 {rdir.name};待裁决清单见日志 {logs / f'{sfx}-finalize.log'}:"
-                                  + tail[-500:])
-                print("  ⏸ 挂起待裁决(机械链定不了档,需模型/人按 fault-tree-rca 法则写 decisions.json"
-                      " 后重跑 finalize+render,再单用例判卷)")
-                continue
-            _run([rca_scripts / "render_report.py", rdir / "rca.json"], 120,
-                 logs / f"{sfx}-render.log")            # 报告渲染尽力而为,不拦回归
+def _execute_case(cid: str, i: int, data_dir: Path, chain: dict, logs: Path, row: dict, pending_hold: bool) -> bool:
+    """确定性执行链:runner → draft_rca → finalize_rca → render。任一环节拦下时把 row 记好并返回 False。"""
+    if not data_dir.is_dir():
+        row.update(stage="exec_fail", detail="用例没有 data/ 目录")
+        print(f"  ✗ {row['detail']}")
+        return False
+    sfx = case_suffix(cid, i)
+    result_root, rca_scripts = chain["result_root"], chain["rca_scripts"]
+    before = {p.name for p in result_root.glob("result-*")}
+    cmd = [chain["runner"], "--plan", chain["assets"] / "plan.json", "--result-base", result_root,
+           "--result-suffix", sfx] + build_data_args(data_dir)
+    code, tail = _run(cmd, 900, logs / f"{sfx}-runner.log")
+    rdir = newest_result_dir(result_root, before)
+    if code != 0 or rdir is None:
+        row.update(stage="exec_fail",
+                   detail=f"runner exit {code}(日志 {logs / f'{sfx}-runner.log'}):{tail[-300:]}")
+        print(f"  ✗ 执行失败:{row['detail'][:200]}")
+        return False
+    ri = find_rca_input(rdir)
+    if ri is None:
+        row.update(stage="exec_fail", detail=f"{rdir.name} 里没有 rca_input(plan 无 RCA 步?)")
+        print(f"  ✗ {row['detail']}")
+        return False
+    code, tail = _run([rca_scripts / "draft_rca.py", ri, "-o", rdir / "rca_draft.json"],
+                      300, logs / f"{sfx}-draft.log")
+    if code != 0:
+        row.update(stage="exec_fail", detail=f"draft_rca exit {code}:{tail[-300:]}")
+        print(f"  ✗ 起草失败:{row['detail'][:200]}")
+        return False
+    solutions = chain["solutions"]
+    fin = [rca_scripts / "finalize_rca.py", rdir / "rca_draft.json",
+           "-o", rdir / "rca.json", "--rca-input", ri] \
+        + (["--solutions", solutions] if solutions.exists() else [])
+    code, tail = _run(fin, 300, logs / f"{sfx}-finalize.log")
+    if code != 0:
+        # finalize 的硬性检查:有候选未机械定档(真冲突要权衡)→ 绝不代裁。
+        # 默认(无人值守规则):裁决做不了=这轮没优化好,按不通过计——没替它定档,
+        # 只是把"验证不了"如实记为不通过;--pending-hold 恢复挂起等人裁决的旧规则
+        if not pending_hold:
+            row.update(stage="evaluated", verdict="FAIL",
+                       error_category="pending_adjudication",
+                       detail=f"机械链定不了档(待裁决);无人值守规则按不通过计。"
+                              f"结果目录 {rdir.name};清单见日志 {logs / f'{sfx}-finalize.log'}")
+            print("  ✗ 待裁决 → 按不通过计(默认无人值守规则;要挂起等人裁决加 --pending-hold)")
+            return False
+        row.update(stage="pending_adjudication",
+                   detail=f"结果目录 {rdir.name};待裁决清单见日志 {logs / f'{sfx}-finalize.log'}:"
+                          + tail[-500:])
+        print("  ⏸ 挂起待裁决(机械链定不了档,需模型/人按 fault-tree-rca 法则写 decisions.json"
+              " 后重跑 finalize+render,再单用例判卷)")
+        return False
+    _run([rca_scripts / "render_report.py", rdir / "rca.json"], 120,
+         logs / f"{sfx}-render.log")            # 报告渲染尽力而为,不拦回归
+    return True
 
-        ev = [SCRIPTS_DIR / "eval_run.py", "--case", cid, "--cases-dir", case_dir,
-              "--result-dir", result_root, "--skill-dir", skill_dir, "--out", eval_out]
-        code, tail = _run(ev, 600, logs / f"{case_suffix(cid, i)}-eval.log")
-        rep = find_eval_report(eval_out, cid)
-        if rep is None:
-            row.update(stage="eval_error", detail=f"eval_run exit {code}:{tail[-300:]}")
-            print(f"  ✗ 判卷异常:{row['detail'][:200]}")
-            continue
-        row.update(stage="evaluated", **rep)
-        qs = rep.get("quality_score")
-        print(f"  → {rep.get('verdict')}"
-              + (f" / {rep.get('error_category')}" if rep.get("error_category") else "")
-              + (f" / quality_score={qs}" if qs is not None else ""))
 
+def _evaluate_case(cid: str, i: int, case_dir: Path, result_root: Path, skill_dir: Path,
+                   eval_out: Path, logs: Path, row: dict) -> None:
+    """判卷:eval_run 单用例 → 读最新报告进 row;报告拿不到记 eval_error。"""
+    ev = [SCRIPTS_DIR / "eval_run.py", "--case", cid, "--cases-dir", case_dir,
+          "--result-dir", result_root, "--skill-dir", skill_dir, "--out", eval_out]
+    code, tail = _run(ev, 600, logs / f"{case_suffix(cid, i)}-eval.log")
+    rep = find_eval_report(eval_out, cid)
+    if rep is None:
+        row.update(stage="eval_error", detail=f"eval_run exit {code}:{tail[-300:]}")
+        print(f"  ✗ 判卷异常:{row['detail'][:200]}")
+        return
+    row.update(stage="evaluated", **rep)
+    qs = rep.get("quality_score")
+    print(f"  → {rep.get('verdict')}"
+          + (f" / {rep.get('error_category')}" if rep.get("error_category") else "")
+          + (f" / quality_score={qs}" if qs is not None else ""))
+
+
+def _summarize(rows: list, out: Path, eval_out: Path) -> int:
+    """整批汇总:写 quality_score_batch.json(与 eval_run 同一算法)与 regress_summary.json,打印汇总,返回退出码。"""
     done = [r for r in rows if r["stage"] == "evaluated"]
     pending = [r for r in rows if r["stage"] == "pending_adjudication"]
     broken = [r for r in rows if r["stage"] in ("exec_fail", "eval_error")]
@@ -365,6 +370,48 @@ def main() -> int:
         print("  ✗ 异常用例(看 logs/ 对应日志):" + "、".join(r["case_id"] for r in broken))
     print(f"  明细:{sp}")
     return 0 if not (pending or broken) and passed == len(done) else 1
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    a = _parse_args()
+
+    skill_dir = Path(a.skill_dir).resolve()
+    case_dir = Path(a.case_dir).resolve()
+    out = Path(a.out).resolve()
+    logs = out / "logs"
+    out.mkdir(parents=True, exist_ok=True)
+
+    # 入口A:先建库(一次性资产动作;库已在时别重复建——case_gen 自身有 --force 语义,这里不透传)
+    if a.packages:
+        code = _build_case_library(a, skill_dir, case_dir, logs)
+        if code is not None:
+            return code
+    cases = _collect_cases(case_dir, a.case)
+    if cases is None:
+        return 2
+    print(f"[regress] 用例 {len(cases)} 个;工作目录 {out}")
+
+    chain = _resolve_exec_chain(a, skill_dir, out)
+    if chain is None:
+        return 2
+
+    eval_out = out / "eval"
+    rows = []
+    for i, cid in enumerate(cases):
+        data_dir = case_dir / cid / "data"
+        row = {"case_id": cid, "stage": "", "detail": ""}
+        rows.append(row)
+        print(f"\n===== [{i + 1}/{len(cases)}] {cid} =====")
+
+        if not a.eval_only and not _execute_case(cid, i, data_dir, chain, logs, row, a.pending_hold):
+            continue
+        _evaluate_case(cid, i, case_dir, chain["result_root"], skill_dir, eval_out, logs, row)
+
+    return _summarize(rows, out, eval_out)
 
 
 if __name__ == "__main__":

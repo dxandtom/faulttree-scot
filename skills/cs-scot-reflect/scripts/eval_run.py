@@ -411,6 +411,77 @@ def _update_fuse_history(
         print(f"[fuse] 熔断触发: {case_id} {node_id} {error_category}（连续 {len(prior) + 1} 轮）")
 
 
+def _run_reconcile(case_id: str, expected_path: Path, rca_path: Path, temp_dir: Path,
+                   progress_file: Path, scripts_dir: Path):
+    """3a: reconcile.py 对账。返回 (输出文件路径, 子进程结果, 对账数据——文件不在则 {})。"""
+    task_prefix = f"case:{case_id}"
+    reconcile_out = temp_dir / f"{case_id}_reconcile.json"
+    reconcile_args = [
+        "--expected", str(expected_path),
+        "--rca", str(rca_path),
+        "--out", str(reconcile_out)
+    ]
+    print(f"[{case_id}] 执行 reconcile.py...")
+    update_progress(progress_file, f"{task_prefix}:reconcile", "started")
+    reconcile_result = run_sub_script(scripts_dir / "reconcile.py", reconcile_args)
+    if reconcile_result["ok"]:
+        print(f"[{case_id}] reconcile.py 成功")
+        update_progress(progress_file, f"{task_prefix}:reconcile", "completed")
+    else:
+        print(f"[{case_id}] reconcile.py 失败: {reconcile_result['stderr']}")
+        update_progress(progress_file, f"{task_prefix}:reconcile", "completed",
+                        f"returncode={reconcile_result['returncode']}")
+
+    # 加载 reconcile 结果（对账退出码=1 表示有漏判/假阳，属预期；文件写不出来才是评估失败）
+    reconcile_data = load_json(reconcile_out) if reconcile_out.exists() else {}
+    return reconcile_out, reconcile_result, reconcile_data
+
+
+def _run_tree_check(case_id: str, expected_data: Dict[str, Any], tree_indexes: List[Path],
+                    temp_dir: Path, progress_file: Path, scripts_dir: Path) -> Dict[str, Any]:
+    """3c: 树结构检查(按用例:查本用例期望根因是否在 tree_index 中——KNOWLEDGE_GAP 的输入)。"""
+    task_prefix = f"case:{case_id}"
+    tree_check_data: Dict[str, Any] = {}
+    expected_ids = [r.get("node_id") for r in expected_data.get("expected_root_causes", [])
+                    if r.get("node_id")]
+    if tree_indexes and expected_ids:
+        tree_check_out = temp_dir / f"{case_id}_tree.json"
+        tree_args = [
+            "--tree-index", str(tree_indexes[0]),
+            "--node-ids", ",".join(expected_ids),
+            "--out", str(tree_check_out)
+        ]
+        print(f"[{case_id}] 执行 check_tree.py（期望节点: {','.join(expected_ids)}）...")
+        update_progress(progress_file, f"{task_prefix}:check_tree", "started")
+        run_sub_script(scripts_dir / "check_tree.py", tree_args)   # 有缺失节点时退出码=1，属预期
+        tree_check_data = load_json(tree_check_out) if tree_check_out.exists() else {}
+        update_progress(progress_file, f"{task_prefix}:check_tree", "completed")
+    return tree_check_data
+
+
+def _run_classify(case_id: str, classify_args: List[str], classify_out: Path,
+                  progress_file: Path, scripts_dir: Path):
+    """3d: classify.py 分类。返回 (子进程结果, 分类数据, 是否真正产出了结果文件)。"""
+    task_prefix = f"case:{case_id}"
+    print(f"[{case_id}] 执行 classify.py...")
+    update_progress(progress_file, f"{task_prefix}:classify", "started")
+    classify_result = run_sub_script(scripts_dir / "classify.py", classify_args)
+
+    # classify.py 返回 exit code=1 表示"分类出非 PASS 结果"（设计如此，不是脚本错误）
+    # 只有当输出文件不存在或无法读取时才真正算"失败"
+    classify_data = load_json(classify_out) if classify_out.exists() else {}
+    ok = bool(classify_out.exists() and classify_data)
+    if ok:
+        print(f"[{case_id}] classify.py 完成（exit code={classify_result['returncode']}）")
+        update_progress(progress_file, f"{task_prefix}:classify", "completed")
+    else:
+        # 真正失败：输出文件不存在或无法解析——评估过程失败，不能当作"未分类=PASS"
+        print(f"[{case_id}] classify.py 失败: {classify_result['stderr']}")
+        update_progress(progress_file, f"{task_prefix}:classify", "completed",
+                        f"returncode={classify_result['returncode']}")
+    return classify_result, classify_data, ok
+
+
 def process_case(
     case_id: str,
     cases_dir: Path,
@@ -469,25 +540,8 @@ def process_case(
 
     # Step 3: 执行子脚本（依次）
     # 3a: reconcile.py
-    reconcile_out = temp_dir / f"{case_id}_reconcile.json"
-    reconcile_args = [
-        "--expected", str(expected_path),
-        "--rca", str(rca_path),
-        "--out", str(reconcile_out)
-    ]
-    print(f"[{case_id}] 执行 reconcile.py...")
-    update_progress(progress_file, f"{task_prefix}:reconcile", "started")
-    reconcile_result = run_sub_script(scripts_dir / "reconcile.py", reconcile_args)
-    if reconcile_result["ok"]:
-        print(f"[{case_id}] reconcile.py 成功")
-        update_progress(progress_file, f"{task_prefix}:reconcile", "completed")
-    else:
-        print(f"[{case_id}] reconcile.py 失败: {reconcile_result['stderr']}")
-        update_progress(progress_file, f"{task_prefix}:reconcile", "completed",
-                        f"returncode={reconcile_result['returncode']}")
-
-    # 加载 reconcile 结果（对账退出码=1 表示有漏判/假阳，属预期；文件写不出来才是评估失败）
-    reconcile_data = load_json(reconcile_out) if reconcile_out.exists() else {}
+    reconcile_out, reconcile_result, reconcile_data = _run_reconcile(
+        case_id, expected_path, rca_path, temp_dir, progress_file, scripts_dir)
     if rca_path.exists() and not reconcile_data:
         return {"case_id": case_id, "ok": False,
                 "error": f"reconcile.py 未产出结果文件: {reconcile_result['stderr'][:300]}"}
@@ -502,21 +556,7 @@ def process_case(
         binding_check_path.write_text(json.dumps(shared_binding_check, ensure_ascii=False), encoding="utf-8")
 
     # 3c: 树结构检查（按用例：查本用例期望根因是否在 tree_index 中——KNOWLEDGE_GAP 的输入）
-    tree_check_data: Dict[str, Any] = {}
-    expected_ids = [r.get("node_id") for r in expected_data.get("expected_root_causes", [])
-                    if r.get("node_id")]
-    if tree_indexes and expected_ids:
-        tree_check_out = temp_dir / f"{case_id}_tree.json"
-        tree_args = [
-            "--tree-index", str(tree_indexes[0]),
-            "--node-ids", ",".join(expected_ids),
-            "--out", str(tree_check_out)
-        ]
-        print(f"[{case_id}] 执行 check_tree.py（期望节点: {','.join(expected_ids)}）...")
-        update_progress(progress_file, f"{task_prefix}:check_tree", "started")
-        run_sub_script(scripts_dir / "check_tree.py", tree_args)   # 有缺失节点时退出码=1，属预期
-        tree_check_data = load_json(tree_check_out) if tree_check_out.exists() else {}
-        update_progress(progress_file, f"{task_prefix}:check_tree", "completed")
+    tree_check_data = _run_tree_check(case_id, expected_data, tree_indexes, temp_dir, progress_file, scripts_dir)
 
     # 3d: classify.py
     classify_out = temp_dir / f"{case_id}_classify.json"
@@ -537,21 +577,9 @@ def process_case(
     if reconcile_data:
         classify_args.extend(["--reconcile", str(reconcile_out)])
 
-    print(f"[{case_id}] 执行 classify.py...")
-    update_progress(progress_file, f"{task_prefix}:classify", "started")
-    classify_result = run_sub_script(scripts_dir / "classify.py", classify_args)
-
-    # classify.py 返回 exit code=1 表示"分类出非 PASS 结果"（设计如此，不是脚本错误）
-    # 只有当输出文件不存在或无法读取时才真正算"失败"
-    classify_data = load_json(classify_out) if classify_out.exists() else {}
-    if classify_out.exists() and classify_data:
-        print(f"[{case_id}] classify.py 完成（exit code={classify_result['returncode']}）")
-        update_progress(progress_file, f"{task_prefix}:classify", "completed")
-    else:
-        # 真正失败：输出文件不存在或无法解析——评估过程失败，不能当作"未分类=PASS"
-        print(f"[{case_id}] classify.py 失败: {classify_result['stderr']}")
-        update_progress(progress_file, f"{task_prefix}:classify", "completed",
-                        f"returncode={classify_result['returncode']}")
+    classify_result, classify_data, classify_ok = _run_classify(
+        case_id, classify_args, classify_out, progress_file, scripts_dir)
+    if not classify_ok:
         return {"case_id": case_id, "ok": False,
                 "error": f"classify.py 未产出结果文件: {classify_result['stderr'][:300]}",
                 "expected": expected_data, "reconcile": reconcile_data,
@@ -576,6 +604,40 @@ def process_case(
     }
 
 
+def _classified_error_class(classify_data: Dict[str, Any]) -> Optional[int]:
+    """classify 的 error_class(0~5,单一事实来源);未分类(PASS)或解析不出 → None。"""
+    classified = classify_data.get("classified", False)
+    try:
+        ec = int(classify_data.get("error_class"))
+    except (TypeError, ValueError):
+        ec = None
+    if not classified:
+        ec = None                                        # PASS:六关全过
+    return ec
+
+
+def _check_details(
+    binding_check_data: Dict[str, Any],
+    tree_check_data: Dict[str, Any],
+    classify_data: Dict[str, Any],
+    run_data: Dict[str, Any]
+) -> Dict[int, Any]:
+    """六关各自的机械原料(执行失败节点/缺源/未绑列表/问题节点),按类号 0~5 索引。"""
+    exec_failures = [nid for nid, st in (run_data.get("execution_status") or {}).items()
+                     if isinstance(st, dict) and not st.get("ok", True)]
+    unbound_nodes = binding_check_data.get("unbound") or binding_check_data.get("unbound_nodes") or []
+    missing_nodes = (tree_check_data or {}).get("missing") or []
+    cd_node = (classify_data.get("details") or {}).get("node_id")   # details 可能是 None,别 .get 上炸
+    return {
+        0: exec_failures or None,
+        1: run_data.get("missing_inputs") or None,
+        2: unbound_nodes or cd_node,
+        3: missing_nodes or cd_node,
+        4: cd_node,
+        5: cd_node,
+    }
+
+
 def build_v9_checks(
     binding_check_data: Dict[str, Any],
     tree_check_data: Dict[str, Any],
@@ -594,27 +656,8 @@ def build_v9_checks(
     passed:true,平台/评分一读就是"通过",语义错——三态就是为修它。
     passed 一律按 classify 的 error_class(0~5)链条推导(单一事实来源);
     detail 只在命中的那关附机械原料(执行失败节点/缺源/未绑列表/问题节点)。"""
-    classified = classify_data.get("classified", False)
-    try:
-        ec = int(classify_data.get("error_class"))
-    except (TypeError, ValueError):
-        ec = None
-    if not classified:
-        ec = None                                        # PASS:六关全过
-
-    exec_failures = [nid for nid, st in (run_data.get("execution_status") or {}).items()
-                     if isinstance(st, dict) and not st.get("ok", True)]
-    unbound_nodes = binding_check_data.get("unbound") or binding_check_data.get("unbound_nodes") or []
-    missing_nodes = (tree_check_data or {}).get("missing") or []
-    cd_node = (classify_data.get("details") or {}).get("node_id")   # details 可能是 None,别 .get 上炸
-    details = {
-        0: exec_failures or None,
-        1: run_data.get("missing_inputs") or None,
-        2: unbound_nodes or cd_node,
-        3: missing_nodes or cd_node,
-        4: cd_node,
-        5: cd_node,
-    }
+    ec = _classified_error_class(classify_data)
+    details = _check_details(binding_check_data, tree_check_data, classify_data, run_data)
     keys = ["env_failure", "input_gap", "binding_gap", "knowledge_gap", "criteria_gap", "verdict_gap"]
     out = {}
     for i, key in enumerate(keys):
@@ -702,234 +745,247 @@ def _build_data_gaps(
     }
 
 
-def generate_report(
-    case_results: List[Dict[str, Any]],
-    out_dir: Path,
-    evaluation_time: str,
-    prev_evaluation: Optional[Path] = None,
-    skill_dir: Optional[Path] = None,
-    temp_dir: Optional[Path] = None
-) -> Dict[str, Any]:
-    """生成最终评估报告 (v9 格式)
+def _collect_case_issues(
+    classify_data: Dict[str, Any],
+    reconcile_data: Dict[str, Any],
+    classified: bool,
+    error_class: Any,
+    error_category: str
+):
+    """从分类结果拼失败签名与 feedback issue(签名锚定分类出的问题节点,没有则取第一个漏判节点)。
+    返回 (失败签名列表, issue 列表),各至多一条。"""
+    # 对账明细（供签名定位实际对账结果）
+    recon_details = reconcile_data.get("details", [])
+    missed_ids = [d.get("node_id") for d in recon_details if d.get("recon") == "MISSED"]
 
-    输出结构: <case_id>-v<round>-<timestamp>/evaluation_report.json
-    每个 case 独立一个输出目录，evaluation_report.json 是唯一对外出口
-
-    Args:
-        case_results: 所有 case 的处理结果
-        out_dir: 输出根目录
-        evaluation_time: 评估时间（ISO格式）
-        prev_evaluation: 上一次评估目录（用于 round 追踪）
-
-    Returns:
-        汇总报告
-    """
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
-    # 汇总统计
-    total = len(case_results)
-    verdict_counts = {"PASS": 0, "PASS_WITH_GAPS": 0, "PARTIAL_PASS": 0, "FAIL": 0,
-                      "EVAL_ERROR": 0}
-    all_case_summaries = []
-    all_feedback = []
-    all_failure_signatures = []
-
-    for result in case_results:
-        case_id = result.get("case_id", "unknown")
-        classify_data = result.get("classify", {})
-        reconcile_data = result.get("reconcile", {})
-        expected_data = result.get("expected", {})
-        rca_data = result.get("rca", {})
-        run_data = result.get("run", {})
-        binding_check_data = result.get("binding_check", {})
-        tree_check_data = result.get("tree_check", {})
-
-        # v9: scenario 必须在 case_issues 使用前先定义
-        scenario = expected_data.get("scenario", "")
-
-        # v9: 计算 round
-        round_num, feedback_iteration = compute_round_and_feedback_iteration(
-            prev_evaluation, case_id
-        )
-
-        # v9: success = 评估过程正常完成（不依赖 verdict）
-        success = result.get("ok", False)
-
-        # v10: 标准 verdict 按 SKILL.md 决策树从 对账+分类+缺口 计算；
-        # 评估过程自身失败（子脚本没产出）单列 EVAL_ERROR，绝不算作 PASS
-        classified = classify_data.get("classified", False)
-        error_category = classify_data.get("error_category", "")
-        error_class = classify_data.get("error_class", "")
-        if success:
-            verdict = _compute_verdict(reconcile_data, classify_data, run_data, expected_data)
-        else:
-            verdict = "EVAL_ERROR"
-        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
-
-        # 对账明细（供签名定位实际对账结果）
-        recon_details = reconcile_data.get("details", [])
-        missed_ids = [d.get("node_id") for d in recon_details if d.get("recon") == "MISSED"]
-
-        # 收集 failure_signatures 和 feedback_to_generate（先收集再写文件）
-        case_failure_sigs = []
-        case_issues = []
-        if classified:
-            details = classify_data.get("details", {})
-            if details:
-                # v10: 签名锚定分类出的问题节点（没有则取第一个漏判节点），
-                # recon_result 取该节点的实际对账结果
-                anchor = details.get("node_id") or (missed_ids[0] if missed_ids else None)
-                recon_of_anchor = next(
-                    (d.get("recon") for d in recon_details if d.get("node_id") == anchor),
-                    "MISSED"
-                )
-                sig = {
-                    "expected_node": anchor,
-                    "recon_result": recon_of_anchor,
-                    "error_class": error_class,
-                    "error_category": error_category,
-                    "reason": details.get("reason", ""),
-                    "evidence": details.get("evidence", []),
-                    "priority": "high"
-                }
-                case_failure_sigs.append(sig)
-                all_failure_signatures.append(sig)
-
-                # 构建 feedback_to_generate issue（与 SKILL.md 对齐）
-                suggestion = _generate_suggestion(error_category, details)
-                case_issues.append({
-                    "error_class": error_category,  # SKILL.md 用 error_class 存类别名
-                    "node_id": details.get("node_id", ""),
-                    "node_name": details.get("node_name", "") or details.get("name", ""),
-                    "expected_result": "confirmed",
-                    "actual_result": recon_of_anchor,
-                    "reason": details.get("reason", ""),
-                    "suggestion": suggestion,
-                    "priority": "high",
-                    "previous_attempts": 0
-                })
-
-        # 构建 v9 格式 feedback_to_generate（每个 case 一个对象，与 SKILL.md 对齐）
-        if case_issues:
-            feedback = {
-                "meta": {
-                    "case_id": case_id,
-                    "round": round_num,
-                    "feedback_iteration": feedback_iteration,
-                    "evaluation_time": evaluation_time,
-                    "source_result_dir": result.get("result_dir", ""),
-                    "scenario": scenario
-                },
-                "issues": case_issues,
-                "next_action": "REGENERATE",
-                "summary": f"第{round_num}轮评估：{case_id}存在{len(case_issues)}个问题，需generate修复后重新生成技能包"
+    # 收集 failure_signatures 和 feedback_to_generate（先收集再写文件）
+    case_failure_sigs = []
+    case_issues = []
+    if classified:
+        details = classify_data.get("details", {})
+        if details:
+            # v10: 签名锚定分类出的问题节点（没有则取第一个漏判节点），
+            # recon_result 取该节点的实际对账结果
+            anchor = details.get("node_id") or (missed_ids[0] if missed_ids else None)
+            recon_of_anchor = next(
+                (d.get("recon") for d in recon_details if d.get("node_id") == anchor),
+                "MISSED"
+            )
+            sig = {
+                "expected_node": anchor,
+                "recon_result": recon_of_anchor,
+                "error_class": error_class,
+                "error_category": error_category,
+                "reason": details.get("reason", ""),
+                "evidence": details.get("evidence", []),
+                "priority": "high"
             }
-            all_feedback.append(feedback)
+            case_failure_sigs.append(sig)
 
-        # 构建 v9 格式 evaluation_report.json（与 SKILL.md 对齐）
-        # reconciliation 需要合并 counts 和 details（reconcile.py 的 details 在顶层）
-        reconciliation_base = reconcile_data.get("reconciliation", {})
-        reconciliation_details = reconcile_data.get("details", [])
-        reconciliation_full = {
-            **reconciliation_base,
-            "details": reconciliation_details
-        }
+            # 构建 feedback_to_generate issue（与 SKILL.md 对齐）
+            suggestion = _generate_suggestion(error_category, details)
+            case_issues.append({
+                "error_class": error_category,  # SKILL.md 用 error_class 存类别名
+                "node_id": details.get("node_id", ""),
+                "node_name": details.get("node_name", "") or details.get("name", ""),
+                "expected_result": "confirmed",
+                "actual_result": recon_of_anchor,
+                "reason": details.get("reason", ""),
+                "suggestion": suggestion,
+                "priority": "high",
+                "previous_attempts": 0
+            })
+    return case_failure_sigs, case_issues
 
-        case_report = {
-            "success": success,  # v9: 评估过程正常完成（不依赖 verdict）
-            "meta": {
-                "case_id": case_id,
-                "scenario": scenario,
-                "round": round_num,
-                "feedback_iteration": feedback_iteration,
-                "evaluation_time": evaluation_time,
-                "verdict": verdict,  # v9: 与 verdict_detail.verdict 保持一致
-                "result_dir": result.get("result_dir", ""),
-                "skill_dir": str(skill_dir) if skill_dir else "",
-                "source_result_dir": result.get("result_dir", "")
-            },
-            "reconciliation": reconciliation_full,  # 合并 counts + details
-            # case_quality: 祖先命中产生的"期望粒度偏粗"提示（用例库维护线索，非错误）
-            "case_quality": reconcile_data.get("case_quality", []),
-            # data_gaps: 从 run_data.missing_inputs 构建，与 SKILL.md 格式对齐
-            "data_gaps": _build_data_gaps(run_data, reconcile_data, expected_data),
-            "failure_signatures": case_failure_sigs,
-            "verdict_detail": {
-                "verdict": verdict,
-                "error_class": error_class if classified else None,
-                "reason": (result.get("error", "评估过程失败") if not success else
-                           (classify_data.get("details", {}).get("reason", "") if classified else ""))
-            },
-            "feedback_to_generate": None,  # 由根目录统一生成
-            "checks": build_v9_checks(binding_check_data, tree_check_data, classify_data, run_data)
-        }
 
-        # 创建 case 独立输出目录: <case_id>-v<round>-<timestamp>/
-        case_out_dir = out_dir / f"{case_id}-v{round_num}-{timestamp}"
-        case_out_dir.mkdir(parents=True, exist_ok=True)
-
-        # 写入 evaluation_report.json（唯一对外出口）
-        report_path = case_out_dir / "evaluation_report.json"
-        report_path.write_text(
-            json.dumps(case_report, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
-        print(f"[eval_run] {case_id}: 报告已写入 {report_path}")
-
-        # 平台展示适配:同目录机械产出 quality_score.json(六维 BOOLEAN 计分,短路后未评维度
-        # 记 null/N-A,总分=通过关数/6×100;算法与实现见 score_report.py)。EVAL_ERROR 无有效
-        # 评分主动跳过;生成失败不拖垮评估——报告仍是权威,可手跑 score_report.py 补出。
-        case_score, case_dims = None, {}
-        try:
-            import importlib.util as _ilu
-            _spec = _ilu.spec_from_file_location(
-                "score_report", Path(__file__).resolve().parent / "score_report.py")
-            _sr = _ilu.module_from_spec(_spec)
-            _spec.loader.exec_module(_sr)
-            _score_path = _sr.write_score(report_path)
-            case_score, case_dims = read_case_score(_score_path)
-            print(f"[eval_run] {case_id}: 平台评分已写入 {_score_path}")
-        except ValueError as e:
-            print(f"[eval_run] {case_id}: 不产 quality_score({e})")
-        except Exception as e:  # noqa: BLE001
-            print(f"[eval_run] ⚠ {case_id}: quality_score.json 生成失败({e})——评估报告不受影响,"
-                  f"可手跑 score_report.py \"{report_path}\" 补出")
-
-        # 写入 eval_run.json（本次评估元数据，内部用）
-        eval_run_meta = {
+def _build_feedback(case_id: str, round_num: int, feedback_iteration: int, evaluation_time: str,
+                    result: Dict[str, Any], scenario: str, case_issues: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """v9 格式 feedback_to_generate(每个 case 一个对象,与 SKILL.md 对齐)。"""
+    return {
+        "meta": {
             "case_id": case_id,
             "round": round_num,
             "feedback_iteration": feedback_iteration,
             "evaluation_time": evaluation_time,
-            "verdict": verdict,
-            "success": success,
+            "source_result_dir": result.get("result_dir", ""),
+            "scenario": scenario
+        },
+        "issues": case_issues,
+        "next_action": "REGENERATE",
+        "summary": f"第{round_num}轮评估：{case_id}存在{len(case_issues)}个问题，需generate修复后重新生成技能包"
+    }
+
+
+def _write_quality_score(case_id: str, report_path: Path):
+    """平台展示适配:同目录机械产出 quality_score.json(六维 BOOLEAN 计分,短路后未评维度
+    记 null/N-A,总分=通过关数/6×100;算法与实现见 score_report.py)。EVAL_ERROR 无有效
+    评分主动跳过;生成失败不拖垮评估——报告仍是权威,可手跑 score_report.py 补出。
+    返回 (总分, 六维);没产出时 (None, {})。"""
+    case_score, case_dims = None, {}
+    try:
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            "score_report", Path(__file__).resolve().parent / "score_report.py")
+        _sr = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_sr)
+        _score_path = _sr.write_score(report_path)
+        case_score, case_dims = read_case_score(_score_path)
+        print(f"[eval_run] {case_id}: 平台评分已写入 {_score_path}")
+    except ValueError as e:
+        print(f"[eval_run] {case_id}: 不产 quality_score({e})")
+    except Exception as e:  # noqa: BLE001
+        print(f"[eval_run] ⚠ {case_id}: quality_score.json 生成失败({e})——评估报告不受影响,"
+              f"可手跑 score_report.py \"{report_path}\" 补出")
+    return case_score, case_dims
+
+
+def _emit_case_report(
+    result: Dict[str, Any],
+    out_dir: Path,
+    timestamp: str,
+    evaluation_time: str,
+    prev_evaluation: Optional[Path],
+    skill_dir: Optional[Path],
+    temp_dir: Optional[Path]
+):
+    """单个 case:算 verdict/签名/反馈,写 <case_id>-v<round>-<timestamp>/ 下的报告、平台评分、元数据与签名。
+    返回 (index 用摘要, 失败签名列表, feedback 对象或 None)。"""
+    case_id = result.get("case_id", "unknown")
+    classify_data = result.get("classify", {})
+    reconcile_data = result.get("reconcile", {})
+    expected_data = result.get("expected", {})
+    run_data = result.get("run", {})
+    binding_check_data = result.get("binding_check", {})
+    tree_check_data = result.get("tree_check", {})
+
+    # v9: scenario 必须在 case_issues 使用前先定义
+    scenario = expected_data.get("scenario", "")
+
+    # v9: 计算 round
+    round_num, feedback_iteration = compute_round_and_feedback_iteration(
+        prev_evaluation, case_id
+    )
+
+    # v9: success = 评估过程正常完成（不依赖 verdict）
+    success = result.get("ok", False)
+
+    # v10: 标准 verdict 按 SKILL.md 决策树从 对账+分类+缺口 计算；
+    # 评估过程自身失败（子脚本没产出）单列 EVAL_ERROR，绝不算作 PASS
+    classified = classify_data.get("classified", False)
+    error_category = classify_data.get("error_category", "")
+    error_class = classify_data.get("error_class", "")
+    if success:
+        verdict = _compute_verdict(reconcile_data, classify_data, run_data, expected_data)
+    else:
+        verdict = "EVAL_ERROR"
+
+    case_failure_sigs, case_issues = _collect_case_issues(
+        classify_data, reconcile_data, classified, error_class, error_category)
+
+    # 构建 v9 格式 feedback_to_generate（每个 case 一个对象，与 SKILL.md 对齐）
+    feedback = (_build_feedback(case_id, round_num, feedback_iteration, evaluation_time,
+                                result, scenario, case_issues) if case_issues else None)
+
+    # 构建 v9 格式 evaluation_report.json（与 SKILL.md 对齐）
+    # reconciliation 需要合并 counts 和 details（reconcile.py 的 details 在顶层）
+    reconciliation_base = reconcile_data.get("reconciliation", {})
+    reconciliation_details = reconcile_data.get("details", [])
+    reconciliation_full = {
+        **reconciliation_base,
+        "details": reconciliation_details
+    }
+
+    case_report = {
+        "success": success,  # v9: 评估过程正常完成（不依赖 verdict）
+        "meta": {
+            "case_id": case_id,
+            "scenario": scenario,
+            "round": round_num,
+            "feedback_iteration": feedback_iteration,
+            "evaluation_time": evaluation_time,
+            "verdict": verdict,  # v9: 与 verdict_detail.verdict 保持一致
             "result_dir": result.get("result_dir", ""),
-            "temp_dir": str(temp_dir)
-        }
-        eval_run_path = case_out_dir / "eval_run.json"
-        eval_run_path.write_text(
-            json.dumps(eval_run_meta, ensure_ascii=False, indent=2),
+            "skill_dir": str(skill_dir) if skill_dir else "",
+            "source_result_dir": result.get("result_dir", "")
+        },
+        "reconciliation": reconciliation_full,  # 合并 counts + details
+        # case_quality: 祖先命中产生的"期望粒度偏粗"提示（用例库维护线索，非错误）
+        "case_quality": reconcile_data.get("case_quality", []),
+        # data_gaps: 从 run_data.missing_inputs 构建，与 SKILL.md 格式对齐
+        "data_gaps": _build_data_gaps(run_data, reconcile_data, expected_data),
+        "failure_signatures": case_failure_sigs,
+        "verdict_detail": {
+            "verdict": verdict,
+            "error_class": error_class if classified else None,
+            "reason": (result.get("error", "评估过程失败") if not success else
+                       (classify_data.get("details", {}).get("reason", "") if classified else ""))
+        },
+        "feedback_to_generate": None,  # 由根目录统一生成
+        "checks": build_v9_checks(binding_check_data, tree_check_data, classify_data, run_data)
+    }
+
+    # 创建 case 独立输出目录: <case_id>-v<round>-<timestamp>/
+    case_out_dir = out_dir / f"{case_id}-v{round_num}-{timestamp}"
+    case_out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 写入 evaluation_report.json（唯一对外出口）
+    report_path = case_out_dir / "evaluation_report.json"
+    report_path.write_text(
+        json.dumps(case_report, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    print(f"[eval_run] {case_id}: 报告已写入 {report_path}")
+
+    # 平台展示适配:同目录机械产出 quality_score.json(六维 BOOLEAN 计分,短路后未评维度
+    # 记 null/N-A,总分=通过关数/6×100;算法与实现见 score_report.py)。EVAL_ERROR 无有效
+    # 评分主动跳过;生成失败不拖垮评估——报告仍是权威,可手跑 score_report.py 补出。
+    case_score, case_dims = _write_quality_score(case_id, report_path)
+
+    # 写入 eval_run.json（本次评估元数据，内部用）
+    eval_run_meta = {
+        "case_id": case_id,
+        "round": round_num,
+        "feedback_iteration": feedback_iteration,
+        "evaluation_time": evaluation_time,
+        "verdict": verdict,
+        "success": success,
+        "result_dir": result.get("result_dir", ""),
+        "temp_dir": str(temp_dir)
+    }
+    eval_run_path = case_out_dir / "eval_run.json"
+    eval_run_path.write_text(
+        json.dumps(eval_run_meta, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+
+    # 写入 failure_signatures.json（per-case 内部用）
+    if case_failure_sigs:
+        sig_path = case_out_dir / "failure_signatures.json"
+        sig_path.write_text(
+            json.dumps(case_failure_sigs, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
 
-        # 写入 failure_signatures.json（per-case 内部用）
-        if case_failure_sigs:
-            sig_path = case_out_dir / "failure_signatures.json"
-            sig_path.write_text(
-                json.dumps(case_failure_sigs, ensure_ascii=False, indent=2),
-                encoding="utf-8"
-            )
+    # 同时在根目录生成汇总（index 用途）
+    summary = {
+        "case_id": case_id,
+        "verdict": verdict,
+        "quality_score": case_score,
+        "dimensions": case_dims,
+        "round": round_num,
+        "report_path": str(report_path.relative_to(out_dir))
+    }
+    return summary, case_failure_sigs, feedback
 
-        # 同时在根目录生成汇总（index 用途）
-        all_case_summaries.append({
-            "case_id": case_id,
-            "verdict": verdict,
-            "quality_score": case_score,
-            "dimensions": case_dims,
-            "round": round_num,
-            "report_path": str(report_path.relative_to(out_dir))
-        })
 
+def _write_batch_outputs(
+    out_dir: Path,
+    all_case_summaries: List[Dict[str, Any]],
+    all_failure_signatures: List[Dict[str, Any]],
+    all_feedback: List[Dict[str, Any]],
+    evaluation_time: str
+) -> Dict[str, Any]:
+    """根目录整批产物:quality_score_batch.json、failure_signatures.json、feedback_to_generate.json;返回整批汇总。"""
     # 根目录 quality_score_batch.json(整批):与一键回归同一算法(batch_summary.py),平台读这一份
     summary_report = write_batch_score(out_dir, all_case_summaries, evaluation_time)
     print(f"[eval_run] 整批汇总已写入 {out_dir / 'quality_score_batch.json'}")
@@ -955,10 +1011,104 @@ def generate_report(
     return summary_report
 
 
+def generate_report(
+    case_results: List[Dict[str, Any]],
+    out_dir: Path,
+    evaluation_time: str,
+    prev_evaluation: Optional[Path] = None,
+    skill_dir: Optional[Path] = None,
+    temp_dir: Optional[Path] = None
+) -> Dict[str, Any]:
+    """生成最终评估报告 (v9 格式)
+
+    输出结构: <case_id>-v<round>-<timestamp>/evaluation_report.json
+    每个 case 独立一个输出目录，evaluation_report.json 是唯一对外出口
+
+    Args:
+        case_results: 所有 case 的处理结果
+        out_dir: 输出根目录
+        evaluation_time: 评估时间（ISO格式）
+        prev_evaluation: 上一次评估目录（用于 round 追踪）
+
+    Returns:
+        汇总报告
+    """
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    # 汇总统计
+    verdict_counts = {"PASS": 0, "PASS_WITH_GAPS": 0, "PARTIAL_PASS": 0, "FAIL": 0,
+                      "EVAL_ERROR": 0}
+    all_case_summaries = []
+    all_feedback = []
+    all_failure_signatures = []
+
+    for result in case_results:
+        summary, case_failure_sigs, feedback = _emit_case_report(
+            result, out_dir, timestamp, evaluation_time, prev_evaluation, skill_dir, temp_dir)
+        verdict_counts[summary["verdict"]] = verdict_counts.get(summary["verdict"], 0) + 1
+        all_case_summaries.append(summary)
+        all_failure_signatures.extend(case_failure_sigs)
+        if feedback:
+            all_feedback.append(feedback)
+
+    return _write_batch_outputs(out_dir, all_case_summaries, all_failure_signatures, all_feedback, evaluation_time)
+
+
 def _round_from_dirname(name: str) -> int:
     """从 <case_id>-v<round>-<timestamp> 目录名解析 round，解析不出返回 0。"""
     m = re.search(r"-v(\d+)-", name)
     return int(m.group(1)) if m else 0
+
+
+def _prev_report_from_file(p: Path, case_id: str) -> Tuple[Dict[str, Any], Path]:
+    """--prev-evaluation 传的是报告文件:是本 case 的就用它;是别的 case 的退回目录模式。返回 (报告, 后续查找起点)。"""
+    prev_report = load_json(p)
+    rep_case = prev_report.get("meta", {}).get("case_id")
+    if rep_case not in (None, "", case_id):
+        # 传的是别的 case 的报告：退回目录模式（报告在 <out>/<case>-v*/ 下两层）
+        return {}, p.parent.parent
+    return prev_report, p
+
+
+def _latest_prev_report_in_dir(p: Path, case_id: str):
+    """在评估输出目录下按 <case_id>-v<round>-* 找该 case 轮次最大的一份报告;没有返回 None,
+    有则返回 (报告, 目录名解析出的 round 备用值)。"""
+    base = p if p.is_dir() else p.parent
+    cands = sorted(
+        [
+            d for d in base.iterdir()
+            if d.is_dir() and d.name.startswith(f"{case_id}-v")
+            and (d / "evaluation_report.json").exists()
+        ],
+        key=lambda d: _round_from_dirname(d.name),
+        reverse=True  # 轮次最大的在前面
+    ) if base.exists() and base.is_dir() else []
+    if not cands:
+        return None
+    return load_json(cands[0] / "evaluation_report.json"), _round_from_dirname(cands[0].name)
+
+
+def _prev_round_and_iteration(prev_report: Dict[str, Any], prev_round_fallback: int) -> Tuple[int, int]:
+    """从上轮报告 meta 读 round(目录名解析值作备用)与新的 feedback_iteration(上轮有 feedback 才 +1)。"""
+    meta = prev_report.get("meta", {})
+    try:
+        prev_round = int(meta.get("round") or prev_round_fallback or 0)
+    except (TypeError, ValueError):
+        prev_round = prev_round_fallback
+
+    # verdict 在 meta.verdict（取不到时用 verdict_detail.verdict）——报告顶层没有 verdict 字段
+    prev_verdict = meta.get("verdict") or prev_report.get("verdict_detail", {}).get("verdict", "")
+    try:
+        prev_feedback_iteration = int(meta.get("feedback_iteration", 0) or 0)
+    except (TypeError, ValueError):
+        prev_feedback_iteration = 0
+
+    # feedback_iteration 只在上轮有 feedback 时才 +1；PASS/PASS_WITH_GAPS 清零
+    if prev_verdict in ("PARTIAL_PASS", "FAIL"):
+        new_feedback_iteration = prev_feedback_iteration + 1
+    else:
+        new_feedback_iteration = 0
+    return prev_round, new_feedback_iteration
 
 
 def compute_round_and_feedback_iteration(
@@ -985,48 +1135,15 @@ def compute_round_and_feedback_iteration(
     prev_round_fallback = 0
 
     if p.is_file():
-        prev_report = load_json(p)
-        rep_case = prev_report.get("meta", {}).get("case_id")
-        if rep_case not in (None, "", case_id):
-            # 传的是别的 case 的报告：退回目录模式（报告在 <out>/<case>-v*/ 下两层）
-            prev_report = {}
-            p = p.parent.parent
+        prev_report, p = _prev_report_from_file(p, case_id)
 
     if not prev_report:
-        base = p if p.is_dir() else p.parent
-        cands = sorted(
-            [
-                d for d in base.iterdir()
-                if d.is_dir() and d.name.startswith(f"{case_id}-v")
-                and (d / "evaluation_report.json").exists()
-            ],
-            key=lambda d: _round_from_dirname(d.name),
-            reverse=True  # 轮次最大的在前面
-        ) if base.exists() and base.is_dir() else []
-        if not cands:
+        found = _latest_prev_report_in_dir(p, case_id)
+        if found is None:
             return (1, 0)  # 无上轮记录
-        prev_report = load_json(cands[0] / "evaluation_report.json")
-        prev_round_fallback = _round_from_dirname(cands[0].name)
+        prev_report, prev_round_fallback = found
 
-    meta = prev_report.get("meta", {})
-    try:
-        prev_round = int(meta.get("round") or prev_round_fallback or 0)
-    except (TypeError, ValueError):
-        prev_round = prev_round_fallback
-
-    # verdict 在 meta.verdict（取不到时用 verdict_detail.verdict）——报告顶层没有 verdict 字段
-    prev_verdict = meta.get("verdict") or prev_report.get("verdict_detail", {}).get("verdict", "")
-    try:
-        prev_feedback_iteration = int(meta.get("feedback_iteration", 0) or 0)
-    except (TypeError, ValueError):
-        prev_feedback_iteration = 0
-
-    # feedback_iteration 只在上轮有 feedback 时才 +1；PASS/PASS_WITH_GAPS 清零
-    if prev_verdict in ("PARTIAL_PASS", "FAIL"):
-        new_feedback_iteration = prev_feedback_iteration + 1
-    else:
-        new_feedback_iteration = 0
-
+    prev_round, new_feedback_iteration = _prev_round_and_iteration(prev_report, prev_round_fallback)
     return (prev_round + 1 if prev_round else 1, new_feedback_iteration)
 
 
@@ -1060,7 +1177,8 @@ def build_default_out_dir(result_dir: Path, scenario: str) -> Path:
     return result_dir.parent / f"{scenario}-eval"
 
 
-def main() -> None:
+def _parse_args() -> argparse.Namespace:
+    """命令行参数(含校验:--case 与 --case-dir 必须且只能给一个)。"""
     parser = argparse.ArgumentParser(
         description="cs-scot-reflect 评估主入口 (v9)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1100,6 +1218,66 @@ def main() -> None:
         parser.error("--case 或 --case-dir 必须指定一个")
     if args.case and args.case_dir:
         parser.error("--case 和 --case-dir 不能同时指定")
+    return args
+
+
+def _collect_case_ids(args: argparse.Namespace, cases_dir: Path) -> List[str]:
+    """单用例模式取 --case;批量模式扫描 case-dir 下所有子目录(隐藏目录除外),目录不存在即退出。"""
+    # 单用例模式
+    if args.case:
+        return [args.case]
+    # 批量模式：扫描 case-dir 下所有子目录
+    if not cases_dir.exists():
+        print(f"[error] case-dir 不存在: {cases_dir}", file=sys.stderr)
+        sys.exit(1)
+    return [d.name for d in cases_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
+
+
+def _run_shared_binding_check(skill_dir: Path, tree_index: Path, temp_dir: Path,
+                              progress_file: Path) -> Dict[str, Any]:
+    """绑定静态检查只跑一次、所有 case 复用(check_binding.py 基于 tree_index+scripts,与具体 case 无关)。"""
+    # 执行一次 check_binding.py
+    skill_scripts_dir = find_skill_scripts_dir(skill_dir, tree_index)
+    if not skill_scripts_dir.is_dir():
+        print(f"[warn] 找不到 analyzer 脚本目录（改用 {skill_scripts_dir}）——"
+              "绑定检查将把全树当未绑定，BINDING_GAP 归因不可信，先核对 --skill-dir")
+    binding_out = temp_dir / "shared_binding_check.json"
+    binding_args = [
+        "--tree-index", str(tree_index),
+        "--scripts-dir", str(skill_scripts_dir),
+        "--out", str(binding_out)
+    ]
+    print(f"[eval_run] 执行共享绑定检查（所有case共用）...")
+    update_progress(progress_file, "shared:binding_check", "started")
+    binding_result = run_sub_script(SCRIPTS_DIR / "check_binding.py", binding_args)
+    # check_binding.py 有未绑定节点时按设计退出码=1（警告）——只要结果文件在就加载，
+    # 按退出码丢结果会把"真有未绑定节点"的信息恰好扔掉
+    shared_binding_check = load_json(binding_out) if binding_out.exists() else {}
+    if shared_binding_check:
+        print(f"[eval_run] 共享绑定检查完成，unbound_count="
+              f"{shared_binding_check.get('unbound_count', 'N/A')}")
+        update_progress(progress_file, "shared:binding_check", "completed")
+    else:
+        print(f"[eval_run] 共享绑定检查失败: {binding_result['stderr']}")
+        update_progress(progress_file, "shared:binding_check", "completed",
+                        f"returncode={binding_result['returncode']}")
+    return shared_binding_check
+
+
+def _load_fuse_history(fuse_history_file: Path) -> List[Dict[str, Any]]:
+    """熔断历史固定存在 --out 目录(跨轮稳定);temp 每轮都换,历史存那里永远是空的。"""
+    fuse_history = []
+    if fuse_history_file.exists():
+        content = fuse_history_file.read_text(encoding="utf-8")
+        for line in content.strip().split("\n"):
+            if line:
+                fuse_history.append(json.loads(line))
+    print(f"[eval_run] 熔断历史记录数: {len(fuse_history)}")
+    return fuse_history
+
+
+def main() -> None:
+    args = _parse_args()
 
     result_dir = Path(args.result_dir)
     skill_dir = Path(args.skill_dir)
@@ -1126,16 +1304,7 @@ def main() -> None:
     progress_file.write_text("", encoding="utf-8")
     print(f"[eval_run] 临时目录: {temp_dir}")
 
-    # 单用例模式
-    if args.case:
-        case_ids = [args.case]
-    else:
-        # 批量模式：扫描 case-dir 下所有子目录
-        if not cases_dir.exists():
-            print(f"[error] case-dir 不存在: {cases_dir}", file=sys.stderr)
-            sys.exit(1)
-        case_ids = [d.name for d in cases_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
-
+    case_ids = _collect_case_ids(args, cases_dir)
     print(f"[eval_run] 待评估用例数: {len(case_ids)}")
 
     # 查找 tree_index（所有用例共用同一个 skill-dir）
@@ -1149,46 +1318,13 @@ def main() -> None:
     # check_binding.py 基于 tree_index+scripts，与具体 case 无关；
     # check_tree.py 查的是各用例自己的期望节点，在 process_case 里按用例执行
     shared_binding_check = {}
-
     if tree_indexes:
-        tree_index = tree_indexes[0]
-
-        # 执行一次 check_binding.py
-        skill_scripts_dir = find_skill_scripts_dir(skill_dir, tree_index)
-        if not skill_scripts_dir.is_dir():
-            print(f"[warn] 找不到 analyzer 脚本目录（改用 {skill_scripts_dir}）——"
-                  "绑定检查将把全树当未绑定，BINDING_GAP 归因不可信，先核对 --skill-dir")
-        binding_out = temp_dir / "shared_binding_check.json"
-        binding_args = [
-            "--tree-index", str(tree_index),
-            "--scripts-dir", str(skill_scripts_dir),
-            "--out", str(binding_out)
-        ]
-        print(f"[eval_run] 执行共享绑定检查（所有case共用）...")
-        update_progress(progress_file, "shared:binding_check", "started")
-        binding_result = run_sub_script(SCRIPTS_DIR / "check_binding.py", binding_args)
-        # check_binding.py 有未绑定节点时按设计退出码=1（警告）——只要结果文件在就加载，
-        # 按退出码丢结果会把"真有未绑定节点"的信息恰好扔掉
-        shared_binding_check = load_json(binding_out) if binding_out.exists() else {}
-        if shared_binding_check:
-            print(f"[eval_run] 共享绑定检查完成，unbound_count="
-                  f"{shared_binding_check.get('unbound_count', 'N/A')}")
-            update_progress(progress_file, "shared:binding_check", "completed")
-        else:
-            print(f"[eval_run] 共享绑定检查失败: {binding_result['stderr']}")
-            update_progress(progress_file, "shared:binding_check", "completed",
-                            f"returncode={binding_result['returncode']}")
+        shared_binding_check = _run_shared_binding_check(skill_dir, tree_indexes[0], temp_dir, progress_file)
 
     # ===== 熔断历史加载 =====
     # 固定存在 --out 目录（跨轮稳定）；temp 每轮都换，历史存那里永远是空的
     fuse_history_file = out_dir / "fuse_history.jsonl"
-    fuse_history = []
-    if fuse_history_file.exists():
-        content = fuse_history_file.read_text(encoding="utf-8")
-        for line in content.strip().split("\n"):
-            if line:
-                fuse_history.append(json.loads(line))
-    print(f"[eval_run] 熔断历史记录数: {len(fuse_history)}")
+    fuse_history = _load_fuse_history(fuse_history_file)
 
     # 批量评估每个 case
     all_results = []

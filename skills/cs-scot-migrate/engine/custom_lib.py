@@ -364,21 +364,12 @@ def fault_check(table, args, load):
     翻译:任一实体判真 → 成立;全部实体判不了/无实体 → status=insufficient_data(不当作"正常"),
     并带 gap_kind 细分 no_data(缺数据,补采可解)/cannot_judge(数据在判不动,判据质量信号)/mixed;
     否则不成立;matched:false 却带 details.error(缺数据却报成阴性的老问题)按判不了(no_data)处理。"""
-    import contextlib
-    import importlib.util
-    import io as _io
-    import sys as _sys
     import tempfile
 
     rel = str(args.get("script") or "").strip()
-    if not rel:
-        return {"status": "insufficient_data", "reason": "args.script 缺失(scripts/ 下相对路径,如 custom/fault_check_xxx.py)"}
-    here = Path(__file__).resolve().parent
-    script = (here / rel).resolve()
-    if not str(script).startswith(str(here)):
-        return {"status": "insufficient_data", "reason": f"args.script 路径越界(必须在 scripts/ 之下):{rel}"}
-    if not script.exists():
-        return {"status": "insufficient_data", "reason": f"脚本不存在:{rel}(先把交付包脚本拷进 scripts/custom/)"}
+    script, why = _fc_locate_script(rel)
+    if why:
+        return {"status": "insufficient_data", "reason": why}
     entry_name = str(args.get("entry") or "diagnose")
     kwargs = args.get("entry_kwargs") or {}
     if not isinstance(kwargs, dict):
@@ -389,58 +380,9 @@ def fault_check(table, args, load):
         if root is None:
             return {"status": "insufficient_data", "gap_kind": "no_data",
                     "reason": f"数据整体缺失,脚本未运行:{how}"}
-        sdir = str(script.parent)
-        if sdir not in _sys.path:
-            _sys.path.insert(0, sdir)                    # 交付脚本 import search_config 等同目录共享模块
-
-        def _fc_purge_shared():
-            # 同一进程连续调多个交付脚本时,它们 import 的同目录共享模块(search_*.py 等)会被
-            # sys.modules 全局缓存:前一个包载入的模块连同其模块级状态(缓存、全局变量)直接
-            # 喂给后面的脚本——这些脚本在交付方那里本是各自独立进程跑的,串门会污染判定
-            # (实测:n4 直跑 true、经本适配层在 cross 整链里跑变 false)。调用前后都清掉脚本目录
-            # 下的缓存模块,保证每个脚本冷启动。
-            for _n, _m in list(_sys.modules.items()):
-                _f = getattr(_m, "__file__", None)
-                try:
-                    if _f and str(Path(_f).resolve().parent) == str(script.parent.resolve()):
-                        del _sys.modules[_n]
-                except OSError:
-                    continue
-
-        _fc_purge_shared()
-        spec = importlib.util.spec_from_file_location(f"fc_{script.stem}", script)
-        mod = importlib.util.module_from_spec(spec)
-        sink = _io.StringIO()
-        convention_note = ""                             # 调用方式仲裁的注记(逐网元重调时写进 explain)
-        argv_bak, _sys.argv = _sys.argv, [str(script)]   # argv 隔离:CLI 型脚本库调用时常仍偷读 sys.argv,
-        try:                                             # 会吃到 cross_analyzer 的 -o 临时路径当自己的参数
-            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):     # (实测:路径当正则炸 \U)
-                spec.loader.exec_module(mod)             # 脚本运行期的 print 全部收走,不进执行日志
-                fn = getattr(mod, entry_name, None)
-                if not callable(fn):
-                    cands = [n for n in dir(mod) if callable(getattr(mod, n)) and not n.startswith("_")]
-                    return {"status": "insufficient_data",
-                            "reason": f"脚本没有入口函数「{entry_name}」;文件顶层可调用:{cands[:8]}"}
-                def _per_ne_map():
-                    m = {}
-                    for ne_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-                        r = fn(_StrPath(ne_dir), **kwargs)
-                        m[ne_dir.name] = r if isinstance(r, dict) else {"error": f"入口返回非 dict:{type(r).__name__}"}
-                    return m
-
-                if args.get("per_ne"):
-                    ne_map = _per_ne_map()
-                else:
-                    ne_map = _fc_normalize(fn(_StrPath(root), **kwargs))
-                    if _fc_no_judgment(ne_map):          # 调用方式仲裁:单网元风格脚本(没做多网元探测)
-                        retry = _per_ne_map()            # 吃不了网元层根目录——逐网元重调一次,
-                        if not _fc_no_judgment(retry):   # 不改判断逻辑只换喂法;重调也空转就维持原判(数据不足)
-                            ne_map = retry
-                            convention_note = ("(调用方式:脚本不认多网元根目录,已按逐网元重调"
-                                               "——脚本未做规范要求的多网元探测,请交付方补)")
-        finally:
-            _sys.argv = argv_bak
-            _fc_purge_shared()
+        ne_map, convention_note, bad_fact = _fc_run_script(script, entry_name, kwargs, args.get("per_ne"), root)
+        if bad_fact is not None:
+            return bad_fact
 
     if ne_map is None:
         return {"status": "insufficient_data", "gap_kind": "cannot_judge",
@@ -449,73 +391,184 @@ def fault_check(table, args, load):
     if not ne_map:
         return {"status": "insufficient_data", "gap_kind": "no_data",
                 "reason": "脚本一个网元都没读到(目录结构与脚本预期对不上,或数据缺失)"}
-    hit, miss, bad = [], [], []
-    bad_kinds = set()                                    # 判不了的细分:no_data(缺数据)/cannot_judge(判不动)
-    evidence, hits_raw, hit_why, miss_why = [], [], [], []
-    for ne, r in ne_map.items():
-        if not isinstance(r, dict) or ("matched" not in r):
-            bad.append((ne, str((r or {}).get("error") or r)[:120] if isinstance(r, dict) else str(r)[:120]))
-            bad_kinds.add("cannot_judge")
-            continue
-        tri = _fc_tristate(r.get("matched"))
-        det = r.get("details") if isinstance(r.get("details"), dict) else {}
-        err = det.get("error") or r.get("error")
-        reason = str(det.get("reason") or "").strip()
-        if tri is None:                                  # undetermined/insufficient_data → 该实体判不了
-            bad.append((ne, str(reason or err or f"matched={r.get('matched')!r},判不了")[:120]))
-            bad_kinds.add(_fc_gap_kind(r.get("matched")))
-        elif tri is False and err:                       # 缺数据却报 false+error(报成阴性的老问题)→ 按判不了
-            bad.append((ne, str(err)[:120]))
-            bad_kinds.add("no_data")
-        elif tri:
-            hit.append(ne)
-            if reason:                                   # 脚本给的命中理由(文字说明)不能丢,进 explain
-                hit_why.append((ne, reason[:200]))
-            for ev in (r.get("evidence") or [])[:5]:
-                if isinstance(ev, dict):                 # 新契约证据条目:{type, id, data:{source_files, matched_items}}
-                    label = ":".join(str(ev[k]) for k in ("type", "id") if ev.get(k)) or str(ev)[:200]
-                    data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
-                    items = data.get("matched_items")
-                    if isinstance(items, list) and items:    # 命中原文逐字引用(定长截断防上下文爆炸)
-                        label += f" 命中{len(items)}条:" + "、".join(f"「{_fc_item_str(x)[:120]}」" for x in items[:2])
-                        for x in items:
-                            if len(hits_raw) < 3:
-                                hits_raw.append(_fc_item_str(x)[:160])
-                    srcs = data.get("source_files")
-                    if isinstance(srcs, list) and srcs:
-                        names = "、".join(str(s).replace("\\", "/").rsplit("/", 1)[-1] for s in srcs[:2])
-                        label += f"(来源:{names}{'…' if len(srcs) > 2 else ''})"
-                    evidence.append(((f"{ne}: " if ne != "(整体)" else "") + label)[:400])
-                else:
-                    evidence.append(f"{ne}: {str(ev)[:200]}" if not str(ev).startswith(f"{ne}:") else str(ev)[:200])
-        else:
-            miss.append(ne)
-            if reason:                                   # 未命中的文字理由同样留痕(如"步骤1成立但步骤2输出非空")
-                miss_why.append((ne, reason[:160]))
+    acc = _fc_collect(ne_map)
+    hit, miss, bad = acc["hit"], acc["miss"], acc["bad"]
     if not hit and not miss:                             # 全部网元都没给出 matched(error/坏形状/四态的两种判不了)
-        gap = ("no_data" if bad_kinds == {"no_data"}
-               else "cannot_judge" if bad_kinds == {"cannot_judge"} else "mixed")
-        prefix = {"no_data": "数据不足(缺数据,补采可解)",
-                  "cannot_judge": "数据在,无法判断(判据/脚本判不动)",
-                  "mixed": "部分缺数据、部分无法判断"}[gap]
-        return {"status": "insufficient_data", "gap_kind": gap, "script": rel,
-                "reason": f"{prefix}:" + "; ".join(f"{n}: {e}" for n, e in bad[:5])}
+        return _fc_all_unjudged(bad, acc["bad_kinds"], rel)
     sat = bool(hit)
+    note = _fc_note(sat, bad, acc["hit_why"], acc["miss_why"])
+    out = {"status": "ok", "predicate_satisfied": sat,
+           "matched_nes": hit, "checked_nes": len(hit) + len(miss), "data_via": how,
+           "script": rel,                                # 被判脚本真身(相对路径):追问"哪个脚本判的"有据
+           "evidence": acc["evidence"][:8],
+           "explain": (f"脚本判定:{len(hit)}/{len(hit) + len(miss)} 个网元命中"
+                       f"({'、'.join(hit[:5])})" if sat
+                       else f"脚本判定:{len(hit) + len(miss)} 个网元均未命中") + note + convention_note}
+    if acc["hits_raw"]:
+        out["hits"] = acc["hits_raw"]                    # 命中原文 → draft_rca 的 actual 里"命中原文:「…」"
+    return out
+
+
+def _fc_locate_script(rel):
+    """args.script(scripts/ 下相对路径)→ (脚本绝对路径, None);缺失/越界/不存在 → (None, 原因)。"""
+    if not rel:
+        return None, "args.script 缺失(scripts/ 下相对路径,如 custom/fault_check_xxx.py)"
+    here = Path(__file__).resolve().parent
+    script = (here / rel).resolve()
+    if not str(script).startswith(str(here)):
+        return None, f"args.script 路径越界(必须在 scripts/ 之下):{rel}"
+    if not script.exists():
+        return None, f"脚本不存在:{rel}(先把交付包脚本拷进 scripts/custom/)"
+    return script, None
+
+
+def _fc_purge_shared(script):
+    """清掉脚本目录下已缓存进 sys.modules 的模块,保证每个交付脚本冷启动。"""
+    import sys as _sys
+    # 同一进程连续调多个交付脚本时,它们 import 的同目录共享模块(search_*.py 等)会被
+    # sys.modules 全局缓存:前一个包载入的模块连同其模块级状态(缓存、全局变量)直接
+    # 喂给后面的脚本——这些脚本在交付方那里本是各自独立进程跑的,串门会污染判定
+    # (实测:n4 直跑 true、经本适配层在 cross 整链里跑变 false)。调用前后都清掉脚本目录
+    # 下的缓存模块,保证每个脚本冷启动。
+    for _n, _m in list(_sys.modules.items()):
+        _f = getattr(_m, "__file__", None)
+        try:
+            if _f and str(Path(_f).resolve().parent) == str(script.parent.resolve()):
+                del _sys.modules[_n]
+        except OSError:
+            continue
+
+
+def _fc_per_ne_map(fn, root, kwargs):
+    """逐网元调用入口(根目录下每个子目录一次)→ {网元名: 结果};入口返回非 dict 记作 error 条目。"""
+    m = {}
+    for ne_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        r = fn(_StrPath(ne_dir), **kwargs)
+        m[ne_dir.name] = r if isinstance(r, dict) else {"error": f"入口返回非 dict:{type(r).__name__}"}
+    return m
+
+
+def _fc_run_script(script, entry_name, kwargs, per_ne, root):
+    """载入交付脚本并调用入口(输出收走、argv 隔离、共享模块冷启动、调用方式仲裁)。
+    返回 (ne_map, 调用方式注记, None) 或 (None, "", 数据不足事实)。"""
+    import contextlib
+    import importlib.util
+    import io as _io
+    import sys as _sys
+
+    sdir = str(script.parent)
+    if sdir not in _sys.path:
+        _sys.path.insert(0, sdir)                        # 交付脚本 import search_config 等同目录共享模块
+    _fc_purge_shared(script)
+    spec = importlib.util.spec_from_file_location(f"fc_{script.stem}", script)
+    mod = importlib.util.module_from_spec(spec)
+    sink = _io.StringIO()
+    convention_note = ""                                 # 调用方式仲裁的注记(逐网元重调时写进 explain)
+    argv_bak, _sys.argv = _sys.argv, [str(script)]       # argv 隔离:CLI 型脚本库调用时常仍偷读 sys.argv,
+    try:                                                 # 会吃到 cross_analyzer 的 -o 临时路径当自己的参数
+        with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):     # (实测:路径当正则炸 \U)
+            spec.loader.exec_module(mod)                 # 脚本运行期的 print 全部收走,不进执行日志
+            fn = getattr(mod, entry_name, None)
+            if not callable(fn):
+                cands = [n for n in dir(mod) if callable(getattr(mod, n)) and not n.startswith("_")]
+                return None, "", {"status": "insufficient_data",
+                                  "reason": f"脚本没有入口函数「{entry_name}」;文件顶层可调用:{cands[:8]}"}
+            if per_ne:
+                ne_map = _fc_per_ne_map(fn, root, kwargs)
+            else:
+                ne_map = _fc_normalize(fn(_StrPath(root), **kwargs))
+                if _fc_no_judgment(ne_map):              # 调用方式仲裁:单网元风格脚本(没做多网元探测)
+                    retry = _fc_per_ne_map(fn, root, kwargs)   # 吃不了网元层根目录——逐网元重调一次,
+                    if not _fc_no_judgment(retry):       # 不改判断逻辑只换喂法;重调也空转就维持原判(数据不足)
+                        ne_map = retry
+                        convention_note = ("(调用方式:脚本不认多网元根目录,已按逐网元重调"
+                                           "——脚本未做规范要求的多网元探测,请交付方补)")
+    finally:
+        _sys.argv = argv_bak
+        _fc_purge_shared(script)
+    return ne_map, convention_note, None
+
+
+def _fc_ne_state(r):
+    """单网元结果 → (状态, 文字, 判不了细分):状态 bad=判不了(文字=原因,细分 no_data/cannot_judge)、
+    hit=命中、miss=未命中(文字=脚本给的 reason,可空)。"""
+    if not isinstance(r, dict) or ("matched" not in r):
+        return "bad", (str((r or {}).get("error") or r)[:120] if isinstance(r, dict) else str(r)[:120]), "cannot_judge"
+    tri = _fc_tristate(r.get("matched"))
+    det = r.get("details") if isinstance(r.get("details"), dict) else {}
+    err = det.get("error") or r.get("error")
+    reason = str(det.get("reason") or "").strip()
+    if tri is None:                                      # undetermined/insufficient_data → 该实体判不了
+        return "bad", str(reason or err or f"matched={r.get('matched')!r},判不了")[:120], _fc_gap_kind(r.get("matched"))
+    if tri is False and err:                             # 缺数据却报 false+error(报成阴性的老问题)→ 按判不了
+        return "bad", str(err)[:120], "no_data"
+    return ("hit" if tri else "miss"), reason, None
+
+
+def _fc_ev_label(ne, ev):
+    """一条证据 → (易懂文字, 命中原文条目列表)。新契约 dict 条目拼 type:id + 命中原文 + 来源文件;其余直转文字。"""
+    if not isinstance(ev, dict):
+        return (f"{ne}: {str(ev)[:200]}" if not str(ev).startswith(f"{ne}:") else str(ev)[:200]), []
+    # 新契约证据条目:{type, id, data:{source_files, matched_items}}
+    label = ":".join(str(ev[k]) for k in ("type", "id") if ev.get(k)) or str(ev)[:200]
+    data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
+    items = data.get("matched_items")
+    raw_items = []
+    if isinstance(items, list) and items:                # 命中原文逐字引用(定长截断防上下文爆炸)
+        label += f" 命中{len(items)}条:" + "、".join(f"「{_fc_item_str(x)[:120]}」" for x in items[:2])
+        raw_items = items
+    srcs = data.get("source_files")
+    if isinstance(srcs, list) and srcs:
+        names = "、".join(str(s).replace("\\", "/").rsplit("/", 1)[-1] for s in srcs[:2])
+        label += f"(来源:{names}{'…' if len(srcs) > 2 else ''})"
+    return ((f"{ne}: " if ne != "(整体)" else "") + label)[:400], raw_items
+
+
+def _fc_collect(ne_map):
+    """逐网元归类:hit/miss/bad(判不了)+ 细分集合 + 证据文字 + 命中原文(至多 3 条)+ 命中/未命中理由。"""
+    acc = {"hit": [], "miss": [], "bad": [], "evidence": [], "hits_raw": [], "hit_why": [], "miss_why": [],
+           "bad_kinds": set()}                           # 判不了的细分:no_data(缺数据)/cannot_judge(判不动)
+    for ne, r in ne_map.items():
+        state, text, gap = _fc_ne_state(r)
+        if state == "bad":
+            acc["bad"].append((ne, text))
+            acc["bad_kinds"].add(gap)
+        elif state == "hit":
+            acc["hit"].append(ne)
+            if text:                                     # 脚本给的命中理由(文字说明)不能丢,进 explain
+                acc["hit_why"].append((ne, text[:200]))
+            for ev in (r.get("evidence") or [])[:5]:
+                label, raw_items = _fc_ev_label(ne, ev)
+                for x in raw_items:
+                    if len(acc["hits_raw"]) < 3:
+                        acc["hits_raw"].append(_fc_item_str(x)[:160])
+                acc["evidence"].append(label)
+        else:
+            acc["miss"].append(ne)
+            if text:                                     # 未命中的文字理由同样留痕(如"步骤1成立但步骤2输出非空")
+                acc["miss_why"].append((ne, text[:160]))
+    return acc
+
+
+def _fc_all_unjudged(bad, bad_kinds, rel):
+    """全部网元都判不了 → 数据不足事实,gap_kind 按细分集合归为 no_data/cannot_judge/mixed。"""
+    gap = ("no_data" if bad_kinds == {"no_data"}
+           else "cannot_judge" if bad_kinds == {"cannot_judge"} else "mixed")
+    prefix = {"no_data": "数据不足(缺数据,补采可解)",
+              "cannot_judge": "数据在,无法判断(判据/脚本判不动)",
+              "mixed": "部分缺数据、部分无法判断"}[gap]
+    return {"status": "insufficient_data", "gap_kind": gap, "script": rel,
+            "reason": f"{prefix}:" + "; ".join(f"{n}: {e}" for n, e in bad[:5])}
+
+
+def _fc_note(sat, bad, hit_why, miss_why):
+    """explain 的附注:未判网元清单 + 脚本给的命中/未命中说明(各取前两条)。"""
     note = f";另有 {len(bad)} 个网元未判({'; '.join(f'{n}: {e}' for n, e in bad[:3])})" if bad else ""
     if sat and hit_why:
         note = ";脚本说明:" + "; ".join((f"{n}: " if n != "(整体)" else "") + w for n, w in hit_why[:2]) + note
     elif not sat and miss_why:
         note = ";未命中说明:" + "; ".join((f"{n}: " if n != "(整体)" else "") + w for n, w in miss_why[:2]) + note
-    out = {"status": "ok", "predicate_satisfied": sat,
-           "matched_nes": hit, "checked_nes": len(hit) + len(miss), "data_via": how,
-           "script": rel,                                # 被判脚本真身(相对路径):追问"哪个脚本判的"有据
-           "evidence": evidence[:8],
-           "explain": (f"脚本判定:{len(hit)}/{len(hit) + len(miss)} 个网元命中"
-                       f"({'、'.join(hit[:5])})" if sat
-                       else f"脚本判定:{len(hit) + len(miss)} 个网元均未命中") + note + convention_note}
-    if hits_raw:
-        out["hits"] = hits_raw                           # 命中原文 → draft_rca 的 actual 里"命中原文:「…」"
-    return out
+    return note
 
 
 @register("latest_by_seq_then_match")

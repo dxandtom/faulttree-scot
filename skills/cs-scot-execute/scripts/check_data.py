@@ -89,61 +89,50 @@ def _csv_header(p: Path):
     return None
 
 
-def main() -> int:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    if len(sys.argv) != 2:
-        print("用法: python check_data.py <用户给的数据路径>")
-        return 2
-    root = Path(sys.argv[1]).expanduser()
-    if not root.exists():
-        print(f"✗ 路径不存在:{root}")
-        return 2
-    print(f"数据入口检查:{root}\n")
-    usable, problems, suggest = [], [], []
+def _dir_of_input_file(root: Path):
+    """输入是单个文件:zip 直接指路给 zip2csv(返回 None 表示已处理完),其它文件按它所在目录检查。"""
+    if root.suffix.lower() == ".zip":
+        print("• 输入是 zip 压缩包 → 直接交给 zip2csv 转三表(它吃 zip 也吃目录),转完把")
+        print("  extracted/ 当原始目录再跑一次本检查拿 raw= 的正确层。")
+        return None
+    root_dir = root.parent
+    print(f"• 输入是单个文件,按它所在目录检查:{root_dir}\n")
+    return root_dir
 
-    if root.is_file():
-        if root.suffix.lower() == ".zip":
-            print("• 输入是 zip 压缩包 → 直接交给 zip2csv 转三表(它吃 zip 也吃目录),转完把")
-            print("  extracted/ 当原始目录再跑一次本检查拿 raw= 的正确层。")
-            return 0
-        root_dir = root.parent
-        print(f"• 输入是单个文件,按它所在目录检查:{root_dir}\n")
-        root = root_dir
 
-    # A. 原始采集结构
-    flat = _kind_dirs(root)
-    if flat:
-        counts = "、".join(f"{k}/ {_txt_count(root / k)} 个文件" for k in flat)
-        print(f"✓ 平铺单网元结构:{root.name} 下直接有 {counts}(网元名=目录名)")
+def _report_flat_ne(root: Path, flat: list, usable: list, problems: list, suggest: list) -> None:
+    """A. 平铺单网元结构(路径下直接是 CONFIG/CMD/…):报文件数、给 raw= 喂法、空目录记为问题。"""
+    counts = "、".join(f"{k}/ {_txt_count(root / k)} 个文件" for k in flat)
+    print(f"✓ 平铺单网元结构:{root.name} 下直接有 {counts}(网元名=目录名)")
+    usable.append("raw")
+    suggest.append(f'runner 的原始目录参数:--data "raw={root}"(平铺单网元,自动整形)')
+    empty = [k for k in flat if _txt_count(root / k) == 0]
+    if empty:
+        problems.append(f"目录 {', '.join(empty)} 里没有任何 .txt/.log 文件——空目录判不出东西,确认采集是否齐")
+
+
+def _report_ne_parents(root: Path, usable: list, problems: list, suggest: list) -> None:
+    """A. 向下找网元层父目录并逐个报告(最多 3 个父目录、各列 8 个网元),提醒 raw= 要传的层级。"""
+    parents = _find_ne_parents(root)
+    for parent, nes in parents[:3]:
+        print(f"✓ 原始采集结构:网元层父目录 = {parent}")
+        for ne in nes[:8]:
+            kd = _kind_dirs(ne)
+            counts = "、".join(f"{k}/{_txt_count(ne / k)}文件" for k in kd)
+            print(f"    网元「{ne.name}」:{counts}")
+            if all(_txt_count(ne / k) == 0 for k in kd):
+                problems.append(f"网元「{ne.name}」的数据目录全是空的——确认采集是否齐")
+        if len(nes) > 8:
+            print(f"    …(共 {len(nes)} 个网元)")
         usable.append("raw")
-        suggest.append(f'runner 的原始目录参数:--data "raw={root}"(平铺单网元,自动整形)')
-        empty = [k for k in flat if _txt_count(root / k) == 0]
-        if empty:
-            problems.append(f"目录 {', '.join(empty)} 里没有任何 .txt/.log 文件——空目录判不出东西,确认采集是否齐")
-    else:
-        parents = _find_ne_parents(root)
-        for parent, nes in parents[:3]:
-            print(f"✓ 原始采集结构:网元层父目录 = {parent}")
-            for ne in nes[:8]:
-                kd = _kind_dirs(ne)
-                counts = "、".join(f"{k}/{_txt_count(ne / k)}文件" for k in kd)
-                print(f"    网元「{ne.name}」:{counts}")
-                if all(_txt_count(ne / k) == 0 for k in kd):
-                    problems.append(f"网元「{ne.name}」的数据目录全是空的——确认采集是否齐")
-            if len(nes) > 8:
-                print(f"    …(共 {len(nes)} 个网元)")
-            usable.append("raw")
-            suggest.append(f'runner 的原始目录参数:--data "raw={parent}"')
-            if parent != root:
-                print(f"    ⚠ 注意:raw= 要传**这一层**({parent.name}),不是你给的顶层——传错层脚本找不到网元")
-        if not parents and not flat:
-            pass                                          # 没有原始结构,往下看表
+        suggest.append(f'runner 的原始目录参数:--data "raw={parent}"')
+        if parent != root:
+            print(f"    ⚠ 注意:raw= 要传**这一层**({parent.name}),不是你给的顶层——传错层脚本找不到网元")
+    # 没有原始结构,往下看表
 
-    # B/C. 表与清单
+
+def _scan_tables(root: Path) -> tuple:
+    """B/C. 扫描根目录下的 csv/xlsx/xlsm,按表头分成 数据表 [(文件名, 命中的指标)]、清单表、读不了表头的表。"""
     tables, manifests, unknown_x = [], [], []
     for p in sorted(list(root.glob("*.csv")) + list(root.glob("*.xlsx")) + list(root.glob("*.xlsm"))):
         if p.name.startswith("~$"):
@@ -159,6 +148,11 @@ def main() -> int:
         hit = [ind for ind, signs in _TABLE_SIGNS.items() if hs & signs]
         if hit:
             tables.append((p.name, hit))
+    return tables, manifests, unknown_x
+
+
+def _report_tables(tables: list, manifests: list, unknown_x: list, usable: list, suggest: list) -> None:
+    """B/C. 打印表与清单的识别结果:数据表给喂法,清单点名禁喂,读不了的先跳过。"""
     if tables:
         print("✓ 已解析数据表:")
         for name, hit in tables:
@@ -171,6 +165,9 @@ def main() -> int:
     if unknown_x:
         print(f"• 读不了表头的表文件(缺读取器,先跳过):{', '.join(unknown_x)}")
 
+
+def _conclude(root: Path, usable: list, problems: list, suggest: list) -> int:
+    """收尾:列问题、给建议喂法(退出码 0);认不出形态时指路散文件补救或让用户确认(退出码 2)。"""
     print()
     if problems:
         print("发现问题:")
@@ -195,6 +192,41 @@ def main() -> int:
         return 2
     print("  把本报告原样给用户:请确认数据目录给对了没(常见错:给了外层目录/给了采集清单)。**不要强行继续**。")
     return 2
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    if len(sys.argv) != 2:
+        print("用法: python check_data.py <用户给的数据路径>")
+        return 2
+    root = Path(sys.argv[1]).expanduser()
+    if not root.exists():
+        print(f"✗ 路径不存在:{root}")
+        return 2
+    print(f"数据入口检查:{root}\n")
+    usable, problems, suggest = [], [], []
+
+    if root.is_file():
+        root = _dir_of_input_file(root)
+        if root is None:
+            return 0
+
+    # A. 原始采集结构
+    flat = _kind_dirs(root)
+    if flat:
+        _report_flat_ne(root, flat, usable, problems, suggest)
+    else:
+        _report_ne_parents(root, usable, problems, suggest)
+
+    # B/C. 表与清单
+    tables, manifests, unknown_x = _scan_tables(root)
+    _report_tables(tables, manifests, unknown_x, usable, suggest)
+
+    return _conclude(root, usable, problems, suggest)
 
 
 if __name__ == "__main__":

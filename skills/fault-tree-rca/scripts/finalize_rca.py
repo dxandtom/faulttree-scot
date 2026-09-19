@@ -146,23 +146,10 @@ def _put_en(item: dict, key: str, en: str) -> None:
         item[key + "_en"] = en
 
 
-def main() -> int:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    ap = argparse.ArgumentParser(description="裁决单 → rca.json 机械合成(模型只交判定,拼装归代码)")
-    ap.add_argument("draft")
-    ap.add_argument("decisions", nargs="?", default=None,
-                    help="模型裁决单(只需含候选清单里没定档的条目;全自动定档时可省略)")
-    ap.add_argument("-o", "--out", required=True)
-    ap.add_argument("--rca-input", help="抄 tree_issues 用;不给则输出空 tree_issues")
-    ap.add_argument("--solutions", help="tree/solutions.json,按根因节点点查 recommend_solution")
-    a = ap.parse_args()
-
-    draft = _load(Path(a.draft))
-    if a.decisions:
-        dec_raw = _load(Path(a.decisions))
+def _read_decisions(path):
+    """读裁决单并把 verdict 归一为四档:{node_id: 裁决条目(带 _v)};全自动定档时可不给裁决单。"""
+    if path:
+        dec_raw = _load(Path(path))
         dec_list = dec_raw.get("decisions") if isinstance(dec_raw, dict) else dec_raw
         if not isinstance(dec_list, list):
             raise SystemExit("裁决单须是 list(或 {\"decisions\": [...]}),一个候选一条")
@@ -178,12 +165,19 @@ def main() -> int:
                              f"(只认 confirmed/probable/excluded/undetermined 及中文同义词)")
         d["_v"] = v
         decisions[str(d["node_id"])] = d
+    return decisions
 
-    # 必裁决集 = 确证候选 + 疑似候选 + 冲突条目(md 形态为 holding_candidates + 冲突)
-    adjudicables = {str(e["node_id"]): e for e in
-                    (draft.get("confirmed_candidates", []) + draft.get("probable_candidates", [])
-                     + draft.get("holding_candidates", []) + draft.get("conflict_nodes", []))}
-    # 候选清单已机械定档的(auto_verdict):不给裁决自动收;给了相反裁决明确拒收(机械定档不容改写)
+
+def _adjudicables(draft: dict) -> dict:
+    """必裁决集 = 确证候选 + 疑似候选 + 冲突条目(md 形态为 holding_candidates + 冲突)。"""
+    return {str(e["node_id"]): e for e in
+            (draft.get("confirmed_candidates", []) + draft.get("probable_candidates", [])
+             + draft.get("holding_candidates", []) + draft.get("conflict_nodes", []))}
+
+
+def _apply_auto_verdicts(adjudicables: dict, decisions: dict) -> int:
+    """自动定档合并:候选清单已机械定档的(auto_verdict)不给裁决自动收;给了相反裁决明确拒收
+    (机械定档不容改写)。返回自动收的条数。"""
     auto_cnt = 0
     for nid, e in adjudicables.items():
         av = _VERDICT.get(str(e.get("auto_verdict") or "").strip().lower())
@@ -198,6 +192,11 @@ def main() -> int:
             continue                                     # 同档:模型补充的 caveats/support 照收
         decisions[nid] = {"node_id": nid, "verdict": av, "_v": av}
         auto_cnt += 1
+    return auto_cnt
+
+
+def _check_coverage(draft: dict, adjudicables: dict, decisions: dict) -> None:
+    """漏裁决检查:必裁决集一条都不许漏;裁决单里也不许冒出候选清单之外的节点。"""
     missing = [f"{nid}「{e.get('node')}」" for nid, e in adjudicables.items() if nid not in decisions]
     if missing:
         raise SystemExit("不合格:以下候选没有裁决(候选清单未机械定档,需要权衡;候选不许无声消失,"
@@ -208,7 +207,88 @@ def main() -> int:
     if unknown:
         raise SystemExit(f"不合格:裁决单里的节点不在候选清单中:{', '.join(unknown)}(别编节点)")
 
-    rca_result, probable, undetermined, excl_notes, excl_notes_en = [], [], [], [], []
+
+def _check_confirmable(nid: str, e: dict, ev: list) -> None:
+    """确证前置检查:候选自身须干净(_dirty);路径上级不许有实测不成立/冲突(层级矛盾只收 probable)。"""
+    bad = _dirty(ev)
+    if bad:
+        raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但候选自身不干净:"
+                         + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad[:3])
+                         + " —— 确证要求:候选自身成立(未绑定/数据不足祖先与叶子因待定不拦,"
+                           "自动落 caveats);对候选自身有疑,改 probable(带 blocked_at/caveats)"
+                           "或 excluded(带 reason)")
+    bad_anc = [x for x in ev[:-1]
+               if "不成立" in str(x.get("judgment") or "") or "冲突" in str(x.get("judgment") or "")]
+    if bad_anc:
+        raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但路径上级 "
+                         + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad_anc[:3])
+                         + " —— 规则:层级矛盾(候选成立+上级实测不成立/冲突)只收 probable"
+                           "(blocked_at=该上级,note 写清矛盾);上级判断方法确认写错的,"
+                           "调优表清其绑定(未绑定默认放行)后重跑")
+
+
+def _confirmed_caveats(e: dict, d: dict, ev: list) -> tuple:
+    """确证条目的 caveats (zh, en):裁决单的 caveats + 祖先注记 + 叶子因待定注记(中间节点确证必须落痕)。"""
+    notes, notes_en = _anc_notes(ev), _anc_notes(ev, "en")
+    kids = e.get("children_status") or []
+    if e.get("leaf_pending") or kids:            # 中间节点确证:叶子因待定必须落痕,不许无痕
+        notes.append(_leaf_note(kids))
+        notes_en.append(_leaf_note(kids, "en"))
+    cav = ";".join(x for x in ([str(d.get("caveats") or "").strip()] + notes) if x)
+    cav_en = ";".join(x for x in ([str(d.get("caveats") or "").strip()] + notes_en) if x)
+    return cav, cav_en
+
+
+def _confirmed_item(nid: str, e: dict, d: dict, ev: list, path: list) -> dict:
+    """确证条目合成:先做前置检查,再拼机械字段;祖先注记与叶子因待定机械落 caveats。"""
+    _check_confirmable(nid, e, ev)
+    item = {"Root_cause": e.get("node"), "Fault_tree_path": path,
+            "node_id": nid,
+            "support": d.get("support") or e.get("support_hint") or "",
+            "evidence_path": ev}
+    _put_en(item, "support", d.get("support") or e.get("support_hint_en") or e.get("support_hint") or "")
+    cav, cav_en = _confirmed_caveats(e, d, ev)
+    if cav:
+        item["caveats"] = cav
+        _put_en(item, "caveats", cav_en)
+    return item
+
+
+def _probable_caveats(e: dict, d: dict, ev: list) -> tuple:
+    """疑似条目的 caveats (zh, en):裁决单 caveats(其次候选清单预填的 note)+ 层级矛盾之外的祖先缺数注记。"""
+    cav_bits = [str(d.get("caveats") or e.get("note") or "").strip()]
+    cav_bits_en = [str(d.get("caveats") or e.get("note_en") or e.get("note") or "").strip()]
+    notes, notes_en = _anc_notes(ev), _anc_notes(ev, "en")
+    keep = [i for i, x in enumerate(notes) if "数据不足" in x]   # 层级矛盾之外的祖先缺数也留痕
+    cav_bits += [notes[i] for i in keep]
+    cav_bits_en += [notes_en[i] for i in keep]
+    return ";".join(x for x in cav_bits if x), ";".join(x for x in cav_bits_en if x)
+
+
+def _probable_item(nid: str, e: dict, d: dict, ev: list, path: list) -> dict:
+    """疑似条目合成:卡点/注意/support 优先取裁决单,其次候选清单预填(含英文预填)。"""
+    cav, cav_en = _probable_caveats(e, d, ev)
+    item = {"Root_cause": e.get("node"), "Fault_tree_path": path,
+            "node_id": nid,
+            "confidence": d.get("confidence") or "medium",
+            "blocked_at": d.get("blocked_at") or e.get("blocked_at_hint") or "",
+            "caveats": cav,
+            "support": d.get("support") or e.get("support_hint") or "",
+            "evidence_path": ev}
+    _put_en(item, "blocked_at", d.get("blocked_at") or e.get("blocked_at_hint_en") or e.get("blocked_at_hint") or "")
+    _put_en(item, "caveats", cav_en)
+    _put_en(item, "support", d.get("support") or e.get("support_hint_en") or e.get("support_hint") or "")
+    return item
+
+
+def _excl_note(e: dict, nid: str, reason) -> tuple:
+    """排除留痕一条的 (zh, en) 文案。"""
+    return f"「{e.get('node')}」({nid}):{reason}", f"「{_nm(e, 'en')}」({nid}):{reason}"
+
+
+def _synthesize(adjudicables: dict, decisions: dict) -> tuple:
+    """按裁决逐条合成:确证/疑似条目、排除留痕(zh/en);excluded 无 reason、有成立事实却裁 undetermined 都拒收。"""
+    rca_result, probable, excl_notes, excl_notes_en = [], [], [], []
     hold_ids = set(adjudicables)                          # 这些都有成立事实(候选/冲突)
     for nid, e in adjudicables.items():
         d = decisions[nid]
@@ -216,74 +296,35 @@ def main() -> int:
         ev = _ev_final(e, d.get("overrides"))
         path = e.get("path_names") or [e.get("node")]
         if v == "confirmed":
-            bad = _dirty(ev)
-            if bad:
-                raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但候选自身不干净:"
-                                 + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad[:3])
-                                 + " —— 确证要求:候选自身成立(未绑定/数据不足祖先与叶子因待定不拦,"
-                                   "自动落 caveats);对候选自身有疑,改 probable(带 blocked_at/caveats)"
-                                   "或 excluded(带 reason)")
-            bad_anc = [x for x in ev[:-1]
-                       if "不成立" in str(x.get("judgment") or "") or "冲突" in str(x.get("judgment") or "")]
-            if bad_anc:
-                raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=confirmed,但路径上级 "
-                                 + "、".join(f"{x.get('node')}({x.get('judgment')})" for x in bad_anc[:3])
-                                 + " —— 规则:层级矛盾(候选成立+上级实测不成立/冲突)只收 probable"
-                                   "(blocked_at=该上级,note 写清矛盾);上级判断方法确认写错的,"
-                                   "调优表清其绑定(未绑定默认放行)后重跑")
-            item = {"Root_cause": e.get("node"), "Fault_tree_path": path,
-                    "node_id": nid,
-                    "support": d.get("support") or e.get("support_hint") or "",
-                    "evidence_path": ev}
-            _put_en(item, "support", d.get("support") or e.get("support_hint_en") or e.get("support_hint") or "")
-            notes, notes_en = _anc_notes(ev), _anc_notes(ev, "en")
-            kids = e.get("children_status") or []
-            if e.get("leaf_pending") or kids:            # 中间节点确证:叶子因待定必须落痕,不许无痕
-                notes.append(_leaf_note(kids))
-                notes_en.append(_leaf_note(kids, "en"))
-            cav = ";".join(x for x in ([str(d.get("caveats") or "").strip()] + notes) if x)
-            if cav:
-                item["caveats"] = cav
-                _put_en(item, "caveats", ";".join(x for x in ([str(d.get("caveats") or "").strip()] + notes_en) if x))
-            rca_result.append(item)
+            rca_result.append(_confirmed_item(nid, e, d, ev, path))
         elif v == "probable":
-            cav_bits = [str(d.get("caveats") or e.get("note") or "").strip()]
-            cav_bits_en = [str(d.get("caveats") or e.get("note_en") or e.get("note") or "").strip()]
-            notes, notes_en = _anc_notes(ev), _anc_notes(ev, "en")
-            keep = [i for i, x in enumerate(notes) if "数据不足" in x]   # 层级矛盾之外的祖先缺数也留痕
-            cav_bits += [notes[i] for i in keep]
-            cav_bits_en += [notes_en[i] for i in keep]
-            item = {"Root_cause": e.get("node"), "Fault_tree_path": path,
-                    "node_id": nid,
-                    "confidence": d.get("confidence") or "medium",
-                    "blocked_at": d.get("blocked_at") or e.get("blocked_at_hint") or "",
-                    "caveats": ";".join(x for x in cav_bits if x),
-                    "support": d.get("support") or e.get("support_hint") or "",
-                    "evidence_path": ev}
-            _put_en(item, "blocked_at", d.get("blocked_at") or e.get("blocked_at_hint_en") or e.get("blocked_at_hint") or "")
-            _put_en(item, "caveats", ";".join(x for x in cav_bits_en if x))
-            _put_en(item, "support", d.get("support") or e.get("support_hint_en") or e.get("support_hint") or "")
-            probable.append(item)
+            probable.append(_probable_item(nid, e, d, ev, path))
         elif v == "excluded":
             if not (d.get("reason") or "").strip():
                 raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」verdict=excluded 但没给 reason——"
                                  "排除有成立事实的候选,理由只能是反证或绑定质量问题,必须落字")
-            excl_notes.append(f"「{e.get('node')}」({nid}):{d['reason']}")
-            excl_notes_en.append(f"「{_nm(e, 'en')}」({nid}):{d['reason']}")
+            zh, en = _excl_note(e, nid, d["reason"])
+            excl_notes.append(zh)
+            excl_notes_en.append(en)
         else:                                             # undetermined:有成立事实的不收
             if nid in hold_ids:
                 raise SystemExit(f"不合格:候选 {nid}「{e.get('node')}」有'成立'事实,不收 undetermined"
                                  "(待确认=既无正向证据又缺数据)——升 probable 或有据 excluded")
+    return rca_result, probable, excl_notes, excl_notes_en
 
-    # 待确认条目(真缺数据的节点)自动带出;模型给了裁决的按裁决走(如补充 reason)
+
+def _undetermined_items(draft: dict, decisions: dict, excl_notes: list, excl_notes_en: list) -> list:
+    """待确认条目(真缺数据的节点)自动带出;模型给了裁决的按裁决走(如补充 reason,或 excluded+reason 转排除留痕)。"""
+    undetermined = []
     for e in draft.get("undetermined_skeleton", []):
         nid = str(e.get("node_id"))
         d = decisions.get(nid, {})
         if d and d.get("_v") == "excluded":
             if not (d.get("reason") or "").strip():
                 raise SystemExit(f"不合格:{nid} verdict=excluded 但没给 reason")
-            excl_notes.append(f"「{e.get('node')}」({nid}):{d['reason']}")
-            excl_notes_en.append(f"「{_nm(e, 'en')}」({nid}):{d['reason']}")
+            zh, en = _excl_note(e, nid, d["reason"])
+            excl_notes.append(zh)
+            excl_notes_en.append(en)
             continue
         item = {"Fault_tree_path": [e.get("node")],
                 "blocked_at": f"{e.get('node')}({nid})",
@@ -293,22 +334,21 @@ def main() -> int:
         _put_en(item, "blocked_at", f"{_nm(e, 'en')}({nid})")
         _put_en(item, "reason", d.get("reason") or e.get("actual_en") or e.get("actual") or _t("insufficient", "en"))
         undetermined.append(item)
+    return undetermined
 
-    doc = {"rca_result": rca_result, "probable_causes": probable,
-           "undetermined": undetermined, "tree_issues": {}}
-    if excl_notes:
-        doc["excluded_note"] = ";".join(excl_notes)
-        _put_en(doc, "excluded_note", ";".join(excl_notes_en))
-    if a.rca_input:
+
+def _attach_extras(doc: dict, rca_input, solutions) -> None:
+    """附加项:tree_issues 从 rca_input 抄(不给则空);recommend_solution 按根因节点点查 solutions.json;读失败只警告。"""
+    if rca_input:
         try:
-            ri = json.loads(Path(a.rca_input).read_text(encoding="utf-8"))
+            ri = json.loads(Path(rca_input).read_text(encoding="utf-8"))
             doc["tree_issues"] = ri.get("tree_issues") or {}
         except Exception as e:
             print(f"[warn] 读 rca_input 失败({e}),tree_issues 置空")
-    if a.solutions:
+    if solutions:
         try:
-            sol = json.loads(Path(a.solutions).read_text(encoding="utf-8"))
-            for rc in rca_result + probable:
+            sol = json.loads(Path(solutions).read_text(encoding="utf-8"))
+            for rc in doc["rca_result"] + doc["probable_causes"]:
                 s = sol.get(str(rc.get("node_id")))
                 if isinstance(s, dict) and (s.get("zh") or s.get("en")):
                     rc["recommend_solution"] = s.get("zh") or s.get("en")
@@ -316,13 +356,47 @@ def main() -> int:
         except Exception as e:
             print(f"[warn] 读 solutions.json 失败({e}),不附解决方案")
 
-    out = Path(a.out)
+
+def _write_doc(doc: dict, out: Path, n_excl: int, auto_cnt: int) -> None:
+    """写盘并打印合成统计与下一步。"""
     out.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已机械合成 → {out}")
-    print(f"  确证 {len(rca_result)} 条、疑似 {len(probable)} 条、待确认 {len(undetermined)} 条"
-          f"、排除留痕 {len(excl_notes)} 条(其中 {auto_cnt} 条由候选清单机械定档,零模型裁决)。")
+    print(f"  确证 {len(doc['rca_result'])} 条、疑似 {len(doc['probable_causes'])} 条、待确认 {len(doc['undetermined'])} 条"
+          f"、排除留痕 {n_excl} 条(其中 {auto_cnt} 条由候选清单机械定档,零模型裁决)。")
     print("  下一步:python render_report.py <本 rca.json> 机械渲染报告(证据/命中原文/卡点全从"
           " rca.json 拼,模型只在报告末尾追加「补充说明」段,数字不许改)。")
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    ap = argparse.ArgumentParser(description="裁决单 → rca.json 机械合成(模型只交判定,拼装归代码)")
+    ap.add_argument("draft")
+    ap.add_argument("decisions", nargs="?", default=None,
+                    help="模型裁决单(只需含候选清单里没定档的条目;全自动定档时可省略)")
+    ap.add_argument("-o", "--out", required=True)
+    ap.add_argument("--rca-input", help="抄 tree_issues 用;不给则输出空 tree_issues")
+    ap.add_argument("--solutions", help="tree/solutions.json,按根因节点点查 recommend_solution")
+    a = ap.parse_args()
+
+    draft = _load(Path(a.draft))
+    decisions = _read_decisions(a.decisions)
+    adjudicables = _adjudicables(draft)
+    auto_cnt = _apply_auto_verdicts(adjudicables, decisions)
+    _check_coverage(draft, adjudicables, decisions)
+
+    rca_result, probable, excl_notes, excl_notes_en = _synthesize(adjudicables, decisions)
+    undetermined = _undetermined_items(draft, decisions, excl_notes, excl_notes_en)
+
+    doc = {"rca_result": rca_result, "probable_causes": probable,
+           "undetermined": undetermined, "tree_issues": {}}
+    if excl_notes:
+        doc["excluded_note"] = ";".join(excl_notes)
+        _put_en(doc, "excluded_note", ";".join(excl_notes_en))
+    _attach_extras(doc, a.rca_input, a.solutions)
+    _write_doc(doc, Path(a.out), len(excl_notes), auto_cnt)
     return 0
 
 

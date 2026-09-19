@@ -129,31 +129,50 @@ def _by_name(nodes, name):
     return hits[0] if len(hits) == 1 else None
 
 
-def collect(doc: dict, nodes: dict):
-    """rca.json → 标记节点 {nid: (tag, item)}、证据 {nid: evidence 条目}、已知不成立 {nid: 原因}。"""
-    flags, ev, failed = {}, {}, {}
+def _collect_evidence(it: dict, tag: str, nodes: dict, ev: dict, failed: dict) -> None:
+    """一条确证/疑似条目的 evidence_path → 证据表(确诊优先覆盖)与已知不成立表。"""
+    for e in it.get("evidence_path") or []:
+        eid = str(e.get("node_id") or "") or _by_name(nodes, e.get("node"))
+        if eid and eid in nodes:
+            if eid not in ev or tag == "confirmed":
+                ev[eid] = e
+            if "不成立" in str(e.get("judgment") or ""):
+                failed.setdefault(eid, _one(e.get("actual") or e.get("judgment"), 120))
+
+
+def _collect_flagged(doc: dict, nodes: dict, flags: dict, ev: dict, failed: dict) -> None:
+    """确证/疑似条目 → 标记节点(node_id 优先,其次按路径末位名字查树),并收其证据。"""
     for tag, key in (("confirmed", "rca_result"), ("probable", "probable_causes")):
         for it in doc.get(key) or []:
             nid = str(it.get("node_id") or "") or _by_name(nodes, (it.get("Fault_tree_path") or [""])[-1])
             if nid and nid in nodes:
                 flags.setdefault(nid, (tag, it))
-            for e in it.get("evidence_path") or []:
-                eid = str(e.get("node_id") or "") or _by_name(nodes, e.get("node"))
-                if eid and eid in nodes:
-                    if eid not in ev or tag == "confirmed":
-                        ev[eid] = e
-                    if "不成立" in str(e.get("judgment") or ""):
-                        failed.setdefault(eid, _one(e.get("actual") or e.get("judgment"), 120))
+            _collect_evidence(it, tag, nodes, ev, failed)
+
+
+def _collect_undetermined(doc: dict, nodes: dict, flags: dict) -> None:
+    """待确认条目 → 标记节点:blocked_at 末尾的 (nid) 优先,其次按路径末位名字查树;已标记的不覆盖。"""
     for it in doc.get("undetermined") or []:
         m = _NID_RE.search(str(it.get("blocked_at") or ""))
         nid = m.group(1) if m else _by_name(nodes, (it.get("Fault_tree_path") or [""])[-1])
         if nid and nid in nodes and nid not in flags:
             flags[nid] = ("undetermined", it)
-    # 排除留痕:「名」(nid):原因 → 已知不成立的候选(展开路径上的兄弟按此点名)
+
+
+def _collect_excluded(doc: dict, nodes: dict, failed: dict) -> None:
+    """排除留痕:「名」(nid):原因 → 已知不成立的候选(展开路径上的兄弟按此点名)。"""
     for m in re.finditer(r"「([^」]+)」\((\w+)\):([^;]*)", str(doc.get("excluded_note") or "")):
         nid = m.group(2) if m.group(2) in nodes else _by_name(nodes, m.group(1))
         if nid:
             failed.setdefault(nid, _one(m.group(3), 120))
+
+
+def collect(doc: dict, nodes: dict):
+    """rca.json → 标记节点 {nid: (tag, item)}、证据 {nid: evidence 条目}、已知不成立 {nid: 原因}。"""
+    flags, ev, failed = {}, {}, {}
+    _collect_flagged(doc, nodes, flags, ev, failed)
+    _collect_undetermined(doc, nodes, flags)
+    _collect_excluded(doc, nodes, failed)
     return flags, ev, failed
 
 
