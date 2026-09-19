@@ -11,7 +11,7 @@
     检查结果 JSON，包含:
     - fully_bound: 完全绑定的节点列表
     - partially_bound: 部分绑定的节点列表（多条件节点部分有绑定）
-    - unbound: 有判据但完全无绑定的节点列表（可能是 BINDING_GAP）
+    - unbound: 有判据但完全无绑定的节点列表（可能是 BINDING_GAP,即绑定缺口）
 """
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ def check_binding_gaps(tree_index: Dict[str, Any], bound_nodes: Set[str]) -> Dic
     """
     nodes = tree_index.get("nodes", {})
     if isinstance(nodes, dict):
-        # 执行链的 tree_index:nodes 是字典,node_id 就是字典的 key(节点体内没有 node_id 字段)
+        # 执行链生成的 tree_index:nodes 是字典,node_id 就是字典的 key(节点内容里没有 node_id 字段)
         node_items = [(node.get("node_id") or node.get("id") or nid, node)
                       for nid, node in nodes.items()]
     elif isinstance(nodes, list):

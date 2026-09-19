@@ -109,130 +109,110 @@ def find_cmd_output(lines_or_file, cmd_pattern, max_lines=1000):
     cmd_standalone_pattern = re.compile(r'^\s*(display\s+[^=]+?)\s*$', re.I)
     inline_cmd_pattern = re.compile(r'^=+\s*(display\s+[^=]+?)\s*=+$', re.I)
     prompt_pattern = re.compile(r'^<(\S+)>\s*(display\s+\S+)', re.I)
+    patterns = (sep_pattern, cmd_standalone_pattern, inline_cmd_pattern, prompt_pattern)
 
     i = 0
     while i < n:
-        line = lines[i].strip()
-        original_line = lines[i].rstrip('\n')
+        hit = _match_cmd_at(lines, i, n, cmd_regex, patterns)
+        if hit is None:
+            i += 1
+            continue
+        cmd_match, start, out_start, stop_sep, stop_prompt = hit
+        output_lines, j = _read_output(lines, out_start, n, max_lines, sep_pattern, stop_sep, stop_prompt)
 
-        cmd_match = None
-        start = i
-
-        # 格式1: 上下分隔线 =========display xxx========
-        if i + 2 < n:
-            next_line1 = lines[i + 1].strip()
-            next_line2 = lines[i + 2].strip() if i + 2 < n else ''
-
-            if sep_pattern.match(line) and sep_pattern.match(next_line2):
-                cmd_m = cmd_standalone_pattern.match(next_line1)
-                if cmd_m and cmd_regex.search(cmd_m.group(1)):
-                    cmd_match = next_line1.strip()
-                    start = i + 1
-                    i = i + 3
-
-                    output_lines = []
-                    j = i
-                    while j < n and j < i + max_lines:
-                        next_line = lines[j].strip()
-                        if sep_pattern.match(next_line) or \
-                           next_line.startswith('<') or \
-                           next_line.startswith('Command:'):
-                            break
-                        output_lines.append(lines[j].rstrip('\n'))
-                        j += 1
-
-                    results.append({
-                        'start_line': start + 1,
-                        'cmd': cmd_match,
-                        'output': ''.join(output_lines),
-                        'output_lines': len(output_lines)
-                    })
-                    i = j
-                    continue
-
-        # 格式2: 内嵌命令格式 ===display xxx===
-        if sep_pattern.match(line):
-            cmd_m = inline_cmd_pattern.match(line)
-            if cmd_m and cmd_regex.search(cmd_m.group(1)):
-                cmd_match = cmd_m.group(1).strip()
-                start = i
-                i += 1
-
-                output_lines = []
-                j = i
-                while j < n and j < i + max_lines:
-                    next_line = lines[j].strip()
-                    if sep_pattern.match(next_line) or \
-                       next_line.startswith('<') or \
-                       next_line.startswith('Command:'):
-                        break
-                    output_lines.append(lines[j].rstrip('\n'))
-                    j += 1
-
-                results.append({
-                    'start_line': start + 1,
-                    'cmd': cmd_match,
-                    'output': ''.join(output_lines),
-                    'output_lines': len(output_lines)
-                })
-                i = j
-                continue
-
-        # 格式3: Command: display xxx 格式
-        if line.startswith('Command:'):
-            cmd_part = line[len('Command:'):].strip()
-            if cmd_regex.search(cmd_part):
-                cmd_match = line
-                start = i
-                i += 1
-
-                output_lines = []
-                j = i
-                while j < n and j < i + max_lines:
-                    next_line = lines[j].strip()
-                    if next_line.startswith('Command:'):
-                        break
-                    output_lines.append(lines[j].rstrip('\n'))
-                    j += 1
-
-                results.append({
-                    'start_line': start + 1,
-                    'cmd': cmd_match,
-                    'output': ''.join(output_lines),
-                    'output_lines': len(output_lines)
-                })
-                i = j
-                continue
-
-        # 格式4: 命令提示符格式 <Switch>display xxx
-        if line.startswith('<'):
-            cmd_m = prompt_pattern.match(line)
-            if cmd_m and cmd_regex.search(cmd_m.group(2)):
-                cmd_match = line
-                start = i
-                i += 1
-
-                output_lines = []
-                j = i
-                while j < n and j < i + max_lines:
-                    next_line = lines[j].strip()
-                    if next_line.startswith('<') or next_line.startswith('Command:'):
-                        break
-                    output_lines.append(lines[j].rstrip('\n'))
-                    j += 1
-
-                results.append({
-                    'start_line': start + 1,
-                    'cmd': cmd_match,
-                    'output': ''.join(output_lines),
-                    'output_lines': len(output_lines)
-                })
-                i = j
-                continue
-
-        i += 1
+        results.append({
+            'start_line': start + 1,
+            'cmd': cmd_match,
+            'output': ''.join(output_lines),
+            'output_lines': len(output_lines)
+        })
+        i = j
 
     return results
+
+
+def _read_output(lines, start, n, max_lines, sep_pattern, stop_sep, stop_prompt):
+    """从 start 行起收集回显,最多 max_lines 行;遇到新段落起点就停(Command: 一律认,
+    分隔线/提示符按 stop_sep/stop_prompt 决定是否认)。返回 (回显行列表, 停止位置)。"""
+    output_lines = []
+    j = start
+    while j < n and j < start + max_lines:
+        next_line = lines[j].strip()
+        if (stop_sep and sep_pattern.match(next_line)) or \
+           (stop_prompt and next_line.startswith('<')) or \
+           next_line.startswith('Command:'):
+            break
+        output_lines.append(lines[j].rstrip('\n'))
+        j += 1
+    return output_lines, j
+
+
+def _match_cmd_at(lines, i, n, cmd_regex, patterns):
+    """在第 i 行按四种格式依次识别匹配 cmd_regex 的命令;命中返回
+    (命令文本, 命令所在行, 回显起始行, 回显是否遇分隔线停, 是否遇提示符停),否则 None。"""
+    sep_pattern, cmd_standalone_pattern, inline_cmd_pattern, prompt_pattern = patterns
+    line = lines[i].strip()
+
+    # 格式1: 上下分隔线 =========display xxx========
+    if i + 2 < n:
+        next_line1 = lines[i + 1].strip()
+        next_line2 = lines[i + 2].strip() if i + 2 < n else ''
+
+        if sep_pattern.match(line) and sep_pattern.match(next_line2):
+            cmd_m = cmd_standalone_pattern.match(next_line1)
+            if cmd_m and cmd_regex.search(cmd_m.group(1)):
+                return next_line1.strip(), i + 1, i + 3, True, True
+
+    # 格式2: 内嵌命令格式 ===display xxx===
+    if sep_pattern.match(line):
+        cmd_m = inline_cmd_pattern.match(line)
+        if cmd_m and cmd_regex.search(cmd_m.group(1)):
+            return cmd_m.group(1).strip(), i, i + 1, True, True
+
+    # 格式3: Command: display xxx 格式
+    if line.startswith('Command:'):
+        cmd_part = line[len('Command:'):].strip()
+        if cmd_regex.search(cmd_part):
+            return line, i, i + 1, False, False
+
+    # 格式4: 命令提示符格式 <Switch>display xxx
+    if line.startswith('<'):
+        cmd_m = prompt_pattern.match(line)
+        if cmd_m and cmd_regex.search(cmd_m.group(2)):
+            return line, i, i + 1, False, True
+
+    return None
+
+
+def _match_any_cmd_at(lines, i, n, patterns):
+    """在第 i 行按三种格式(不含 Command: 格式)识别任意命令;命中返回
+    (命令文本, 命令所在行, 回显起始行, 回显是否遇分隔线停, 是否遇提示符停),否则 None。"""
+    sep_pattern, cmd_standalone_pattern, inline_cmd_pattern, prompt_pattern = patterns
+    line = lines[i].strip()
+
+    # 格式1: 上下分隔线
+    if i + 2 < n:
+        next_line1 = lines[i + 1].strip()
+        next_line2 = lines[i + 2].strip() if i + 2 < n else ''
+
+        if sep_pattern.match(line) and sep_pattern.match(next_line2):
+            cmd_m = cmd_standalone_pattern.match(next_line1)
+            if cmd_m:
+                return cmd_m.group(1).strip(), i + 1, i + 3, True, True
+
+    # 格式2: 内嵌命令
+    if sep_pattern.match(line):
+        cmd_m = inline_cmd_pattern.match(line)
+        if cmd_m:
+            return cmd_m.group(1).strip(), i, i + 1, True, True
+
+    # 格式4: 命令提示符
+    if line.startswith('<'):
+        cmd_m = prompt_pattern.match(line)
+        if cmd_m:
+            return cmd_m.group(2).strip(), i, i + 1, False, True
+
+    return None
 
 
 def find_all_cmds(file_path):
@@ -254,85 +234,20 @@ def find_all_cmds(file_path):
     cmd_standalone_pattern = re.compile(r'^\s*(display\s+[^\s=]+(?:\s+[^\s=]+)*)\s*$', re.I)
     inline_cmd_pattern = re.compile(r'^=+\s*(display\s+[^\s=]+(?:\s+[^\s=]+)*)\s*=+$', re.I)
     prompt_pattern = re.compile(r'^<(\S+)>\s*(display\s+\S+)', re.I)
+    patterns = (sep_pattern, cmd_standalone_pattern, inline_cmd_pattern, prompt_pattern)
 
     i = 0
     while i < n:
-        line = lines[i].strip()
-        cmd_match = None
-        start = i
+        hit = _match_any_cmd_at(lines, i, n, patterns)
+        if hit is None:
+            i += 1
+            continue
+        cmd_match, start, out_start, stop_sep, stop_prompt = hit
+        # 不限行数:上限给 n(j < n 已兜底,等价于原来的 while j < n)
+        output_lines, j = _read_output(lines, out_start, n, n, sep_pattern, stop_sep, stop_prompt)
 
-        # 格式1: 上下分隔线
-        if i + 2 < n:
-            next_line1 = lines[i + 1].strip()
-            next_line2 = lines[i + 2].strip() if i + 2 < n else ''
-
-            if sep_pattern.match(line) and sep_pattern.match(next_line2):
-                cmd_m = cmd_standalone_pattern.match(next_line1)
-                if cmd_m:
-                    cmd_match = cmd_m.group(1).strip()
-                    start = i + 1
-                    i = i + 3
-
-                    output_lines = []
-                    j = i
-                    while j < n:
-                        next_line = lines[j].strip()
-                        if sep_pattern.match(next_line) or \
-                           next_line.startswith('<') or \
-                           next_line.startswith('Command:'):
-                            break
-                        output_lines.append(lines[j].rstrip('\n'))
-                        j += 1
-
-                    results.append({'start_line': start + 1, 'cmd': cmd_match, 'output': ''.join(output_lines)})
-                    i = j
-                    continue
-
-        # 格式2: 内嵌命令
-        if sep_pattern.match(line):
-            cmd_m = inline_cmd_pattern.match(line)
-            if cmd_m:
-                cmd_match = cmd_m.group(1).strip()
-                start = i
-                i += 1
-
-                output_lines = []
-                j = i
-                while j < n:
-                    next_line = lines[j].strip()
-                    if sep_pattern.match(next_line) or \
-                       next_line.startswith('<') or \
-                       next_line.startswith('Command:'):
-                        break
-                    output_lines.append(lines[j].rstrip('\n'))
-                    j += 1
-
-                results.append({'start_line': start + 1, 'cmd': cmd_match, 'output': ''.join(output_lines)})
-                i = j
-                continue
-
-        # 格式4: 命令提示符
-        if line.startswith('<'):
-            cmd_m = prompt_pattern.match(line)
-            if cmd_m:
-                cmd_match = cmd_m.group(2).strip()
-                start = i
-                i += 1
-
-                output_lines = []
-                j = i
-                while j < n:
-                    next_line = lines[j].strip()
-                    if next_line.startswith('<') or next_line.startswith('Command:'):
-                        break
-                    output_lines.append(lines[j].rstrip('\n'))
-                    j += 1
-
-                results.append({'start_line': start + 1, 'cmd': cmd_match, 'output': ''.join(output_lines)})
-                i = j
-                continue
-
-        i += 1
+        results.append({'start_line': start + 1, 'cmd': cmd_match, 'output': ''.join(output_lines)})
+        i = j
 
     return results
 

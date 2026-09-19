@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """平台1 联调接入服务——收平台的优化请求,受理即回 success,后台跑 driver,完了回调。
 
-链路口径(字段名与平台接口文档 callDongXuanOptimizeApi 一致):
-  平台 POST multipart(versionId + excelFile + prevObjectkey)→ 我方校验入参、落盘、
+链路约定(字段名与平台接口文档 callDongXuanOptimizeApi 一致):
+  平台 POST multipart(versionId + excelFile + prevObjectkey)→ 我方校验入参、写入文件、
   起后台任务 → 立刻返回 success(本次调用结束)→ 后台迁移完成 → 回调平台
   POST /workspace/faultTreeNode/optimizeCallback(versionId + skillFile 文件流)。
   平台收到回调后自己上传 OBS 并把版本记录置 COMPLETED。

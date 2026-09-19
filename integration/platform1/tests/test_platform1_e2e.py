@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """平台1 联调驱动端到端测试(fake 货架,不碰网络;标准库,直接 python 跑)。
 最小产物 = tree/*.tree_index.json + 空 scripts/(引擎由迁移自动补全);节点交付包按 tester 规范造。
-覆盖:成功路(下载→迁移→打包→回调)/ 续跑 / 失败也回传(表错位、一行没落地)/ 关闭失败回传 /
+覆盖:成功路(下载→迁移→打包→回调)/ 续跑 / 失败也回传(表错位、一行没生效)/ 关闭失败回传 /
 首次优化不回传 / 回调地址取值顺序 / responseCode 判成败。
 用法:python integration/platform1/tests/test_platform1_e2e.py"""
 import json
@@ -61,7 +61,7 @@ def fault_check(data_dir):
 
 def mk_product(d: Path):
     """最小可迁移产物:借仓库自带的 examples/compression-demo(tree_index + 两个 analyzer)
-    + generate 的 cross_analyzer 骨架(S 绑定落在这里)。树:接入失败示例 → QoS建立失败(n2)
+    + generate 的 cross_analyzer 脚本框架(S 绑定写在这里)。树:接入失败示例 → QoS建立失败(n2)
     → 干扰导致(n3)/ 弱覆盖(n4)/ License受限(n5)。"""
     demo = REPO / "examples" / "compression-demo"
     shutil.copytree(demo / "tree", d / "tree")
@@ -148,7 +148,7 @@ mk_product(prod)
 store = WORK / "store"
 store.mkdir()
 mk_pkg(store, "干扰导致")
-mk_pkg(store, "弱覆盖", script="def diagnose(d):\n    return {'matched': 'false'}\n")   # 只认 .txt 之外还缺 .log/缺数据判 false:体检过不了
+mk_pkg(store, "弱覆盖", script="def diagnose(d):\n    return {'matched': 'false'}\n")   # 只识别 .txt 之外还缺 .log/缺数据判 false:契约检查过不了
 zip_dir(prod, store / "skill_v1.zip")
 PREV = "obs://bucket/skills/skill_v1.zip"
 
@@ -190,7 +190,7 @@ with zipfile.ZipFile(oz3) as zf, zipfile.ZipFile(store / "skill_v1.zip") as z0:
     same = all(zf.read(n) == z0.read(n) for n in z0.namelist())
 check("除报告外内容与上一版逐字节一致", same)
 
-print("\n== ④ 失败也回传:一行都没落地(体检不过)→ 回传未变化上一版 ==")
+print("\n== ④ 失败也回传:一行都没落地(格式检查不过)→ 回传未变化上一版 ==")
 xb = WORK / "bad.csv"
 xb.write_text(HDR + "接入失败示例,Root,QoS建立失败,Qos,弱覆盖,Weak,obs://b/乙.zip,弱覆盖.zip\n", encoding="utf-8-sig")
 CB.hits.clear()
@@ -262,7 +262,7 @@ drv = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(drv)
 check("SCOT_SKILLS_ROOT 指向只装发行包的目录 → 迁移脚本定位到 <包>/migrate/scripts",
       drv.MIGRATE == pkg / "migrate" / "scripts" / "migrate_fault_check.py", str(drv.MIGRATE))
-check("模型档技能名 → cs-scot-generate-optimize(前门按表形态路由到优化线)",
+check("模型档技能名 → cs-scot-generate-optimize(统一入口按表形态路由到优化线)",
       drv._skill_name_for_model() == "cs-scot-generate-optimize")
 os.environ["SCOT_MIGRATE_SCRIPT"] = str(WORK / "x.py")
 check("SCOT_MIGRATE_SCRIPT 显式指定优先", drv._find_migrate() == WORK / "x.py")

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """引擎副本与发行包重复文件测试:
-① migrate/engine/ 副本与同门源文件逐字节一致(sync_engine.py --check);
+① migrate/engine/ 副本与 skills 目录下的源文件逐字节一致(sync_engine.py --check);
 ② package_skill 打出的发行包里不含 migrate/engine/,且全包内没有内容完全相同的重复文件;
 ③ 发行包内的 migrate(无 engine/)真跑一单迁移,csv/xlsx 表都过;
-④ 单独部署的 migrate(旁边没有任何同门)靠 engine/ 里的整目录副本,把旧打包技能的
+④ 单独部署的 migrate(旁边没有任何其他技能)靠 engine/ 里的整目录副本,把旧打包技能的
    assets/fault-tree-rca(补上树视图 render_tree.py)与 SKILL.md 正文(带 rca_reply.md 指引)刷新到当前代;
-⑤ 发行包里的 migrate(无 engine/)靠包根同门做同一件事,结果与 ④ 相同——两种形态没有能力差。"""
+⑤ 发行包里的 migrate(无 engine/)靠包根的其他技能目录做同一件事,结果与 ④ 相同——两种形态没有能力差。"""
 import hashlib
 import shutil
 import subprocess
@@ -42,7 +42,7 @@ p2 = subprocess.run([sys.executable, str(REPO / "skills/cs-scot-generate-optimiz
 pkg = out / "cs-scot-generate-optimize"
 check("打包退出码 0", p2.returncode == 0, (p2.stdout + p2.stderr)[-600:])
 check("包里没有 migrate/engine/", not (pkg / "migrate" / "engine").exists())
-check("包里有同门源(generate/scripts/xlsx_reader.py、cs-scot-execute/scripts/runner.py)",
+check("包里有 skills 目录下的源(generate/scripts/xlsx_reader.py、cs-scot-execute/scripts/runner.py)",
       (pkg / "generate" / "scripts" / "xlsx_reader.py").exists() and (pkg / "cs-scot-execute" / "scripts" / "runner.py").exists())
 by_hash = defaultdict(list)
 for f in pkg.rglob("*"):
@@ -127,13 +127,13 @@ for form in ("csv", "xlsx"):
                        capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(W))
     o = (r.stdout or "") + (r.stderr or "")
     check(f"包内 migrate 跑 {form} 表:退出码 0 且落地 ✓ n3", r.returncode == 0 and "✓ n3「干扰导致」" in o, o[-700:])
-    check(f"{form}:引擎补全走的是包内同门源(无 [warn] 拿不出可信版本)", "拿不出可信版本" not in o and "无法自动升级" not in o, o[-500:])
+    check(f"{form}:引擎补全走的是包内的源(无 [warn] 拿不出可信版本)", "拿不出可信版本" not in o and "无法自动升级" not in o, o[-500:])
 shutil.rmtree(W, ignore_errors=True)
 shutil.rmtree(out, ignore_errors=True)
 
-print("\n== ④ 单独部署形态:只装 cs-scot-migrate(无同门),靠 engine/ 刷新 assets/fault-tree-rca 树视图与 SKILL.md 正文 ==")
+print("\n== ④ 单独部署形态:只装 cs-scot-migrate(旁边没有其他技能),靠 engine/ 刷新 assets/fault-tree-rca 树视图与 SKILL.md 正文 ==")
 S = Path(tempfile.mkdtemp(prefix="solo-"))
-solo = S / "skills" / "cs-scot-migrate"                  # 只拷 migrate 自己,旁边什么同门都没有
+solo = S / "skills" / "cs-scot-migrate"                  # 只拷 migrate 自己,旁边没有任何其他技能
 shutil.copytree(REPO / "skills" / "cs-scot-migrate", solo, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 check("单独部署目录里只有 cs-scot-migrate(没有 fault-tree-rca/zip2csv/cs-scot-execute)",
       sorted(p.name for p in (S / "skills").iterdir()) == ["cs-scot-migrate"])
@@ -178,14 +178,14 @@ def refresh_old_skill(base: Path, migrate_py: Path, tag: str):
     check(f"{tag}SKILL.md 正文已刷新到带 rca_reply.md 的执行指引,frontmatter 身份保留",
           "SKILL.md 正文已刷新" in o and "rca_reply.md" in sk and "--tree" in sk
           and sk.startswith("---\nname: old-scenario-skill\ndescription: 旧场景技能(保留身份)\n---\n"), o[-700:])
-    check(f"{tag}全程没有一句“本机没有同门 … 可刷新/可拷”的告警", "没有同门" not in o, o[-700:])
+    check(f"{tag}全程没有一句“本机 skills 目录下没有 … 技能可复制/可刷新”的告警", "技能可复制" not in o and "技能可刷新" not in o, o[-700:])
     return sk
 
 
 sk4 = refresh_old_skill(S, solo / "scripts" / "migrate_fault_check.py", "单独 migrate:")
 shutil.rmtree(S, ignore_errors=True)
 
-print("\n== ⑤ 发行包形态:包内 migrate(无 engine/)靠包根同门做同一件事,结果与 ④ 相同 ==")
+print("\n== ⑤ 发行包形态:包内 migrate(无 engine/)靠包根的其他技能目录做同一件事,结果与 ④ 相同 ==")
 P5 = Path(tempfile.mkdtemp(prefix="pkgrefresh-"))
 out5 = P5 / "dist"
 subprocess.run([sys.executable, str(REPO / "skills/cs-scot-generate-optimize/scripts/package_skill.py"),

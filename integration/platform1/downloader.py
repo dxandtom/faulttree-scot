@@ -93,7 +93,7 @@ def _platform_fetch(kind: str, locator: str, dst: Path) -> Path:
 def dl_config():
     """只读下载配置 obs_headers_config.json(PLATFORM1_DL_CONFIG 可指别处),不加载平台脚本
     (不需要 psf)。返回 (配置 dict 或 {}, 当前环境名):环境取 PLATFORM1_ENV,没有就取
-    default.env,再没有就 dev。文件不在=({}, env);不是合法 JSON → SystemExit 人话。"""
+    default.env,再没有就 dev。文件不在=({}, env);不是合法 JSON → SystemExit 并给出易懂的说明。"""
     cfg_p = Path(os.environ.get("PLATFORM1_DL_CONFIG", "") or (HERE / "obs_headers_config.json"))
     cfg = {}
     if cfg_p.exists():
@@ -112,7 +112,7 @@ def default_env() -> str:
 
 def auth_headers():
     """复用平台下载脚本那套鉴权(obs_headers_config.json 的 authType/invokeToken,token 走它的
-    加密封装),给回调用——回调接口挂在同一个网关(webot)时鉴权口径一致。
+    加密封装),给回调用——回调接口挂在同一个网关(webot)时鉴权方式一致。
     返回 (请求头 dict, 下载端点主机名);配置/依赖不在时抛 SystemExit(调用方决定要不要吞)。"""
     from urllib.parse import urlparse
     mod = _load_platform_module()

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""RCA 输出诚实性自检(指标无关、机械兜底)。
+"""RCA 输出诚实性自检(与指标无关、纯机械检查)。
 
-只兜**结构底线 + 诚实**,不碰强度/排序/你怀疑什么(那是模型判断)。分档严格度不同:
-- **rca_result(确证根因)**:严。揪 ① 自相矛盾(判"成立"却又承认拿不到数据);
+只查**结构底线 + 诚实**,不碰强度/排序/你怀疑什么(那是模型判断)。分档严格度不同:
+- **rca_result(确证根因)**:严。查 ① 自相矛盾(判"成立"却又承认拿不到数据);
   ② 假根因(**候选自身**(叶子或最深成立中间节点)带"数据不足/不成立/存疑"——祖先带伤不拦:数据不足=零信息、
   不成立/冲突=树逻辑矛盾按叶子事实确证,finalize 已机械落 caveats 标出);③ 缺路径(没 evidence_path)。
 - **probable_causes(疑似)**:松——路径含"数据不足"**甚至"不成立"**节点都**放行**(那正是疑似该体现的泛化),
   只查 ④ 有没有把理由说清(`blocked_at`/`caveats` + `support`/`evidence`)。
-- **任何档**:⑤ 给"无事实/未覆盖"节点编一个"成立" = 伪造,揪(需传 rca_input.json 才能核对)。
+- **任何档**:⑤ 给"无事实/未覆盖"节点编一个"成立" = 伪造,查出(需传 rca_input.json 才能核对)。
 - ⑥ 空诊断(三档全空)。
-- **undetermined(待确认)**:软点名(计入清零门)——把有"成立"事实且无反证的节点当阻塞点/理由
+- **undetermined(待确认)**:软提示(计入清零检查)——把有"成立"事实且无反证的节点当阻塞点/理由
   (「成立状态,具体证据待查」)= 填错档:证据在输入里,该升疑似/确证或有据排除,这档不收有证据的候选。
 
 用法:python validate_rca.py <rca.json> [rca_input.json]   # 不合格 → 退出码 1
@@ -36,8 +36,8 @@ def _is_clean_hold(judgment: str) -> bool:
 
 def _strong_refuted(facts) -> bool:
     """有没有**强反证**:ok+不成立 且不是存在类弱阴性(C/G 非 absent 的未命中="这份数据里没看见",
-    不构成反证——别的源命中了,存在即被证实;与 draft_rca._weak_neg 同口径)。各体检的"有反证豁免"
-    只认强反证,免得双源防漏绑定里另一源的存在类未命中把节点洗出保护网(实测 n25/n26 就是这形态)。"""
+    不构成反证——别的源命中了,存在即被证实;与 draft_rca._weak_neg 同一规则)。各项检查的"有反证豁免"
+    只把强反证当反证,免得双源防漏绑定里另一源的存在类未命中把节点洗出保护网(实测 n25/n26 就是这形态)。"""
     return any(f.get("status") == "ok" and f.get("predicate_satisfied") is False
                and not (str(f.get("class") or "").upper() in ("C", "G") and not f.get("absent"))
                for f in facts)
@@ -105,8 +105,8 @@ def _check_unknown_nodes(rc, tier, universe, problems):
 
 def _unaddressed_holds(input_path, rca_path):
     """候选对账(软提示):有成立事实、有真条件、非 pass_through 的候选节点,
-    在 rca.json **全文**里(node_id 按词边界认,防 n13 命中 n136;节点全名也认——契约允许只写名字)
-    一处都没出现 → 视为"漏裁决"点名。只提示不拦:契约的 excluded 档允许"一句话带过不进列表",
+    在 rca.json **全文**里(node_id 按词边界认,防 n13 命中 n136;节点全名也识别——格式约定允许只写名字)
+    一处都没出现 → 视为"漏裁决"点名。只提示不拦:格式约定的 excluded 档允许"一句话带过不进列表",
     硬卡会误杀合法排除,还会重演"逼重写→编假节点"的旧病(docs/notes 有案底)。
     实测背景:同产物同数据两跑,第二跑把 5 个有成立事实的分支通篇漏掉,原有校验(只核"写了的对不对")全数放行。"""
     try:
@@ -135,7 +135,7 @@ def _unaddressed_holds(input_path, rca_path):
 
 
 def _probables_without_block(probables, input_path):
-    """疑似档体检(软):按契约,疑似 = 路径无不成立、但**有数据不足节点**且叶子有强证据——
+    """疑似档检查(软):按格式约定,疑似 = 路径无不成立、但**有数据不足节点**且叶子有强证据——
     所以每条疑似的 evidence_path 里该有至少一个真实阻塞点(有真判据、非 pass_through、
     局部子树里没有任何 status=ok 的事实 = 真缺数)。路径全干净的点名(该升确证/该写实阻塞)。
     没给 node_id 的条目核不了,跳过(理由齐不齐另有硬检查);pruned 缺失(md 形态)整体跳过。"""
@@ -195,22 +195,18 @@ def _real_blocks(input_path):
     return out
 
 
-def _undet_holds_check(undet, input_path):
-    """待确认档体检(软,计入清零门):待确认条目把**有'成立'事实且无反证**的节点当阻塞点/理由/观察
-    = 违反档位定义(待确认=既无正向证据又缺数据;hold 节点有正向证据,该进 probable 或有据排除)。
-    实测:确证/疑似/排除相继设检后,弱模型把 outline 里已成立的节点丢进待确认、写"具体证据待查"
-    (旧词 hold 还被读成"搁置待查",故 outline 已改中文标签+自带图例,本检查双保险)
-    交卷——证据就在输入里,"待查"="没查"。这档不能再是空档,否则永远是下一个泄压阀。
-    只核 blocked_at/reason/observed(条目自己给的"为什么待确认"),不核 Fault_tree_path——
-    路径途经成立的祖先、真卡在无数据的叶子,是合法的待确认,不误伤。"""
+def _load_pruned(input_path):
+    """读 rca_input.json 的 pruned_nodes;读不到 / 无 pruned_nodes(md 形态)→ {}(调用方跳过检查)。"""
     try:
         d = json.loads(Path(input_path).read_text(encoding="utf-8"))
-        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
+        return (d.get("fault_tree") or {}).get("pruned_nodes") or {}
     except Exception:
-        return []
-    if not pruned:
-        return []
-    holds = {}                                            # nid -> name:成立且无反证、有真条件、非 pass_through
+        return {}
+
+
+def _clean_holds(pruned) -> dict:
+    """{nid: 节点名}:成立且无强反证、有真条件、非 pass_through 的节点——三项软检查共用的"有正向证据"集合。"""
+    holds = {}
     for nid, n in pruned.items():
         facts = n.get("facts") or []
         hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
@@ -219,19 +215,39 @@ def _undet_holds_check(undet, input_path):
         has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond
         if hold and not refuted and has_cond and not n.get("pass_through"):
             holds[nid] = str(n.get("name") or "")
+    return holds
+
+
+def _undet_hits(u: dict, holds: dict) -> list:
+    """一条待确认条目的 blocked_at/reason/observed 里点到的成立节点 id(先按 nN,再按节点全名;去重保序)。"""
+    why = " ".join([str(u.get("blocked_at", "")), str(u.get("reason", ""))]
+                   + [str(x) for x in (u.get("observed") or [])])
+    ids = set(re.findall(r"\bn\d+\b", why))
+    hit = [i for i in ids if i in holds] + [i for i, nm in holds.items()
+                                            if i not in ids and nm and nm in why]
+    return list(dict.fromkeys(hit))                       # 去重保序
+
+
+def _undet_holds_check(undet, input_path):
+    """待确认档检查(软,计入清零检查):待确认条目把**有'成立'事实且无反证**的节点当阻塞点/理由/观察
+    = 违反档位定义(待确认=既无正向证据又缺数据;hold 节点有正向证据,该进 probable 或有据排除)。
+    实测:确证/疑似/排除相继设检后,弱模型把 outline 里已成立的节点丢进待确认、写"具体证据待查"
+    (旧词 hold 还被读成"搁置待查",故 outline 已改中文标签+自带图例,本检查双保险)
+    交卷——证据就在输入里,"待查"="没查"。这一档不能再没有约束,否则永远是模型逃避判断的出口。
+    只核 blocked_at/reason/observed(条目自己给的"为什么待确认"),不核 Fault_tree_path——
+    路径途经成立的祖先、真卡在无数据的叶子,是合法的待确认,不误伤。"""
+    pruned = _load_pruned(input_path)
+    if not pruned:
+        return []
+    holds = _clean_holds(pruned)                          # nid -> name:成立且无反证、有真条件、非 pass_through
     if not holds:
         return []
     out = []
     for u in undet or []:
         if not isinstance(u, dict):
             continue
-        why = " ".join([str(u.get("blocked_at", "")), str(u.get("reason", ""))]
-                       + [str(x) for x in (u.get("observed") or [])])
-        ids = set(re.findall(r"\bn\d+\b", why))
-        hit = [i for i in ids if i in holds] + [i for i, nm in holds.items()
-                                                if i not in ids and nm and nm in why]
         label = (u.get("Fault_tree_path") or ["(未写路径)"])[-1]
-        for nid in dict.fromkeys(hit):                    # 去重保序
+        for nid in _undet_hits(u, holds):
             out.append((str(label), nid, holds[nid]))
     return out
 
@@ -240,27 +256,27 @@ _DATA_ABSENT_WORDS = ("数据不足", "证据不足", "无数据", "未获取", 
 _SEMANTIC_DOUBT_WORDS = ("语义近似", "存疑", "近似")
 
 
+def _erased_in_entry(tier: str, rc: dict, holds, out: list) -> None:
+    """一条确证/疑似条目里,成立节点的 judgment 被写成"数据不足/证据不足"类(且无语义怀疑字样)的逐个记下。"""
+    name = rc.get("Root_cause") or rc.get("root_cause") or "(未命名)"
+    for e in _evidence(rc):
+        if not isinstance(e, dict) or str(e.get("node_id")) not in holds:
+            continue
+        j = str(e.get("judgment", ""))
+        if any(w in j for w in _DATA_ABSENT_WORDS) and \
+                not any(w in j for w in _SEMANTIC_DOUBT_WORDS):
+            out.append((tier, str(name), str(e.get("node_id")), str(e.get("node", ""))))
+
+
 def _erased_holds_check(doc, input_path):
-    """抹掉成立体检(软,计入清零门):节点事实明明 ok+成立、无反证,报告的 evidence 却给它写
+    """抹掉成立的检查(软,计入清零检查):节点事实明明 ok+成立、无反证,报告的 evidence 却给它写
     "数据不足/证据不足/未获取"类判断 = 对数据存在性的事实性撒谎(实测:n77 成立被写成
     "binding证据不足,未获取…数据")。与「伪造成立」互为镜像:那边防无中生有,这边防有中生无。
     语义怀疑是合法出口——judgment 写'语义近似/存疑'(可与降档理由并存)不受本检查影响。"""
-    try:
-        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
-        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
-    except Exception:
-        return []
+    pruned = _load_pruned(input_path)
     if not pruned:
         return []
-    holds = set()
-    for nid, n in pruned.items():
-        facts = n.get("facts") or []
-        hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
-        refuted = _strong_refuted(facts)
-        cond = n.get("condition") or ""
-        if hold and not refuted and cond and "无条件" not in cond and "无判断" not in cond \
-                and not n.get("pass_through"):
-            holds.add(nid)
+    holds = set(_clean_holds(pruned))
     if not holds:
         return []
     out = []
@@ -268,15 +284,20 @@ def _erased_holds_check(doc, input_path):
         for rc in (doc.get(key) or []) if isinstance(doc, dict) else []:
             if not isinstance(rc, dict):
                 continue
-            name = rc.get("Root_cause") or rc.get("root_cause") or "(未命名)"
-            for e in _evidence(rc):
-                if not isinstance(e, dict) or str(e.get("node_id")) not in holds:
-                    continue
-                j = str(e.get("judgment", ""))
-                if any(w in j for w in _DATA_ABSENT_WORDS) and \
-                        not any(w in j for w in _SEMANTIC_DOUBT_WORDS):
-                    out.append((tier, str(name), str(e.get("node_id")), str(e.get("node", ""))))
+            _erased_in_entry(tier, rc, holds, out)
     return out
+
+
+def _reported_ids(doc) -> set:
+    """确证/疑似条目 evidence 里出现过的 node_id 集合(=已有确证/疑似下落的节点)。"""
+    reported = set()
+    for tier in ("rca_result", "probable_causes"):
+        for rc in (doc.get(tier) or []) if isinstance(doc, dict) else []:
+            if isinstance(rc, dict):
+                for e in _evidence(rc):
+                    if isinstance(e, dict) and e.get("node_id"):
+                        reported.add(str(e.get("node_id")))
+    return reported
 
 
 def _excluded_holds_check(doc, rca_path, input_path):
@@ -285,32 +306,19 @@ def _excluded_holds_check(doc, rca_path, input_path):
     理由必须落在反证或绑定质量上。实测:确证/疑似都设硬检查后,excluded 成了新泄压阀——弱模型
     以"属正常配置模式,非故障"排除了业务确认的真根因(推翻树判据),还发明"证据量比别人少/
     与已确认根因同源"等排除标准。通篇没提的节点归候选对账管,这里只核"有下落但下落是排除"的。"""
+    pruned = _load_pruned(input_path)
+    if not pruned:
+        return []
     try:
-        d = json.loads(Path(input_path).read_text(encoding="utf-8"))
-        pruned = (d.get("fault_tree") or {}).get("pruned_nodes") or {}
         text = Path(rca_path).read_text(encoding="utf-8")
     except Exception:
         return []
-    if not pruned:
-        return []
-    reported = set()
-    for tier in ("rca_result", "probable_causes"):
-        for rc in (doc.get(tier) or []) if isinstance(doc, dict) else []:
-            if isinstance(rc, dict):
-                for e in _evidence(rc):
-                    if isinstance(e, dict) and e.get("node_id"):
-                        reported.add(str(e.get("node_id")))
+    reported = _reported_ids(doc)
     ids_in_text = set(re.findall(r"\bn\d+\b", text))
     out = []
-    for nid, n in pruned.items():
-        facts = n.get("facts") or []
-        hold = any(f.get("status") == "ok" and f.get("predicate_satisfied") is True for f in facts)
-        refuted = _strong_refuted(facts)
-        cond = n.get("condition") or ""
-        has_cond = bool(cond) and "无条件" not in cond and "无判断" not in cond
-        if not hold or refuted or not has_cond or n.get("pass_through") or nid in reported:
+    for nid, name in _clean_holds(pruned).items():
+        if nid in reported:
             continue
-        name = str(n.get("name") or "")
         if nid not in ids_in_text and not (name and name in text):
             continue
         out.append((nid, name))
@@ -373,181 +381,167 @@ def _check_path_chain(rc, tier, pm, problems):
                 f"按 tree_index 真实层级重排,别把叶子挂到不相干的节点下")
 
 
-def main() -> int:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    if len(sys.argv) < 2:
-        print("用法:python validate_rca.py <rca.json> [rca_input.json]", file=sys.stderr)
-        return 2
-    p = Path(sys.argv[1])
-    try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"无法读取/解析 {p}: {e}", file=sys.stderr)
-        return 2
-    hold_map = _holding_map(sys.argv[2]) if len(sys.argv) >= 3 else None
-    parent_map = _parent_map(sys.argv[2]) if len(sys.argv) >= 3 else None
-    universe = _node_universe(sys.argv[2]) if (len(sys.argv) >= 3 and hold_map is not None) else None
-    blocks = _real_blocks(sys.argv[2]) if len(sys.argv) >= 3 else None
+def _check_confirmed_node(node: dict, is_last: bool, name, hold_map, problems) -> None:
+    """确证 evidence 一个节点:①判'成立'却承认拿不到数据=自相矛盾;②候选自身带未完整成立标记=假根因。"""
+    judg, actual, nname = str(node.get("judgment", "")), str(node.get("actual", "")), node.get("node", "?")
+    if _is_clean_hold(judg) and any(m in (judg + actual) for m in MISSING):
+        problems.append(f"[自相矛盾] 确证根因「{name}」/节点「{nname}」判'成立'却承认拿不到数据 → {judg!r}")
+    tag = _tag(judg, NOT_PROVEN)
+    if not tag:
+        return
+    # 确证检查只看候选自身(路径末位;叶子或最深成立中间节点)——祖先有问题不拦:
+    # 与 finalize_rca 同一规则(finalize 已把祖先的问题机械写进 caveats 标出)。
+    if not is_last:
+        return
+    # 结构节点豁免:该节点在 rca_input 里是 pass_through / 无真条件(根·分组·汇总节点),
+    # 本就没有独立判据,谈不上"数据不足"破坏确证——弱模型常把它标成'数据不足'而不是约定
+    # 要求的'无独立条件',那是标签瑕疵、不是路径断了。以 rca_input 的机械事实为准。
+    if hold_map:
+        pt, _h, hc = hold_map.get(str(node.get("node_id", "")), (False, False, True))
+        if pt or not hc:
+            return
+    problems.append(
+        f"[假根因] 确证根因「{name}」的候选自身带'{tag}'(「{nname}」)"
+        f"→ 挪进 probable_causes 或 excluded,别凑路径、别造节点")
 
-    confirmed = _confirmed(doc)
-    probables = doc.get("probable_causes", []) if isinstance(doc, dict) else []
-    undet = doc.get("undetermined", []) if isinstance(doc, dict) else []
-    problems = []
 
-    # ⑥ 空诊断:三档全空 = 啥也没说
-    if not confirmed and not probables and not undet:
-        problems.append("[空诊断] rca_result / probable_causes / undetermined 全空——"
-                        "就算没有根因,也必须在 undetermined 写清:卡在哪个节点、缺哪个量、看到哪些观察。")
-
-    # 确证根因:严(①自相矛盾 ②假根因 ③缺路径 ⑤伪造)
-    for rc in confirmed:
-        if not isinstance(rc, dict):
+def _check_confirmed_entry(rc: dict, hold_map, parent_map, universe, problems) -> None:
+    """确证根因:严(①自相矛盾 ②假根因 ③缺路径 ⑤伪造 + 路径链 + 未知节点)。"""
+    name = rc.get("Root_cause") or rc.get("root_cause") or "(未命名根因)"
+    ev = _evidence(rc)
+    if not ev:
+        problems.append(f"[缺路径] 确证根因「{name}」没有 evidence_path——确证必须把根→叶整条路径、每节点的条件/实际值/判断摆出来")
+    for i, node in enumerate(ev):
+        if not isinstance(node, dict):
             continue
-        name = rc.get("Root_cause") or rc.get("root_cause") or "(未命名根因)"
-        ev = _evidence(rc)
-        if not ev:
-            problems.append(f"[缺路径] 确证根因「{name}」没有 evidence_path——确证必须把根→叶整条路径、每节点的条件/实际值/判断摆出来")
-        for i, node in enumerate(ev):
-            if not isinstance(node, dict):
-                continue
-            judg, actual, nname = str(node.get("judgment", "")), str(node.get("actual", "")), node.get("node", "?")
-            if _is_clean_hold(judg) and any(m in (judg + actual) for m in MISSING):
-                problems.append(f"[自相矛盾] 确证根因「{name}」/节点「{nname}」判'成立'却承认拿不到数据 → {judg!r}")
-            tag = _tag(judg, NOT_PROVEN)
-            if tag:
-                # 确证闸只看候选自身(路径末位;叶子或最深成立中间节点)——祖先带伤不拦:
-                # 与 finalize_rca 同口径(finalize 已把祖先带伤机械落 caveats 标出)。
-                if i < len(ev) - 1:
-                    continue
-                # 结构节点豁免:该节点在 rca_input 里是 pass_through / 无真条件(根·分组·汇总节点),
-                # 本就没有独立判据,谈不上"数据不足"破坏确证——弱模型常把它标成'数据不足'而不是契约
-                # 要求的'无独立条件',那是标签瑕疵、不是路径断了。以 rca_input 的机械事实为准。
-                if hold_map:
-                    pt, _h, hc = hold_map.get(str(node.get("node_id", "")), (False, False, True))
-                    if pt or not hc:
-                        continue
-                problems.append(
-                    f"[假根因] 确证根因「{name}」的候选自身带'{tag}'(「{nname}」)"
-                    f"→ 挪进 probable_causes 或 excluded,别凑路径、别造节点")
-        _check_fabrication(rc, "确证根因", hold_map, problems)
-        _check_path_chain(rc, "确证根因", parent_map, problems)
-        _check_unknown_nodes(rc, "确证根因", universe, problems)
+        _check_confirmed_node(node, i == len(ev) - 1, name, hold_map, problems)
+    _check_fabrication(rc, "确证根因", hold_map, problems)
+    _check_path_chain(rc, "确证根因", parent_map, problems)
+    _check_unknown_nodes(rc, "确证根因", universe, problems)
 
-    # 疑似:松——只查 ④理由齐不齐 + ⑤有没有伪造成立;路径含 不成立/数据不足 一律放行
-    for rc in probables:
-        if not isinstance(rc, dict):
-            continue
-        name = rc.get("Root_cause") or "(未命名疑似)"
-        if not (rc.get("blocked_at") or rc.get("caveats")):
-            problems.append(f"[疑似缺理由] 疑似「{name}」没说清为什么只是疑似——必须写 `blocked_at`(卡在哪个节点)或 `caveats`(为何不确定)")
-        if not (rc.get("support") or _evidence(rc)):
-            problems.append(f"[疑似缺证据] 疑似「{name}」既无 `support` 也无 `evidence_path`——疑似也得摆出支撑它的正向证据")
-        # 口径不符(硬):证据链与档位打架——evidence 里没有任何节点写'数据不足/不成立'类疑虑,
-        # blocked_at 又空 = "全成立却居疑似"。模型有权凭主观怀疑降档,但怀疑必须落字、落在具体节点
-        # ('单源/保险起见'不是档位理由)。实测:确证被误杀几轮后,弱模型防御性把全成立候选整批降进
-        # 疑似(0 确证/13 疑似),软提示点名 10 条它照样交卷——不硬拦,往下躲永远零代价。
-        _ev = _evidence(rc)
-        if _ev and not any(_tag(str(n.get("judgment", "")), NOT_PROVEN) for n in _ev if isinstance(n, dict)):
-            # 证据链全"成立"→ blocked_at 必须**解析到一个真实阻塞节点**(_real_blocks)。实测:堵住
-            # "blocked_at 为空"后,弱模型改往里塞散文("无阻塞,匹配率极低(0.8%)")继续赖在疑似档——
-            # 散文不指向任何节点,解析不到=硬拦。真有语义怀疑(如"log 是代理证据")的正道:把存疑
-            # 节点的 judgment 写'语义近似/存疑'(有数据)或'数据不足'(真缺数),不受本检查影响。
-            ba = str(rc.get("blocked_at") or "").strip()
-            resolved = False
-            if ba and blocks is None:
-                resolved = True                          # 没给 rca_input 无从核实,维持从宽
-            elif ba and blocks:
-                _ids = set(re.findall(r"\bn\d+\b", ba))
-                resolved = any(i in blocks for i in _ids) or any(nm and nm in ba for nm in blocks.values())
-            if not resolved:
-                why = ("blocked_at 为空" if not ba
-                       else f"blocked_at「{ba[:40]}」未指向任何真实阻塞节点(散文式理由不算阻塞)")
-                problems.append(
-                    f"[口径不符] 疑似「{name}」evidence_path 全'成立'且 {why}"
-                    f"——全成立该进 rca_result;确有怀疑就写实:存疑节点 judgment 改'语义近似/存疑'(有数据)或'数据不足'(真缺数),"
-                    f"blocked_at 指向具体阻塞节点。'单源/保险起见/匹配率低'都不是降档理由")
-        _check_fabrication(rc, "疑似", hold_map, problems)
-        _check_path_chain(rc, "疑似", parent_map, problems)
-        _check_unknown_nodes(rc, "疑似", universe, problems)
 
-    # 疑似档体检(软提示,不改退出码):确证与疑似的镜像检查——确证不许路径带伤(上面的硬检查),
-    # 疑似必须真有伤:evidence_path 里至少一个「有真判据、非 pass_through、且没有任何 ok 事实」的
-    # 实际阻塞点。路径全干净的疑似 = 要么该升确证、要么阻塞点没写进路径(实测:校验误杀确证 →
-    # 弱模型批量降档避审,疑似从个位数膨胀到 20+ ——疑似档不能当泄压阀)。
-    soft_hints = 0
-    if len(sys.argv) >= 3:
-        nb = _probables_without_block(probables, sys.argv[2])
-        soft_hints += len(nb)
-        if nb:
-            print(f"⚠ 疑似档体检:以下 {len(nb)} 条疑似的 evidence_path 里没有任何「有真判据且缺数据」的实际阻塞点:")
-            for nm, ba in nb[:10]:
-                print(f"  - 「{nm}」(blocked_at: {ba or '未写'})")
-            if len(nb) > 10:
-                print(f"  …(还有 {len(nb) - 10} 条)")
-            print("  → 路径真干净就升确证;确有阻塞就把阻塞节点补进 evidence_path、blocked_at 写实——"
-                  "疑似档不是确证的避风港,也不是候选对账的泄压阀。")
+def _check_probable_rule(rc: dict, name, blocks, problems) -> None:
+    """规则不符(硬):证据链与档位打架——evidence 里没有任何节点写'数据不足/不成立'类疑虑,
+    blocked_at 又空 = "全成立却居疑似"。模型有权凭主观怀疑降档,但怀疑必须落字、落在具体节点
+    ('单源/保险起见'不是档位理由)。实测:确证被误杀几轮后,弱模型防御性把全成立候选整批降进
+    疑似(0 确证/13 疑似),软提示点名 10 条它照样交卷——不硬拦,往下躲永远零代价。"""
+    _ev = _evidence(rc)
+    if not (_ev and not any(_tag(str(n.get("judgment", "")), NOT_PROVEN) for n in _ev if isinstance(n, dict))):
+        return
+    # 证据链全"成立"→ blocked_at 必须**解析到一个真实阻塞节点**(_real_blocks)。实测:堵住
+    # "blocked_at 为空"后,弱模型改往里塞散文("无阻塞,匹配率极低(0.8%)")继续赖在疑似档——
+    # 散文不指向任何节点,解析不到=硬拦。真有语义怀疑(如"log 是代理证据")的正道:把存疑
+    # 节点的 judgment 写'语义近似/存疑'(有数据)或'数据不足'(真缺数),不受本检查影响。
+    ba = str(rc.get("blocked_at") or "").strip()
+    resolved = False
+    if ba and blocks is None:
+        resolved = True                          # 没给 rca_input 无从核实,维持从宽
+    elif ba and blocks:
+        _ids = set(re.findall(r"\bn\d+\b", ba))
+        resolved = any(i in blocks for i in _ids) or any(nm and nm in ba for nm in blocks.values())
+    if not resolved:
+        why = ("blocked_at 为空" if not ba
+               else f"blocked_at「{ba[:40]}」未指向任何真实阻塞节点(散文式理由不算阻塞)")
+        problems.append(
+            f"[规则不符] 疑似「{name}」evidence_path 全'成立'且 {why}"
+            f"——全成立该进 rca_result;确有怀疑就写实:存疑节点 judgment 改'语义近似/存疑'(有数据)或'数据不足'(真缺数),"
+            f"blocked_at 指向具体阻塞节点。'单源/保险起见/匹配率低'都不是降档理由")
 
-    # 待确认档体检(软提示,计入清零门):已成立节点被当成待确认的阻塞/理由 = 填错档
-    if len(sys.argv) >= 3:
-        uh = _undet_holds_check(undet, sys.argv[2])
-        soft_hints += len(uh)
-        if uh:
-            print(f"⚠ 待确认档体检:以下 {len(uh)} 处把**有'成立'事实且无反证**的节点当成了待确认的阻塞点/理由:")
-            for label, nid, nm in uh[:10]:
-                print(f"  - 待确认「{label}」← {nid} 「{nm}」(有成立事实,不是'待查')")
-            if len(uh) > 10:
-                print(f"  …(还有 {len(uh) - 10} 处)")
-            print("  → 待确认=既无正向证据又缺数据;这些节点证据已在输入里:`rca_query --node nX` 拉出事实,"
-                  "路径全成立升确证、上游真缺数进疑似(blocked_at 写那个真缺数的节点)、"
-                  "系背景噪声/有反证则走排除并在 excluded_note 点名。**'具体证据待查'不是档位理由——查就是了。**")
 
-    # 抹掉成立体检(软提示,计入清零门):有成立事实的节点被写成"数据不足/证据不足" = 有中生无
-    if len(sys.argv) >= 3:
-        eh = _erased_holds_check(doc, sys.argv[2])
-        soft_hints += len(eh)
-        if eh:
-            print(f"⚠ 抹掉成立体检:以下 {len(eh)} 处节点**有 ok+成立 事实且无反证**,evidence 却写'数据不足/证据不足'类判断:")
-            for tier, name, nid, nname in eh[:10]:
-                print(f"  - {tier}「{name}」/节点 {nid}「{nname}」")
-            if len(eh) > 10:
-                print(f"  …(还有 {len(eh) - 10} 处)")
-            print("  → 数据是有的,'数据不足'字面为假:按事实改'成立';确有语义怀疑(代理证据/口径近似)"
-                  "→ judgment 写'语义近似/存疑'并在 caveats 说明,别拿'数据不足'当降档托词。")
+def _check_probable_entry(rc: dict, hold_map, parent_map, universe, blocks, problems) -> None:
+    """疑似:松——只查 ④理由齐不齐 + ⑤有没有伪造成立;路径含 不成立/数据不足 一律放行。"""
+    name = rc.get("Root_cause") or "(未命名疑似)"
+    if not (rc.get("blocked_at") or rc.get("caveats")):
+        problems.append(f"[疑似缺理由] 疑似「{name}」没说清为什么只是疑似——必须写 `blocked_at`(卡在哪个节点)或 `caveats`(为何不确定)")
+    if not (rc.get("support") or _evidence(rc)):
+        problems.append(f"[疑似缺证据] 疑似「{name}」既无 `support` 也无 `evidence_path`——疑似也得摆出支撑它的正向证据")
+    _check_probable_rule(rc, name, blocks, problems)
+    _check_fabrication(rc, "疑似", hold_map, problems)
+    _check_path_chain(rc, "疑似", parent_map, problems)
+    _check_unknown_nodes(rc, "疑似", universe, problems)
 
-    # 排除核对(软提示,不改退出码):被排除/仅观察的"成立且无反证"候选逐条晾出来。
-    # 注意:排除是合法出口,这张清单不计入"必须清零"的软提示数(不然有一条合法排除就永远清不了)
-    # ——它的处置方式是:报告「已排除的候选」一节逐条晾出站得住的理由(反证/绑定质量)。
-    exh = []
-    if len(sys.argv) >= 3:
-        exh = _excluded_holds_check(doc, sys.argv[1], sys.argv[2])
-        if exh:
-            print(f"⚠ 排除核对:以下 {len(exh)} 个节点有'成立'事实、**无任何反证**,却没进确证/疑似(下落=排除/仅观察):")
-            for nid, name in exh[:10]:
-                print(f"  - {nid} 「{name}」")
-            if len(exh) > 10:
-                print(f"  …(还有 {len(exh) - 10} 个)")
-            print("  → 排除的合法理由只有两种:①反证(该节点有 ok+不成立 的事实);②绑定质量问题"
-                  "(点名哪条绑定、为何假命中)。**'配置常见/看着正常/证据量比别人少/只命中一条/占比低/"
-                  "与已确认根因同源'都不是排除理由——树的判据就是故障标准,你无权推翻树。**理由站不住的,挪回疑似或 undetermined。")
 
-    # 候选对账(软提示,不改退出码):专逮"有成立事实的候选通篇没下落"的漏裁决
-    if len(sys.argv) >= 3:
-        miss = _unaddressed_holds(sys.argv[2], sys.argv[1])
-        soft_hints += len(miss)
-        if miss:
-            print(f"⚠ 候选对账:以下 {len(miss)} 个节点有'成立'事实,rca.json 里却通篇没有下落(漏裁决嫌疑):")
-            for nid, name in miss[:15]:
-                print(f"  - {nid} 「{name}」")
-            if len(miss) > 15:
-                print(f"  …(还有 {len(miss) - 15} 个,用 rca_query --holding 看全量)")
-            print("  → 逐个裁决(rca_query --node nX 走查),**别为消除本提示把候选整批塞进 probable_causes**"
-                  "——成立事实里常混着背景噪声(如子串命中),照单全收=放弃裁决、报告变噪音墙。"
-                  "真候选就补报(确证/疑似,或至少在 undetermined.observed 给一行);"
-                  "背景噪声/确属排除的,在 excluded_note 一句话点名留痕,别静默略过。")
+def _hint_probables_without_block(probables, input_path) -> int:
+    """疑似档检查(软提示,不改退出码):确证与疑似的镜像检查——确证不许路径上有问题节点(上面的硬检查),
+    疑似必须真有伤:evidence_path 里至少一个「有真判据、非 pass_through、且没有任何 ok 事实」的
+    实际阻塞点。路径全干净的疑似 = 要么该升确证、要么阻塞点没写进路径(实测:校验误杀确证 →
+    弱模型批量降档避审,疑似从个位数膨胀到 20+ ——疑似档不能当泄压阀)。返回点名条数。"""
+    nb = _probables_without_block(probables, input_path)
+    if nb:
+        print(f"⚠ 疑似档检查:以下 {len(nb)} 条疑似的 evidence_path 里没有任何「有真判据且缺数据」的实际阻塞点:")
+        for nm, ba in nb[:10]:
+            print(f"  - 「{nm}」(blocked_at: {ba or '未写'})")
+        if len(nb) > 10:
+            print(f"  …(还有 {len(nb) - 10} 条)")
+        print("  → 路径真干净就升确证;确有阻塞就把阻塞节点补进 evidence_path、blocked_at 写实——"
+              "疑似档不是确证的避风港,也不是候选对账的泄压阀。")
+    return len(nb)
 
+
+def _hint_undet_holds(undet, input_path) -> int:
+    """待确认档检查(软提示,计入清零检查):已成立节点被当成待确认的阻塞/理由 = 填错档。返回点名条数。"""
+    uh = _undet_holds_check(undet, input_path)
+    if uh:
+        print(f"⚠ 待确认档检查:以下 {len(uh)} 处把**有'成立'事实且无反证**的节点当成了待确认的阻塞点/理由:")
+        for label, nid, nm in uh[:10]:
+            print(f"  - 待确认「{label}」← {nid} 「{nm}」(有成立事实,不是'待查')")
+        if len(uh) > 10:
+            print(f"  …(还有 {len(uh) - 10} 处)")
+        print("  → 待确认=既无正向证据又缺数据;这些节点证据已在输入里:`rca_query --node nX` 拉出事实,"
+              "路径全成立升确证、上游真缺数进疑似(blocked_at 写那个真缺数的节点)、"
+              "系背景噪声/有反证则走排除并在 excluded_note 点名。**'具体证据待查'不是档位理由——查就是了。**")
+    return len(uh)
+
+
+def _hint_erased_holds(doc, input_path) -> int:
+    """抹掉成立的检查(软提示,计入清零检查):有成立事实的节点被写成"数据不足/证据不足" = 有中生无。返回点名条数。"""
+    eh = _erased_holds_check(doc, input_path)
+    if eh:
+        print(f"⚠ 抹掉成立的检查:以下 {len(eh)} 处节点**有 ok+成立 事实且无反证**,evidence 却写'数据不足/证据不足'类判断:")
+        for tier, name, nid, nname in eh[:10]:
+            print(f"  - {tier}「{name}」/节点 {nid}「{nname}」")
+        if len(eh) > 10:
+            print(f"  …(还有 {len(eh) - 10} 处)")
+        print("  → 数据是有的,'数据不足'字面为假:按事实改'成立';确有语义怀疑(代理证据/定义近似)"
+              "→ judgment 写'语义近似/存疑'并在 caveats 说明,别拿'数据不足'当降档托词。")
+    return len(eh)
+
+
+def _hint_excluded_holds(doc, rca_path, input_path) -> list:
+    """排除核对(软提示,不改退出码):被排除/仅观察的"成立且无反证"候选逐条晾出来。
+    注意:排除是合法出口,这张清单不计入"必须清零"的软提示数(不然有一条合法排除就永远清不了)
+    ——它的处置方式是:报告「已排除的候选」一节逐条晾出站得住的理由(反证/绑定质量)。返回清单。"""
+    exh = _excluded_holds_check(doc, rca_path, input_path)
+    if exh:
+        print(f"⚠ 排除核对:以下 {len(exh)} 个节点有'成立'事实、**无任何反证**,却没进确证/疑似(下落=排除/仅观察):")
+        for nid, name in exh[:10]:
+            print(f"  - {nid} 「{name}」")
+        if len(exh) > 10:
+            print(f"  …(还有 {len(exh) - 10} 个)")
+        print("  → 排除的合法理由只有两种:①反证(该节点有 ok+不成立 的事实);②绑定质量问题"
+              "(点名哪条绑定、为何假命中)。**'配置常见/看着正常/证据量比别人少/只命中一条/占比低/"
+              "与已确认根因同源'都不是排除理由——树的判据就是故障标准,你无权推翻树。**理由站不住的,挪回疑似或 undetermined。")
+    return exh
+
+
+def _hint_unaddressed(input_path, rca_path) -> int:
+    """候选对账(软提示,不改退出码):专逮"有成立事实的候选通篇没下落"的漏裁决。返回点名条数。"""
+    miss = _unaddressed_holds(input_path, rca_path)
+    if miss:
+        print(f"⚠ 候选对账:以下 {len(miss)} 个节点有'成立'事实,rca.json 里却通篇没有下落(漏裁决嫌疑):")
+        for nid, name in miss[:15]:
+            print(f"  - {nid} 「{name}」")
+        if len(miss) > 15:
+            print(f"  …(还有 {len(miss) - 15} 个,用 rca_query --holding 看全量)")
+        print("  → 逐个裁决(rca_query --node nX 走查),**别为消除本提示把候选整批塞进 probable_causes**"
+              "——成立事实里常混着背景噪声(如子串命中),照单全收=放弃裁决、报告变噪音墙。"
+              "真候选就补报(确证/疑似,或至少在 undetermined.observed 给一行);"
+              "背景噪声/确属排除的,在 excluded_note 一句话点名留痕,别静默略过。")
+    return len(miss)
+
+
+def _verdict(problems, soft_hints: int, exh: list, confirmed, probables, hold_map) -> int:
+    """收尾:有硬问题列出并返回 1;有未处置软提示不给干净台阶;否则打印通过行(带排除核对提醒)。"""
     if problems:
         print(f"不合格:发现 {len(problems)} 处问题:")
         for pr in problems:
@@ -569,6 +563,58 @@ def main() -> int:
              f"必须逐条晾出理由(反证/绑定质量),无声排除=不合格交付" if exh else "")
     print(f"通过:确证根因 {len(confirmed)} 条(候选自身成立)、疑似 {len(probables)} 条(理由齐备){note}{extra}。")
     return 0
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    if len(sys.argv) < 2:
+        print("用法:python validate_rca.py <rca.json> [rca_input.json]", file=sys.stderr)
+        return 2
+    p = Path(sys.argv[1])
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"无法读取/解析 {p}: {e}", file=sys.stderr)
+        return 2
+    has_input = len(sys.argv) >= 3
+    hold_map = _holding_map(sys.argv[2]) if has_input else None
+    parent_map = _parent_map(sys.argv[2]) if has_input else None
+    universe = _node_universe(sys.argv[2]) if (has_input and hold_map is not None) else None
+    blocks = _real_blocks(sys.argv[2]) if has_input else None
+
+    confirmed = _confirmed(doc)
+    probables = doc.get("probable_causes", []) if isinstance(doc, dict) else []
+    undet = doc.get("undetermined", []) if isinstance(doc, dict) else []
+    problems = []
+
+    # ⑥ 空诊断:三档全空 = 啥也没说
+    if not confirmed and not probables and not undet:
+        problems.append("[空诊断] rca_result / probable_causes / undetermined 全空——"
+                        "就算没有根因,也必须在 undetermined 写清:卡在哪个节点、缺哪个量、看到哪些观察。")
+
+    # 确证根因:严(①自相矛盾 ②假根因 ③缺路径 ⑤伪造)
+    for rc in confirmed:
+        if isinstance(rc, dict):
+            _check_confirmed_entry(rc, hold_map, parent_map, universe, problems)
+
+    # 疑似:松——只查 ④理由齐不齐 + ⑤有没有伪造成立;路径含 不成立/数据不足 一律放行
+    for rc in probables:
+        if isinstance(rc, dict):
+            _check_probable_entry(rc, hold_map, parent_map, universe, blocks, problems)
+
+    # 软提示(带 rca_input 才做):疑似档 / 待确认档 / 抹掉成立 计入清零检查;排除核对单列;候选对账计入
+    soft_hints, exh = 0, []
+    if has_input:
+        soft_hints += _hint_probables_without_block(probables, sys.argv[2])
+        soft_hints += _hint_undet_holds(undet, sys.argv[2])
+        soft_hints += _hint_erased_holds(doc, sys.argv[2])
+        exh = _hint_excluded_holds(doc, sys.argv[1], sys.argv[2])
+        soft_hints += _hint_unaddressed(sys.argv[2], sys.argv[1])
+
+    return _verdict(problems, soft_hints, exh, confirmed, probables, hold_map)
 
 
 if __name__ == "__main__":

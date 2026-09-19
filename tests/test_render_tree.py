@@ -4,7 +4,9 @@
 ① 仓库样例 rca.json(疑似,卡点在中间层):路径展开、卡点符号、其余分支折叠;
 ② 合成场景:确诊落中间层(子树到叶子)+ 缺数据(子树折叠)+ 已知不成立兄弟单列 + 折叠;
 ③ 不截断:长判据全文保留、多行判据续行悬挂缩进;
-④ render_report --tree:报告首节树视图、rca_tree.txt、rca_reply.md(树视图代码块+确证表+疑似表+待确认)。"""
+④ render_report --tree:报告首节树视图、rca_tree.txt、rca_reply.md(树视图代码块+确证表+疑似表+待确认);
+⑤ --lang en:节点名用 name_en、判据用 condition_en、方案用 solutions.json 的 en,固定文案英文,
+   没有英文的节点回退中文,证据原文不译;报告与回复稿的标题/表头/判定词同步英文;zh 输出一字不变。"""
 import importlib.util
 import json
 import shutil
@@ -106,11 +108,11 @@ p = subprocess.run([sys.executable, str(RR), str(rca_p), "--tree", str(tree_p)],
 md = (WORK / "rca_report.md").read_text(encoding="utf-8") if (WORK / "rca_report.md").exists() else ""
 check("退出码 0", p.returncode == 0, p.stderr[-400:])
 check("报告含树视图节且在确证节之前", "## 树视图" in md and md.index("## 树视图") < md.index("## 确证根因"))
-check("rca_tree.txt 落盘", (WORK / "rca_tree.txt").exists()
+check("rca_tree.txt 已写出", (WORK / "rca_tree.txt").exists()
       and "✅ 分支A  [确诊]" in (WORK / "rca_tree.txt").read_text(encoding="utf-8"))
 rp = (WORK / "rca_reply.md").read_text(encoding="utf-8") if (WORK / "rca_reply.md").exists() else ""
 print(rp)
-check("回复稿落盘且头行有计数", rp.startswith("**诊断结论:确证根因 1 条 · 疑似 0 条 · 待确认 1 条**"))
+check("回复稿已写出且头行有计数", rp.startswith("**诊断结论:确证根因 1 条 · 疑似 0 条 · 待确认 1 条**"))
 check("回复稿:树视图在 text 代码块里", (FENCE + "text") in rp and "✅ 分支A  [确诊]" in rp)
 check("回复稿:确证根因表(根因/路径/原文匹配/方案)",
       "| # | 根因 | 根因路径 | 原文匹配(实测 / 依据) | 推荐方案 |" in rp
@@ -124,6 +126,48 @@ p2 = subprocess.run([sys.executable, str(RR), str(rca_p), "-o", str(WORK / "plai
 check("不带 --tree:报告无树视图节,回复稿照出(无树)", p2.returncode == 0
       and "## 树视图" not in (WORK / "plain.md").read_text(encoding="utf-8")
       and (FENCE + "text") not in (WORK / "rca_reply.md").read_text(encoding="utf-8"))
+
+print("\n== ⑤ --lang en:英文树视图 / 报告 / 回复稿,缺英文回退中文 ==")
+tree_en = json.loads(json.dumps(tree, ensure_ascii=False))
+for nid, en in (("r", "Root"), ("a", "Branch A"), ("a1", "A leaf 1"), ("c", "Branch C"), ("d", "Branch D")):
+    tree_en["nodes"][nid]["name_en"] = en                                # 分支B / A叶2 故意不给英文 → 回退中文
+tree_en["nodes"]["a"]["condition_en"] = "All of: 1. qos car inbound cir < 1000; 2. pass stays 0 and discard grows; 3. vlan missing"
+sols = {"a": {"zh": "换板", "en": "Replace the board"}}
+txt_en = rt.render_tree(doc2, tree_en["nodes"], "r", lang="en", solutions=sols)
+print(txt_en)
+check("英文头行", txt_en.startswith("Tree view: confirmed 1 · probable 0 · missing data 1 (only paths"))
+check("节点名用 name_en、标签英文", "✅ Branch A  [Confirmed]" in txt_en and "· A leaf 1" in txt_en and "? Branch C  [Missing data]" in txt_en)
+check("没有英文的节点回退中文", "✗ 分支B" in txt_en and "· A叶2" in txt_en)
+check("判据用 condition_en、方案用 solutions.json 的 en、证据原文不译",
+      "Criterion:All of: 1. qos car inbound cir < 1000" in txt_en and "Solution:Replace the board" in txt_en
+      and "Evidence:A 命中 3 条" in txt_en and "Basis:display a" in txt_en and "Caveat:叶子因待定" in txt_en)
+check("折叠提示英文", "…(1 more branches not involved)" in txt_en and "…(3 nodes in subtree not evaluated; rerun after data is supplied)" in txt_en
+      and "Missing:缺 display c 采集" in txt_en)
+check("zh 输出不受影响(与 ② 逐字相同)", rt.render_tree(doc2, tree_en["nodes"], "r") == txt2)
+tree_en_p = WORK / "en" / "x.tree_index.json"
+tree_en_p.parent.mkdir()
+tree_en_p.write_text(json.dumps(tree_en, ensure_ascii=False), encoding="utf-8")
+(WORK / "en" / "solutions.json").write_text(json.dumps(sols, ensure_ascii=False), encoding="utf-8")
+rca_en_p = WORK / "en" / "rca.json"
+rca_en_p.write_text(json.dumps(doc2, ensure_ascii=False), encoding="utf-8")
+p3 = subprocess.run([sys.executable, str(RR), str(rca_en_p), "--tree", str(tree_en_p), "--lang", "en"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(REPO))
+md_en = (WORK / "en" / "rca_report.md").read_text(encoding="utf-8")
+rp_en = (WORK / "en" / "rca_reply.md").read_text(encoding="utf-8")
+print(rp_en)
+check("退出码 0", p3.returncode == 0, p3.stderr[-400:])
+check("报告:英文标题、树视图节、确证节、根因名与路径用英文、判定词译成英文",
+      md_en.startswith("# Diagnosis Report") and "## Tree view" in md_en and "## Confirmed root causes" in md_en
+      and "### 1. Branch A ✅" in md_en and "- Path: Root· → Branch A✓ (✓holds" in md_en
+      and "- Verdict:holds" in md_en and "- Observed:A 命中 3 条" in md_en, md_en[:900])
+check("报告:待确认节点名英文、原因原文;方案用 solutions 的 en", "- Branch C:缺 display c 采集" in md_en
+      and "- Suggested solution: Replace the board" in md_en, md_en[-900:])
+check("回复稿:英文头行、树视图、确证表(根因/路径英文、方案英文)、待确认、Notes",
+      rp_en.startswith("**Diagnosis: confirmed root causes 1 · probable 0 · to be confirmed 1**")
+      and "**Tree view** (only paths" in rp_en and "✅ Branch A  [Confirmed]" in rp_en
+      and "| 1 | Branch A | Root → Branch A | A 命中 3 条:qos car inbound cir 500 \\| pass 0 discard 1200 \\| vlan 缺 / display a | Replace the board |" in rp_en
+      and "- Branch C:缺 display c 采集" in rp_en and rp_en.rstrip().endswith("numbers as stated above)_"), rp_en[-800:])
+check("rca_tree.txt 也是英文", "✅ Branch A  [Confirmed]" in (WORK / "en" / "rca_tree.txt").read_text(encoding="utf-8"))
 
 print(f"\n通过 {PASSED} / {PASSED + FAILED}" + ("  全绿" if not FAILED else "  【有失败!】"))
 shutil.rmtree(WORK, ignore_errors=True)

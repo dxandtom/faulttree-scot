@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """NSA/接入类「配置拓扑」场景适配器:把 MO 配置文本解析成系统能用的表,并提供 custom 用的几个原语。
 
-为什么要它:本仓的 load_table 只认 csv/xlsx(行列表格)。但接入类故障的配置往往是这种【文本】:
+为什么要它:本仓的 load_table 只接受 csv/xlsx(行列表格)。但接入类故障的配置往往是这种【文本】:
     GNBCUS1:MOName=GNBCUS1_1,UpEpGroupId=EPGROUP_1,CellId=CELL_1;
     USERPLANEPEER:MOName=UPPEER_1,uppeerid=UPPEER_1,peeripv4=192.168.100.1;
     EPGROUP:MOName=EPGROUP_1,userplanepeerrefs={uppeerid=UPPEER_1,userlabel=SITE_A};   # 值里可带花括号

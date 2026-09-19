@@ -7,7 +7,7 @@
 - **判断列按源分列**:`CHR判断方法 / X2 cause / RB日志判断方法 / 配置数据(核查/判断方法) /
   DBG日志(DEBUG) / 信令判断方法 / 话统(PFM) …` —— 表头**模糊匹配**成规范源标签
   (CHR/X2/RB/配置/DBG/信令/话统),落进节点的 `data_source`,**列头自带"查哪个源"、给绑定预路由**;
-  判据没按源分列的(混血表的 `Judgment Condition` 单列/「判断条件」)归 **通用** 标签(无预路由,
+  判据没按源分列的(混合格式表的 `Judgment Condition` 单列/「判断条件」)归 **通用** 标签(无预路由,
   路由靠模型读判据原文);同层 L n 与 L n(Chinese) 双列只取中文列(空格逐格回退英文格)。
 - **按场景名(L2)跨页签提取**:输入 `--start-node "NSA场景接入失败"`,把**所有树页签**里该 L2
   场景的行收集起来,按"根→叶"路径合并成**一棵**从 L2 起的子树;同一节点的判断按"源标签 + 出处页签"累积。
@@ -15,11 +15,14 @@
   `--sheet "<页签名>"` 可限定只用某一页(等价"按页签名选")。
 - **元数据**:`和基础诊断对接KPI索引 / 解决方案 / 备注` 存为节点元数据(**不进判断条件**);
   `数据链接` 丢弃;`产品 / 制式` 不参与建树分支。
-- 输出契约与老脚本同形(`<短名>.md` + `<短名>.tree_index.json`);**文件/目录名用英文短名(slug)**:
+- 输出格式与老脚本同形(`<短名>.md` + `<短名>.tree_index.json`);**文件/目录名用英文短名(slug)**:
   自动取场景所在层的英文列转小写连字符(如 layer-3-service-issues),取不到沿用中文名、可 --slug 指定;
   中文场景名保留在 index.scenario。节点多了可选 `meta`/`sheets` 字段(additive,老消费方忽略即可)。
 - **推荐解决方案**:`Recommend Solution(Chinese/English)` 列按节点收进 `tree/solutions.json`
   (不进树、不进判据、不进裁决上下文;RCA 报根因时按 node_id 点查,给结论附解决方案)。
+- **英文名与英文判据**:中英双列表里同层的英文格(`L n` 与 `L n(Chinese)` 成对时的 `L n`,或显式的
+  `L n(English)`)存为节点 `name_en`,`Judgment Condition`(英文)列存为 `condition_en`;只存不参与
+  建树与判据解析,供树视图与报告按用户语言输出。英文格为空就不存。
 
 用法:
     excel_to_tree_v2.py <xlsx> --list                          # 列出所有可输入的场景名(L2)+ 各自出处页签
@@ -37,12 +40,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from excel_to_tree import _clean_text, _infer_combine, _is_skip_judgment, scenario_out_dir  # 复用老内核的通用件
+from excel_to_tree import _clean_text, _infer_combine, _is_skip_judgment, _set_name_en, scenario_out_dir  # 复用老内核的通用件
 
-_LEVEL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")          # 新格式 L1.. / 老格式 L1(Chinese) 都认
+_LEVEL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")          # 新格式 L1.. / 老格式 L1(Chinese) 都识别
 _OLD_RE = re.compile(r"old\b|旧", re.IGNORECASE)            # 页签名带 old/旧 = 过期版,默认跳过
 DEFAULT_START_LEVEL = 2                                      # 背景业务知识:场景节点通常在 L2
-# 判断列表头 → 规范源标签(按关键词模糊匹配,扛各页签命名差异)。顺序无所谓,一个表头通常只含一个源词。
+# 判断列表头 → 规范源标签(按关键词模糊匹配,兼容各页签的命名差异)。顺序无所谓,一个表头通常只含一个源词。
 _SRC_KEYWORDS: List[Tuple[str, str]] = [
     ("CHR", "CHR"), ("X2", "X2"), ("RB", "RB"), ("DBG", "DBG"), ("DEBUG", "DBG"),
     ("信令", "信令"), ("配置", "配置"), ("话统", "话统"), ("PFM", "话统"),
@@ -68,8 +71,8 @@ def classify(h: str) -> Tuple[str, Any]:
     for kw, tag in _SRC_KEYWORDS:                            # 含源关键词 → 判断方法列
         if kw.lower() in h.lower():
             return ("method", tag)
-    # 通用判据列(老格式单列判据,常见于"混血"表:v2 层级列 + v1 判据列,如数通树)——不认它
-    # 会把整棵树的判据**静默丢光**(建出 0 判据的空壳树,下游只能瞎猜)。
+    # 通用判据列(老格式单列判据,常见于混合格式表:v2 层级列 + v1 判据列,如数通树)——不识别它
+    # 会把整棵树的判据**静默丢光**(建出 0 判据的空树,下游只能瞎猜)。
     # 标签"通用"= 判据未按源分列,路由靠模型读判据原文。
     if "judgment condition" in h.lower() or "判断条件" in h:
         return ("method", "通用")
@@ -79,7 +82,7 @@ def classify(h: str) -> Tuple[str, Any]:
 def sheet_schema(header: List[str]):
     """表头 → (层级列[(列名,层级)]升序, 判断列{列名:源标签}, 元数据列{列名:名}, 层级备选列{层级:[列名]})。
 
-    「混血」表(同层有 L1 与 L1(Chinese) 双列、判据中英双列)的双列处理:
+    混合格式表(同层有 L1 与 L1(Chinese) 双列、判据中英双列)的双列处理:
     - 同一层级多列 → 主列取「(Chinese)」那列(业务语言);其余列进**备选表**,取值时逐格回退
       (某行中文格空、英文格有值 → 用英文格,不整列丢弃)——否则中英文名会被当成两层节点
       串进路径,树深翻倍;整列取舍又会把漏译的行静默挤层/丢支。
@@ -115,6 +118,32 @@ def sheet_schema(header: List[str]):
     return primary, methods, metas, fallback
 
 
+_LEVEL_EN_RE = re.compile(r"^L(\d+)(?:\(English\)|_Name_EN)$", re.IGNORECASE)
+
+
+def sheet_en_cols(header: List[str]):
+    """表头 → (英文层级列 {层级: 列名}, 英文判据列名|None)。
+    英文层级列:显式的 L n(English) / L n_Name_EN;或中英双列时与 L n(Chinese) 成对的裸 L n 列。
+    英文判据列:Judgment Condition 中英双列里不带 Chinese 的那列(sheet_schema 去重时弃掉的那列)。"""
+    levels, _m, _me, fb = sheet_schema(header)
+    en_lvl: Dict[int, str] = {}
+    for h in header:
+        m = _LEVEL_EN_RE.match((h or "").strip())
+        if m:
+            en_lvl.setdefault(int(m.group(1)), h)
+    for col, lvl in levels:
+        if lvl in en_lvl or "chinese" not in col.lower():
+            continue
+        for c in fb.get(lvl) or ():
+            if "chinese" not in c.lower():
+                en_lvl[lvl] = c
+                break
+    jd_en = next((h for h in header
+                  if ("judgment condition" in (h or "").lower() and "chinese" not in h.lower())
+                  or (h or "").strip().lower() == "diagnosis_method_en"), None)
+    return en_lvl, jd_en
+
+
 def _lvl_value(row, col: str, fb_cols) -> str:
     """某行某层的取值:主列(中文)优先,空则逐格回退备选列(英文)——漏译一格不丢一支。"""
     v = (row.get(col) or "").strip()
@@ -132,7 +161,7 @@ _CJK_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")   # 中日韩统一表意�
 
 def slugify(name: str):
     """英文名 → 文件/目录用短名(slug):小写、非字母数字一律转 '-'、合并去首尾。
-    含中文字符(英文格没翻译、填的还是中文)或转换后为空 → 返回 None(不可用,交上层兜底)。"""
+    含中文字符(英文格没翻译、填的还是中文)或转换后为空 → 返回 None(不可用,由上层用备用做法)。"""
     s = str(name or "").strip()
     if not s or _CJK_RE.search(s):
         return None
@@ -144,7 +173,7 @@ def slugify(name: str):
 
 def find_english_slug(tree_sheets, scenario: str):
     """任意层级:找「场景名」所在格的同层英文备选列取值,第一个能转成合法 slug 的当英文短名。
-    (混血表同层是 Lx(Chinese)/Lx 双列,主列=中文、备选列=英文——场景名住哪层就取哪层的英文格。)"""
+    (混合格式表同层是 Lx(Chinese)/Lx 双列,主列=中文、备选列=英文——场景名住哪层就取哪层的英文格。)"""
     for _name, header, rows in tree_sheets:
         levels, _, _, fb = sheet_schema(header)
         for col, lvl in levels:
@@ -162,7 +191,7 @@ def find_english_slug(tree_sheets, scenario: str):
 
 def resolve_scenario_alias(tree_sheets, scenario: str):
     """--start-node 传的是英文列(备选列)里的叫法时,翻译成主列真名。
-    背景:混血双列表的 --list 显示中文主列名,但老版脚本曾把英文列名列出来——用户/老会话
+    背景:混合格式双列表的 --list 显示中文主列名,但老版脚本曾把英文列名列出来——用户/老会话
     记住的英文名在新版下点不中,直接报"未找到"会让人以为脚本坏了。返回真名或 None。"""
     for _name, header, rows in tree_sheets:
         levels, _m, _me, fb = sheet_schema(header)
@@ -181,10 +210,10 @@ def is_tree_sheet(header: List[str]) -> bool:
 
 
 def default_out(anchor: Path, stem: str, slug, scenario: str):
-    """默认落点:**直出打包技能形态**——scot技能/<短名>/(execute 骨架+SKILL 身份),产物=其 assets/,
+    """默认落点:**直接生成技能形态**——scot技能/<短名>/(execute 的执行指引与脚本+SKILL 身份),产物=其 assets/,
     流水线跑完技能即成品,免掉单独打包一步(调优/迁移本就支持在 assets 上就地做)。
-    直出的前提:有英文短名(云端技能名要英文)+ 本机有同门 cs-scot-execute / fault-tree-rca;
-    不满足 → 退回老的 scot产物/<场景名>/ 产物形态,响亮提示最后跑 package_scenario.py 补打包。
+    直接生成的前提:有英文短名(云端技能名要英文)+ 本机 skills 目录下有 cs-scot-execute / fault-tree-rca;
+    不满足 → 退回老的 scot产物/<场景名>/ 产物形态,明确提示最后跑 package_scenario.py 单独打包。
     返回 (技能目录|None, 产物目录, 说明)。"""
     skill_dir = anchor / "scot技能" / stem
     if (skill_dir / "SKILL.md").exists() and (skill_dir / "assets").is_dir():
@@ -193,22 +222,22 @@ def default_out(anchor: Path, stem: str, slug, scenario: str):
         import package_scenario                          # 单文件部署(只带 v1/v2/xlsx_reader 三件套)
     except ImportError:                                  # 没有打包脚本:不许崩,退回产物形态照常出树
         return None, scenario_out_dir(anchor, stem), \
-            "打包脚本 package_scenario.py 不在(单文件部署)——退回产物形态;要直出技能请带全 scripts/ 目录"
-    exe = package_scenario.find_material("cs-scot-execute")          # ①技能内嵌 ②同门 skills/
+            "打包脚本 package_scenario.py 不在(单文件部署)——只生成产物目录;要直接生成技能请带全 scripts/ 目录"
+    exe = package_scenario.find_material("cs-scot-execute")          # ①技能内嵌 ②同一 skills 目录下
     rca = package_scenario.find_material("fault-tree-rca")
     if not slug:
         return None, scenario_out_dir(anchor, stem), \
-            "未取到英文短名(技能名需英文)——退回产物形态;加 --slug 重跑可直出技能,或最后跑 package_scenario.py"
+            "未取到英文短名(技能名需英文)——只生成产物目录;加 --slug 重跑可直接生成技能,或最后跑 package_scenario.py"
     if not (exe / "SKILL.md").exists() or not (rca / "SKILL.md").exists():
         return None, scenario_out_dir(anchor, stem), \
-            ("找不到打包素材 cs-scot-execute / fault-tree-rca(技能内嵌与同门 skills/ 都没有)"
+            ("找不到打包素材 cs-scot-execute / fault-tree-rca(技能内嵌与同一 skills/ 目录下都没有)"
              "——退回产物形态,最后跑 package_scenario.py")
     if skill_dir.exists():
         return None, scenario_out_dir(anchor, stem), \
-            f"{skill_dir} 已存在但不是完整技能(缺 SKILL.md 或 assets/)——不动它,退回产物形态;人工清理后重跑可直出"
+            f"{skill_dir} 已存在但不是完整技能(缺 SKILL.md 或 assets/)——不动它,只生成产物目录;人工清理后重跑可直接生成技能"
     import package_scenario
     package_scenario.scaffold_skill(skill_dir, scenario, stem, exe, rca)
-    return skill_dir, skill_dir / "assets", "已搭好技能骨架(execute 骨架+rca 副本+zip2csv)"
+    return skill_dir, skill_dir / "assets", "已搭好技能目录框架(执行器脚本+rca 副本+zip2csv)"
 
 
 def read_sheets(path: str):
@@ -233,6 +262,81 @@ def list_scenarios(tree_sheets, start_level: int) -> Dict[str, List[str]]:
     return {k: sorted(v) for k, v in sorted(sc.items())}
 
 
+def _row_levels(row, levels, fb):
+    """一行各层取值(主列优先、逐格回退备选列),空格去掉;连续同名层折叠。返回 (层级值列表, 是否折叠过)。"""
+    full = [(lvl, _lvl_value(row, c, fb.get(lvl))) for c, lvl in levels]
+    full = [(lvl, v) for lvl, v in full if v]
+    # 连续同名层折叠:平台 DataExport 常见"向右填充/合并单元格展开"——同一行 L3 之后
+    # 几百列全是同一个叶子名,路径变成上千级连环重名链(实测:渲染 md 递归 994 层爆栈)。
+    # 只折叠**相邻**同名格,真实树不存在"同名节点直接挂在同名父下"的形态,零误伤。
+    deduped = full[:1]
+    for it in full[1:]:
+        if it[1] != deduped[-1][1]:
+            deduped.append(it)
+    return deduped, len(deduped) != len(full)
+
+
+def _scenario_path(full, names, scenario: str, start_level: int):
+    """从本行路径截出以场景为根的一段:优先场景名在 start_level 层(L2),否则在别的层找到也认;都没有 → None。"""
+    sl = start_level
+    if len(full) >= sl and full[sl - 1][1] == scenario:   # 优先:场景名在 L2
+        return full[sl - 1:]
+    if scenario in names:                                  # 备用做法:在别的层找到
+        return full[names.index(scenario):]
+    return None
+
+
+def _row_methods(row, methods) -> Dict[str, str]:
+    """本行各源判断列 → {源标签: 判据文本}(同标签多列按换行累积;空格/pass-through 标记不算)。"""
+    mth: Dict[str, str] = {}
+    for c, tag in methods.items():
+        v = _clean_text(row.get(c))
+        if v and not _is_skip_judgment(v):
+            mth[tag] = (mth[tag] + "\n" + v) if tag in mth else v
+    return mth
+
+
+def _row_metas(row, metas) -> Dict[str, str]:
+    """本行元数据列 → {元数据名: 值}(同名多列取第一个非空)。"""
+    meta: Dict[str, str] = {}
+    for c, tag in metas.items():
+        v = _clean_text(row.get(c))
+        if v:
+            meta.setdefault(tag, v)
+    return meta
+
+
+def _row_cond_en(row, jd_en_col, mth) -> str:
+    """本行英文判据:只在有英文判据列且本行有中文判据时取;pass-through 标记当空。"""
+    cond_en = _clean_text(row.get(jd_en_col)) if (jd_en_col and mth) else ""
+    if cond_en and _is_skip_judgment(cond_en):
+        cond_en = ""
+    return cond_en
+
+
+def _merge_leaf(nd, nid: str, sheet: str, row, cond_en: str, mth, meta, sol_cols, solutions) -> None:
+    """把一行的出处页签/英文判据/各源判据/元数据/解决方案并进路径最深节点(跨行跨页签累积、去重)。"""
+    if sheet not in nd["sheets"]:
+        nd["sheets"].append(sheet)
+    if cond_en:
+        prev = nd.get("condition_en")
+        nd["condition_en"] = (prev + "\n" + cond_en) if (prev and cond_en not in prev) else (prev or cond_en)
+    for tag, v in mth.items():
+        prev = nd["data_source"].get(tag)
+        nd["data_source"][tag] = (prev + "\n" + v) if (prev and v not in prev) else (prev or v)
+    if nd["data_source"]:
+        cond = "\n".join(f"[{t}] {nd['data_source'][t]}" for t in nd["data_source"])
+        nd["condition"] = cond
+        nd["combine"] = _infer_combine(cond)
+        nd["pass_through"] = False
+    for tag, v in meta.items():
+        nd["meta"].setdefault(tag, v)
+    for c, lang in sol_cols:
+        sv = _clean_text(row.get(c))
+        if sv:
+            solutions.setdefault(nid, {}).setdefault(lang, sv)
+
+
 def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
     """跨页签收集 scenario(L2)的行,按路径合并成一棵从 L2 起的子树(扁平权威 index)。
     同一路径节点跨页签/跨行累积:data_source 按源标签累积、meta 累积、sheets 记出处。"""
@@ -252,44 +356,25 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
         levels, methods, metas, fb = sheet_schema(header)
         if not levels:
             continue
-        # 推荐解决方案列(混血表英文表头,classify 不收):不进树/不进判据,单独按节点收集,
+        en_lvl, jd_en_col = sheet_en_cols(header)
+        # 推荐解决方案列(混合格式表的英文表头,classify 不收):不进树/不进判据,单独按节点收集,
         # 供 RCA 报根因时点查输出——诊断结论"太干巴巴"的补丁,但绝不掺进裁决上下文。
         sol_cols = [(h, "zh" if "chinese" in h.lower() else "en")
                     for h in header if "recommend solution" in h.lower()]
         for row in rows:
-            full = [(lvl, _lvl_value(row, c, fb.get(lvl))) for c, lvl in levels]
-            full = [(lvl, v) for lvl, v in full if v]
-            # 连续同名层折叠:平台 DataExport 常见"向右填充/合并单元格展开"——同一行 L3 之后
-            # 几百列全是同一个叶子名,路径变成上千级连环重名链(实测:渲染 md 递归 994 层爆栈)。
-            # 只折叠**相邻**同名格,真实树不存在"同名节点直接挂在同名父下"的形态,零误伤。
-            deduped = full[:1]
-            for it in full[1:]:
-                if it[1] != deduped[-1][1]:
-                    deduped.append(it)
-            if len(deduped) != len(full):
+            full, padded = _row_levels(row, levels, fb)
+            if padded:
                 padded_rows += 1
-            full = deduped
             if not full:
                 continue
             names = [v for _, v in full]
-            sl = start_level
-            if len(full) >= sl and full[sl - 1][1] == scenario:   # 优先:场景名在 L2
-                path = full[sl - 1:]
-            elif scenario in names:                                # 兜底:在别的层找到
-                path = full[names.index(scenario):]
-            else:
+            path = _scenario_path(full, names, scenario, start_level)
+            if not path:
                 continue
             # 本行各源判断 + 元数据(挂到最深节点)
-            mth: Dict[str, str] = {}
-            for c, tag in methods.items():
-                v = _clean_text(row.get(c))
-                if v and not _is_skip_judgment(v):
-                    mth[tag] = (mth[tag] + "\n" + v) if tag in mth else v
-            meta: Dict[str, str] = {}
-            for c, tag in metas.items():
-                v = _clean_text(row.get(c))
-                if v:
-                    meta.setdefault(tag, v)
+            mth = _row_methods(row, methods)
+            meta = _row_metas(row, metas)
+            cond_en = _row_cond_en(row, jd_en_col, mth)
             parent_id, parts = None, []
             for j, (lvl, nm) in enumerate(path):
                 parts.append(nm)
@@ -301,23 +386,9 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
                     nodes[parent_id]["children"].append(nid)
                 if j == 0:
                     root_id = nid
+                _set_name_en(nd, row, en_lvl, lvl, nm)
                 if j == len(path) - 1:
-                    if name not in nd["sheets"]:
-                        nd["sheets"].append(name)
-                    for tag, v in mth.items():
-                        prev = nd["data_source"].get(tag)
-                        nd["data_source"][tag] = (prev + "\n" + v) if (prev and v not in prev) else (prev or v)
-                    if nd["data_source"]:
-                        cond = "\n".join(f"[{t}] {nd['data_source'][t]}" for t in nd["data_source"])
-                        nd["condition"] = cond
-                        nd["combine"] = _infer_combine(cond)
-                        nd["pass_through"] = False
-                    for tag, v in meta.items():
-                        nd["meta"].setdefault(tag, v)
-                    for c, lang in sol_cols:
-                        sv = _clean_text(row.get(c))
-                        if sv:
-                            solutions.setdefault(nid, {}).setdefault(lang, sv)
+                    _merge_leaf(nd, nid, name, row, cond_en, mth, meta, sol_cols, solutions)
                 parent_id = nid
     if padded_rows:
         print(f"ℹ 层级列右向填充折叠:{padded_rows} 行存在相邻同名层级格(DataExport 常见填充/"
@@ -328,7 +399,7 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
 def index_to_markdown(index: Dict[str, Any]) -> str:
     """扁平 index → #/##/### 层级 md;判断条件(按源标签)+ 元数据紧跟节点。
     显式栈迭代而非递归:异常深的树(层级列识别错位/填充数据)不该炸 RecursionError,
-    要么正常渲染、要么(万一 index 被外部改出环)响亮点名坏在哪个节点。"""
+    要么正常渲染、要么(万一 index 被外部改出环)明确点名坏在哪个节点。"""
     nodes = index["nodes"]
     lines: List[str] = []
     if index.get("root"):
@@ -358,6 +429,151 @@ def index_to_markdown(index: Dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _split_sheets(sheets, include_old: bool, only_sheet):
+    """页签分流:非树页 / 名字带 old·旧 的旧版页(除非 --include-old)/ --sheet 未点名的页跳过。
+    返回 (树页签, 非树名, 旧版名)。"""
+    tree, nontree, old = [], [], []
+    for n, h, r in sheets:
+        if not is_tree_sheet(h):
+            nontree.append(n)
+        elif _OLD_RE.search(n) and not include_old:
+            old.append(n)
+        elif only_sheet and n != only_sheet:
+            continue
+        else:
+            tree.append((n, h, r))
+    return tree, nontree, old
+
+
+def _print_scenarios(tree, nontree, old, start_level: int) -> None:
+    """--list:列出所有可输入场景名(start_level 层)+ 各自出处页签。"""
+    sc = list_scenarios(tree, start_level)
+    print(f"树页签 {len(tree)} 个 | 非树跳过 {nontree or '无'} | 旧版跳过 {old or '无'}")
+    print(f"可输入场景名(L{start_level}) 共 {len(sc)}:")
+    for name, where in sc.items():
+        print(f"  {name}    ←  {where}")
+
+
+def _build_scenario_index(tree, start_node: str, start_level: int):
+    """按场景名建索引;点不中时试英文备选列的叫法(翻成主列真名重建),仍没有 → 退出 1。返回 (index, 真名)。"""
+    index = build_index(tree, start_node, start_level)
+    if not index.get("root"):
+        alias = resolve_scenario_alias(tree, start_node)
+        if alias:
+            print(f"ℹ 「{start_node}」是英文列里的叫法,主列真名是「{alias}」——已按真名提取"
+                  "(--list 显示的是主列名;老版脚本曾列英文名,两代叫法都识别)")
+            start_node = alias
+            index = build_index(tree, alias, start_level)
+    if not index.get("root"):
+        print(f"未在任何树页签找到场景「{start_node}」(L{start_level},主列与英文备选列都查过)。"
+              "用 --list 核对名字。", file=sys.stderr)
+        sys.exit(1)
+    return index, start_node
+
+
+def _warn_depth(index) -> None:
+    """深度检查:正常故障树十来层;几十层以上=层级列识别错位/异常数据,明确报出来,别静默产出坏树。"""
+    def _depth(nid: str) -> int:
+        d, cur = 0, nid
+        while cur:
+            d += 1
+            cur = index["nodes"].get(cur, {}).get("parent")
+        return d
+    max_d = max((_depth(n) for n in index["nodes"]), default=0)
+    if max_d > 32:
+        print(f"⚠ 树深 {max_d} 层,远超正常故障树——层级列识别可能错位(--list 核对场景、检查表头),"
+              "继续输出但下游多半不可用", file=sys.stderr)
+
+
+def _exempt_top_levels(index) -> None:
+    """「高层不判断」规则(简单粗暴,用户定案):L1/L2 这种靠根的层级,判据多为场景分类/选路说明,
+    不是故障条件——绑成判定会把整树确证卡死(实测:根节点"判断属于哪种场景"不成立 → 全树只能疑似)。
+    场景**根节点不看母表层号一律豁免**(实测:场景在母表更深层时,根的"参考下级节点"判据被派了绑定,
+    谁也绑不上 → 数据不足挂在全树每条路径上)。
+    处理:带判据的 L≤2 节点与场景根标 pass_through(不阻断、不参与绑定),判据文本保留供人读;
+    某棵树确实要在高层判(少见)→ --bind-top-levels 关掉本规则(由调用方决定是否调用)。"""
+    topjudge = [nid for nid, nd in index["nodes"].items()
+                if nd.get("condition") and ((nd.get("level") or 99) <= 2 or nid == index.get("root"))]
+    for nid in topjudge:
+        index["nodes"][nid]["pass_through"] = True
+    if topjudge:
+        print(f"高层不判断:L1/L2/场景根带判据节点 {len(topjudge)} 个已标 pass_through(不阻断路径、不参与绑定;"
+              "判据保留供人读。确要在高层判 → 重跑加 --bind-top-levels)")
+
+
+def _pick_slug(tree, slug_arg, start_node: str):
+    """英文短名:--slug 手工指定 > 场景所在层英文列自动转 > 场景名本身(本就是英文时)> 沿用中文名(现状)。
+    --slug 给了但转不成合法短名 → 退出 2。"""
+    if slug_arg:
+        slug = slugify(slug_arg)
+        if not slug:
+            print(f"--slug「{slug_arg}」不可用:须为英文(会转成小写连字符,如 layer-3-service-issues)",
+                  file=sys.stderr)
+            sys.exit(2)
+        return slug
+    return find_english_slug(tree, start_node) or slugify(start_node)
+
+
+def _resolve_output(args, stem: str, slug):
+    """输出落点:-o 显式 md 路径;否则按 --out-base/xlsx 所在目录走 default_out(技能形态或产物目录)。
+    返回 (output_path, 产物目录|None, 技能目录|None, 说明)。"""
+    output_path = args.output
+    out_dir = skill_dir = None
+    skill_note = ""
+    if not output_path:
+        anchor = Path(args.out_base).expanduser() if args.out_base else Path(args.excel_path).expanduser().resolve().parent
+        skill_dir, out_dir, skill_note = default_out(anchor, stem, slug, args.start_node)
+        output_path = str(out_dir / "tree" / f"{stem}.md")
+    return output_path, out_dir, skill_dir, skill_note
+
+
+def _write_outputs(outp: Path, md: str, index, solutions) -> None:
+    """写 md / tree_index / solutions.json(没产出方案时必须删掉旧表)。"""
+    outp.parent.mkdir(parents=True, exist_ok=True)
+    outp.write_text(md, encoding="utf-8")
+    outp.with_suffix(".tree_index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    if solutions:
+        sol_path = outp.parent / "solutions.json"
+        sol_path.write_text(json.dumps(solutions, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        # 重跑没产出方案(改了表头/换了页签/清了格)→ 必须清掉旧表:node_id(nN)按遭遇序分配,
+        # 树一变旧表的 nN 就错位,陈旧 solutions 会把别的节点的方案错挂给根因(全链无人再校验它)。
+        (outp.parent / "solutions.json").unlink(missing_ok=True)
+
+
+def _print_summary(start_node: str, index, solutions, output_path: str, outp: Path, slug,
+                   out_dir, skill_dir, skill_note: str) -> None:
+    """收尾提示:输出路径、短名、解决方案表、页签来源/节点数/判据数(0 判据当场喊停)、产物/技能目录。"""
+    print(f"已输出子树: {output_path}")
+    print(f"已输出权威 index: {outp.with_suffix('.tree_index.json')}")
+    if slug:
+        print(f"英文短名(slug): {slug}(文件/目录名用;中文场景名保留在 index.scenario)")
+    else:
+        print("⚠ 未取到可用英文短名(场景所在层英文列缺失/未翻译):文件与目录沿用中文名。"
+              "需要英文名请加 --slug <english-name> 重跑。", file=sys.stderr)
+    if solutions:
+        print(f"已输出解决方案表: {outp.parent / 'solutions.json'}(节点 {len(solutions)} 个;"
+              "RCA 报根因时点查,不进裁决上下文)")
+    src_sheets = sorted({s for nd in index["nodes"].values() for s in nd.get("sheets", [])})
+    n_cond = sum(1 for nd in index["nodes"].values()
+                 if nd.get("condition") and not nd.get("pass_through"))
+    n_en = sum(1 for nd in index["nodes"].values() if nd.get("name_en"))
+    print(f"场景「{start_node}」合并自页签: {src_sheets};节点数 {len(index['nodes'])},带判据节点 {n_cond}"
+          + (f",带英文名节点 {n_en}" if n_en else ""))
+    if n_cond == 0:
+        print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是格式没被识别"
+              "(判据列表头对不上关键词/通用判据列),**停下检查 Excel 表头,别往下绑定**"
+              "——0 判据的树绑出来的只能是瞎猜。", file=sys.stderr)
+    if out_dir is not None:
+        print(f"本场景产物目录: {out_dir}")
+        if skill_dir is not None:
+            print(f"本场景技能目录: {skill_dir}({skill_note})")
+            print("  已是打包技能形态:后续步骤 --out 一律用上面的产物目录(=技能的 assets/),"
+                  "流水线跑完技能即成品,**无需再跑 package_scenario 打包**。")
+        else:
+            print(f"⚠ 未直接生成技能形态:{skill_note}", file=sys.stderr)
+
+
 def main() -> None:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -380,126 +596,32 @@ def main() -> None:
     args = ap.parse_args()
 
     sheets = read_sheets(args.excel_path)
-    tree, nontree, old = [], [], []
-    for n, h, r in sheets:
-        if not is_tree_sheet(h):
-            nontree.append(n)
-        elif _OLD_RE.search(n) and not args.include_old:
-            old.append(n)
-        elif args.sheet and n != args.sheet:
-            continue
-        else:
-            tree.append((n, h, r))
+    tree, nontree, old = _split_sheets(sheets, args.include_old, args.sheet)
 
     if args.list:
-        sc = list_scenarios(tree, args.start_level)
-        print(f"树页签 {len(tree)} 个 | 非树跳过 {nontree or '无'} | 旧版跳过 {old or '无'}")
-        print(f"可输入场景名(L{args.start_level}) 共 {len(sc)}:")
-        for name, where in sc.items():
-            print(f"  {name}    ←  {where}")
+        _print_scenarios(tree, nontree, old, args.start_level)
         return
 
     if not args.start_node:
         print("请用 --start-node「场景名」选场景,或 --list 看有哪些。", file=sys.stderr)
         sys.exit(2)
 
-    index = build_index(tree, args.start_node, args.start_level)
-    if not index.get("root"):
-        alias = resolve_scenario_alias(tree, args.start_node)
-        if alias:
-            print(f"ℹ 「{args.start_node}」是英文列里的叫法,主列真名是「{alias}」——已按真名提取"
-                  "(--list 显示的是主列名;老版脚本曾列英文名,两代叫法都认)")
-            args.start_node = alias
-            index = build_index(tree, alias, args.start_level)
-    if not index.get("root"):
-        print(f"未在任何树页签找到场景「{args.start_node}」(L{args.start_level},主列与英文备选列都查过)。"
-              "用 --list 核对名字。", file=sys.stderr)
-        sys.exit(1)
-    # 深度体检:正常故障树十来层;几十层以上=层级列识别错位/异常数据,响亮报出来别静默产坏树
-    def _depth(nid: str) -> int:
-        d, cur = 0, nid
-        while cur:
-            d += 1
-            cur = index["nodes"].get(cur, {}).get("parent")
-        return d
-    max_d = max((_depth(n) for n in index["nodes"]), default=0)
-    if max_d > 32:
-        print(f"⚠ 树深 {max_d} 层,远超正常故障树——层级列识别可能错位(--list 核对场景、检查表头),"
-              "继续输出但下游多半不可用", file=sys.stderr)
-    # 「高层不判断」规则(简单粗暴,用户定案):L1/L2 这种靠根的层级,判据多为场景分类/选路说明,
-    # 不是故障条件——绑成判定会把整树确证卡死(实测:根节点"判断属于哪种场景"不成立 → 全树只能疑似)。
-    # 场景**根节点不看母表层号一律豁免**(实测:场景在母表更深层时,根的"参考下级节点"判据被派了绑定,
-    # 谁也绑不上 → 数据不足挂在全树每条路径上)。
-    # 处理:带判据的 L≤2 节点与场景根标 pass_through(不阻断、不参与绑定),判据文本保留供人读;
-    # 某棵树确实要在高层判(少见)→ --bind-top-levels 关掉本规则。
+    index, args.start_node = _build_scenario_index(tree, args.start_node, args.start_level)
+    _warn_depth(index)
     if not args.bind_top_levels:
-        topjudge = [nid for nid, nd in index["nodes"].items()
-                    if nd.get("condition") and ((nd.get("level") or 99) <= 2 or nid == index.get("root"))]
-        for nid in topjudge:
-            index["nodes"][nid]["pass_through"] = True
-        if topjudge:
-            print(f"高层不判断:L1/L2/场景根带判据节点 {len(topjudge)} 个已标 pass_through(不阻断路径、不参与绑定;"
-                  "判据保留供人读。确要在高层判 → 重跑加 --bind-top-levels)")
-    solutions = index.pop("solutions", {})              # 单独落盘,不进 tree_index(别膨胀树契约)
+        _exempt_top_levels(index)
+    solutions = index.pop("solutions", {})              # 单独写文件,不进 tree_index(别膨胀树的格式约定)
     md = index_to_markdown(index)
 
-    # 英文短名:--slug 手工指定 > 场景所在层英文列自动转 > 场景名本身(本就是英文时)> 沿用中文名(现状)
-    if args.slug:
-        slug = slugify(args.slug)
-        if not slug:
-            print(f"--slug「{args.slug}」不可用:须为英文(会转成小写连字符,如 layer-3-service-issues)",
-                  file=sys.stderr)
-            sys.exit(2)
-    else:
-        slug = find_english_slug(tree, args.start_node) or slugify(args.start_node)
+    slug = _pick_slug(tree, args.slug, args.start_node)
     stem = slug or args.start_node
     if slug:
         index["slug"] = slug
 
-    output_path = args.output
-    out_dir = skill_dir = None
-    skill_note = ""
-    if not output_path:
-        anchor = Path(args.out_base).expanduser() if args.out_base else Path(args.excel_path).expanduser().resolve().parent
-        skill_dir, out_dir, skill_note = default_out(anchor, stem, slug, args.start_node)
-        output_path = str(out_dir / "tree" / f"{stem}.md")
+    output_path, out_dir, skill_dir, skill_note = _resolve_output(args, stem, slug)
     outp = Path(output_path)
-    outp.parent.mkdir(parents=True, exist_ok=True)
-    outp.write_text(md, encoding="utf-8")
-    outp.with_suffix(".tree_index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
-    if solutions:
-        sol_path = outp.parent / "solutions.json"
-        sol_path.write_text(json.dumps(solutions, ensure_ascii=False, indent=2), encoding="utf-8")
-    else:
-        # 重跑没产出方案(改了表头/换了页签/清了格)→ 必须清掉旧表:node_id(nN)按遭遇序分配,
-        # 树一变旧表的 nN 就错位,陈旧 solutions 会把别的节点的方案错挂给根因(全链无人再校验它)。
-        (outp.parent / "solutions.json").unlink(missing_ok=True)
-    print(f"已输出子树: {output_path}")
-    print(f"已输出权威 index: {outp.with_suffix('.tree_index.json')}")
-    if slug:
-        print(f"英文短名(slug): {slug}(文件/目录名用;中文场景名保留在 index.scenario)")
-    else:
-        print("⚠ 未取到可用英文短名(场景所在层英文列缺失/未翻译):文件与目录沿用中文名。"
-              "需要英文名请加 --slug <english-name> 重跑。", file=sys.stderr)
-    if solutions:
-        print(f"已输出解决方案表: {outp.parent / 'solutions.json'}(节点 {len(solutions)} 个;"
-              "RCA 报根因时点查,不进裁决上下文)")
-    src_sheets = sorted({s for nd in index["nodes"].values() for s in nd.get("sheets", [])})
-    n_cond = sum(1 for nd in index["nodes"].values()
-                 if nd.get("condition") and not nd.get("pass_through"))
-    print(f"场景「{args.start_node}」合并自页签: {src_sheets};节点数 {len(index['nodes'])},带判据节点 {n_cond}")
-    if n_cond == 0:
-        print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是格式没被识别"
-              "(判据列表头对不上关键词/通用判据列),**停下检查 Excel 表头,别往下绑定**"
-              "——0 判据的树绑出来的只能是瞎猜。", file=sys.stderr)
-    if out_dir is not None:
-        print(f"本场景产物目录: {out_dir}")
-        if skill_dir is not None:
-            print(f"本场景技能目录: {skill_dir}({skill_note})")
-            print("  已是打包技能形态:后续步骤 --out 一律用上面的产物目录(=技能的 assets/),"
-                  "流水线跑完技能即成品,**无需再跑 package_scenario 打包**。")
-        else:
-            print(f"⚠ 未直出技能形态:{skill_note}", file=sys.stderr)
+    _write_outputs(outp, md, index, solutions)
+    _print_summary(args.start_node, index, solutions, output_path, outp, slug, out_dir, skill_dir, skill_note)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@
 
 候选自身与路径祖先的区分：rca.json 的确证/疑似条目顶层带 node_id（候选自身），
 evidence_path 逐节点带 node_id 且最后一个是候选自身、其余是路径上级。
-Fault_tree_path 是节点名字列表（不是 id），仅当元素形如 nX 时才作为祖先兜底。
+Fault_tree_path 是节点名字列表（不是 id），仅当元素形如 nX 时才作为祖先的备用来源。
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def entry_node_ids(item: Dict[str, Any]) -> Tuple[Optional[str], Set[str]]:
     """从一条确证/疑似条目里提取 (候选自身 node_id, 路径祖先 node_id 集合)。
 
     优先级：顶层 node_id 字段（执行链 finalize 的输出直接带）→ evidence_path 最后一个节点。
-    祖先 = evidence_path 除最后一个之外的节点；Fault_tree_path 仅当元素形如 nX 时兜底并入。
+    祖先 = evidence_path 除最后一个之外的节点；Fault_tree_path 仅当元素形如 nX 时作为备用来源并入。
     """
     ev = item.get("evidence_path") or []
     ev_ids = [e.get("node_id") for e in ev if isinstance(e, dict) and e.get("node_id")]
@@ -261,7 +261,7 @@ def main() -> None:
 
     result = reconcile(expected_path, rca_path)
 
-    # 结果先落盘再打印——打印环节出任何问题都不能丢对账结果
+    # 结果先写入文件再打印——打印环节出任何问题都不能丢对账结果
     if args.out:
         out_path = Path(args.out)
         out_path.parent.mkdir(parents=True, exist_ok=True)

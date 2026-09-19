@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""evaluation_report.json → quality_score.json(平台展示适配,纯机械转换,零模型参与)。
+"""evaluation_report.json → quality_score.json(适配平台展示,纯机械转换,不经过模型)。
 
-平台的评估展示 = 若干维度各一个分 + 一个综合分。本技能的评估是"六关按序、命中即停",
+平台的评估展示 = 若干维度各一个分 + 一个综合分。本技能的评估是"六类错误按顺序检查、命中即停",
 不做程度打分——对就是对、错就是错,所以:
 - 六个维度 = 六类错误(顺序即评估顺序),value_type=BOOLEAN:
   通过 → value:true, score:100;命中 → value:false, score:0;
   前序维度未通过、本维度没评到 → value:null, score:null(展示层渲染成 N/A);
-- total_score = 通过维度数 ÷ 6 × 100(取整)——语义"六关过了几关",挂得越早分越低
-  (全过 100;挂第 1 关 0;挂最后一关 83);
-- reason 三语(default/zh_CN/en_US)模板化:失败维度 zh_CN 附机械摘要(逐字取自报告的
-  verdict_detail.reason),en_US 固定英文模板——机械转换不做自由翻译,default=zh_CN。
+- total_score = 通过维度数 ÷ 6 × 100(取整)——含义是"六个维度通过了几个",越早未通过分越低
+  (全部通过 100;第 1 个维度未通过 0;最后一个维度未通过 83);
+- reason 三语(default/zh_CN/en_US)模板化:未通过维度的 zh_CN 附机械摘要(逐字取自报告的
+  verdict_detail.reason),en_US 用固定英文模板——机械转换不做自由翻译,default=zh_CN。
 
-判定来源:verdict_detail(verdict + error_class 整数 0~5)——与"命中即停"链条严格一致。
-不读 checks 的 passed(v10 之前的老报告里,没评到的关会被写成 passed:true,读它会把
-"未评估"错展示成"通过";error_class 推导对新旧报告都成立)。
+判定来源:verdict_detail(verdict + error_class 整数 0~5)——与"命中即停"的检查顺序严格一致。
+不读 checks 的 passed(旧版报告里,没评到的维度会被写成 passed:true,读它会把
+"未评估"错误地展示成"通过";按 error_class 推导对新旧报告都成立)。
 
-评估流程末尾由 eval_run.py 自动生成;也可对任意历史 evaluation_report.json 手跑本脚本补出:
+评估流程末尾由 eval_run.py 自动生成;也可对任意历史 evaluation_report.json 手动运行本脚本补出:
   python score_report.py <evaluation_report.json 或其所在目录> [-o <输出路径>]
 维度的 key/三语名称/权重/排序的平台配置对照表见 ../references/score_dimensions.md。
 """
@@ -39,7 +39,7 @@ CLASS_NAMES = ["ENV_FAILURE", "INPUT_GAP", "BINDING_GAP", "KNOWLEDGE_GAP", "CRIT
 
 
 def _tri_reason(state, idx, ec, summary_zh):
-    """三态 reason 模板(default=zh_CN;en_US 固定模板不自由翻译)。"""
+    """按三种状态(通过/未通过/未评估)生成 reason 模板(default=zh_CN;en_US 用固定模板,不做自由翻译)。"""
     key, zh, en = DIMS[idx]
     if state is True:
         z = f"通过:未发现{zh}({CLASS_NAMES[idx]})类问题。"
@@ -55,8 +55,8 @@ def _tri_reason(state, idx, ec, summary_zh):
 
 
 def build_score(report: dict) -> dict:
-    """报告 dict → 平台评分 dict。评估自身失败(EVAL_ERROR/success=false)没有可信六关
-    结果,抛 ValueError——宁缺评分,不拿假分冒充。"""
+    """报告 dict → 平台评分 dict。评估自身失败(EVAL_ERROR/success=false)时没有可信的六维度
+    结果,抛 ValueError——宁可不出评分,也不拿假分数当作有效评分。"""
     meta = report.get("meta") or {}
     vd = report.get("verdict_detail") or {}
     verdict = vd.get("verdict") or meta.get("verdict") or ""
@@ -68,11 +68,11 @@ def build_score(report: dict) -> dict:
     except (TypeError, ValueError):
         ec = None
     if verdict.startswith("PASS"):
-        # PASS 与 PASS_WITH_GAPS 同待遇:后者=全命中+数据缺口注记,缺口住在 verdict 层,
-        # 六关(错误分类)判定全部通过——只认 "PASS" 精确串曾把 PASS_WITH_GAPS 打成全 N/A、0 分
+        # PASS 与 PASS_WITH_GAPS 同样处理:后者是全部命中并附数据缺口备注,缺口只记录在 verdict 层,
+        # 六个维度(错误分类)全部判为通过——以前只精确匹配 "PASS" 字符串,曾把 PASS_WITH_GAPS 错评成全 N/A、0 分
         ec = None
     elif ec is None:
-        # 非 PASS 却没定位到错误类:链条推导不出"过了几关",保守全 N/A、0 分,响亮提示
+        # 非 PASS 却没定位到错误类:推导不出通过了几个维度,保守地全记 N/A、0 分,并明确提示
         print("[score_report] ⚠ verdict 非 PASS 但 error_class 缺失——六维全记未评估、总分 0,"
               "请查 evaluation_report.json 的 verdict_detail", file=sys.stderr)
         dims = {k: {"value": None, "score": None,

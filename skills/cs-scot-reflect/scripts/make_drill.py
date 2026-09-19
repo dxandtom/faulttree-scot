@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """make_drill.py - 生成六类错误的演练场(自带迷你产物+用例+结果,离线跑通 评估→分拣 全流程)
 
-用途:演示/验证飞轮的错误分类与回流处置,不需要真实场景技能与真实数据。
+用途:演示/验证评估-反馈闭环的错误分类与反馈处理,不需要真实场景技能与真实数据。
 生成一个自包含工作区:迷你故障树产物 + 8 个用例(六类错误各一 + 孤儿绑定 + PASS 基线),
-每个用例配一份"已执行完"的结果目录(run.json/rca_input.json/rca.json 按该类错误特征捏好)。
+每个用例配一份"已执行完"的结果目录(run.json/rca_input.json/rca.json 按该类错误的特征构造好)。
 
 用法:
     python make_drill.py --out <演练目录>
@@ -88,13 +88,13 @@ def main() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    # 迷你产物(评估要看 tree_index/scripts/台账)
+    # 迷你产物(评估要读 tree_index、scripts 和迁移台账)
     wj("product/tree/演练.tree_index.json", TREE)
     wj("product/tree/migrations.json", LEDGER)
     (out / "product" / "scripts").mkdir(parents=True, exist_ok=True)
     (out / "product" / "scripts" / "log_analyzer.py").write_text(ANALYZER, encoding="utf-8")
 
-    # 用例 + 结果:每个用例一份"已跑完"的结果目录,按错误特征捏好
+    # 用例 + 结果:每个用例一份"已跑完"的结果目录,按错误特征构造好
     drills = [
         # (用例id, expected, run.json, rca_input, rca.json, 期望评估结论)
         ("drill-pass", _exp("drill-pass", "n6", "接口DOWN"),
@@ -105,7 +105,7 @@ def main() -> None:
          "FAIL·类0 ENV_FAILURE(脚本运行崩溃)→工单:自动迭代档,migrate 重迁+限定范围修复"),
         ("drill-1-input", _exp("drill-1-input", "n7", "链路震荡"),
          _run(missing=["log"]), RCA_INPUT, RCA_EMPTY,
-         "FAIL·类1 INPUT_GAP(数据缺失且漏判)→工单:人工兜底档,补数据清单"),
+         "FAIL·类1 INPUT_GAP(数据缺失且漏判)→工单:人工档,补数据清单"),
         ("drill-2-form", _exp("drill-2-form", "n7", "链路震荡"),
          _run(missing=["cmd"]), RCA_INPUT, RCA_EMPTY,
          "FAIL·类2 BINDING_GAP(绑定形态不匹配:cmd raw 在场、表未供)→工单:自动迭代档,"
@@ -116,29 +116,29 @@ def main() -> None:
          "FAIL·类2 BINDING_GAP(孤儿绑定 n88)→工单:自动迭代档,调优表清残留绑定"),
         ("drill-2-binding", _exp("drill-2-binding", "n9", "清绑定节点"),
          _run(), RCA_INPUT, RCA_EMPTY,
-         "FAIL·类2 BINDING_GAP(绑定清除冲突:台账有迁移记录+绑定为空)→工单:人工兜底档,二选一(恢复绑定/修订期望)"),
+         "FAIL·类2 BINDING_GAP(绑定清除冲突:台账有迁移记录+绑定为空)→工单:人工档,二选一(恢复绑定/修订期望)"),
         ("drill-3-knowledge", _exp("drill-3-knowledge", "n999", "幽灵节点"),
          _run(), RCA_INPUT, RCA_EMPTY,
-         "FAIL·类3 KNOWLEDGE_GAP(树上没有 n999)→工单:人工兜底档,故障树缺节点→tester 需求单"),
+         "FAIL·类3 KNOWLEDGE_GAP(树上没有 n999)→工单:人工档,故障树缺节点→tester 需求单"),
         ("drill-4-criteria", _exp("drill-4-criteria", "n7", "链路震荡",
                                   facts={"n7": {"predicate_satisfied": True}}),
          _run(), RCA_INPUT, RCA_EMPTY,
          "FAIL·类4 CRITERIA_GAP(期望成立实测不成立)→工单:自动迭代档,判定偏差修复(按证据修到与判据文档一致)"),
         ("drill-5-verdict", _exp("drill-5-verdict", "n7", "链路震荡"),
          _run(), RCA_INPUT, RCA_EMPTY,
-         "FAIL·类5 VERDICT_GAP(事实无冲突仍漏判)→工单:人工兜底档,结论归档争议(+辩论引擎可选)"),
+         "FAIL·类5 VERDICT_GAP(事实无冲突仍漏判)→工单:人工档,结论归档争议(+辩论引擎可选)"),
     ]
     for cid, exp, run_doc, ri, rca, note in drills:
         data_dir = out / "cases" / cid / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         (data_dir / "占位.txt").write_text("演练数据占位\n", encoding="utf-8")
         if cid == "drill-1-input":
-            # 类1 语义:缺的源必须是用例数据**本可提供**的——且在场的得是**表文件**
-            # (raw 形态在场没喂到=类2 绑定形态不匹配,不是类1)。教具放一份 log 表文件,
-            # 演示"表在场没喂→补喂/映射"这条正宗类1
+            # 类1(INPUT_GAP)的定义:缺的数据源必须是用例数据**本可提供**的——且已存在的得是**表文件**
+            # (原始采集文本(raw 形态)存在却没传给脚本 = 类2 绑定形态不匹配,不是类1)。演练材料里放一份 log 表文件,
+            # 演示"表文件存在却没传入→补传/映射"这条典型的类1
             (data_dir / "logbuffer采集.csv").write_text("Summary\n演练 log 表\n", encoding="utf-8")
         if cid == "drill-2-form":
-            # 类2 绑定形态不匹配教具:cmd 内容以 raw 形态在场(目录+txt,无表文件)
+            # 类2 绑定形态不匹配的演练材料:cmd 内容以原始采集文本(raw 形态)存在(目录+txt,无表文件)
             (data_dir / "网元A" / "CMD").mkdir(parents=True, exist_ok=True)
             (data_dir / "网元A" / "CMD" / "采集.txt").write_text("演练 cmd raw\n", encoding="utf-8")
         exp["data_source"] = str(data_dir)

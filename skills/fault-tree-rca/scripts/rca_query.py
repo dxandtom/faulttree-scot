@@ -29,7 +29,7 @@ def _fault_tree(data: dict):
 
 
 def _ff(f: dict) -> dict:
-    """取事实体:兼容瘦身后的扁平结构(字段在顶层)和未瘦身的嵌套 {"fact":{...}}。"""
+    """取事实体:兼容精简后的扁平结构(字段在顶层)和未精简的嵌套 {"fact":{...}}。"""
     inner = f.get("fact")
     return inner if isinstance(inner, dict) else f
 
@@ -95,7 +95,7 @@ def main() -> None:
         hold = _holding(nodes)
         print(f"# {len(hold)} 个有'成立'事实的候选节点(逐个用 --node 看整条路径再判):")
         print("# 确证根因=【最深成立节点】:叶子最好;中间节点成立且下级无一成立 → 也确证")
-        print("#   (叶子因待定由 finalize 自动落 caveats,子节点三态见骨架 children_status)。")
+        print("#   (叶子因待定由 finalize 自动落 caveats,子节点三态见候选清单 children_status)。")
         for nid in hold:
             path = _path_to_root(nodes, nid)
             names = " → ".join(nodes.get(p, {}).get("name", "?") for p in reversed(path))

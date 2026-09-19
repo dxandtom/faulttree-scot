@@ -194,50 +194,68 @@ def filter_logs(logs, keyword=None, module=None, severity=None,
     end_dt = parse_time(end_time) if end_time else None
 
     for log in logs:
-        # 关键字过滤
-        if keyword:
-            keyword_lower = keyword.lower()
-            if keyword_lower not in log['detail'].lower() and \
-               keyword_lower not in log['info_name'].lower():
-                continue
-
-        # 模块过滤
-        if module and module.lower() not in log['module'].lower():
-            continue
-
-        # 信息名过滤
-        if info_name and info_name.lower() not in log['info_name'].lower():
-            continue
-
-        # 级别过滤
-        if severity:
-            try:
-                sev_level = int(severity) if severity.isdigit() else None
-                if sev_level is not None and log['level'] != str(sev_level):
-                    continue
-            except ValueError:
-                level_map = {'emergency': 0, 'alert': 1, 'critical': 2, 'error': 3,
-                             'warning': 4, 'notice': 5, 'info': 6, 'debug': 7}
-                if severity.lower() in level_map:
-                    if log['level'] != str(level_map[severity.lower()]):
-                        continue
-
-        # 日志类型过滤
-        if log_type and log['log_type'] != log_type:
-            continue
-
-        # 时间过滤
-        if start_dt or end_dt:
-            log_dt = parse_time(log['timestamp'])
-            if log_dt:
-                if start_dt and log_dt < start_dt:
-                    continue
-                if end_dt and log_dt > end_dt:
-                    continue
-
-        results.append(log)
+        if _log_matches(log, keyword, module, info_name, severity, log_type, start_dt, end_dt):
+            results.append(log)
 
     return results
+
+
+def _severity_ok(log, severity):
+    """级别过滤:纯数字级别按值比对;数字转换失败时按名称查表,查不到就不过滤。"""
+    try:
+        sev_level = int(severity) if severity.isdigit() else None
+        if sev_level is not None and log['level'] != str(sev_level):
+            return False
+    except ValueError:
+        level_map = {'emergency': 0, 'alert': 1, 'critical': 2, 'error': 3,
+                     'warning': 4, 'notice': 5, 'info': 6, 'debug': 7}
+        if severity.lower() in level_map:
+            if log['level'] != str(level_map[severity.lower()]):
+                return False
+    return True
+
+
+def _time_ok(log, start_dt, end_dt):
+    """时间过滤:日志时间解析得出才比对区间,解析不出的放行。"""
+    log_dt = parse_time(log['timestamp'])
+    if log_dt:
+        if start_dt and log_dt < start_dt:
+            return False
+        if end_dt and log_dt > end_dt:
+            return False
+    return True
+
+
+def _log_matches(log, keyword, module, info_name, severity, log_type, start_dt, end_dt):
+    """一条日志是否通过全部过滤条件(按关键字→模块→信息名→级别→类型→时间顺序短路)。"""
+    # 关键字过滤
+    if keyword:
+        keyword_lower = keyword.lower()
+        if keyword_lower not in log['detail'].lower() and \
+           keyword_lower not in log['info_name'].lower():
+            return False
+
+    # 模块过滤
+    if module and module.lower() not in log['module'].lower():
+        return False
+
+    # 信息名过滤
+    if info_name and info_name.lower() not in log['info_name'].lower():
+        return False
+
+    # 级别过滤
+    if severity and not _severity_ok(log, severity):
+        return False
+
+    # 日志类型过滤
+    if log_type and log['log_type'] != log_type:
+        return False
+
+    # 时间过滤
+    if (start_dt or end_dt) and not _time_ok(log, start_dt, end_dt):
+        return False
+
+    return True
 
 
 def extract_port_name(log):
@@ -388,48 +406,17 @@ def main():
 
     # UP/DOWN 统计
     if args.updown:
-        stats = count_port_updown(logs, args.updown)
-        if args.json:
-            print(json.dumps(stats, ensure_ascii=False, indent=2))
-        else:
-            if args.updown in stats:
-                s = stats[args.updown]
-                print(f"\n端口 {args.updown} 的 UP/DOWN 统计:")
-                print(f"  UP 事件: {s['up']} 次")
-                print(f"  DOWN 事件: {s['down']} 次")
-                print(f"  总切换次数: {s['total']} 次")
-                if s['down'] > 0:
-                    print(f"\n  最近 DOWN 事件:")
-                    for e in s['down_events'][:3]:
-                        print(f"    {e['timestamp']} - {e['info_name']}")
-            else:
-                print(f"未找到端口 {args.updown} 的事件记录")
+        _print_updown(args, logs)
         return
 
     # 端口统计
     if args.port_stats:
-        stats = count_port_events(logs, args.port_stats)
-        if args.json:
-            print(json.dumps(stats, ensure_ascii=False, indent=2))
-        else:
-            if args.port_stats in stats:
-                events = stats[args.port_stats]
-                print(f"\n端口 {args.port_stats} 共有 {len(events)} 条事件记录")
-                for e in events[:10]:
-                    print(f"  {e['timestamp']} {e['module']}/{e['info_name']}")
-            else:
-                print(f"未找到端口 {args.port_stats} 的事件记录")
+        _print_port_stats(args, logs)
         return
 
     # 统计模式
     if args.count:
-        if args.group_by:
-            counter = count_events(filtered, args.group_by)
-            print(f"\n按 {args.group_by} 统计:")
-            for key, cnt in counter.most_common(20):
-                print(f"  {key}: {cnt}")
-        else:
-            print(f"\n总计: {len(filtered)} 条")
+        _print_count(args, filtered)
         return
 
     # JSON 输出
@@ -438,6 +425,57 @@ def main():
         return
 
     # 显示结果
+    _print_matches(args, logs, filtered)
+
+
+def _print_updown(args, logs):
+    """--updown:打印指定端口的 UP/DOWN 切换统计(--json 时整份 JSON)。"""
+    stats = count_port_updown(logs, args.updown)
+    if args.json:
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+    else:
+        if args.updown in stats:
+            s = stats[args.updown]
+            print(f"\n端口 {args.updown} 的 UP/DOWN 统计:")
+            print(f"  UP 事件: {s['up']} 次")
+            print(f"  DOWN 事件: {s['down']} 次")
+            print(f"  总切换次数: {s['total']} 次")
+            if s['down'] > 0:
+                print(f"\n  最近 DOWN 事件:")
+                for e in s['down_events'][:3]:
+                    print(f"    {e['timestamp']} - {e['info_name']}")
+        else:
+            print(f"未找到端口 {args.updown} 的事件记录")
+
+
+def _print_port_stats(args, logs):
+    """--port-stats:打印指定端口的事件记录(最多 10 条;--json 时整份 JSON)。"""
+    stats = count_port_events(logs, args.port_stats)
+    if args.json:
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+    else:
+        if args.port_stats in stats:
+            events = stats[args.port_stats]
+            print(f"\n端口 {args.port_stats} 共有 {len(events)} 条事件记录")
+            for e in events[:10]:
+                print(f"  {e['timestamp']} {e['module']}/{e['info_name']}")
+        else:
+            print(f"未找到端口 {args.port_stats} 的事件记录")
+
+
+def _print_count(args, filtered):
+    """--count:按 --group-by 字段分组统计(前 20 项),没给分组字段就只打总数。"""
+    if args.group_by:
+        counter = count_events(filtered, args.group_by)
+        print(f"\n按 {args.group_by} 统计:")
+        for key, cnt in counter.most_common(20):
+            print(f"  {key}: {cnt}")
+    else:
+        print(f"\n总计: {len(filtered)} 条")
+
+
+def _print_matches(args, logs, filtered):
+    """默认展示:--context>0 带上下文列前 20 条,否则逐条列前 100 条;没有匹配则报错退出。"""
     if filtered:
         if args.context > 0:
             raw_lines = [log['raw'] for log in logs]

@@ -107,13 +107,8 @@ class FakePlatform(BaseHTTPRequestHandler):
         pass
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description="平台1 接入链路本机演示(不碰网络、不用模型)")
-    ap.add_argument("--out", help="演示目录(缺省 integration/platform1/_runs/demo,每次清空重来)")
-    a = ap.parse_args()
-    out = Path(a.out).resolve() if a.out else HERE / "_runs" / "demo"
-    if out.exists():
-        shutil.rmtree(out)
+def make_samples(out: Path) -> tuple:
+    """①造样例:上一版 skill zip、一个节点交付包、一行的平台表;返回 (货架目录, 表路径)。"""
     store = out / "store"
     store.mkdir(parents=True)
 
@@ -128,13 +123,21 @@ def main() -> int:
     print(f"   {NODE}.zip = 一个节点的交付包(真跑时按表里的 Product_Obs 下载)")
     print("   平台表.csv     = 平台发来的表,一行:节点路径 + 包的地址 + 包名")
     print("   真跑时下载来自平台;这里用 --fake-store 让 driver 从这个目录按文件名拷,其余逻辑一模一样")
+    return store, table
 
+
+def start_fake_platform() -> str:
+    """②起假的平台回调接收器(只收一次),返回回调地址。"""
     say("2/5", "起一个假的平台回调接收器(真平台的 optimizeCallback 接口就是这样一个 POST)")
     srv = HTTPServer(("127.0.0.1", 0), FakePlatform)
     threading.Thread(target=srv.handle_request, daemon=True).start()
     cb_url = f"http://127.0.0.1:{srv.server_address[1]}/agent/workspace/faultTreeNode/optimizeCallback"
     print(f"   {cb_url}")
+    return cb_url
 
+
+def write_request(out: Path, table: Path, cb_url: str) -> Path:
+    """③写请求文件(平台四个字段 + 本地实验的回调地址),返回文件路径。"""
     say("3/5", "写请求文件(平台 POST /optimize 发来的四个字段,server.py 收到后也是先存成这样一份)")
     req = {"versionId": "demo0001-0000-0000-0000-000000000001",
            "excel": str(table), "prevObjectkey": "obs://bucket/skills/skill_v1.zip",
@@ -142,9 +145,12 @@ def main() -> int:
     req_p = out / "request.json"
     req_p.write_text(json.dumps(req, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"   {req_p}")
+    return req_p
 
+
+def run_driver_once(req_p: Path, work: Path, store: Path):
+    """④像 server.py 那样起 driver.py 子进程跑一单,原样转发输出并落 run.log;返回 CompletedProcess。"""
     say("4/5", "跑一单:像 server.py 那样起 driver.py 子进程(下面是 driver 的原样输出)")
-    work = out / "run"
     cmd = [sys.executable, str(HERE / "driver.py"), "--request", str(req_p),
            "--workdir", str(work), "--fake-store", str(store)]
     print("   " + " ".join(cmd))
@@ -163,7 +169,22 @@ def main() -> int:
     print("   " + "-" * 70)
     (work / "run.log").parent.mkdir(parents=True, exist_ok=True)
     (work / "run.log").write_text(log, encoding="utf-8")
+    return p
 
+
+def show_ledger(outz: Path) -> None:
+    """从新版 skill 包里读迁移台账 tree/migrations.json,点名这一单装进去的节点。"""
+    with zipfile.ZipFile(outz) as zf:
+        n = next((x for x in zf.namelist() if x.endswith("tree/migrations.json")), None)
+        if n:
+            mig = json.loads(zf.read(n))
+            hit = [f"{k}「{v.get('package_node')}」← {v.get('script')}" for k, v in mig.items()
+                   if v.get("package_node") == NODE]
+            print(f"   包里 tree/migrations.json(迁移台账)记了这一单装进去的节点:{'; '.join(hit) or list(mig)[:3]}")
+
+
+def show_results(p, work: Path) -> bool:
+    """⑤告诉你日志、产物、回调各在哪;返回这一单是否走通。"""
     say("5/5", "看结果")
     outz = next(iter((work / "out").glob("skill_*.zip")), None) if (work / "out").is_dir() else None
     print(f"   退出码 {p.returncode}(0 = 这一单成功)")
@@ -178,14 +199,23 @@ def main() -> int:
     else:
         print("   回调  假平台没收到(看日志里 [回调] 行)")
     if outz:
-        with zipfile.ZipFile(outz) as zf:
-            n = next((x for x in zf.namelist() if x.endswith("tree/migrations.json")), None)
-            if n:
-                mig = json.loads(zf.read(n))
-                hit = [f"{k}「{v.get('package_node')}」← {v.get('script')}" for k, v in mig.items()
-                       if v.get("package_node") == NODE]
-                print(f"   包里 tree/migrations.json(迁移台账)记了这一单装进去的节点:{'; '.join(hit) or list(mig)[:3]}")
-    ok = p.returncode == 0 and outz is not None and bool(FakePlatform.hits)
+        show_ledger(outz)
+    return p.returncode == 0 and outz is not None and bool(FakePlatform.hits)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="平台1 接入链路本机演示(不碰网络、不用模型)")
+    ap.add_argument("--out", help="演示目录(缺省 integration/platform1/_runs/demo,每次清空重来)")
+    a = ap.parse_args()
+    out = Path(a.out).resolve() if a.out else HERE / "_runs" / "demo"
+    if out.exists():
+        shutil.rmtree(out)
+    store, table = make_samples(out)
+    cb_url = start_fake_platform()
+    req_p = write_request(out, table, cb_url)
+    work = out / "run"
+    p = run_driver_once(req_p, work, store)
+    ok = show_results(p, work)
     print("\n" + ("演示成功:表 → 下载 → 迁移 → 打包 → 回调,整条链路走通。"
                   "接下来拿 run.log 对照《先看这个.md》第 4 节逐行看。" if ok
                   else "演示没走通,把上面的输出整段发给交接人。"))
