@@ -7,17 +7,18 @@ description: 执行一份 SCoT 诊断计划 plan.json（cs-scot-generate 生成�
 
 ## 任务
 
-执行 `plan.json` 描述的 SCoT 计划（SCoT v4.0 的子集，格式见 `references/plan_schema.md`）：从入口节点出发，按顺序运行各指标的解析脚本，把每个脚本输出的事实存入工作记忆，最后把全部事实和故障子树交给 fault-tree-rca 做根因分析。统计已经在生成阶段写进脚本，执行阶段不再加工数据；根因分析是唯一需要模型判断的步骤。
+执行 `plan.json` 描述的 SCoT 计划（SCoT v4.0 的子集，格式见 `references/plan_schema.md`）：从入口节点出发，按顺序运行各指标的分析脚本，把每个脚本输出的事实存入工作记忆，最后把全部事实和故障子树交给 fault-tree-rca 做根因分析。统计已经在生成阶段写进脚本，执行阶段不再加工数据；根因分析是唯一需要模型判断的步骤。
 
 ## 术语
 
 | 术语 | 含义 |
 |---|---|
-| 计划 `plan.json` | 节点列表加转移关系；节点分 `script`（跑解析脚本）和 `agent_skill`（根因分析）两种 |
+| 计划 `plan.json` | 节点列表加转移关系；节点分 `script`（跑分析脚本）和 `agent_skill`（根因分析）两种 |
 | 指标、数据源 | 一种输入数据（KPI 表、配置表、日志表……），计划里用 `$input.<指标>` 引用，命令里用 `--data <指标>=<文件>` 提供 |
-| 解析脚本 | `scripts/<指标>_analyzer.py`，读一份数据，输出该指标的逐条件事实 |
-| 事实 | 解析脚本的输出：某个判据在数据里查到的真实值和是否命中，不含结论 |
-| 原始日志目录 | 采集来的命令回显文件所在目录，用 `--data raw=<目录>` 提供；S 类节点脚本直接读它 |
+| 分析脚本 | `scripts/<指标>_analyzer.py`，读一份数据，输出该指标的逐条件事实；cs-scot-generate 里叫"逐条件分析脚本"，是同一个东西 |
+| 事实 | 分析脚本的输出：某个判据在数据里查到的真实值和是否命中，不含结论 |
+| 原始日志目录 | 采集来的命令回显文件所在目录，用 `--data raw=<目录>` 提供，S 类节点脚本直接读它。必须传网元目录的父目录：zip 输入是 zip2csv 输出里的 `extracted/`，经 ifilter 归类的散文件是 `formated_result/`，传错一层 S 类节点脚本一个网元都找不到（检查脚本会打印该传哪一层） |
+| 短名 | 场景的英文短名（如 `layer-3-service-issues`）：技能目录名和 `assets/tree/` 下文件名都用它；取不到英文时是中文场景名 |
 | 结果目录 | 每轮运行新建的 `result-<运行号>/`，装本轮全部产出 |
 | `rca_input.json`、`rca.json` | 交给根因分析的汇总输入，和根因分析的结果 |
 | 缺口 | 计划需要但这次没提供的数据源，或转换不出的数据；结论只代表已提供数据能看到的部分 |
@@ -43,12 +44,12 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 
 - **每轮一个独立的结果目录**。每次运行自动新建 `result-[标签-]<运行号>/`，本轮全部产出（`rca_input.json`、`rca.json`、`run.json`、`_compression.txt`）都在里面，多个人或多份数据同时跑同一份产物互不覆盖。结果路径以 runner 启动时打印的"结果目录：…"为准，后面写 rca.json、汇报都用它。历史轮次是同级的其他 `result-*` 目录，总索引在结果根目录的 `index.jsonl`（一行一轮：运行号、目录、输入指纹）。
 - **每轮写 `run.json`**：运行号、输入数据指纹（路径、大小、sha1）、`missing_inputs`（缺口）、`execution_status`（逐节点执行状态：正常、失败及错误、跳过及原因，每步跑完立即写入，半途失败时已跑步骤的状态也在）。
-- **部分数据也能跑**。计划需要的数据源只给了一部分时不报错：缺源的解析步骤自动跳过并标 `[skip]`，其余照跑，结尾打印"数据源缺口汇总"（缺了什么、跳过了哪些步骤、补数据的命令）。缺口同时写进 `run.json` 的 `missing_inputs` 和 `rca_input.json` 顶层的 `missing_indicators`，根因分析把这些源的判据按"数据不足"处理，不是"已排除"。向用户汇报时必须带上缺口。一个数据源都没给仍然报错；`--data` 的指标名打错会触发"计划用不到的数据源"告警，看到它先核对名字。
+- **部分数据也能跑**。计划需要的数据源只给了一部分时不报错：缺源的分析脚本步骤自动跳过并标 `[skip]`，其余照跑，结尾打印"数据源缺口汇总"（缺了什么、跳过了哪些步骤、补数据的命令）。缺口同时写进 `run.json` 的 `missing_inputs` 和 `rca_input.json` 顶层的 `missing_indicators`，根因分析把这些源的判据按"数据不足"处理，不是"已排除"。向用户汇报时必须带上缺口。一个数据源都没给仍然报错；`--data` 的指标名打错会触发"计划用不到的数据源"告警，看到它先核对名字。
 - **启动时比对产物的 `manifest.json`**：产物格式版本较旧或缺失只告警不阻断，提示"由旧工具链生成，建议重新 generate"。
 
 ## 场景技能形态：一句话诊断
 
-本技能常以场景技能的形态发布：技能目录名是场景的英文短名（如 `layer-3-service-issues`），本文件作为执行指引，诊断资源在 `assets/` 下：`assets/plan.json`、`assets/scripts/`（各指标的解析脚本）、`assets/tree/`（故障树、可选的 solutions.json、可编辑的 knowledge.md）、`assets/fault-tree-rca/`（根因分析规则副本）。用户只需一句话（如"数据在这里，帮我诊断"），按下面五步跑完全程，不需要用户指路。
+本技能常以场景技能的形态发布：技能目录名是场景的英文短名（如 `layer-3-service-issues`），本文件作为执行指引，诊断资源在 `assets/` 下：`assets/plan.json`、`assets/scripts/`（各指标的分析脚本）、`assets/tree/`（故障树、可选的 solutions.json、可编辑的 knowledge.md）、`assets/fault-tree-rca/`（fault-tree-rca 技能副本，含规则与脚本）。用户只需一句话（如"数据在这里，帮我诊断"），按下面五步跑完全程，不需要用户指路。
 
 ### 1. 数据入口
 
@@ -74,7 +75,7 @@ python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" \
 诊断结论一律由脚本渲染，不手写：
 
 ```bash
-python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<场景>.tree_index.json" [--lang en]
+python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<短名>.tree_index.json" [--lang en]
 ```
 
 产出 `rca_report.md`（完整报告）、`rca_tree.txt`（树视图）、`rca_reply.md`（聊天框回复稿：树视图 + 确证根因表 + 疑似表 + 待确认）。最终回复的正文就是 `rca_reply.md` 的全文，原样贴出，树视图保持在 ```text 代码块里，表格一格不改；正文前面加"执行过程"，末尾的"补充说明"是唯一可以自己写的地方。用户整段用英文提问时，渲染命令加 `--lang en`：标题、表头、标签、节点名、判据、方案和脚本生成的说明（祖先注记、卡点、待确认原因）都由脚本按树里存的英文输出，树里没有英文的地方回退中文；裁决单里你自己写的理由、注意、卡点用对话的语言写；回复稿里剩下的中文只有分析脚本给出的事实原文，由你逐句直译，其余一字不动。三份文件的内容、回复的组织、英文提问的处理规则，见 `references/reply_format.md`。
@@ -83,7 +84,7 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
 
 ### 5. 用户反馈
 
-用户指着某个节点说"判错了""应该是 XXX"时，按定位、分诊、修改、验证四步处理，判断只在分诊一步：答案不在事实里是绑定问题，改对应解析脚本里的绑定；答案在事实里但判错是判读规则问题，往 `assets/tree/knowledge.md` 加规则；判据本身不对是树的问题，回 generate 走调优表；事实反驳用户说法时摆出原文说明分歧。步骤细节见 `references/feedback_fix.md`。
+用户指着某个节点说"判错了""应该是 XXX"时，按定位、分诊、修改、验证四步处理，判断只在分诊一步：答案不在事实里是绑定问题，改对应分析脚本里的绑定；答案在事实里但判错是判读规则问题，往 `assets/tree/knowledge.md` 加规则；判据本身不对是树的问题，回 generate 走调优表；事实反驳用户说法时摆出原文说明分歧。步骤细节见 `references/feedback_fix.md`。
 
 ## 执行模型
 
@@ -103,10 +104,10 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
 
 ```json
 {
-  "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
+  "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"node_id":"<候选自身的 node_id>","support":"…",
      "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实>",
         "how":"<怎么判的说明（抄事实的 explain）>","judgment":"成立/不成立/数据不足"}]} ],
-  "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low","blocked_at":"…","caveats":"…","support":"…","evidence_path":[…]} ],
+  "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"node_id":"<候选自身的 node_id>","confidence":"high/medium/low","blocked_at":"…","caveats":"…","support":"…","evidence_path":[…]} ],
   "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…"]} ],
   "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }
 }
@@ -117,7 +118,7 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
 ## 设计要点
 
 - 计划是直线的：故障树的分支判断在根因分析内部完成，执行层只顺序遍历节点。
-- 局部子树压缩有零损失下界：剪枝后的根因分析输入若不比完整树小（小而密的树本就无可剪），自动回退到完整树，压缩为 0%；孤儿事实瘦身，未覆盖清单只留 id 和名字。
+- 根因分析输入默认是局部子树形态：按 tree_index 剪掉与本轮事实无关的分支。剪枝后若不比完整树小（小而密的树本就无可剪），或事实能对上 node_id 的不足一半（剪枝不可信），自动改用完整形态，压缩记为 0%；孤儿事实瘦身，未覆盖清单只留 id 和名字。
 - 确定性计算都在 `script` 节点的脚本里；`agent_skill` 是唯一的模型判断步骤。
 - 暂不实现 conditions、parallel、budget、reflection 等 SCoT 的重型特性（schema 兼容，需要再加）。
 
@@ -132,4 +133,4 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
 | 2 | 按文件名匹配指标：cmd、config、log | 三份数据各对应一个 `<指标>_analyzer.py` |
 | 3 | `runner.py --plan assets/plan.json --result-base ../layer-3-service-issues-result --data cmd=… --data config=… --data log=… --data raw=D:\采集\站点A --result-suffix 站点A` | 打印"结果目录：…"，各脚本步骤正常，缺口汇总 |
 | 3 | 进入 rca 步骤：`draft_rca.py` → 有冲突候选才写裁决单 → `finalize_rca.py` | 结果目录里出现 rca.json |
-| 4 | `render_report.py rca.json --tree assets/tree/<场景>.tree_index.json`（英文提问加 `--lang en`） | 三份文件；把 rca_reply.md 全文贴进回复，前面加执行过程，末尾补充说明 |
+| 4 | `render_report.py rca.json --tree assets/tree/<短名>.tree_index.json`（英文提问加 `--lang en`） | 三份文件；把 rca_reply.md 全文贴进回复，前面加执行过程，末尾补充说明 |

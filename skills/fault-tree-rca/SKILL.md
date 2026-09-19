@@ -13,7 +13,7 @@ description: 综合根因分析。输入故障子树和各指标的解析事实�
 
 1. 运行 `python "<本技能目录>/scripts/draft_rca.py" <结果目录>/rca_input.json`，生成候选清单 `rca_draft.json`：所有"成立"的节点已经列成候选，根到叶子的路径和证据已预填，每个候选已自动定档。不要自己逐个节点翻找候选。
 2. 只有清单里存在冲突候选（`conflict_nodes` 非空）时，写一份裁决单 `<结果目录>/decisions.json`：一个候选一条，只写判定与理由（格式见 finalize_rca.py 文件头）。理由、注意、卡点这些自由文本用当前对话的语言写：用户用英文提问就写英文，脚本会原样带进 rca.json 的中英两个版本。没有冲突候选就跳过这一步。
-3. 运行 `python "<本技能目录>/scripts/finalize_rca.py" <结果目录>/rca_draft.json [<结果目录>/decisions.json] -o <结果目录>/rca.json`（有 `assets/tree/solutions.json` 时加 `--solutions`，再加 `--rca-input <结果目录>/rca_input.json` 带上 tree_issues），由脚本拼装 rca.json，不要手写。合成脚本自带结构检查，报错就改裁决单重跑；合成成功即为最终交付，不用再跑校验。
+3. 运行 `python "<本技能目录>/scripts/finalize_rca.py" <结果目录>/rca_draft.json [<结果目录>/decisions.json] -o <结果目录>/rca.json`（有 `assets/tree/solutions.json` 时加 `--solutions <assets>/tree/solutions.json`，再加 `--rca-input <结果目录>/rca_input.json` 带上 tree_issues），由脚本拼装 rca.json，不要手写。合成脚本自带结构检查，报错就改裁决单重跑；合成成功即为最终交付，不用再跑校验。
 
 然后按 cs-scot-execute 的第 4 步渲染报告并汇报。
 
@@ -23,7 +23,7 @@ description: 综合根因分析。输入故障子树和各指标的解析事实�
 
 | 术语 | 含义 |
 |---|---|
-| 事实 | 解析脚本查出来的真实值：某个字段的取值、分布、是否命中；只有数据，没有判断 |
+| 事实 | 分析脚本（`<指标>_analyzer.py`）查出来的真实值：某个字段的取值、分布、是否命中；只有数据，没有判断 |
 | 候选 | 判据成立的最深节点；根因从候选里产生 |
 | 候选清单 `rca_draft.json` | draft_rca.py 生成的文件：候选、路径、证据、自动定档结果 |
 | 四档 | 确证根因 `rca_result`、疑似 `probable_causes`、待确认 `undetermined`、排除 |
@@ -32,14 +32,17 @@ description: 综合根因分析。输入故障子树和各指标的解析事实�
 | 裁决单 `decisions.json` | 模型对冲突候选给出的判定与理由 |
 | 默认放行 | 上级节点没有绑定或数据不足时不阻断路径，记入 caveats |
 | 外挂知识 | 业务同事写的判读规则（怎么查、怎么解读、什么算正常），不是事实 |
+| 定档 | 把候选归入四档之一。由 draft_rca.py 按机械规则完成（写在候选的 `auto_verdict` 里），只有冲突候选交模型权衡 |
+| 局部子树形态、完整形态 | rca_input 的两种形态：常态是 runner 按 tree_index 剪出的局部子树（`fault_tree.pruned_nodes`）；没有 tree_index 或剪枝不划算时是完整形态（`fault_tree_md` 加 `indicator_results`） |
+| 树视图标签 | `rca_tree.txt` 里打印的"确诊/疑似/缺数据"，分别对应确证根因、疑似、待确认三档 |
 
 ## 输入
 
 通常由 cs-scot-execute 汇总在本轮结果目录的 `rca_input.json` 里：
 
 - `fault_tree_md`：故障子树正文（`#/##/###` 层级加条件），人工编写，可能不规整；或
-- `fault_tree`（压缩形态）：`pruned_nodes` 只含相关节点，每个节点把事实挂在 `facts` 里，带 `condition`、`combine`、`pass_through`、`node_id`；另带 `tree_issues`（覆盖报告）、`unmapped_facts`、`uncovered_values`（判别列里没被任何绑定认领的取值和条数，据此把漏绑的记录归到"非典型/其他"节点报出，不漏诊）。两种形态规则一样；`pass_through` 节点不阻断路径；`node_id` 是权威编号，不要造不存在的节点。
-- `indicator_results`（完整形态时）：字典，键是指标名（任意、不固定），值是该指标解析好的事实。有的指标给的是定义或规则（某量怎么算、阈值多少），不是实测值；定义不是测量。解析端不下判断、不做匹配，判断全在本技能。
+- `fault_tree`（局部子树形态）：`pruned_nodes` 只含相关节点，每个节点把事实挂在 `facts` 里，带 `condition`、`combine`、`pass_through`、`node_id`；另带 `tree_issues`（覆盖报告）、`unmapped_facts`、`uncovered_values`（判别列里没被任何绑定认领的取值和条数，据此把漏绑的记录归到"非典型/其他"节点报出，不漏诊）。两种形态规则一样；`pass_through` 节点不阻断路径；`node_id` 是权威编号，不要造不存在的节点。
+- `indicator_results`（完整形态时）：字典，键是指标名（任意、不固定），值是该指标解析好的事实。有的指标给的是定义或规则（某量怎么算、阈值多少），不是实测值；定义不是测量。分析脚本不下判断、不做匹配，判断全在本技能。
 - `missing_indicators`（可选）：本轮整个数据源没提供的源名和原因。这些源绑定的判据一律"数据不足"，既未证实也未证伪，不当作"不成立"；结论要注明缺口。
 - `knowledge`（可选）：外挂知识条目，已按当前分支筛过。照它的规则判读，引用时写知识标题留痕；但不能拿知识内容顶替实测值，成立仍要数据里查到的事实。
 
@@ -53,7 +56,7 @@ description: 综合根因分析。输入故障子树和各指标的解析事实�
 
 1. **只用真实事实，不顶替。** `actual` 逐字引用事实里的真实值；不引入事实里没有的数字；条件要 X 就不能拿相关的 Y 算个数顶成"X 成立"，有定义、有旁证都不等于成立；精确匹配，差一个字符就是没命中。
 2. **要 X 却拿不到 X 的实测值，该条件就是"数据不足"**，不当成立也不当不成立。
-3. **四档分流由候选清单自动完成**（判定规则第 4 版，见 rca_rules.md）：候选自身成立、路径上有判定的节点没有"不成立"或"冲突" → 确证根因，未绑定或数据不足的上级默认放行并记入 caveats（判断方法写错的中间节点，走调优表清绑定后就归此类）；候选自身成立、某上级实测"不成立"或"冲突" → 疑似，`blocked_at` 写该上级，`reason` 写清矛盾与实际值；候选自身冲突 → 交模型权衡后归档，带 confidence 和 caveat，不凑路径、不造节点；候选自身不成立 → 排除；其余 → 待确认。`rca_result` 为空很正常，上游缺话统、信令时强证据放在疑似。
+3. **四档定档由候选清单自动完成**（见 rca_rules.md 第 4 节）：候选自身成立、路径上有判定的节点没有"不成立"或"冲突" → 确证根因，未绑定或数据不足的上级默认放行并记入 caveats（判断方法写错的中间节点，走调优表清绑定后就归此类）；候选自身成立、某上级实测"不成立"或"冲突" → 疑似，`blocked_at` 写该上级，`reason` 写清矛盾与实际值；候选自身冲突 → 交模型权衡后定档，带 confidence 和 caveat，不凑路径、不造节点；候选自身不成立 → 排除；其余 → 待确认。`rca_result` 为空很正常，上游缺话统、信令时强证据放在疑似。
 
 其他要求：
 
@@ -70,25 +73,25 @@ finalize_rca.py 在合成时检查：候选一条不许漏裁决；确证的条�
 
 ```json
 {
-  "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"support":"…",
+  "rca_result": [ {"Root_cause":"…","Fault_tree_path":["…"],"node_id":"<候选自身的 node_id>","support":"…",
      "evidence_path":[{"node":"…","node_id":"…","condition":"<逐字>","actual":"<逐字引用事实；没有就写'事实中无此值'>",
         "how":"<怎么判的说明：事实带 explain 就逐字抄，数字不改写>","judgment":"成立/不成立/数据不足"}]} ],
-  "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"confidence":"high/medium/low",
+  "probable_causes": [ {"Root_cause":"…","Fault_tree_path":["…"],"node_id":"<候选自身的 node_id>","confidence":"high/medium/low",
      "blocked_at":"<卡点：反证、冲突或未闭合的子因>","caveats":"<有效样本量、空值比例、语义近似>","support":"<叶子证据>","evidence_path":[…]} ],
   "undetermined": [ {"Fault_tree_path":["…"],"blocked_at":"…","reason":"缺哪个量","observed":["…（仅观察，非根因）"]} ],
   "tree_issues": { "uncovered_condition_nodes":[…], "orphan_node_ids":[…] }
 }
 ```
 
-每条 evidence 把条件、实际值、判断写全。详细分档和字段见 `references/rca_rules.md`。
+每条 evidence 把条件、实际值、判断写全。顶层的 `node_id` 是候选自身的编号，评估对账用它。`evidence_path` 的字段由 finalize_rca.py 从候选清单逐字照搬（node、node_id、condition、actual、how、judgment，冲突时另有 conflict_actual、conflict_how，弱阴性另有 other_source_note），模型不能增删字段。详细定档规则和字段见 `references/rca_rules.md`。
 
 推荐解决方案：产物 `tree/solutions.json` 存在时，定完根因后对 `rca_result`、`probable_causes` 报出的节点按 node_id 查，条目加 `recommend_solution`（优先中文），文字汇报也带上。只查报出的那几个节点，查不到就不加，不编方案。
 
 ## 报告与汇报
 
-`scripts/render_report.py <rca.json> --tree tree/<场景>.tree_index.json [--lang en]` 渲染三份文件：`rca_report.md`（完整报告）、`rca_tree.txt`（树视图，只展开确诊、疑似、缺数据所在的路径）、`rca_reply.md`（聊天框回复稿：树视图 + 确证根因表 + 疑似表 + 待确认）。最终回复的正文就是 rca_reply.md 的全文，原样贴出，前面加执行过程，只在末尾的"补充说明"里写自己的解读（同一病根归组、处理优先级、需要人复核的疑点），数字以渲染段落为准。用户用英文提问（整段英文才算，混杂按中文）时，渲染加 `--lang en`：标题、表头、标签、判定词由脚本输出英文，节点名、判据、方案取树里存的 `name_en`、`condition_en` 和 `solutions.json` 的 `en`，脚本写进 rca.json 的机械说明（祖先注记、卡点、待确认原因、排除留痕）用同名 `_en` 字段的英文版，没有英文的地方回退中文。回复稿里可能剩下的中文只有分析脚本给出的事实原文（`how`、事实 reason）；证据行原文保留，结构一行不改，具体规则见场景技能 `references/reply_format.md`。
+`scripts/render_report.py <rca.json> --tree tree/<短名>.tree_index.json [--lang en]` 渲染三份文件：`rca_report.md`（完整报告）、`rca_tree.txt`（树视图，只展开确证、疑似、缺数据所在的路径；它打印的标签是"确诊/疑似/缺数据"，对应确证根因、疑似、待确认）、`rca_reply.md`（聊天框回复稿：树视图 + 确证根因表 + 疑似表 + 待确认）。最终回复的正文就是 rca_reply.md 的全文，原样贴出，前面加执行过程，只在末尾的"补充说明"里写自己的解读（同一病根归组、处理优先级、需要人复核的疑点），数字以渲染段落为准。用户用英文提问（整段英文才算，混杂按中文）时，渲染加 `--lang en`：标题、表头、标签、判定词由脚本输出英文，节点名、判据、方案取树里存的 `name_en`、`condition_en` 和 `solutions.json` 的 `en`，脚本写进 rca.json 的机械说明（祖先注记、卡点、待确认原因、排除留痕）用同名 `_en` 字段的英文版，没有英文的地方回退中文。回复稿里可能剩下的中文只有分析脚本给出的事实原文（`how`、事实 reason）；证据行原文保留，结构一行不改，具体规则见 `cs-scot-execute/references/reply_format.md`（场景技能里就是它的 references 目录）。
 
 ## 分工
 
-- 解析端只把数据查清楚摆出来（事实），不下判断，不做故障树匹配。
+- 分析脚本只把数据查清楚摆出来（事实），不下判断，不做故障树匹配。
 - 判断全在本技能：把真实值代入故障树条件比较得出成立或不成立；要 X 没 X 就是数据不足；再做路径回溯、逐节点取证、处理子树的不规整。两边都不编造。

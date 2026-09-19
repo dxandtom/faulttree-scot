@@ -16,7 +16,7 @@
 |---|---|
 | `id` | 条件标识（如故障树里的行号或节点名） |
 | `node` | 故障树节点名 |
-| `node_id` | 该节点在 `tree/<场景>.tree_index.json` 里的 key（形如 `nN`，短，推荐）或 `code`，两种写法都能识别。必填：根因分析靠它把事实挂回树上。不要填节点名；填错或填了不存在的编号，会被当作无主的"孤儿"绑定报出来 |
+| `node_id` | 该节点在 `tree/<短名>.tree_index.json` 里的 key（形如 `nN`，短，推荐）或 `code`，两种写法都能识别。必填：根因分析靠它把事实挂回树上。不要填节点名；填错或填了不存在的编号，会被当作无主的"孤儿"绑定报出来 |
 | `condition_text` | 逐字取自故障树的判断条件（供根因分析复核） |
 | `class` | `A`/`C`/`G`/`D`/`J`/`P` 之一，决定用哪个内核（B/E/F/H/I 已停用，见上） |
 | `source` | 数据源逻辑名（对应执行时的 `--data <name>=<file>`）；J 类可以为 null |
@@ -78,7 +78,30 @@ P 类的使用场景：判据要"查对端，比较本端和对端的某项信�
 
 - 单源子代理遇到跨源判据，既不勉强绑定，也不能不写，而是写一行标记 `{"node_id":"nN","decision":"cross_source","mapping_reason":"<缺哪一环>"}`。
 - 合并脚本 merge_conditions 把标记汇总成 `dispatch/cross_candidates.json`；`make_dispatch --cross` 生成一份带全部数据源概览和知识条目的补绑任务说明，由一个子代理（或主代理）按上面的模板填进 cross_analyzer.py。
-- 跨源绑定不进调优表（由工程侧维护）。
+- 跨源绑定也进调优表：`export_tree_excel.py` 把 `cross_analyzer.py` 里的绑定导出到`绑定:cross`列（放在最后一列），人在表上改完由 `import_tree_excel.py` 写回；调优表没有`绑定:cross`列时，既有跨源绑定原样不动，导入脚本会核对树的改动是否波及它们并点名。写法见下一节。
+
+## `绑定:cross`列与 S 类（代码脚本）绑定的写法
+
+调优表里每个数据源一列`绑定:<源名>`，跨源绑定放在最后一列`绑定:cross`，导入时由 `import_tree_excel.py` 写回 `cross_analyzer.py`。写这一列时遵守两条：
+
+- 每条跨源绑定必须带 `source`，且是最终查询落点的真实源名（如 `config`）；没有叫 `cross` 的数据源，`source` 写 `cross` 或留空会被导入脚本拒收。
+- S 类绑定只许写在`绑定:cross`列：cross 脚本执行时全部数据源都在，函数里 `load("<源名>")` 都取得到；写到单源列里拿不到其他表。
+
+S 类是"代码脚本"类别，人工调优专用。它的类别参数只有 `func`、`file`、`args` 三个（`node_id`、`source`、`mapping_reason` 等公共字段照常写），`func` 与 `file` 二选一：
+
+- `func`：`scripts/custom_lib.py` 里用 `@register("<名字>")` 注册的函数名。函数统一签名 `fn(table, args, load)`：`table` 是绑定 `source` 那个源的表（`(header, rows)`），`args` 是绑定里的 `args` 原样传入，`load("<源名>")` 取其他源的表；返回与内核同形的事实，即 `{"status":"ok","predicate_satisfied":…,"explain":"…"}` 或 `{"status":"insufficient_data","reason":"…"}`。
+- `file`：`scripts/` 下的脚本相对路径（如 `custom/n31_xxx.py`），脚本要有入口函数 `check(table, args, load)`，签名与返回同上。
+- S 类不支持 `param_from`：参数直接写进 `args`，取源在函数里用 `load` 完成。
+
+cs-scot-migrate 迁入交付脚本时写的就是一条 S 类绑定，用函数库里的通用适配函数 `fault_check` 运行交付的 `fault_check_*.py`：
+
+```json
+{"class": "S", "func": "fault_check",
+ "args": {"script": "custom/fault_check_<节点名>.py", "entry": "diagnose", "per_ne": true, "entry_kwargs": {}},
+ "mapping_reason": "迁移自 tester 交付包「<节点名>」：判断逻辑=脚本原样"}
+```
+
+`args.script` 必填（`scripts/` 下的相对路径）；`entry` 缺省为 `diagnose`；`per_ne` 为 true 表示入口只接收单个网元目录，由适配函数逐网元调用后汇总，不需要时不写；`entry_kwargs` 是入口的额外关键字参数，没有就不写。适配函数怎样把交付脚本的四态结果翻译成事实，见 cs-scot-migrate 的 SKILL.md「迁移后」一节。
 
 ## C/G 类 `contains` 目标值的三条规则
 

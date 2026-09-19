@@ -22,7 +22,7 @@
 
 ## 4. 分层验证（便宜的必做，贵的不默认做）
 
-- 改了绑定：用上轮 `run.json` 里记的同一份数据，单独跑该数据源的解析脚本 `python assets/scripts/<源>_analyzer.py <数据> -o <临时输出>`，确认该节点的事实变对了（matched、hits、方向）。
+- 改了绑定：用上轮 `run.json` 里记的同一份数据，单独跑该数据源的分析脚本 `python assets/scripts/<源>_analyzer.py <数据> -o <临时输出>`，确认该节点的事实变对了（matched、hits、方向）。
 - 改了 knowledge：确认"适用"标签能命中该分支，即标签词出现在节点名或判据里。
 - 完整重跑（全链加根因分析）不默认做，问用户要不要。
 

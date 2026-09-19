@@ -62,6 +62,13 @@ CUSTOM = {"L4-crc": _crc_error}
 
 ## 四、diag（EAV 窄表）的标准绑法
 
+先说清「diag」在本项目里的两个含义，避免把两种结构完全不同的表配错指标名：
+
+- 本文的 diag 指平台采集工具导出的 `*_CmdResult.csv`：EAV 窄表，列是 `DataItem`、`DataValue`、`Unit`，绑定用 `filter` 选指标。
+- zip2csv 输出目录里的 `csv/<网元>/DIAG/*.csv` 是命令回显表（列 `NEName`、`CmdName`、`ObjContent`），`DIAG` 只是 `CMD` 目录的旧名字。内核 `condition_kernels.py` 和执行器 runner 把 `diag` 与 `cmd` 当作同一类数据的两代源名互认：只提供了其中一个名字时，把同一张表也登记到另一个名字下；两个名字都提供了就各归各。这条兼容规则是为 DIAG 改名 CMD 准备的，不是为 EAV 表准备的。
+
+由此得出的配对规则：同一个场景里 `diag` 指标名只对应一种表结构，由生成时的绑定决定（分析脚本里 `filter.column` 为 `DataItem` 的就是 EAV 表）。按 EAV 绑定的 `diag_analyzer.py` 收到 zip2csv 的 DIAG 或 CMD 表会整批报「找不到列」，反过来也一样。本文这类同时用到 `cmd` 与 `diag` 两个指标的场景，执行时两份数据都要传，不能只传一份靠别名补上，否则别名会把 cmd 表当 diag 表用。执行侧的说明见 `cs-scot-execute/references/data_entry.md`。
+
 这张表是「一行一个量」：`DataItem` 列说明这一行是哪个指标，`DataValue` 列是它的值。绑定时先用 `filter` 选出指标，再用 `column` 指向值列：
 ```python
 # A 类：某指标值越限（如 CPU 占用率 > 80）
@@ -79,6 +86,7 @@ CUSTOM = {"L4-crc": _crc_error}
   ```bash
   python -c "import csv,sys;csv.field_size_limit(10**9);print('\n'.join(sorted({r.get('DataItem','') for r in csv.DictReader(open(sys.argv[1],encoding='utf-8',errors='ignore'))})))" "<diag的csv>" > "<OUT>/overview/diag_dataitem枚举.txt"
   ```
+  这条抽枚举命令是「不用 `python -c` 解析数据」这条规矩的唯一例外：它只读一列做去重，不解析任何产物 JSON；路径照旧加引号。
 - 多个指标共同判断一个节点时，用 D 类组合（见 condition_binding_schema.md 的「一个节点多条判据怎么绑」一节）。
 - **「diag 一条都不用绑」这种全空结论，必须先把 `DataItem` 枚举对着树上的判据逐个核对过才能下**（`Alarm*`、`BFD_*`、`INTF_*`、`FIB_*`、`SYS_*` 这些结构化字段常常可以替代回显的子串匹配），并在汇报里写明「核对了哪些、为什么都不适用」。不要因为 cmd 容易绑定就略过 diag。
 

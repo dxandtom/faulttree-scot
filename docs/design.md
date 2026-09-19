@@ -6,7 +6,7 @@
 
 网络保障（CS）场景下，基于业务同事人工编写的故障树和现场采集的数据，自动生成一套场景专属的诊断脚本与执行计划，在平台上执行，产出根因路径和逐节点的判断依据；并用评估反思和优化闭环持续改进。
 
-## 2. 六个技能与分工
+## 2. 七个技能与分工
 
 | 技能 | 阶段 | 做什么 | 由谁用 |
 |---|---|---|---|
@@ -49,7 +49,7 @@
 | `assets/tree/<短名>.tree_index.json` | generate | execute、rca、migrate、reflect | 故障树结构：节点编号、名称、判据、层级 |
 | `assets/plan.json` | generate | execute | 执行计划：先跑哪些分析脚本，最后做根因分析 |
 | `assets/scripts/<数据源>_analyzer.py` | generate（绑定由模型填） | execute | 每个数据源的逐条件分析脚本 |
-| `assets/tree/<短名>.tuning.xlsx` | generate、migrate | 人工调优、migrate | 调优表：一行一个节点，树和绑定的可编辑事实源 |
+| `assets/tree/<短名>.tuning.xlsx` | generate（步骤 5 打包时自动导出；默认流程下在步骤 6 前用 `export_tree_excel.py` 导出）、migrate | 人工调优、migrate | 调优表：一行一个节点，树和绑定的可编辑事实源 |
 | `result-<运行号>/rca_input.json` | execute | rca、reflect | 逐节点事实 |
 | `result-<运行号>/rca.json` | rca | execute（渲染）、reflect | 四档根因结论 |
 | `tree/migrations.json` | migrate | reflect（建用例库）、optimize | 迁移记录：节点对应哪个交付包 |
@@ -78,12 +78,25 @@ skills/
   cs-scot-generate-optimize/   统一入口：SKILL.md、scripts/（route_feedback、package_skill）、references/
   zip2csv/                     原始数据转表：SKILL.md、scripts/、vendor/ifilter.py
 integration/platform1/         与平台联调的驱动、接入服务、交接说明
-tests/                         五套测试；integration/platform1/tests/ 是端到端测试
+tests/                         七套测试；integration/platform1/tests/ 是端到端测试
 docs/                          本文、交接文档、遗留任务
 ```
 
 ## 7. 现状与遗留
 
-- 六个技能与两个辅助部件已实现并在平台联调；发行包由 `cs-scot-generate-optimize/scripts/package_skill.py` 打出。
-- 已讨论、尚未动手的改动记录在 `docs/遗留任务.md`（如英文树视图）。
+- 七个技能与一个辅助部件已实现并在平台联调；发行包由 `cs-scot-generate-optimize/scripts/package_skill.py` 打出。
+- 已讨论、尚未动手的改动记录在 `docs/遗留任务.md`。
 - 平台接入见 `integration/platform1/README.md` 与同目录的交接说明。
+
+## 8. 几个容易混淆的说法
+
+| 说法 | 指什么 |
+|---|---|
+| 格式检查 | datacom-fault-tree-tester 的 `check_contract.py` 对交付脚本输入输出格式的检查；cs-scot-migrate 迁入前也跑它 |
+| 格式约定 | 绑定怎么写的规定，即 cs-scot-generate 的 `references/condition_binding_schema.md`（产物 `scripts/` 下带副本），调优表里的绑定列按它填 |
+| 产物格式版本 | 产物 `manifest.json` 里的 `product_format_version`，执行与评估启动时比对，旧产物只告警不阻断 |
+| 短名 | 场景的英文短名（slug），技能目录名和 `assets/tree/` 下文件名都用它；取不到英文时是中文场景名 |
+| 分析脚本 | 产物 `scripts/<指标>_analyzer.py`，每个数据源一份，逐条件输出事实；各技能文档统一叫这个名字 |
+| 局部子树形态、完整形态 | `rca_input.json` 的两种形态：常态是按 tree_index 剪出的局部子树，没有 tree_index 或剪枝不划算时是完整形态 |
+| 定档 | 根因分析把候选归入确证、疑似、待确认、排除四档之一，由脚本按机械规则完成，只有冲突候选交模型 |
+| 处理项、处理清单 | 反馈处理线由 route_feedback.py 给出的每条问题的处理方式，以及装着全部处理项的 `feedback_tickets.json` |

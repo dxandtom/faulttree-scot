@@ -88,6 +88,7 @@ python "<本目录>/scripts/eval_run.py" \
 | `--skill-dir` | 场景技能目录 | `scot技能/ldp-lsp/` |
 | `--out` | 评估输出目录，默认 `<result-dir 的父目录>/<场景>-eval/` | |
 | `--prev-evaluation` | 上一轮的 evaluation_report.json 文件或其评估目录，用于接续轮次 | |
+| `--scenario` | 场景名，只用来拼默认输出目录；不给时从 `--result-dir` 推断 | |
 
 批量时每个用例要对到它自己的执行结果，按四级匹配：① 结果目录名含 case_id（执行时用 `--result-suffix` 标注的优先）；② run.json 记录的输入数据路径落在本用例的数据目录内（runner 每轮自动记录，这是主力通道）；③ 只有一个候选就用它并警告；④ 都对不上就报错，绝不拿别的用例的结果顶数。
 
@@ -122,14 +123,14 @@ python "<本目录>/scripts/eval_run.py" \
 
    | 类 | 名称 | 检测条件 | 处置 |
    |---|---|---|---|
-   | 0 | ENV_FAILURE | 某步骤 `ok` 为 false，或 run.json 不存在 | 脚本崩溃：自动（优化技能重迁）；环境故障：人工 |
+   | 0 | ENV_FAILURE | 某步骤 `ok` 为 false，或 run.json 不存在 | 交付脚本（`scripts/custom/`）崩溃：自动（优化技能重迁）；其他环境故障：人工 |
    | 1 | INPUT_GAP | `missing_inputs` 非空且有期望根因漏判，且缺的源本可提供。采集本就不含该类（`missing_kind` 为 `collection_absent`）或用例数据里本来没有的机械剔除；剔完为空则继续查绑定层。缺的源在用例数据里只有原始日志形态时改判类 2 绑定形态不匹配 | 人工（使用方补数据）；改判类 2 的自动 |
    | 2 | BINDING_GAP | 孤儿绑定（产出了事实但树上无此节点），或漏判的期望根因自身有判据无绑定。祖先未绑定不算，全树其余未绑定节点也不算错 | 孤儿绑定、绑定缺失、绑定形态不匹配：自动；绑定清除冲突：人工 |
    | 3 | KNOWLEDGE_GAP | tree_index 里没有该节点 | 用例库过期：自动（重建用例库）；故障树缺节点：人工（退回 tester） |
    | 4 | CRITERIA_GAP | 判据算出的事实与 expected_facts 不相等 | 自动（按证据修到与判据文档一致，判定标准不动） |
-   | 5 | VERDICT_GAP | 事实全对却归错档，含阴性用例假阳 | 人工（结论归档争议） |
+   | 5 | VERDICT_GAP | 事实全对却定错档，含阴性用例假阳 | 人工（结论定档争议） |
 
-   "自动"指优化技能 cs-scot-generate-optimize 的反馈处理线按处理清单执行，同节点同类三轮不过熔断转人工；"人工"指自动化本来做不了的情况，汇总交人。各类问题的处理方式见优化技能的 `references/feedback_routing.md`；各类的检测逻辑与证据字段见 `references/error_classification.md`。
+   "自动"指优化技能 cs-scot-generate-optimize 的反馈处理线按处理清单执行，同节点同类三轮不过熔断转人工；"人工"指自动化本来做不了的情况，汇总交人。各类问题的处理方式见 `cs-scot-generate-optimize/references/feedback_routing.md`；各类的检测逻辑与证据字段见 `references/error_classification.md`。
 4. 综合评级 verdict：
 
    | verdict | 含义 | 触发反馈 |
@@ -163,7 +164,7 @@ python "<本目录>/scripts/eval_run.py" \
 
 ## 与上下游的配合
 
-- 上游 generate 生成场景技能（plan.json、解析脚本、tree_index）；中游 execute 执行诊断，产出 result 目录；本技能读产物与 expected.json 对账，输出反馈。
+- 上游 generate 生成场景技能（plan.json、分析脚本、tree_index）；中游 execute 执行诊断，产出 result 目录；本技能读产物与 expected.json 对账，输出反馈。
 - 反馈由 cs-scot-generate-optimize 的反馈处理线承接：运行 route_feedback.py 得到每条问题的处理方式，自动档直接执行后全库重跑重评进入下一轮。
 - 轮次通过 evaluation_report.json 传递：第二轮把第一轮的报告作为 `--prev-evaluation` 传入。
 
@@ -205,5 +206,5 @@ python "<本目录>/scripts/regress.py" --skill-dir scot技能/ldp-lsp-is-not-es
 
 - 每轮评估创建独立目录，互不覆盖；中间产物放系统临时目录，不回拷。
 - 所有路径通过参数传入，没有硬编码；默认输出目录由 result-dir 推导。
-- 与具体指标类型无关；rca_input 的剪枝形态（`fault_tree.pruned_nodes`）与完整形态（`indicator_results`）都能识别。
+- 与具体指标类型无关；rca_input 的局部子树形态（`fault_tree.pruned_nodes`）与完整形态（`indicator_results`）都能识别。
 - 评估失败不冒充通过：子脚本没产出结果就是 EVAL_ERROR，绝不算 PASS。

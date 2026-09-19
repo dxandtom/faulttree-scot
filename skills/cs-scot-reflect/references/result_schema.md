@@ -18,19 +18,25 @@
 
 **用途**：记录执行状态，包括是否成功、缺哪些数据、哪些步骤失败了。
 
-### 必须字段
+### 字段
 
 ```json
 {
   "run_id": "run-20260810T034800Z-9a2c55",  // 【必须】运行唯一标识
   "created_at": "2026-08-10T03:48:00Z",    // 【必须】创建时间（ISO8601）
-  "execution_status": {                     // 【必须】各步骤执行状态
+  "plan_id": "plan_ldp-lsp",               // 【必须】计划标识，即 plan.json 的 plan_id
+  "product_dir": "scot技能/ldp-lsp/assets",  // 【必须】本次运行的产物目录
+  "inputs": {                              // 【必须】各输入数据的指纹（路径、大小、sha1）；批量判卷按它把用例对到结果
+    "config": { "...": "..." }
+  },
+  "execution_status": {                     // 【必须】各步骤执行状态，每步跑完立即写入
     "config_analyzer": { "ok": true, "exitcode": 0, "error": null },
     "diag_analyzer":   { "ok": true, "exitcode": 0, "error": null },
     "log_analyzer":    { "ok": true, "exitcode": 0, "error": null },
     "rca":             { "ok": true, "exitcode": 0, "error": null }
   },
-  "missing_inputs": []                    // 缺的数据源列表
+  "missing_inputs": ["chr"],               // 只在有缺口时出现：缺的数据源列表
+  "missing_kind": { "chr": "not_provided" } // 只在有缺口时出现：缺口性质，见下
 }
 ```
 
@@ -43,11 +49,10 @@
 | error | string \| null | 错误信息（ok=false时才有值） |
 | skipped | string | 跳过原因（被跳过时才有此字段） |
 
-### missing_inputs 字段说明
+### missing_inputs 与 missing_kind 字段说明
 
-- 类型：`string[]`
-- 说明：本次运行缺失的数据源key列表
-- 示例：`["chr", "rb"]`
+- `missing_inputs`：`string[]`，本次运行缺失的数据源 key 列表，示例 `["chr", "rb"]`；没有缺口时整个字段不出现。
+- `missing_kind`：`{源名: 性质}`，与 `missing_inputs` 同时出现。`collection_absent` 表示带 `--data raw=` 运行时该类数据在采集里本来就不存在，不是漏传，评估归因据此不判 INPUT_GAP；`not_provided` 表示没有提供。
 
 ---
 
@@ -57,7 +62,7 @@
 
 **有两种形态，评估读取端两种都要认**：
 
-### 形态A：剪枝形态（真实场景的常态）
+### 形态 A：局部子树形态（真实场景的常态）
 
 树大时执行链会做局部子树压缩，事实挂在剪枝节点上：
 
@@ -86,7 +91,7 @@
 
 节点 predicate 判定：该节点任一 fact 的 `predicate_satisfied == true` 即成立（多事实取"或"）。
 
-### 形态B：退化形态（树很小、剪枝不划算时才出现）
+### 形态 B：完整形态（没有 tree_index，或树很小、剪枝不划算时才出现）
 
 ```json
 {
@@ -112,7 +117,7 @@
 }
 ```
 
-### conditions[] 字段说明（形态B）
+### conditions[] 字段说明（形态 B）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -201,9 +206,12 @@
 ### 用于 INPUT_GAP（类1）检测
 - 检查 `missing_inputs` 是否非空
 
+### 用于 BINDING_GAP（类2）检测
+- 检查 `rca.json` 的 `tree_issues.orphan_node_ids` 是否非空（孤儿绑定）
+- 漏判的期望根因自身有判据却没有任何绑定（静态查 tree_index 与各分析脚本）
+
 ### 用于 CRITERIA_GAP（类4）检测
 - 比对 `rca_input.json` 中各节点的 `predicate_satisfied` 与 `expected_facts`
 
 ### 用于 VERDICT_GAP（类5）检测
-- 比对 `rca.json` 中的裁决结果与 `expected_root_causes`
-- 检查 `tree_issues.orphan_node_ids` 是否非空
+- 比对 `rca.json` 中的裁决结果与 `expected_root_causes`（顶层 `node_id` 是候选自身的编号，对账用它）

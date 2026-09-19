@@ -5,13 +5,13 @@
 ## 1. 渲染三份文件
 
 ```bash
-python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<场景>.tree_index.json"
+python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<短名>.tree_index.json"
 ```
 
 | 文件 | 内容 |
 |---|---|
 | `rca_report.md` | 完整报告：确证、疑似、待确认、排除留痕、树面问题；证据是命中原文、实测值、来源，逐字来自 rca.json |
-| `rca_tree.txt` | 树视图：只展开确诊、疑似、缺数据所在的路径，节点带判据、证据、方案 |
+| `rca_tree.txt` | 树视图：只展开确证、疑似、缺数据所在的路径，节点带判据、证据、方案。树视图里打印的标签是"确诊/疑似/缺数据"，对应四档里的确证根因、疑似、待确认 |
 | `rca_reply.md` | 聊天框回复稿：树视图 + 确证根因表 + 疑似表 + 待确认 |
 
 为什么不让模型自己总结：实测里证据会被压成"S 脚本 matched=true"，内部字段名（absent=True 之类）直接漏给用户。所以这些内容不自己写、不改写。
@@ -34,10 +34,10 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
 2. 渲染时加 `--lang en`：
 
    ```bash
-   python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<场景>.tree_index.json" --lang en
+   python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --tree "<assets>/tree/<短名>.tree_index.json" --lang en
    ```
 
-   脚本负责的部分：标题、表头、标签（Criterion / Evidence / Basis / Blocked at / Caveat / Solution / Missing）、树视图头行与折叠提示、判定词（holds / does not hold / insufficient data / conflict）；节点名用树里的 `name_en`，判据用 `condition_en`，方案用 `solutions.json` 的 `en`；脚本写进 rca.json 的机械说明（祖先未验证、层级矛盾、叶子因待定、缺口分型、待确认原因、排除留痕）用同名 `_en` 字段的英文版。树里没有英文的节点回退中文，不算错误。
+   脚本负责的部分：标题、表头、标签（Criterion / Observed / Basis / Verdict / Blocked at / Caveat / Suggested solution / Note，反证行标 Counter-evidence）、树视图头行与折叠提示、判定词（holds / does not hold / insufficient data / conflict）；节点名用树里的 `name_en`，判据用 `condition_en`，方案用 `solutions.json` 的 `en`；脚本写进 rca.json 的机械说明（祖先未验证、层级矛盾、叶子因待定、缺口分型、待确认原因、排除留痕）用同名 `_en` 字段的英文版。树里没有英文的节点回退中文，不算错误。
 3. 回复稿里可能剩下的中文只有分析脚本给出的事实原文：`how`（判断依据的说明）和事实自带的 reason。这些由你逐句直译成英文：不概括、不补充、不解释，拿不准的词保留中文并括注。回退成中文的节点名，译成英文后括注中文原名，如 `Interference (干扰导致)`。
 4. 不翻的：证据行（设备回显、实测值、来源文件名、命令名）、数字、节点编号、判定档位、表格分隔线。
 5. 结构一个不改：段落顺序与数量、树视图的每一行、缩进、连线（├─ └─ │）、符号（✅ ⚠ ? ✓ ✗ ·）、折叠计数、表格的行列与格数。

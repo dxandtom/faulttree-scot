@@ -253,7 +253,7 @@ def _parse_knowledge_entries(text: str) -> list:
             cur = {"title": line[4:].strip(), "tags": None, "stage": None, "body": []}
             entries.append(cur)
         elif cur is not None:
-            s = line.strip().replace(":", ":")
+            s = line.strip().replace("：", ":")            # 全角冒号归一成半角,「阶段：」「适用：」也能识别
             if cur["tags"] is None and not cur["body"] and s.startswith("适用:"):
                 cur["tags"] = [t for t in re.split(r"[、,,/\s]+", s.split(":", 1)[1]) if t]
             elif cur["stage"] is None and not cur["body"] and s.startswith("阶段:"):

@@ -8,7 +8,7 @@ disable-model-invocation: false
 
 ## 任务
 
-把现场采集的原始数据转成后续解析脚本能读的三类表：日志表（LOG）、配置表（CONFIG）、命令回显表（DIAG 或 CMD）。整条流水线由一个脚本完成，不需要人工介入：
+把现场采集的原始数据按三类目录转成后续分析脚本能读的表：日志表（LOG）、配置表（CONFIG）、命令回显表（DIAG 或 CMD）；命令回显有两种表头（转换结果与派生汇总表，见第 6、7 步），所以是三类目录、四种表头。整条流水线由一个脚本完成，不需要人工介入：
 
 1. 识别输入形态：没有分类目录的散文件先调用 `vendor/ifilter.py` 归类；已有分类目录的直接进入下一步。
 2. zip 输入解压到本地目录；目录输入就地扫描，不解压。
@@ -16,7 +16,7 @@ disable-model-invocation: false
 4. 处理 `CONFIG/`：遍历全部 `.txt`，用 `config2csv.parse_config_to_csv()` 转成 CSV。
 5. 处理 `DIAG/`：遍历全部 `.txt`，用 `parse_diag_to_csv.parse_diag_to_csv()` 转成 CSV。
 6. 处理 `CMD/`：CMD 是 DIAG 的新名字，两个名字都能识别，处理方式相同；输出到 `csv/<网元>/CMD/`，列为 NEName、CmdName、ObjContent（下游把 ObjContent 与 CmdResult 视为同义）。
-7. 生成命令汇总表：基于 DIAG 转出的 CSV，在 `csv/<网元>/CMD/` 下生成汇总 CSV，列为 NEName、CmdName、OriginCmd、CmdResult。
+7. 生成命令汇总表：基于 DIAG 转出的 CSV，在 `csv/<网元>/CMD/` 下生成派生的汇总 CSV，列为 NEName、CmdName、OriginCmd、CmdResult；同名文件已有第 6 步的真实转换结果时跳过，不覆盖。所以 `CMD/` 下可能同时出现两种表头（老包走 DIAG 目录得到汇总表，新包走 CMD 目录得到转换结果），两种都能作为 cmd 指标的数据，但下游合并多网元文件时只能把表头相同的合到一起。
 8. 把全部 CSV 打成一个 zip。
 
 ## 术语
@@ -27,7 +27,7 @@ disable-model-invocation: false
 | 原始散文件 | 单个或一堆 log、txt、混杂的 zip，没有分类目录；rar 需先手工解压 |
 | ifilter | 同事维护的归类脚本，放在 `vendor/` 下原样引入，不改内部逻辑；把散文件归类成 `formated_result/<网元>/<CMD、CONFIG、LOG>/` |
 | 网元 | 一台设备；输出按网元分目录 |
-| 原始日志目录 | S 类节点脚本直接读的原始回显所在目录，执行器用 `--data raw=<目录>` 接收；脚本结束时会打印建议填哪个路径 |
+| 原始日志目录 | S 类节点脚本直接读的原始回显所在目录，即网元目录的父目录（zip 输入是输出目录里的 `extracted/`，经 ifilter 归类的散文件是 `formated_result/`），执行器用 `--data raw=<目录>` 接收；脚本结束时会打印建议填哪个路径 |
 
 ## 输入的三种形态
 
@@ -36,7 +36,7 @@ disable-model-invocation: false
 | 形态 | 特征 | 处理 |
 |---|---|---|
 | 原始散文件 | 单个或一堆 log/txt、混杂 zip，没有分类目录；rar 需先手工解压 | 脚本自动调用 ifilter 归类出 `formated_result/<网元>/<CMD、CONFIG、LOG>/`，再按分类目录处理 |
-| 分类目录 | 任意深度存在 LOG、CONFIG、DIAG、CMD 目录，里面是 txt 或 log 文件 | 本技能常规转换成三类表 |
+| 分类目录 | 任意深度存在 LOG、CONFIG、DIAG、CMD 目录，里面是 txt 或 log 文件 | 本技能按三类目录常规转换 |
 | 已是 csv | 表头带 NEName、CmdName 等列 | 不需要本技能，直接交给绑定或执行器 |
 
 关于 ifilter 归类，有五点要知道：

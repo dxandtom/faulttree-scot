@@ -18,7 +18,7 @@ description: 把节点交付包（datacom-fault-tree-tester 产出的判断方�
 
 | 术语 | 含义 |
 |---|---|
-| 节点交付包 | tester 产出的 `<节点名>.zip` 或解压后的目录：`判断方法_<节点名>.md`、`fault_check_<节点名>.py`、`测试数据/` |
+| 节点交付包 | tester 产出的 `<节点名>_<时间戳>.zip` 或解压后的目录：`判断方法_<节点名>.md`（脚本按 `判断方法*.md` 且文件名不含"规范"查找，节点名优先取文档标题行 `# 判断方法：<节点名>`）、`fault_check_<节点名>.py`、`测试数据/`。zip 文件名不参与节点匹配，只在对应表的 zip 列里用来找包 |
 | 合集包 | 一个 zip 或目录里装着多个节点交付包 |
 | 场景技能、产物 | generate 生成的技能目录；产物是它的 `assets/` 目录，含 `tree/`、`scripts/`、`plan.json` |
 | 判据 | 故障树节点上的判断条件原文 |
@@ -26,7 +26,7 @@ description: 把节点交付包（datacom-fault-tree-tester 产出的判断方�
 | 对应表 | 每行一个节点的 xlsx 或 csv，写明节点路径、对应的 zip、判据、解决方案、是否要改；平台每次优化给的全量表就是它 |
 | 调优表 | 产物自带的 `tree/<短名>.tuning.xlsx`，一行一个节点，是树和绑定的可编辑事实源 |
 | 迁移记录 | `tree/migrations.json`，记每个节点迁自哪个包、内容指纹、时间、检查结果 |
-| 工具链公共文件 | 与场景无关、由工具链维护的文件：引擎脚本、runner、check_data、zip2csv、fault-tree-rca 规则副本、执行指引正文 |
+| 工具链公共文件 | 与场景无关、由工具链维护的文件：引擎脚本、runner、check_data、zip2csv、fault-tree-rca 技能副本、执行指引正文 |
 | 同一 skills 目录下的其他技能 | 与本技能并列安装的 cs-scot-generate、cs-scot-execute、fault-tree-rca、zip2csv、datacom-fault-tree-tester；发行包形态下它们在包根 |
 | `engine/` | 本技能自带的公共文件副本，单独安装、旁边没有其他技能时用它 |
 | 格式检查 | 用 tester 的 `check_contract.py` 检查交付脚本是否符合约定的输入输出格式 |
@@ -91,7 +91,7 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
     --package <合集包> --product <产物目录> --only "<包节点名>" --node <节点号>
 ```
 
-`--only` 从合集包里选定一个子包；单节点的参数 `--entry`、`--per-ne`、`--entry-kwargs` 都可以配。
+`--only` 从合集包里选定一个子包；单节点的参数 `--entry`、`--per-ne`、`--entry-kwargs` 都可以配；包里有多个 `fault_check_*.py` 时用 `--script <文件名>` 指定用哪个。
 
 ### 第 5 步：拿不准就问用户
 
@@ -120,7 +120,7 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py \
 
 每次迁移，脚本按顺序做：
 
-1. 调优表比 tree_index 新（可能有未导入的人工修改）时先导入，再按新树匹配。表填坏了导入会失败，迁移停在这里，把报错原样给用户。
+1. 调优表比 tree_index 新（可能有未导入的人工修改）时先导入，再按新树匹配。表填坏了导入会失败，迁移停在这里，把报错原样给用户。预导入报「多个顶层节点」这类旧版导出器造成的结构问题时，加 `--rebuild-tuning`：把存量调优表备份为 `.bak` 后从产物重建，未导入的手工修改可从 `.bak` 里找回。
 2. **刷新工具链公共文件**：逐文件与同一 skills 目录下的其他技能比对，内容不同就刷新，旧文件留 `.bak`；旁边没有其他技能时用 `engine/` 里的副本。规则见"无包刷新"一节。
 3. **格式检查**：每个交付脚本过一遍 `check_contract.py`，按适配函数能否弥补分两档处理，见 `references/script_check.md`；脚本 import 的共享模块包里没带时补齐一份。
 4. 把脚本复制进产物 `scripts/custom/`，修改调优表（判据与绑定），导入编译回产物，回导调优表保持同步。
@@ -142,7 +142,7 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py --product <产物�
 | 会刷新（工具链公共文件） | 不碰（场景相关） |
 |---|---|
 | `assets/scripts/` 下的引擎脚本：condition_kernels、xlsx_reader、custom_lib（没有手工注册函数时）、import_tree_excel、export_tree_excel | `assets/tree/`、`assets/plan.json`、knowledge.md |
-| 技能根目录的 `scripts/runner.py`、`check_data.py`、`tree_prune.py` 和 `references/` | `assets/scripts/*_analyzer.py`（各指标脚本） |
+| 技能根目录的 `scripts/runner.py`、`check_data.py`、`tree_prune.py` 和 `references/` | `assets/scripts/*_analyzer.py`（各指标的分析脚本） |
 | `assets/zip2csv/` 逐文件 | `assets/scripts/cross_analyzer.py`（只升级框架，绑定不动） |
 | `assets/fault-tree-rca/`（有文件不同就整目录刷新，旧副本备份为 `fault-tree-rca.bak`） | `assets/scripts/custom/`（节点脚本与随包共享模块） |
 | `SKILL.md` 正文（换正文，保留技能名和描述，旧文备份为 `SKILL.md.bak`） | custom_lib.py 里手工注册的函数 |
@@ -153,8 +153,8 @@ python skills/cs-scot-migrate/scripts/migrate_fault_check.py --product <产物�
 
 ## 迁移后
 
-- 执行诊断时可加 `--data raw=<zip2csv 输出的 extracted 目录>`，让脚本直接读原始日志文件，最忠实；不加也能跑，适配函数会从 config、log、cmd 三张表重建输入。
-- 判断结果三态：任一网元命中 → 成立；全部网元报错或没有网元 → 数据不足（不当作"正常"）；其余 → 不成立。
+- 执行诊断时可加 `--data raw=<原始日志目录>`（网元目录的父目录：zip 输入是 zip2csv 输出里的 `extracted/`，经 ifilter 归类的散文件是 `formated_result/`），让脚本直接读原始日志文件，最忠实；不加也能跑，适配函数会从 config、log、cmd 三张表重建输入。
+- 交付脚本返回的是四态 `matched`（`true`、`false`、`undetermined`、`insufficient_data`），通用适配函数 `fault_check` 按网元逐个归类后翻译成事实。先把每个网元归为三种：命中（`true`）、未命中（`false`）、判不了（`undetermined`、`insufficient_data`，没有 `matched` 字段或形状认不出，以及 `matched` 为 `false` 却带 `error` 的老问题）。再汇总：任一网元命中 → 成立，判不了的网元在 `explain` 里附注；没有命中但有未命中 → 不成立；一个命中或未命中都没有 → 数据不足（不当作"正常"），并带 `gap_kind` 细分：一个网元都没读到记 `no_data`；全部网元都判不了时按判不了的原因归类，全是 `insufficient_data`（或缺数据报错）为 `no_data`（补采可解），全是 `undetermined`（数据在但判不动）为 `cannot_judge`（判据或脚本质量信号），两者都有为 `mixed`。
 - 证据保真：脚本给出的命中原文（`matched_items`）、出处文件（`source_files`）、判定理由（`details.reason`）逐字进事实（定长截断，防止上下文过长），随 rca_input 带进根因报告。
 - 产物就是场景技能的 `assets/` 时，迁移就地生效，技能已更新完毕，不用重新打包；只有在独立产物目录上迁移、之后要发布成技能时才跑 `package_scenario.py`。
 - 同一节点重复迁移（交付包更新）就重跑同一条命令，迁移记录覆盖更新。

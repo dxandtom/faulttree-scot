@@ -1,6 +1,8 @@
 # 错误分类详细说明
 
-> 本文件定义 6 类错误的检测逻辑、判断条件、处理方式。
+> 本文件定义 6 类错误的检测逻辑与判断条件。各类问题由谁处理、怎么处理，以 `cs-scot-generate-optimize/references/feedback_routing.md` 为准，本文的"处理方式"只是它的摘要。
+>
+> 每类下面的"分类代号"是分类脚本 classify.py 内部 `verdict` 字段的取值（`run_invalid` 等），只是分类结果的代号，随分类结果一起输出；它不是评估报告 `meta.verdict` 的评级（PASS、PASS_WITH_GAPS、PARTIAL_PASS、FAIL、EVAL_ERROR），两者不要混。
 
 ## 决策树总览
 
@@ -20,7 +22,7 @@ Step 3: 输出分类结果
 
 **定义**：执行层问题（环境崩溃、脚本崩溃），与模型质量无关。
 
-**Verdict**: `run_invalid`
+**分类代号**：`run_invalid`
 
 ### 检测条件（满足任一即命中）
 
@@ -40,9 +42,8 @@ Step 3: 输出分类结果
 
 ### 处理方式
 
-- **必须中断**
-- 人工修复环境/脚本后重跑 execute
-- 不回流 generate
+- 交付脚本（`scripts/custom/` 下的 `fault_check_*.py`）崩溃：自动档，优化技能按迁移记录重迁该节点的交付包
+- 其他环境故障（依赖、权限、数据损坏）：人工修复后重跑 execute，不动资产
 
 ---
 
@@ -50,7 +51,7 @@ Step 3: 输出分类结果
 
 **定义**：使用方没有提供必要的数据源，导致部分步骤被跳过，**且因此有期望根因漏判**。
 
-**Verdict**: `needs_data`
+**分类代号**：`needs_data`
 
 ### 检测条件（两条同时满足）
 
@@ -70,9 +71,8 @@ Step 3: 输出分类结果
 
 ### 处理方式
 
-- **必须中断**
-- 使用方补数据后重跑 execute
-- 不回流 generate
+- 人工档：使用方补数据后重跑 execute，不动资产
+- 缺的源在用例数据里只有原始日志形态（没有表）时，评估改判为类 2"绑定形态不匹配"，走自动档
 
 ---
 
@@ -81,7 +81,7 @@ Step 3: 输出分类结果
 **定义**：绑定层的一切不一致——孤儿绑定（产出事实但树上无此节点），或**漏判期望根因
 自身**有判据却没有任何绑定。
 
-**Verdict**: `needs_binding`
+**分类代号**：`needs_binding`
 
 ### 检测条件（两条任一命中）
 
@@ -126,9 +126,10 @@ for each missed_expected_node:
 
 ### 处理方式
 
-- **可继续 loop**
-- 自动回流 generate 补绑定
-- 熔断：同节点同类连改 3 轮不过 → 标记人深查
+- 孤儿绑定：自动档，通过调优表清掉已删节点残留的绑定
+- 绑定缺失、绑定形态不匹配：自动档，有交付包就由 migrate 重迁，没有就在调优表补绑定行后导回
+- 绑定清除冲突：人工档，二选一（重迁恢复绑定，或改用例期望）
+- 熔断：同一用例、同一节点、同一类连改 3 轮不过 → 转人工
 
 ---
 
@@ -136,7 +137,7 @@ for each missed_expected_node:
 
 **定义**：`expected.json` 中提到的节点在 `tree_index.json` 中不存在。
 
-**Verdict**: `needs_knowledge`
+**分类代号**：`needs_knowledge`
 
 ### 检测条件
 
@@ -155,9 +156,9 @@ for each missed_expected_node:
 
 ### 处理方式
 
-- **可继续 loop**
-- 回流 tester 增节点 → migrate 更新树
-- 熔断：同节点同类连改 3 轮不过 → 标记人深查
+- 用例库过期（节点名还在树上、只是编号重排）：自动档，重新生成用例库
+- 故障树缺节点：人工档，向 tester 提增加节点的需求，回包后走优化线导入
+- 熔断：同一用例、同一节点、同一类连改 3 轮不过 → 转人工
 
 ---
 
@@ -165,7 +166,7 @@ for each missed_expected_node:
 
 **定义**：节点的 predicate_satisfied 判断与 expected_facts 不一致。
 
-**Verdict**: `needs_criteria_review`
+**分类代号**：`needs_criteria_review`
 
 ### 检测条件
 
@@ -187,9 +188,8 @@ for each missed_expected_node:
 
 ### 处理方式
 
-- **可继续 loop**
-- 人拍板 → 调优表修正
-- 熔断：同节点同类连改 3 轮不过 → 标记人深查
+- 自动档：按证据修到与判据文档一致（绑定错就改调优表，实现偏离就做限定修复），判定标准本身不动；疑为用例期望标错的留证，等熔断后人工复核
+- 熔断：同一用例、同一节点、同一类连改 3 轮不过 → 转人工
 
 ---
 
@@ -198,7 +198,7 @@ for each missed_expected_node:
 **定义**：RCA 裁决结论与期望不符——纯裁决层错误：0~4 全排除、每个节点的事实都对，
 结论还归错档，才轮到它（孤儿绑定归类2）。
 
-**Verdict**: `needs_adjudication`
+**分类代号**：`needs_adjudication`
 
 ### 检测条件
 
@@ -222,9 +222,8 @@ for each missed_expected_node:
 
 ### 处理方式
 
-- **可继续 loop**
-- 人裁决 → 调规则
-- 熔断：同节点同类连改 3 轮不过 → 标记人深查
+- 人工档：出争议说明交人，不自动改根因分析的判定规则
+- 熔断：同一用例、同一节点、同一类连改 3 轮不过 → 转人工
 
 ---
 
@@ -274,11 +273,15 @@ for each missed_expected_node:
 
 ## 处理规则汇总
 
-| 类 | 类型 | 处理方 | 可继续loop | 熔断 |
-|----|------|--------|------------|------|
-| 0 | ENV_FAILURE | 人工修环境 | 否 | - |
-| 1 | INPUT_GAP | 使用方补数据 | 否 | - |
-| 2 | BINDING_GAP | generate补绑定 | 是 | 是 |
-| 3 | KNOWLEDGE_GAP | tester增节点 | 是 | 是 |
-| 4 | CRITERIA_GAP | 人拍板→调优表 | 是 | 是 |
-| 5 | VERDICT_GAP | 人裁决→调规则 | 是 | 是 |
+摘自 `cs-scot-generate-optimize/references/feedback_routing.md`，以它为准：
+
+| 类 | 类型 | 自动档 | 人工档 |
+|----|------|--------|--------|
+| 0 | ENV_FAILURE | 交付脚本崩溃：migrate 重迁 | 其他环境故障 |
+| 1 | INPUT_GAP | （改判类 2 的绑定形态不匹配） | 使用方补数据 |
+| 2 | BINDING_GAP | 孤儿绑定清理、绑定缺失补挂、绑定形态不匹配重迁 | 绑定清除冲突 |
+| 3 | KNOWLEDGE_GAP | 用例库过期重生成 | 故障树缺节点，退回 tester |
+| 4 | CRITERIA_GAP | 按证据修到与判据文档一致 | （熔断后复核） |
+| 5 | VERDICT_GAP | 无 | 结论定档争议，出争议说明 |
+
+自动档的问题同一用例、同一节点、同一类连续 3 轮不过即熔断转人工。

@@ -11,9 +11,9 @@ description: 把故障树 Excel 与各指标的数据编译成场景诊断技能
 
 1. 各指标的逐条件分析脚本 `scripts/<指标>_analyzer.py`（同一个通用引擎的副本，只是填写的条件不同）；
 2. SCoT 执行计划 `plan.json`；
-3. 故障树 Markdown `tree/<场景>.md` 与权威拓扑 `tree/<场景>.tree_index.json`。
+3. 故障树 Markdown `tree/<短名>.md` 与权威拓扑 `tree/<短名>.tree_index.json`（短名的定义见术语表）。
 
-生成分 6 步：步骤 1 建树并搭好技能目录 → 步骤 2 组装产物目录 → 步骤 2.5 把判据绑定到数据列 → 步骤 3 用真实数据验证 → 步骤 4 清理生成期的临时文件 → 步骤 5 仅在步骤 1 没能直接生成技能目录时单独打包。步骤 1 默认直接生成技能目录（`scot技能/<英文短名>/`，产物在它的 `assets/` 下），清理完技能即成品，把技能目录的完整路径报给用户。
+生成主线 6 步（步骤 1、2、2.5、3、4、5，其中步骤 5 只在退化情形跑），另有步骤 3.5（假阳性检验）和步骤 6（人工调优）两个可选步：步骤 1 建树并搭好技能目录 → 步骤 2 组装产物目录 → 步骤 2.5 把判据绑定到数据列 → 步骤 3 用真实数据验证 → 步骤 4 清理生成期的临时文件 → 步骤 5 仅在步骤 1 没能直接生成技能目录时单独打包。步骤 1 默认直接生成技能目录（`scot技能/<英文短名>/`，产物在它的 `assets/` 下），清理完技能即成品，把技能目录的完整路径报给用户。
 
 生成的产物是数据和资产，交给执行技能 cs-scot-execute 去跑，本身不是可执行程序。
 
@@ -37,12 +37,14 @@ description: 把故障树 Excel 与各指标的数据编译成场景诊断技能
 | 子代理 | 主会话派出去并行做绑定的代理，一份任务说明派一个 |
 | 覆盖度 | 树上应该绑定的叶子节点里，已经被某个数据源绑定的比例 |
 | 根因分析 | 执行阶段最后一步，由 fault-tree-rca 根据各脚本输出的事实判定根因 |
+| 短名 | 场景的英文短名（slug，如 `layer-3-service-issues`），由 v2 建树脚本按英文列生成，用作技能目录名和 `tree/` 下各文件的文件名；取不到英文时，短名就是中文场景名 |
+| 格式约定 | 绑定怎么写的规定，即 `references/condition_binding_schema.md`（产物 `scripts/` 下带一份副本）。另外两个名字与它不是一回事：格式检查指 datacom-fault-tree-tester 的 `check_contract.py` 对交付脚本输入输出格式的检查；产物格式版本指 `manifest.json` 里的 `product_format_version`，执行与评估启动时比对，旧产物只告警 |
 
 ## 执行规矩
 
 这些规矩来自实际运行中最费时的错误：命令失败后自行寻找替代做法。
 
-- 全部动作只有两种：运行本技能 `scripts/` 下的脚本，读产物文件。不要用 `python -c` 临时解析 JSON 或 CSV（Windows 上中文路径经 shell 传递会乱码），要看数据一律用概览工具 `analyzer.py`。
+- 全部动作只有两种：运行本技能 `scripts/` 下的脚本，读产物文件。不要用 `python -c` 临时解析 JSON 或 CSV（Windows 上中文路径经 shell 传递会乱码），要看数据一律用概览工具 `analyzer.py`。步骤 4 的清理命令是唯一例外，它只删文件，不解析任何产物。
 - 同一条命令失败，原样重试至多 1 次；再失败按脚本打印的修法处理；脚本没给修法就把报错原文报给用户并停下。不要换写法自行绕过，不要绕开脚本另写替代方案。
 - 所有中间文件都放在产物目录 `<OUT>` 之内，不要用 /tmp（Windows 上 /tmp 在工作区之外，读写会被拒绝或出现编码错误）。
 - 每一步以该步脚本末尾的打印为完成标志，完成即进入下一步，不重复已完成的步骤。
@@ -68,17 +70,17 @@ description: 把故障树 Excel 与各指标的数据编译成场景诊断技能
 
 特征：输入是 zip 包，或目录树里任意深度存在 `CONFIG`、`CMD`（或 `DIAG`）、`LOG` 目录，里面是 `.txt`/`.log` 的命令回显。嵌套几层都算（`xxx/xxx/网元/CMD`、`网元/CMD`、根目录下直接 `CMD`，类型目录里再按日期分子目录也可以），转换脚本会递归查找，不要因为多包了一层就判定为不认识。
 
-概览和绑定只接受带表头的表（csv/xlsx）。txt 不是表，直接当数据喂进去，全部判据都会报"找不到列"。先用 zip2csv 转成表再进入流程：
+概览和绑定只接受带表头的表（csv/xlsx）。txt 不是表，直接当数据传进去，全部判据都会报"找不到列"。先用 zip2csv 转成表再进入流程：
 
 ```bash
 python "<zip2csv.py 路径>" <zip或目录> -o <输出目录>
 ```
 
-- zip2csv 的查找次序：先找本技能目录内的 `zip2csv/scripts/zip2csv.py`（发行包形态内嵌），没有再用同一 skills 目录下独立安装的 `zip2csv/scripts/zip2csv.py`。zip 和目录都可以直接作为输入，LOG 目录下 `.txt` 和 `.log` 都能识别。
-- 散乱的原始文件（零散的 log/txt、混杂的 zip，连分类目录都没有；rar 需先手工解压）也直接喂给 zip2csv：它会先调用内置的 `vendor/ifilter.py` 归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/`，再转表。ifilter 只依赖 chardet 和 pandas，装不上时它会明确报错并给出替代做法，把报错原样给用户，不要强行继续。
-- 转换结果在 `csv/<网元>/LOG|CONFIG|DIAG|CMD/*.csv`，按子目录名对应指标（log、config、cmd；DIAG 与 cmd 是同一类的新旧两种名字）。多个网元的同类 csv 合并成一张再作为该指标的数据：保留第一份的表头，其余文件逐个追加。
+- zip2csv 的查找次序：先找本技能目录内的 `zip2csv/scripts/zip2csv.py`（单技能交付时内嵌），没有再用同一 skills 目录下独立安装的 `zip2csv/scripts/zip2csv.py`。zip 和目录都可以直接作为输入，LOG 目录下 `.txt` 和 `.log` 都能识别。
+- 散乱的原始文件（零散的 log/txt、混杂的 zip，连分类目录都没有；rar 需先手工解压）也直接交给 zip2csv：它会先调用内置的 `vendor/ifilter.py` 归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/`，再转表。ifilter 只依赖 chardet 和 pandas，装不上时它会明确报错并给出替代做法，把报错原样给用户，不要强行继续。
+- 转换结果在 `csv/<网元>/LOG|CONFIG|DIAG|CMD/*.csv`，按子目录名对应指标（log、config、cmd；DIAG 是 CMD 目录的旧名字，两者都是命令回显表，内核和 runner 把 `diag`、`cmd` 当同一类数据的两代源名互认）。多个网元的同类 csv 合并成一张再作为该指标的数据：只合并表头完全相同的文件，保留第一份的表头，其余文件逐个追加。`CMD/` 下可能出现两种表头：CMD 目录的转换结果（NEName、CmdName、ObjContent）和由 DIAG 目录派生的汇总表（NEName、CmdName、OriginCmd、CmdResult），两种都能作为 cmd 指标的数据（内核把 ObjContent 与 CmdResult 视为同义列），但不能追加进同一个文件。注意「diag」还有另一个含义：数通诊断文件包场景里平台导出的 `*_CmdResult.csv` 是 EAV 窄表（DataItem、DataValue、Unit），与 zip2csv 的 DIAG 表结构完全不同，哪种表配哪个指标名见 `references/datacom_log_adapter.md` 第四节。
 - 四类目录之外的自由格式 txt 转不了表，这类内容走 S 类节点判断脚本（由 cs-scot-migrate 从节点交付包收入）或 `custom` 解析。
-- 原始目录本身要保留：执行时还要用 `--data raw=<原始目录>` 传给 runner，S 类脚本直接读原始文件。
+- 原始目录本身要保留：执行时还要用 `--data raw=<原始日志目录>` 传给 runner，S 类脚本直接读原始文件。原始日志目录指网元目录的父目录：zip 输入是 zip2csv 输出里的 `extracted/`，经 ifilter 归类的散文件是 `formated_result/`，zip2csv 结束时会打印建议值；传错一层，S 类脚本一个网元都找不到。
 
 ## 产物目录 `<OUT>`
 
@@ -100,9 +102,9 @@ python "<zip2csv.py 路径>" <zip或目录> -o <输出目录>
 python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<场景名>"
 ```
 
-- 不带 `-o` 时，子树写到 `<OUT>/tree/<场景名>.md`，并打印"本场景产物目录：`<OUT>`"。记住这个 `<OUT>`，后续步骤都用它。
-- 同时产出 `<OUT>/tree/<场景名>.tree_index.json`：权威拓扑，用 `Ln Code` 作稳定的 `node_id`，带父子关系、条件、AND/OR 提示和数据源。后面填 `node_id`、根因分析压缩上下文都依赖它。
-- 高层节点不参与判定：L1、L2 带判据的节点和场景根节点自动标记 `pass_through`，不阻断路径、不参与绑定，判据保留供人阅读。原因是高层判据多为"场景分类、选路、参考下级节点"之类的说明，不是故障条件，绑成判定会把整棵树的确证卡住。确实要在高层判定时加 `--bind-top-levels`。
+- 不带 `-o` 时，子树写到 `<OUT>/tree/<短名>.md`（老脚本取不到英文短名，文件名就是中文场景名），并打印"本场景产物目录：`<OUT>`"。记住这个 `<OUT>`，后续步骤都用它。
+- 同时产出 `<OUT>/tree/<短名>.tree_index.json`：权威拓扑，用 `Ln Code` 作稳定的 `node_id`，带父子关系、条件、AND/OR 提示和数据源。后面填 `node_id`、根因分析压缩上下文都依赖它。
+- 高层节点不参与判定：L1、L2 带判据的节点和场景根节点自动标记 `pass_through`，不阻断路径、不参与绑定，判据保留供人阅读。原因是高层判据多为"场景分类、选路、参考下级节点"之类的说明，不是故障条件，绑成判定会把整棵树的确证卡住。确实要在高层判定时，用 `excel_to_tree_v2.py` 加 `--bind-top-levels`（只有 v2 有这个参数，老脚本传了会报 `unrecognized arguments`）。
 - 场景默认在 L2（`--start-level` 默认 2）。用户明确要求以 L3、L4 等更深层为起点时，加 `--start-level N`，从那一层查找 `--start-node` 并截取更小的子树；用户没提层级就用默认。`--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`（只有老脚本有这个参数，v2 没有）。输出通常是几十 KB 的单场景子树。
 
 ### 两种 Excel 格式，选对脚本
@@ -135,14 +137,14 @@ python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
 
-这一步做三件事：把公共脚本复制进 `<OUT>/scripts/`（内核库 `condition_kernels.py`、配置适配器 `mo_config.py`、概览工具 `analyzer.py`、绑定格式说明文档；这几个文件每次重跑都会刷新）；为每个指标写一份待填写的分析脚本 `<指标>_analyzer.py`（`CONDITIONS` 留空，步骤 2.5 填）；生成 `plan.json`（各 `<指标>_analyzer` 脚本步骤 → 根因分析步骤）。`--out` 用步骤 1 打印的 `<OUT>`。计划格式见 `references/plan_schema.md`。
+这一步做三件事：把公共脚本复制进 `<OUT>/scripts/`（内核库 `condition_kernels.py`、xlsx 读取器 `xlsx_reader.py`、S 类函数库 `custom_lib.py`、配置适配器 `mo_config.py`、概览工具 `analyzer.py`、调优表导出与导入脚本 `export_tree_excel.py`、`import_tree_excel.py`、绑定格式说明文档；这几个文件每次重跑都会刷新）；为每个指标写一份待填写的分析脚本 `<指标>_analyzer.py`（`CONDITIONS` 留空，步骤 2.5 填），另写一份跨源判据脚本 `cross_analyzer.py`（由步骤 2.5 的跨源补绑填写，没有跨源绑定时执行秒过；已填过的重跑时只升级框架、绑定不动）；生成 `plan.json`（各 `<指标>_analyzer` 脚本步骤 → 跨源判据步骤 `cross` → 根因分析步骤）和 `manifest.json`（产物格式版本）。`--out` 用步骤 1 打印的 `<OUT>`。计划格式见 `references/plan_schema.md`。
 
 **外挂知识分两级。** 知识条目回答"去哪查、怎么查、什么算正常"，每条一段，用 `### 标题` 开头，可选 `阶段:绑定/诊断` 和 `适用:标签`，是判读规则而不是事实：
 
 - 技能级 `<本目录>/knowledge.md`：出厂知识，跨场景积累。首次组装时复制进产物 `tree/knowledge.md`，从第一次绑定就生效；技能级文件不存在时写一份空白模板。
 - 产物级 `<OUT>/tree/knowledge.md`：交付后业务同事往这里追加；重跑 assemble 不会覆盖它。
 
-步骤 2.5 的绑定任务说明和执行时的根因分析输入，都按"适用"标签与节点名、判据文本匹配后自动载入；标 `阶段:绑定` 的只进绑定任务说明，标 `阶段:诊断` 的只随根因分析下发，不标的两边都不载。改了产物级知识，诊断立即生效；要让绑定重新受益，重跑步骤 2.5。
+步骤 2.5 的绑定任务说明和执行时的根因分析输入，都按"适用"标签与节点名、判据文本匹配后自动载入；标 `阶段:绑定` 的只进绑定任务说明，标 `阶段:诊断` 的只随根因分析下发，不标阶段的两边都载入（技能级 knowledge.md 自带的条目里就有不标阶段的）。改了产物级知识，诊断立即生效；要让绑定重新受益，重跑步骤 2.5。
 
 - assemble 有两道检查，不通过退出码 1：`tree/` 下找不到步骤 1 的 `*.tree_index.json`，或 index 里的场景名、短名与 `--scenario` 对不上（步骤 1 没跑、名字不一致或目录错位；新旧两代产物并存时报歧义，退出码 2）；树上没有任何判据。报错里带排查指引，拦的是"步骤 1 没做好就往下绑"，不要绕过。
 - 重跑等于重新编译：已存在的 `<指标>_analyzer.py` 默认会被当前版本的空白脚本覆盖（旧的先备份为 `.py.bak`），所以更新技能后直接重跑即可生效，不用手动删旧脚本，模型随后在步骤 2.5 重新填写。确实要保留上次填好的脚本，加 `--keep`。
@@ -227,11 +229,19 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 ├── scripts/condition_kernels.py           # 类别模板库（分析脚本 import 它）
 ├── scripts/mo_config.py                   # 配置拓扑适配器（MO 文本转表，以及 custom 原语）
 ├── scripts/analyzer.py                    # 概览工具（步骤 2.5 看列用）
+├── scripts/xlsx_reader.py                 # 零依赖的 xlsx 读取器（内核与导入脚本读表用）
+├── scripts/custom_lib.py                  # S 类函数库（含运行交付脚本的通用适配函数 fault_check）
+├── scripts/cross_analyzer.py              # 跨源判据脚本（传参链、两侧比较；步骤 2.5 的跨源补绑填写）
+├── scripts/export_tree_excel.py           # 调优表导出（产物 → xlsx）
+├── scripts/import_tree_excel.py           # 调优表导入（xlsx → 产物）
 ├── overview/                              # 各源概览和枚举，仅绑定期用，含真实数据样本，步骤 4 删
 ├── dispatch/                              # 绑定任务说明（make_dispatch.py 生成），仅绑定期用，步骤 4 删
+├── timing.json                            # 步骤 2.5 的耗时记录（make_dispatch.py 与 merge_conditions.py 写，供提效汇报）
 ├── scripts/condition_binding_schema.md    # 绑定格式说明副本
 ├── tree/<短名>.md                          # 故障树 Markdown（产物③；短名 = 英文 slug，取不到英文时 = 中文场景名）
 ├── tree/<短名>.tree_index.json            # 权威拓扑：node_id、父子、判据、数据源（绑定与根因分析都依赖它）
+├── tree/knowledge.md                      # 外挂知识（产物级；首次组装时从技能级 knowledge.md 复制，交付后业务同事往这里追加）
+├── tree/<短名>.tuning.xlsx                 # 调优表（步骤 5 打包时自动导出，默认流程下在步骤 6 前手动导出）
 └── tree/solutions.json                    # （可选）节点到推荐解决方案的对照：根因分析报根因时附上，不进裁决上下文
 ```
 
@@ -242,14 +252,14 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 步骤 1 已直接生成技能目录时跳过本步，清理完技能即成品，把技能目录报给用户。只有步骤 1 明确提示"只生成了产物目录"（取不到英文短名，或本机没有打包所需的技能）、或者要打包旧产物、在另一台机器上重新打包时才跑：
 
 ```bash
-python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根目录>/scot技能/<slug>/ 技能目录（与 scot产物 平级；--dest 可改）
+python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根目录>/scot技能/<短名>/ 技能目录（与 scot产物 平级；--dest 可改）
 ```
 
-产出 = cs-scot-execute 的执行指引（SKILL.md 自动改名并按场景写 description）+ `assets/`（本产物 + fault-tree-rca 规则副本），自动排除 overview、dispatch、各轮 result-*、index.jsonl、__pycache__ 等临时文件。交付的场景技能只有标准根因分析。上传后用户一句 `/<slug> 数据在 <zip>，帮我诊断` 即可运行全程（默认约定见 cs-scot-execute SKILL.md 的"场景技能形态"一节）。产物没有英文短名时用 `--name` 指定。
+产出 = cs-scot-execute 的执行指引（SKILL.md 自动改名并按场景写 description）+ `assets/`（本产物 + fault-tree-rca 技能副本，含规则与脚本），自动排除 overview、dispatch、各轮 result-*、index.jsonl、__pycache__ 等临时文件。交付的场景技能只有标准根因分析。上传后用户一句 `/<短名> 数据在 <zip>，帮我诊断` 即可运行全程（默认约定见 cs-scot-execute SKILL.md 的"场景技能形态"一节）。产物没有英文短名时用 `--name` 指定。
 
 ## 步骤 6（人工调优）：调优表是树和绑定的可编辑事实源
 
-打包时自动产出 `tree/<短名>.tuning.xlsx`：单页签，一行一个节点，含层级、判据、各源绑定 JSON、解决方案；树里有英文时多出 `L<n>(English)` 和 `Judgment Condition(English)` 列，改英文也在这张表上改，中文判据清空则英文判据一并清空；绑定列的写法和类别模板见产物自带的 `scripts/condition_binding_schema.md`，既是机器读取的格式约定，人也读得懂，不另设第二份文档。人改完表后一条命令编译回产物，零模型参与：
+调优表 `tree/<短名>.tuning.xlsx` 不是默认流程自动产出的：只有步骤 5 的 `package_scenario.py` 打包时会自动导出；默认流程（步骤 1 直接搭好技能目录、跳过步骤 5）下，进入本步前先跑 `python "<OUT>/scripts/export_tree_excel.py" --out "<OUT>"` 生成或刷新调优表。调优表是单页签，一行一个节点，含层级、判据、各源绑定 JSON、解决方案；树里有英文时多出 `L<n>(English)` 和 `Judgment Condition(English)` 列，改英文也在这张表上改，中文判据清空则英文判据一并清空；绑定列的写法和类别模板见产物自带的 `scripts/condition_binding_schema.md`，既是机器读取的格式约定，人也读得懂，不另设第二份文档。人改完表后一条命令编译回产物，零模型参与：
 
 ```bash
 python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或场景技能的 assets/>"
@@ -275,7 +285,7 @@ python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或场景技�
 
 ## 最终汇报
 
-- 必带技能目录的完整路径，加一句"上传该目录即可用 `/<slug>` 一句话诊断"。
+- 必带技能目录的完整路径，加一句"上传该目录即可用 `/<短名>` 一句话诊断"。
 - 汇报里的数字必须当场查文件，不要凭记忆：覆盖度抄 `check_tree_coverage.py` 的输出行，分派统计抄 `make_dispatch.py` 的打印；校验警告的处理结果（修了哪些、保留了哪些、为什么）也要列出。长流程跑完后记忆常常是错的，数字对不上以文件为准，重数一遍。
 
 ## 注意

@@ -9,7 +9,7 @@
    - `script` 节点：按 `name` 找到 `scripts/<name>.py`；解析 `inputs`（其中 `data` 解析成数据文件）；运行 `python scripts/<name>.py <数据> -o <临时文件>`；产出的 JSON 按 `outputs` 写入 `$memory`。
      特例：`inputs.data` 写成 `"$input.*"` 的节点是跨源判据脚本 cross_analyzer（产物格式版本 3 起有）。runner 把本轮已提供的全部数据源以 `--data <源>=<路径>` 逐个递给它；这个节点不进"缺源即跳过"的清单，给多少数据就用多少。
    - `agent_skill` 节点：解析 `inputs`，`fault_tree_md` 指向的路径读成故障树正文，其余输入归到 `indicator_results`；上游被跳过或没有产出的输入不进 `indicator_results`，改记到顶层的 `missing_indicators`（键是源名，值是原因），根因分析按"数据不足"对待。汇总结果写到本轮结果目录的 `rca_input.json`，由 `name` 指定的技能（fault-tree-rca）产出结果。
-     注意：`indicator_results` 是回退形态。产物带 `tree_index.json` 时（常态），runner 会把 rca_input 剪成局部子树形态（`fault_tree.outline`、`pruned_nodes` 等，没有 `indicator_results` 键）。这两种形态的权威定义见 fault-tree-rca 技能的 SKILL.md。
+     注意：`indicator_results` 是完整形态，只在没有 `tree_index.json` 或剪枝不划算时出现。产物带 `tree_index.json` 时（常态），runner 会把 rca_input 剪成局部子树形态（`fault_tree.outline`、`pruned_nodes` 等，没有 `indicator_results` 键）。这两种形态的权威定义见 fault-tree-rca 技能的 SKILL.md。
 3. 沿 `transition.next_on_success` 走到下一节点；`transition.end` 为 true 时结束。
 
 ## 引用

@@ -6,7 +6,7 @@ route_feedback.py 对评估报告里的每类问题给出的处理方式：用�
 
 | 问题类型 | 档 | 用哪个工具 | 做什么 |
 |---|---|---|---|
-| 类 0 脚本运行崩溃 | 自动 | migrate | 重迁该节点的交付包（格式检查与限定范围的修复随迁）；不在清单里的退回 tester 修改 |
+| 类 0 脚本运行崩溃 | 自动 | migrate | 只针对交付脚本（`scripts/custom/` 下的 `fault_check_*.py`）的崩溃，即 `failed_steps` 或 `reason` 里带 custom 或 fault_check：按迁移记录反查该脚本属于哪个节点，重迁其交付包（格式检查与限定范围的修复随迁）；反查不到的按 traceback 定位；修不了的退回 tester。分析脚本等其他步骤崩溃归"环境故障"，交人 |
 | 类 0 环境故障、类 1 数据缺失 | 人工 | 人工 | 给出报错原文或补数据清单，不动资产 |
 | 类 2 绑定形态不匹配 | 自动 | migrate | 缺的数据源在用例数据里只有原始日志形态（没有表）：有交付包就重迁换成 S 类绑定（fault_check 直接读原始日志）；确实没有包就用 zip2csv 转表并写 data_map 映射，或向 tester 提需求 |
 | 类 2 孤儿绑定 | 自动 | 调优表导回 | 清掉已删节点残留的绑定（处理项里带绑定所在脚本的定位） |
@@ -15,9 +15,9 @@ route_feedback.py 对评估报告里的每类问题给出的处理方式：用�
 | 类 3 用例库过期 | 自动 | case_gen | 节点名还在树上、只是编号重排：重新生成用例库，不用麻烦 tester |
 | 类 3 故障树缺节点 | 人工 | tester | 提增加节点的需求；回包后走优化线导入 |
 | 类 4 判定偏差修复 | 自动 | 调优表或 migrate | 按证据修到与判据文档一致：绑定错就改行，实现偏离就做限定修复；判定标准不动，疑为期望标错则留证等熔断复核 |
-| 类 5 结论归档争议 | 人工 | 人裁 | 出争议说明；不自动改引擎的判定规则 |
+| 类 5 结论定档争议（脚本打印的类别名是"结论归档争议"） | 人工 | 人裁 | 出争议说明；不自动改引擎的判定规则 |
 
-六类错误名对照：类 0 ENV_FAILURE，类 1 INPUT_GAP，类 2 BINDING_GAP，类 3 KNOWLEDGE_GAP，类 4 CRITERIA_GAP，类 5 VERDICT_GAP。分类的检测条件见 cs-scot-reflect 的 `references/error_classification.md`。
+六类错误名对照：类 0 ENV_FAILURE，类 1 INPUT_GAP，类 2 BINDING_GAP，类 3 KNOWLEDGE_GAP，类 4 CRITERIA_GAP，类 5 VERDICT_GAP。分类的检测条件见 `cs-scot-reflect/references/error_classification.md`。
 
 ## verdict 各取值怎么处理
 

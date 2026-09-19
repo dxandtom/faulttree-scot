@@ -40,7 +40,7 @@ LAYOUT = {
     "zip2csv": ["zip2csv"],
     "cs-scot-execute": ["cs-scot-execute"],
     "fault-tree-rca": ["fault-tree-rca"],
-    # tester 随包:反馈处理线的类3(缺知识)/类4(实现偏离判据)处置票要路由到它重新产出
+    # tester 随包:反馈处理线的类3(缺知识)/类4(实现偏离判据)处理项要路由到它重新产出
     # 判断方法/fault_check——不带它,评估反思退回交付方的通道在交付环境里就走不通
     "datacom-fault-tree-tester": ["datacom-fault-tree-tester"],
 }
