@@ -2,7 +2,7 @@
 
 > 本文件定义 6 类错误的检测逻辑与判断条件。各类问题由谁处理、怎么处理，以 `cs-scot-generate-optimize/references/feedback_routing.md` 为准，本文的"处理方式"只是它的摘要。
 >
-> 每类下面的"分类代号"是分类脚本 classify.py 内部 `verdict` 字段的取值（`run_invalid` 等），只是分类结果的代号，随分类结果一起输出；它不是评估报告 `meta.verdict` 的评级（PASS、PASS_WITH_GAPS、PARTIAL_PASS、FAIL、EVAL_ERROR），两者不要混。
+> 每类下面的"分类代号"是分类脚本 classify.py 输出里 `class_code` 字段的取值（`run_invalid` 等），只是分类结果的代号，随分类结果一起输出；它不是评估报告 `meta.verdict` 的评级（PASS、PASS_WITH_GAPS、PARTIAL_PASS、FAIL、EVAL_ERROR），两者不要混。
 
 ## 决策树总览
 
@@ -34,7 +34,7 @@ Step 3: 输出分类结果
 ```json
 {
   "class": "ENV_FAILURE",
-  "verdict": "run_invalid",
+  "class_code": "run_invalid",
   "failed_steps": ["config_analyzer", "diag_analyzer"],
   "error_details": ["script exit with code 1", "..."]
 }
@@ -64,7 +64,7 @@ Step 3: 输出分类结果
 ```json
 {
   "class": "INPUT_GAP",
-  "verdict": "needs_data",
+  "class_code": "needs_data",
   "missing_inputs": ["chr", "rb"]
 }
 ```
@@ -116,7 +116,7 @@ for each missed_expected_node:
 ```json
 {
   "class": "BINDING_GAP",
-  "verdict": "needs_binding",
+  "class_code": "needs_binding",
   "node_id": "n4",
   "node_name": "BFD邻居关系",
   "condition": "BFD会话DOWN",
@@ -148,7 +148,7 @@ for each missed_expected_node:
 ```json
 {
   "class": "KNOWLEDGE_GAP",
-  "verdict": "needs_knowledge",
+  "class_code": "needs_knowledge",
   "node_id": "n999",
   "reason": "tree_index中不存在该节点"
 }
@@ -178,7 +178,7 @@ for each missed_expected_node:
 ```json
 {
   "class": "CRITERIA_GAP",
-  "verdict": "needs_criteria_review",
+  "class_code": "needs_criteria_review",
   "node_id": "n6",
   "expected_predicate": true,
   "actual_predicate": false,
@@ -211,7 +211,7 @@ for each missed_expected_node:
 ```json
 {
   "class": "VERDICT_GAP",
-  "verdict": "needs_adjudication",
+  "class_code": "needs_adjudication",
   "expected_node": "n6",
   "expected_in": "rca_result",
   "actual_in": "none",

@@ -45,8 +45,8 @@ ERROR_CLASSES = {
     5: "VERDICT_GAP"
 }
 
-# 错误类别对应的 verdict
-VERDICTS = {
+# 错误类别对应的分类代号(只是分类结果的代号,与评估报告 meta.verdict 的评级无关)
+CLASS_CODES = {
     "ENV_FAILURE": "run_invalid",
     "INPUT_GAP": "needs_data",
     "BINDING_GAP": "needs_binding",
@@ -102,7 +102,7 @@ def check_env_failure(run_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return {
             "class": 0,
             "error_category": "ENV_FAILURE",
-            "verdict": "run_invalid",
+            "class_code": "run_invalid",
             "reason": "run.json 不存在或无法读取"
         }
 
@@ -121,7 +121,7 @@ def check_env_failure(run_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return {
             "class": 0,
             "error_category": "ENV_FAILURE",
-            "verdict": "run_invalid",
+            "class_code": "run_invalid",
             "reason": f"执行步骤失败: {[s['step'] for s in failed_steps]}",
             "failed_steps": failed_steps
         }
@@ -175,7 +175,7 @@ def _binding_form_mismatch(supportable: List[str]) -> Dict[str, Any]:
     return {
         "class": 2,
         "error_category": "BINDING_GAP",
-        "verdict": VERDICTS["BINDING_GAP"],
+        "class_code": CLASS_CODES["BINDING_GAP"],
         "reason": (f"绑定形态不匹配:数据源 {supportable} 的内容在用例数据里以 raw 形态"
                    "在场(无表文件),执行缺的是表——现绑定(表类)处理不了在场的 raw。"
                    "有该节点交付包→migrate 重迁(fault_check 脚本直接吃 raw);"
@@ -223,7 +223,7 @@ def check_input_gap(run_data: Dict[str, Any], missed_count: int,
     return {
         "class": 1,
         "error_category": "INPUT_GAP",
-        "verdict": "needs_data",
+        "class_code": "needs_data",
         "reason": reason,
         "missing_inputs": supportable
     }
@@ -249,7 +249,7 @@ def check_binding_gap(
         return {
             "class": 2,
             "error_category": "BINDING_GAP",
-            "verdict": "needs_binding",
+            "class_code": "needs_binding",
             "reason": f"存在孤儿绑定: 产出了事实但树上没有这些节点 {orphan_nodes}"
                       f"（典型：删节点没清绑定）——清掉残留绑定",
             "orphan_nodes": orphan_nodes
@@ -269,7 +269,7 @@ def check_binding_gap(
             return {
                 "class": 2,
                 "error_category": "BINDING_GAP",
-                "verdict": "needs_binding",
+                "class_code": "needs_binding",
                 "node_id": mid,
                 "node_name": hit.get("name", ""),
                 "reason": f"节点{mid}有判据但无任何绑定（漏判期望根因的自身）",
@@ -292,7 +292,7 @@ def check_knowledge_gap(tree_check: Dict[str, Any], expected_roots: List[Dict]) 
         return {
             "class": 3,
             "error_category": "KNOWLEDGE_GAP",
-            "verdict": "needs_knowledge",
+            "class_code": "needs_knowledge",
             "node_id": first.get("node_id"),
             "reason": f"节点{first.get('node_id')}在tree_index中不存在"
         }
@@ -325,7 +325,7 @@ def check_criteria_gap(
             return {
                 "class": 4,
                 "error_category": "CRITERIA_GAP",
-                "verdict": "needs_criteria_review",
+                "class_code": "needs_criteria_review",
                 "node_id": node_id,
                 "expected_predicate": expected_satisfied,
                 "actual_predicate": actual_satisfied,
@@ -355,7 +355,7 @@ def check_verdict_gap(
         return {
             "class": 5,
             "error_category": "VERDICT_GAP",
-            "verdict": "needs_adjudication",
+            "class_code": "needs_adjudication",
             "node_id": first.get("node_id"),
             "node_name": first.get("node_name", ""),
             "reason": f"阴性用例出现确证根因（假阳）: {first.get('node_id')}",
@@ -372,7 +372,7 @@ def check_verdict_gap(
             return {
                 "class": 5,
                 "error_category": "VERDICT_GAP",
-                "verdict": "needs_adjudication",
+                "class_code": "needs_adjudication",
                 "node_id": first.get("node_id"),
                 "node_name": first.get("node_name", ""),
                 "reason": f"期望根因{first.get('node_id')}不在RCA结论中",
@@ -482,7 +482,7 @@ def main() -> None:
 
     if result["classified"]:
         print(f"[classify] 分类结果: 类{result['error_class']} {result['error_category']}")
-        print(f"  verdict: {result['details'].get('verdict', 'unknown')}")
+        print(f"  分类代号: {result['details'].get('class_code', 'unknown')}")
         print(f"  reason: {result['details'].get('reason', '')}")
     else:
         print("[classify] 分类结果: 全部通过 (PASS)")

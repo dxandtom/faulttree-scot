@@ -51,6 +51,14 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 
 本技能常以场景技能的形态发布：技能目录名是场景的英文短名（如 `layer-3-service-issues`），本文件作为执行指引，诊断资源在 `assets/` 下：`assets/plan.json`、`assets/scripts/`（各指标的分析脚本）、`assets/tree/`（故障树、可选的 solutions.json、可编辑的 knowledge.md）、`assets/fault-tree-rca/`（fault-tree-rca 技能副本，含规则与脚本）。用户只需一句话（如"数据在这里，帮我诊断"），按下面五步跑完全程，不需要用户指路。
 
+| 步骤 | 做什么 | 关键命令或产出 |
+|---|---|---|
+| 1 数据入口 | 先跑 `scripts/check_data.py` 认数据形态；已解析的表直接用，原始数据用 `assets/zip2csv/scripts/zip2csv.py` 转成三表，原始目录另外用 `--data raw=<目录>` 传入 | 数据传入建议；`csv/<网元>/CMD、CONFIG、LOG/*.csv` |
+| 2 数据与指标匹配 | 数据文件按文件名对上 `assets/scripts/<指标>_analyzer.py` 的指标名；对不上的和缺的都记入汇报 | 一组 `--data <指标>=<文件>` |
+| 3 执行 | `scripts/runner.py --plan assets/plan.json --result-base <平级结果目录> --data ...`；随后进入根因分析：先 `draft_rca.py`，只裁决冲突候选，再 `finalize_rca.py` | `result-<运行号>/rca_input.json`、`rca.json` |
+| 4 输出汇报 | `render_report.py rca.json --tree <tree_index>`，英文提问加 `--lang en`；`rca_reply.md` 全文原样贴进回复，前面加执行过程，末尾写补充说明 | `rca_report.md`、`rca_tree.txt`、`rca_reply.md` |
+| 5 用户反馈 | 用户说某节点判错：定位、分诊、修改、验证 | 改绑定、加 `knowledge.md` 规则，或回 generate 改树 |
+
 ### 1. 数据入口
 
 数据以用户给的形式为准：目录或散文件直接用，压缩包先解开。第 0 步必做：跑数据入口检查 `python "<本目录>/scripts/check_data.py" <数据路径>`，按它给出的数据传入建议继续；退出码 2 就把报告原样给用户，不强行继续。数据有三种形态：已解析的表直接传给执行器；原始日志目录（网元目录下有 CONFIG、CMD、LOG 子目录）先用 `assets/zip2csv/scripts/zip2csv.py` 转成三张表，再连同原始目录 `--data raw=<目录>` 一起传入；零散的原始文件同样交给 zip2csv，它会先归类。三种形态的判定、转换命令、失败时怎么办、缺口怎么向用户措辞，见 `references/data_entry.md`。数据转换只用 `assets/zip2csv/` 里的脚本，不去环境里找别的技能。
