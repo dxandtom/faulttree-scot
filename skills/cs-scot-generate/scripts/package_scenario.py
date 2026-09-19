@@ -170,9 +170,7 @@ def main() -> None:
     ap.add_argument("--name", help="技能名覆盖(英文小写连字符);默认用产物的英文短名(slug)")
     ap.add_argument("--execute-skill", default=str(find_material("cs-scot-execute")))
     ap.add_argument("--rca-skill", default=str(find_material("fault-tree-rca")))
-    # 注意:没有、也不会有 --with-debate——**产物(场景技能)永不带辩论引擎**(用户拍板)。
-    # 辩论复核是平台工具链层的能力(同一 skills 目录下的 fault-tree-rca-debate),由执行侧 SCOT_DEBATE 开关
-    # 按指令启用;交付出去的技能永远只有手工 RCA。
+    # 注意:没有、也不会有 --with-debate——产物(场景技能)不带辩论引擎(用户拍板),交付出去的技能只有标准根因分析。
     ap.add_argument("--force", action="store_true", help="目标技能目录已存在时先删再建")
     args = ap.parse_args()
 

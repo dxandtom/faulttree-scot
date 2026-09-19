@@ -148,7 +148,7 @@ mk_product(prod)
 store = WORK / "store"
 store.mkdir()
 mk_pkg(store, "干扰导致")
-mk_pkg(store, "弱覆盖", script="def diagnose(d):\n    return {'matched': 'false'}\n")   # 只认 .txt 之外还缺 .log/缺数据判 false:契约检查过不了
+mk_pkg(store, "弱覆盖", script="def diagnose(d):\n    return {'matched': 'false'}\n")   # 只识别 .txt 之外还缺 .log/缺数据判 false:契约检查过不了
 zip_dir(prod, store / "skill_v1.zip")
 PREV = "obs://bucket/skills/skill_v1.zip"
 
@@ -190,7 +190,7 @@ with zipfile.ZipFile(oz3) as zf, zipfile.ZipFile(store / "skill_v1.zip") as z0:
     same = all(zf.read(n) == z0.read(n) for n in z0.namelist())
 check("除报告外内容与上一版逐字节一致", same)
 
-print("\n== ④ 失败也回传:一行都没落地(契约检查不过)→ 回传未变化上一版 ==")
+print("\n== ④ 失败也回传:一行都没落地(格式检查不过)→ 回传未变化上一版 ==")
 xb = WORK / "bad.csv"
 xb.write_text(HDR + "接入失败示例,Root,QoS建立失败,Qos,弱覆盖,Weak,obs://b/乙.zip,弱覆盖.zip\n", encoding="utf-8-sig")
 CB.hits.clear()

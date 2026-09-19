@@ -168,7 +168,7 @@ def _route_binding_gap(issue: Dict[str, Any], ctx: Dict[str, Any]):
     nid, node, blob, ledger, product = ctx["nid"], ctx["node"], ctx["blob"], ctx["ledger"], ctx["product"]
     orphans = issue.get("orphan_nodes") or []
     if issue.get("binding_form_mismatch") or "绑定形态不匹配" in blob:
-        # 类1 检测改判来的:缺的源在用例 raw 数据里有内容,现绑定(表类)吃不了
+        # 类1 检测改判来的:缺的源在用例 raw 数据里有内容,现绑定(表类)处理不了
         pkg = ledger.get(nid, {}).get("package_node", "")
         return ("绑定形态不匹配", "auto", "migrate(重迁换 S 绑定)",
                 (f"节点 {nid}「{node.get('name', '')}」的绑定要表源,而用例数据只有 raw 形态"
@@ -222,10 +222,9 @@ def _route_criteria_gap(issue: Dict[str, Any], ctx: Dict[str, Any]):
 
 def _route_verdict_gap(issue: Dict[str, Any], ctx: Dict[str, Any]):
     """类5:纯裁决规则争议,出争议单交人,绝不自动改 RCA 引擎的判定规则。"""
-    return ("结论归档争议", "fallback", "人工处理(可加辩论引擎)",
+    return ("结论归档争议", "fallback", "人工处理",
             "0~4 全排除仍漏判/假阳=纯裁决规则争议。出争议单交人;绝不自动改 RCA 引擎的判定规则"
-            "(两引擎同步的核心资产)。SCOT_DEBATE=auto 时可对争议候选跑辩论引擎出辩论记录"
-            "辅助裁决")
+            "(判定规则是核心资产)")
 
 
 def _route_unknown(issue: Dict[str, Any], ctx: Dict[str, Any]):

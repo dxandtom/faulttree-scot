@@ -6,7 +6,7 @@
 同名或对不上的逐包点名)。要零歧义的精确匹配,先对技能跑一次 migrate 再建库。
 
 原理：节点交付包天然就是带标注的用例——每个包 = 单节点判据 + 一份"跑出来就该是
-这个节点"的测试数据（交付方的契约）。migrate 匹配导入时已在 产物/tree/migrations.json
+这个节点"的测试数据（交付方的约定）。migrate 匹配导入时已在 产物/tree/migrations.json
 台账里机械记下"节点 ↔ 包 ↔ 入口"。本脚本只是把这份已知信息落成 cases/<case_id>/expected.json，
 零人工、可重复：故障树结构调整（增删节点、node_id 重排）后重跑一遍即全库刷新。
 
@@ -185,7 +185,7 @@ def _md_path(md: Path) -> List[str]:
 
 
 def find_test_data(pkg_dir: Path) -> Optional[Path]:
-    """包内测试数据目录：目录名含「测试数据」（测试数据/测试数据集/测试数据(新) 都认，
+    """包内测试数据目录：目录名含「测试数据」（测试数据/测试数据集/测试数据(新) 都识别，
     任意深度取最浅）；退而认平台导出名 formated_result / formatted_result。"""
     cands = sorted((p for p in pkg_dir.rglob("*") if p.is_dir() and "测试数据" in p.name),
                    key=lambda p: len(p.parts))

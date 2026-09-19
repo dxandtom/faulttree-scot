@@ -84,7 +84,7 @@ def sum_extracts_vs_threshold(table, args, load):
            ">": nums[0] + nums[1] > thr, ">=": nums[0] + nums[1] >= thr,
            "==": nums[0] + nums[1] == thr}
     if op not in cmp:
-        return {"status": "insufficient_data", "reason": f"op「{op}」不认识(只认 < <= > >= ==)"}
+        return {"status": "insufficient_data", "reason": f"op「{op}」不认识(只接受 < <= > >= ==)"}
     total, ok = nums[0] + nums[1], cmp[op]
     return {"status": "ok", "predicate_satisfied": ok,
             "value": total, "op": op, "threshold": thr, "parts": nums,
@@ -102,7 +102,7 @@ def sum_extracts_vs_threshold(table, args, load):
 class _StrPath(str):
     """路径 str/Path 双兼容:是 str(老脚本 os.path.join/字符串拼接照旧零影响),又能当 pathlib 用
     (/ 拼接、exists/glob/iterdir 等)。交付脚本两种写法都常见,且规范此前没钉死类型——实测按 Path
-    写的入口(`ne_dir / "CMD"`)吃到纯 str 直接 TypeError(fault_check_LDP定时器超时.py:185)。"""
+    写的入口(`ne_dir / "CMD"`)收到纯 str 直接 TypeError(fault_check_LDP定时器超时.py:185)。"""
 
     def __truediv__(self, other):
         import os as _os
@@ -284,7 +284,7 @@ def _fc_prepare_data(load, tmp_root):
 
 def _fc_no_judgment(ne_map) -> bool:
     """整张网元 map 一个能用的判定都没有(空/全 error/全 undetermined/形状怪)→ True。
-    用于识别"单网元风格脚本吃不了多网元根目录"的空转(实测:脚本没做规范要求的多网元探测,
+    用于识别"单网元风格脚本处理不了多网元根目录"的空转(实测:脚本没做规范要求的多网元探测,
     直接在根目录下找 LOG/,找不到就整体 undetermined),识别到就改成逐网元调用。"""
     if not isinstance(ne_map, dict) or not ne_map:
         return True
@@ -293,9 +293,9 @@ def _fc_no_judgment(ne_map) -> bool:
 
 
 def _fc_tristate(v):
-    """matched 值 → True / False / None(判不了)。tester 契约是**字符串**四态
+    """matched 值 → True / False / None(判不了)。tester 的格式约定是**字符串**四态
     ("true"/"false"/"undetermined"/"insufficient_data";旧包三态无 insufficient_data,照收),
-    旧旧契约是 bool——字符串 "false" 按真值判会极性反转(非空字符串恒真),必须显式映射;
+    更早的约定是 bool——字符串 "false" 按真值判会极性反转(非空字符串恒真),必须显式映射;
     大小写不敏感;数值当 bool;认不出的值按判不了(诚实)。"""
     if isinstance(v, bool):
         return v
@@ -310,14 +310,14 @@ def _fc_tristate(v):
 
 
 def _fc_gap_kind(v) -> str:
-    """判不了(_fc_tristate=None)的细分:缺数据还是判不动——四态契约的增量信息。
+    """判不了(_fc_tristate=None)的细分:缺数据还是判不动——四态约定的增量信息。
     "insufficient_data" → no_data(缺数据:没采到命令/文件,补采可解);
     其余("undetermined"/空/认不出) → cannot_judge(数据在,判不出——判据/脚本质量信号)。"""
     return "no_data" if str(v).strip().lower() == "insufficient_data" else "cannot_judge"
 
 
 def _fc_item_str(x) -> str:
-    """matched_items/evidence 条目转成易懂文字:交付契约里条目常是 dict(关键字段+_source_file/
+    """matched_items/evidence 条目转成易懂文字:交付格式里条目常是 dict(关键字段+_source_file/
     _source_line),str() 直转是 Python repr 且截断后不成话——机械拼 k=v,溯源元键单独缀
     「@文件:行」,不许把 repr 漏进报告证据栏。"""
     if isinstance(x, dict):
@@ -358,8 +358,8 @@ def fault_check(table, args, load):
            "per_ne": false(true=入口接受单网元目录,本适配函数逐网元调用汇总),
            "entry_kwargs": {}(入口额外关键字参数,如 judgment_conditions)}
     数据:优先 load("raw_dir")(runner --data raw=<extracted目录>);没有则从三张表重建(备用做法)。
-    结果四种形态都认:旧按网元 map(matched 为 bool)/ results 信封 / details.devices 包裹 /
-    交付契约**全局形态**(顶层一个 matched,字符串四态 "true"/"false"/"undetermined"/
+    结果四种形态都识别:旧按网元 map(matched 为 bool)/ results 信封 / details.devices 包裹 /
+    交付格式**全局形态**(顶层一个 matched,字符串四态 "true"/"false"/"undetermined"/
     "insufficient_data";旧三态包无 insufficient_data 照收,evidence 为 {type,id,data} 结构体数组)。
     翻译:任一实体判真 → 成立;全部实体判不了/无实体 → status=insufficient_data(不当作"正常"),
     并带 gap_kind 细分 no_data(缺数据,补采可解)/cannot_judge(数据在判不动,判据质量信号)/mixed;
@@ -427,7 +427,7 @@ def _fc_purge_shared(script):
     import sys as _sys
     # 同一进程连续调多个交付脚本时,它们 import 的同目录共享模块(search_*.py 等)会被
     # sys.modules 全局缓存:前一个包载入的模块连同其模块级状态(缓存、全局变量)直接
-    # 喂给后面的脚本——这些脚本在交付方那里本是各自独立进程跑的,串门会污染判定
+    # 传给后面的脚本——这些脚本在交付方那里本是各自独立进程跑的,串门会污染判定
     # (实测:n4 直跑 true、经本适配层在 cross 整链里跑变 false)。调用前后都清掉脚本目录
     # 下的缓存模块,保证每个脚本冷启动。
     for _n, _m in list(_sys.modules.items()):
@@ -465,7 +465,7 @@ def _fc_run_script(script, entry_name, kwargs, per_ne, root):
     sink = _io.StringIO()
     convention_note = ""                                 # 调用方式仲裁的注记(逐网元重调时写进 explain)
     argv_bak, _sys.argv = _sys.argv, [str(script)]       # argv 隔离:CLI 型脚本库调用时常仍偷读 sys.argv,
-    try:                                                 # 会吃到 cross_analyzer 的 -o 临时路径当自己的参数
+    try:                                                 # 会把 cross_analyzer 的 -o 临时路径当成自己的参数
         with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):     # (实测:路径当正则炸 \U)
             spec.loader.exec_module(mod)                 # 脚本运行期的 print 全部收走,不进执行日志
             fn = getattr(mod, entry_name, None)
@@ -478,8 +478,8 @@ def _fc_run_script(script, entry_name, kwargs, per_ne, root):
             else:
                 ne_map = _fc_normalize(fn(_StrPath(root), **kwargs))
                 if _fc_no_judgment(ne_map):              # 调用方式仲裁:单网元风格脚本(没做多网元探测)
-                    retry = _fc_per_ne_map(fn, root, kwargs)   # 吃不了网元层根目录——逐网元重调一次,
-                    if not _fc_no_judgment(retry):       # 不改判断逻辑只换喂法;重调也空转就维持原判(数据不足)
+                    retry = _fc_per_ne_map(fn, root, kwargs)   # 处理不了网元层根目录——逐网元重调一次,
+                    if not _fc_no_judgment(retry):       # 不改判断逻辑只换传参方式;重调也空转就维持原判(数据不足)
                         ne_map = retry
                         convention_note = ("(调用方式:脚本不认多网元根目录,已按逐网元重调"
                                            "——脚本未做规范要求的多网元探测,请交付方补)")
@@ -506,10 +506,10 @@ def _fc_ne_state(r):
 
 
 def _fc_ev_label(ne, ev):
-    """一条证据 → (易懂文字, 命中原文条目列表)。新契约 dict 条目拼 type:id + 命中原文 + 来源文件;其余直转文字。"""
+    """一条证据 → (易懂文字, 命中原文条目列表)。新格式 dict 条目拼 type:id + 命中原文 + 来源文件;其余直转文字。"""
     if not isinstance(ev, dict):
         return (f"{ne}: {str(ev)[:200]}" if not str(ev).startswith(f"{ne}:") else str(ev)[:200]), []
-    # 新契约证据条目:{type, id, data:{source_files, matched_items}}
+    # 新格式证据条目:{type, id, data:{source_files, matched_items}}
     label = ":".join(str(ev[k]) for k in ("type", "id") if ev.get(k)) or str(ev)[:200]
     data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
     items = data.get("matched_items")

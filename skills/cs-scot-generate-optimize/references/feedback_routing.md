@@ -15,7 +15,7 @@ route_feedback.py 对评估报告里的每类问题给出的处理方式：用�
 | 类 3 用例库过期 | 自动 | case_gen | 节点名还在树上、只是编号重排：重新生成用例库，不用麻烦 tester |
 | 类 3 故障树缺节点 | 人工 | tester | 提增加节点的需求；回包后走优化线导入 |
 | 类 4 判定偏差修复 | 自动 | 调优表或 migrate | 按证据修到与判据文档一致：绑定错就改行，实现偏离就做限定修复；判定标准不动，疑为期望标错则留证等熔断复核 |
-| 类 5 结论归档争议 | 人工 | 人裁，可加辩论 | 出争议说明；`SCOT_DEBATE=auto` 可用辩论引擎的记录辅助判断；不自动改引擎的判定规则 |
+| 类 5 结论归档争议 | 人工 | 人裁 | 出争议说明；不自动改引擎的判定规则 |
 
 六类错误名对照：类 0 ENV_FAILURE，类 1 INPUT_GAP，类 2 BINDING_GAP，类 3 KNOWLEDGE_GAP，类 4 CRITERIA_GAP，类 5 VERDICT_GAP。分类的检测条件见 cs-scot-reflect 的 `references/error_classification.md`。
 

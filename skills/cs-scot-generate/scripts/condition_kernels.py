@@ -65,7 +65,7 @@ def _shape_err(b, need_op=False):
     if b.get("op") is not None:
         op = _FW_OPS.get(str(b["op"]).strip(), str(b["op"]).strip())
         if op not in _OPS:
-            return f"op「{b['op']}」不认识(只认 < <= > >= == != =)"
+            return f"op「{b['op']}」不认识(只接受 < <= > >= == != =)"
         b["op"] = op
     elif need_op:
         return "缺 op"
@@ -74,9 +74,9 @@ def _shape_err(b, need_op=False):
     if need_op and b.get("threshold") is None:
         return "缺 threshold"
     if b.get("agg") is not None and str(b["agg"]) not in _AGGS:
-        return f"agg「{b['agg']}」不认识(只认 {'/'.join(sorted(_AGGS))})"
+        return f"agg「{b['agg']}」不认识(只接受 {'/'.join(sorted(_AGGS))})"
     if b.get("scope") is not None and str(b["scope"]) not in _SCOPES:
-        return f"scope「{b['scope']}」不认识(只认 aggregate/count_rows)"
+        return f"scope「{b['scope']}」不认识(只接受 aggregate/count_rows)"
     if b.get("require") is not None:
         rq = _num(b["require"])
         if rq is None or rq < 1:
@@ -92,7 +92,7 @@ def _extract_spec_err(spec):
     """extract 参数检查:{"kv": "键名"} 或 {"regex": "正则"} 二选一;正则编译失败=明确拒收
     (判据里的"关键字"是原始材料而非可直接使用的正则——%u/%d 是 printf 占位符不是正则,绑定层要先换成 \\d+ 等)。"""
     if not isinstance(spec, dict) or (("kv" in spec) == ("regex" in spec)):
-        return 'extract 只认 {"kv": "键名"} 或 {"regex": "正则"} 之一'
+        return 'extract 只接受 {"kv": "键名"} 或 {"regex": "正则"} 之一'
     if "regex" in spec:
         try:
             re.compile(str(spec["regex"]))
@@ -366,7 +366,7 @@ def _match_spec_err(b, mode, targets):
         return ("绑定缺 contains/equals/regex 参数(op/target 等野字段无效)——若不拦,"
                 "空 targets 会静默 matched=0、整源变假排除;修绑定格式")
     if b.get("match") is not None and str(b.get("match")) not in ("exact", "contains", "regex"):
-        return (f"match「{b.get('match')}」不认识(只认 exact/contains/regex)——"
+        return (f"match「{b.get('match')}」不认识(只接受 exact/contains/regex)——"
                 "旧内核会静默按 exact 算")
     if mode == "regex":                                 # 判据自带的"关键字"是原始材料而非现成正则:编译不过就明确拒收
         for t in targets:
@@ -571,10 +571,10 @@ def _combo_grouped(b, subs, comb, sources, parent_source, _resolved):
 def k_combo(b, sources, parent_source, _resolved=False):
     subs = b.get("sub") or []
     if not subs:                                        # 空 AND 时 any(False…)全为假 → 恒"成立"(实测出过假阳性),明确拒绝
-        return _insuf("D", "组合绑定缺 sub 子条件列表(字段名写错/被吃掉?)——空组合恒判成立,禁止")
+        return _insuf("D", "组合绑定缺 sub 子条件列表(字段名写错/被丢掉?)——空组合恒判成立,禁止")
     comb = str(b.get("combine", "AND")).upper()
     if comb not in ("AND", "OR"):                       # 实测:拼错(如 ANDD)会被静默按 OR 算=方向相反的假阳性
-        return _insuf("D", f"combine「{b.get('combine')}」不认识(只认 AND/OR)——"
+        return _insuf("D", f"combine「{b.get('combine')}」不认识(只接受 AND/OR)——"
                            "拼错不拦会被静默按 OR 算,'全部满足'悄悄变'任一满足'")
 
     if b.get("group_by"):
@@ -602,7 +602,7 @@ def k_pair(table, b, cls="P"):
         return _insuf(cls, f"未找到取值列「{b.get('value_column')}」({how_v})", resolved_column=None)
     fw = b.get("fault_when", "not_equal")
     if fw not in ("not_equal", "equal"):
-        return _insuf(cls, f"fault_when「{fw}」不认识(只认 not_equal/equal)", resolved_column=vcol)
+        return _insuf(cls, f"fault_when「{fw}」不认识(只接受 not_equal/equal)", resolved_column=vcol)
     spec = b.get("extract")
     if spec:
         err = _extract_spec_err(spec)
@@ -771,7 +771,7 @@ def _resolve_values(spec, sources, parent_source):
         return None, f"取值规格应为对象 {{source, column, filter?, extract?}},收到 {type(spec).__name__}"
     unknown = set(spec) - _SPEC_KEYS
     if unknown:
-        return None, (f"取值规格有不认识的键 {sorted(unknown)}(只认 source/column/filter/extract"
+        return None, (f"取值规格有不认识的键 {sorted(unknown)}(只接受 source/column/filter/extract"
                       ";expand 写在参数规格顶层)——拼错会被静默忽略、抽出错误的值,拒收")
     src = spec.get("source", parent_source)
     table, err = _spec_table(spec, sources, src)
@@ -888,7 +888,7 @@ def _resolve_params(cls, pf, sources, src):
             resolved[name] = vals[0]
             continue
         if mode not in ("all", "any"):
-            return None, None, _insuf(cls, f"参数「{name}」的 expand「{mode}」不认识(只认 all/any)")
+            return None, None, _insuf(cls, f"参数「{name}」的 expand「{mode}」不认识(只接受 all/any)")
         if expand is not None:
             return None, None, _insuf(cls, f"只允许一个参数带 expand(「{expand[0]}」和「{name}」都带了)——"
                                            "两个一起展开会组合爆炸,拆成两条绑定")
@@ -948,7 +948,7 @@ def k_pair_from(b, sources, parent_source):
         return _insuf("P", "filter 不作用于 pair_from 顶层——把 filter 分别写进 local/peer 两侧规格")
     fw = b.get("fault_when", "not_equal")
     if fw not in ("not_equal", "equal"):
-        return _insuf("P", f"fault_when「{fw}」不认识(只认 not_equal/equal)")
+        return _insuf("P", f"fault_when「{fw}」不认识(只接受 not_equal/equal)")
     got = {}
     for side, zh in (("local", "本端"), ("peer", "对端")):
         vals, err = _resolve_values(pf[side], sources, parent_source)
@@ -968,7 +968,7 @@ def k_pair_from(b, sources, parent_source):
 
 # ---------- S:代码类(人手调优专用)——预制函数库 / 单节点脚本,产出与内核同形的事实 ----------
 # 只给人手调优用:生成期的任务说明不介绍本类,merge_conditions 对绑定子代理产出的 S 条目一律拒收。
-# 入口契约:check(table, args, load) → {"status":"ok","predicate_satisfied":bool,…} 或
+# 入口约定:check(table, args, load) → {"status":"ok","predicate_satisfied":bool,…} 或
 #           {"status":"insufficient_data","reason":"…"};异常一律按数据不足(绝不当作"不成立")。
 _SCRIPT_CACHE = {}
 
@@ -1126,7 +1126,7 @@ def _unknown_keys_fact(cls, b):
     if cls in _CLASS_KEYS:
         unknown = set(b) - _META_KEYS - _CLASS_KEYS[cls]
         if unknown:
-            return _insuf(cls, f"绑定带不认识的字段 {sorted(unknown)}({cls} 类只认 "
+            return _insuf(cls, f"绑定带不认识的字段 {sorted(unknown)}({cls} 类只接受 "
                                f"{sorted(_CLASS_KEYS[cls])})——野字段会被静默忽略、"
                                "算出语义错误的确定结论,拒收;修字段名或换类别")
     return None
@@ -1152,7 +1152,7 @@ def _kernel_fn(cls):
         if cls in _ARCHIVED:
             return None, _insuf(cls, f"类别「{cls}」属 v1 内核,已封存于 archive/kernels-v1(数通场景不用)——"
                                      "改用 A/C/G/D/P 组合表达,或复活 v1 内核集")
-        return None, _insuf(cls or "?", f"未知条件类别「{cls}」(本内核集只认 A/C/D/G/J/P)")
+        return None, _insuf(cls or "?", f"未知条件类别「{cls}」(本内核集只接受 A/C/D/G/J/P)")
     return fn, None
 
 

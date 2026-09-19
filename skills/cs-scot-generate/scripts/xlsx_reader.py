@@ -34,7 +34,7 @@ _NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 _NS_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 # 内置的日期/时间数字格式号(含中日韩那几套):命中就把序列号还原成日期串。
 _DATE_FMT_IDS = set(range(14, 23)) | set(range(27, 37)) | {45, 46, 47} | set(range(50, 59))
-_EXCEL_EPOCH = datetime(1899, 12, 30)  # 1900 历,且要吃掉 Excel 那个 1900-02-29 的历史 bug
+_EXCEL_EPOCH = datetime(1899, 12, 30)  # 1900 历,且要抵消 Excel 那个 1900-02-29 的历史 bug
 
 EXCEL_EXT = (".xlsx", ".xlsm", ".xls")
 

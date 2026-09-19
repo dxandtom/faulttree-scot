@@ -37,7 +37,7 @@ def _is_clean_hold(judgment: str) -> bool:
 def _strong_refuted(facts) -> bool:
     """有没有**强反证**:ok+不成立 且不是存在类弱阴性(C/G 非 absent 的未命中="这份数据里没看见",
     不构成反证——别的源命中了,存在即被证实;与 draft_rca._weak_neg 同一规则)。各项检查的"有反证豁免"
-    只认强反证,免得双源防漏绑定里另一源的存在类未命中把节点洗出保护网(实测 n25/n26 就是这形态)。"""
+    只把强反证当反证,免得双源防漏绑定里另一源的存在类未命中把节点洗出保护网(实测 n25/n26 就是这形态)。"""
     return any(f.get("status") == "ok" and f.get("predicate_satisfied") is False
                and not (str(f.get("class") or "").upper() in ("C", "G") and not f.get("absent"))
                for f in facts)
@@ -105,8 +105,8 @@ def _check_unknown_nodes(rc, tier, universe, problems):
 
 def _unaddressed_holds(input_path, rca_path):
     """候选对账(软提示):有成立事实、有真条件、非 pass_through 的候选节点,
-    在 rca.json **全文**里(node_id 按词边界认,防 n13 命中 n136;节点全名也认——契约允许只写名字)
-    一处都没出现 → 视为"漏裁决"点名。只提示不拦:契约的 excluded 档允许"一句话带过不进列表",
+    在 rca.json **全文**里(node_id 按词边界认,防 n13 命中 n136;节点全名也识别——格式约定允许只写名字)
+    一处都没出现 → 视为"漏裁决"点名。只提示不拦:格式约定的 excluded 档允许"一句话带过不进列表",
     硬卡会误杀合法排除,还会重演"逼重写→编假节点"的旧病(docs/notes 有案底)。
     实测背景:同产物同数据两跑,第二跑把 5 个有成立事实的分支通篇漏掉,原有校验(只核"写了的对不对")全数放行。"""
     try:
@@ -135,7 +135,7 @@ def _unaddressed_holds(input_path, rca_path):
 
 
 def _probables_without_block(probables, input_path):
-    """疑似档检查(软):按契约,疑似 = 路径无不成立、但**有数据不足节点**且叶子有强证据——
+    """疑似档检查(软):按格式约定,疑似 = 路径无不成立、但**有数据不足节点**且叶子有强证据——
     所以每条疑似的 evidence_path 里该有至少一个真实阻塞点(有真判据、非 pass_through、
     局部子树里没有任何 status=ok 的事实 = 真缺数)。路径全干净的点名(该升确证/该写实阻塞)。
     没给 node_id 的条目核不了,跳过(理由齐不齐另有硬检查);pruned 缺失(md 形态)整体跳过。"""
@@ -394,7 +394,7 @@ def _check_confirmed_node(node: dict, is_last: bool, name, hold_map, problems) -
     if not is_last:
         return
     # 结构节点豁免:该节点在 rca_input 里是 pass_through / 无真条件(根·分组·汇总节点),
-    # 本就没有独立判据,谈不上"数据不足"破坏确证——弱模型常把它标成'数据不足'而不是契约
+    # 本就没有独立判据,谈不上"数据不足"破坏确证——弱模型常把它标成'数据不足'而不是约定
     # 要求的'无独立条件',那是标签瑕疵、不是路径断了。以 rca_input 的机械事实为准。
     if hold_map:
         pt, _h, hc = hold_map.get(str(node.get("node_id", "")), (False, False, True))

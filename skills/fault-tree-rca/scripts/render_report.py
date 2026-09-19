@@ -7,7 +7,7 @@
 从 evidence_path 逐字拼出(命中原文/网元/来源/实测值全保留),模型只在报告末尾
 「补充说明」段写机械给不了的东西(同病根归组/处理优先级/复核提示),数字不许改。
 
-rca.json 的格式约定只有一份,本渲染器只认它。
+rca.json 的格式约定只有一份,本渲染器只按它渲染。
 用法:python render_report.py <rca.json> [-o <rca_report.md>] [--tree <tree_index.json>] [--lang zh|en]
 缺省写在输入同目录。--lang en:标题、表头、标签用英文,节点名用树里的 name_en(要带 --tree),
 方案用 tree/solutions.json 的 en,判定词(成立/不成立/数据不足/冲突)译成英文;树里没有英文的
@@ -22,7 +22,7 @@ from pathlib import Path
 
 # 注意匹配序:「不成立」含「成立」子串,必须先查(先长后短)
 _SYM = (("不成立", "✗"), ("数据不足", "?"), ("冲突", "⚠"), ("无独立条件", "·"), ("成立", "✓"))
-# 判定词英译(先长后短,避免「不成立」被「成立」先吃掉);未列出的原样保留
+# 判定词英译(先长后短,避免「不成立」被「成立」先匹配掉);未列出的原样保留
 _JD_EN = (("不成立", "does not hold"), ("数据不足", "insufficient data"), ("无独立条件", "no independent condition"),
           ("中间节点", "intermediate node"), ("冲突", "conflict"), ("存疑", "doubtful"), ("成立", "holds"))
 # 固定文案按语言取;zh 一字不改,en 与 cs-scot-execute/references/reply_format.md 的对照表一致

@@ -197,7 +197,7 @@ def find_case_result_dir(result_dir: Path, case_id: str,
     single 模式（用户直接指到结果目录）原样采用。
     multi 模式按四级规则依次匹配（多个命中取最新;带 -abandoned/-superseded 后缀的目录不参与）:
     ① 目录名含完整 case_id（执行时用 --result-suffix 显式标注的，仍然优先认）；
-    ①b 目录名后缀段与 case_id 按段精确比对（后缀只认字母数字-_,执行侧常只带 nX 短段;
+    ①b 目录名后缀段与 case_id 按段精确比对（后缀只接受字母数字-_,执行侧常只带 nX 短段;
        n5 只配 n5-*，配不上 n50-*）；
     ② run.json 记录的输入数据路径落在本用例数据目录内（runner 每轮都写运行记录；
        注意执行侧若传的是合并副本目录，这条规则会失效——①b 就是为此准备的备用规则）；
@@ -273,7 +273,7 @@ _SUBDIR_SFX_RE = re.compile(r"^result-(?:(?P<sfx>.+)-)?\d{8}T\d{6}Z-[0-9a-f]{6}$
 
 
 def _suffix_token_match(d: Path, case_id: str) -> bool:
-    """①b 短后缀匹配:runner 的 --result-suffix 只认字母数字-_,执行侧常按规约只用 case_id 的
+    """①b 短后缀匹配:runner 的 --result-suffix 只接受字母数字-_,执行侧常按规约只用 case_id 的
     nX 短段当后缀(中文进不了后缀)——目录名装不下完整 case_id 时,取目录名的后缀段与 case_id
     **按段精确**比对:后缀 n5 只配 n5-*,配不上 n50-*(实测 9 个用例因短后缀配不上完整
     case_id、run.json 又指向合并副本目录,两条规则都失效而被误判 EVAL_ERROR)。"""
@@ -1117,7 +1117,7 @@ def compute_round_and_feedback_iteration(
 ) -> Tuple[int, int]:
     """计算当前 case 的 round 和 feedback_iteration
 
-    --prev-evaluation 两种传法都认：
+    --prev-evaluation 两种传法都识别：
     - 直接传上一轮 evaluation_report.json 文件路径（SKILL.md 的推荐用法）
     - 传评估输出目录（在其下按 <case_id>-v<round>-* 找该 case 最新一轮）
 

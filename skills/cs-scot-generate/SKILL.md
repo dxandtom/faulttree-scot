@@ -118,7 +118,7 @@ python "<本目录>/scripts/excel_to_tree.py" "<故障树xlsx>" --start-node "<�
 
   v2 的输出与老脚本同形，差别有三点。一，文件和目录名用英文短名：自动取场景所在层的英文列，转小写并用连字符连接（如"三层业务问题"→ `layer-3-service-issues.md`），英文列缺失或未翻译时沿用中文名并提示，可用 `--slug <english-name>` 手工指定；中文场景名保留在 index 的 `scenario` 字段，后续步骤的 `--scenario` 仍传中文名。二，判断条件按 CHR、X2、RB、配置、DBG、信令、话统这些数据源标签写入节点的 `data_source`，供步骤 2.5 预先分派；没有按源分列的判据（中英文混排的老表里 `Judgment Condition` 单列）归"通用"标签，通用标签没有预分派，绑定时由模型读判据原文决定归哪个源。三，表里有 `Recommend Solution(Chinese/English)` 列时另产出 `tree/solutions.json`（节点到推荐解决方案的对照），它不进树、不进判据，只在根因分析报告根因时查出来附上。
 
-- 怎么判断用哪个：先跑 v2 的 `--list`。能列出场景就是新格式，继续用 v2；老脚本报 `未找到 Ln(Chinese) 层级列`，说明把新格式喂给了老脚本，换 v2。`--sheet` 和 `--list` 只有 v2 有，老脚本传了会报 `unrecognized arguments`。
+- 怎么判断用哪个：先跑 v2 的 `--list`。能列出场景就是新格式，继续用 v2；老脚本报 `未找到 Ln(Chinese) 层级列`，说明把新格式交给了老脚本，换 v2。`--sheet` 和 `--list` 只有 v2 有，老脚本传了会报 `unrecognized arguments`。
 - 起始层级：`--start-node` 默认把场景名当 L2 查找。用户明确要求更深层时加 `--start-level N`，`--list` 会改为列出那一层的场景名，`--start-node` 也从那一层查找：
 
   ```bash
@@ -245,7 +245,7 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根目录>/scot技能/<slug>/ 技能目录（与 scot产物 平级；--dest 可改）
 ```
 
-产出 = cs-scot-execute 的执行指引（SKILL.md 自动改名并按场景写 description）+ `assets/`（本产物 + fault-tree-rca 规则副本），自动排除 overview、dispatch、各轮 result-*、index.jsonl、__pycache__ 等临时文件。产物不包含辩论引擎：辩论复核是平台工具链层的能力（fault-tree-rca-debate 技能加执行侧 SCOT_DEBATE 开关），交付的场景技能只有标准根因分析。上传后用户一句 `/<slug> 数据在 <zip>，帮我诊断` 即可运行全程（默认约定见 cs-scot-execute SKILL.md 的"场景技能形态"一节）。产物没有英文短名时用 `--name` 指定。
+产出 = cs-scot-execute 的执行指引（SKILL.md 自动改名并按场景写 description）+ `assets/`（本产物 + fault-tree-rca 规则副本），自动排除 overview、dispatch、各轮 result-*、index.jsonl、__pycache__ 等临时文件。交付的场景技能只有标准根因分析。上传后用户一句 `/<slug> 数据在 <zip>，帮我诊断` 即可运行全程（默认约定见 cs-scot-execute SKILL.md 的"场景技能形态"一节）。产物没有英文短名时用 `--name` 指定。
 
 ## 步骤 6（人工调优）：调优表是树和绑定的可编辑事实源
 

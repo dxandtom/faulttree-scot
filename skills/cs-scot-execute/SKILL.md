@@ -52,7 +52,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 
 ### 1. 数据入口
 
-数据以用户给的形式为准：目录或散文件直接用，压缩包先解开。第 0 步必做：跑数据入口检查 `python "<本目录>/scripts/check_data.py" <数据路径>`，按它给的建议喂法继续；退出码 2 就把报告原样给用户，不强行继续。数据有三种形态：已解析的表直接喂；原始日志目录（网元目录下有 CONFIG、CMD、LOG 子目录）先用 `assets/zip2csv/scripts/zip2csv.py` 转成三张表，再连同原始目录 `--data raw=<目录>` 一起喂；零散的原始文件同样喂给 zip2csv，它会先归类。三种形态的判定、转换命令、失败时怎么办、缺口怎么向用户措辞，见 `references/data_entry.md`。数据转换只用 `assets/zip2csv/` 里的脚本，不去环境里找别的技能。
+数据以用户给的形式为准：目录或散文件直接用，压缩包先解开。第 0 步必做：跑数据入口检查 `python "<本目录>/scripts/check_data.py" <数据路径>`，按它给出的数据传入建议继续；退出码 2 就把报告原样给用户，不强行继续。数据有三种形态：已解析的表直接传给执行器；原始日志目录（网元目录下有 CONFIG、CMD、LOG 子目录）先用 `assets/zip2csv/scripts/zip2csv.py` 转成三张表，再连同原始目录 `--data raw=<目录>` 一起传入；零散的原始文件同样交给 zip2csv，它会先归类。三种形态的判定、转换命令、失败时怎么办、缺口怎么向用户措辞，见 `references/data_entry.md`。数据转换只用 `assets/zip2csv/` 里的脚本，不去环境里找别的技能。
 
 ### 2. 数据与指标匹配
 
@@ -68,12 +68,6 @@ python "<本目录>/scripts/runner.py" --plan "<本目录>/assets/plan.json" \
 `--result-base` 必带：平台不允许技能往自身目录写文件，结果写到与本技能平级的 `<本技能目录名>-result/` 下，每轮自动新建独立的 `result-<运行号>/`。并行诊断多份数据时建议加 `--result-suffix <数据标识>`。
 
 进入根因分析步骤后，第一个动作是运行 `assets/fault-tree-rca/scripts/draft_rca.py` 生成候选清单，不是先读 rca_input 把握全局。rca_input 不整读进上下文（超长必出错）；不用 `python -c` 解析任何产物 JSON（Windows 反斜杠路径进字符串会转义出错，中文输出乱码）；要看节点细节只用 `rca_query.py`。
-
-**根因分析引擎的选择**，由环境变量 `SCOT_DEBATE` 决定，产物本身不带辩论引擎：
-
-- 未设置或 `off`（默认）：按 fault-tree-rca 的流程做，汇报里不提辩论。交付出去的场景技能永远是这个形态。
-- `auto`（平台勾选"辩论复核"时传入）：候选清单里有争议候选（`conflict_nodes` 非空，或疑似里有层级矛盾）时找辩论引擎，按顺序找同一 skills 目录下的 `fault-tree-rca-debate/` 或 `assets/fault-tree-rca-debate/`，再验依赖（`python -c "import scipy, pandas"`）和密钥（其 `vendor/config.yaml`）。引擎在且两项齐，跑 `scripts/run_debate_rca.py --rca-input "<结果目录>/rca_input.json"`，以其产出为最终 rca.json；找不到引擎或缺依赖、密钥，播报"已请求辩论复核，但引擎不可用（缺什么写明），本轮走标准根因分析"；没有争议候选，汇报注一句"无争议候选，辩论复核未触发"。
-- `force`（演示、验收用）：直接跑 `run_debate_rca --no-screen` 全树辩论；引擎不可用同样明说。
 
 ### 4. 输出汇报
 
@@ -94,7 +88,7 @@ python "<fault-tree-rca 目录>/scripts/render_report.py" "<result>/rca.json" --
 ## 执行模型
 
 1. 从 `entry` 节点开始，用 `memory_init` 初始化工作记忆。
-2. 按节点 `kind` 分派：`script` 节点按 `name` 找 `scripts/<name>.py`，解析 `inputs.data` 得到数据文件，运行脚本，把逐条件事实按 `outputs` 写入 `$memory`；`agent_skill` 节点把解析好的输入（故障树正文加各源事实）写到本轮结果目录的 `rca_input.json`，由 `name` 指定的技能（fault-tree-rca）产出结果。这一步有两条可互换的路径：模型按 fault-tree-rca 判断，或运行辩论引擎 fault-tree-rca-debate 的 `run_debate_rca.py`；两者读同一个 rca_input、写同一个 rca.json。
+2. 按节点 `kind` 分派：`script` 节点按 `name` 找 `scripts/<name>.py`，解析 `inputs.data` 得到数据文件，运行脚本，把逐条件事实按 `outputs` 写入 `$memory`；`agent_skill` 节点把解析好的输入（故障树正文加各源事实）写到本轮结果目录的 `rca_input.json`，由 `name` 指定的技能（fault-tree-rca）产出结果。这一步由模型按 fault-tree-rca 的流程判断：读 rca_input，写 rca.json。
 3. 沿 `transition.next_on_success` 前进，`end=true` 结束。
 4. 节点间的数据全靠 `$input`、`$memory`、`$step`、`$output` 引用传递。
 

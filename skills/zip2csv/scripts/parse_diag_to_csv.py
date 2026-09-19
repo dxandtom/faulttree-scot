@@ -40,7 +40,7 @@ FIELD_LIMIT = 100000  # ObjContent 单字段最大字节数，略小于 csv 默�
 sep_pattern = re.compile(r'^=+$')
 # 格式1/4：独立命令行（不含=号），支持前导空格
 cmd_standalone_pattern = re.compile(r'^\s*(display\s+[^=]+?)\s*$', re.I)
-# 格式2：内嵌命令行 ===display xxx===，用 [^=] 避免吃掉尾部等号
+# 格式2：内嵌命令行 ===display xxx===，用 [^=] 避免误吞尾部等号
 inline_cmd_pattern = re.compile(r'^=+\s*(display\s+[^=]+?)\s*=+$', re.I)
 # 格式3：命令提示符 <SwitchName>display xxx
 prompt_pattern = re.compile(r'^<(\S+)>\s*(dis\w*(?:\s+\S+)*)', re.I)

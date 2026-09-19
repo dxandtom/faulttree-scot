@@ -159,7 +159,7 @@ CASES = [
      "binding": {"class": "G", "column": "log", "contains": ["ALM-111"]},
      "expect": {"status": "ok", "matched": 1, "matched_by_target": None}},
     # C/G 缺 contains/equals/regex(op/target 等野字段)→ 明确报数据不足,绝不静默 matched=0 变假排除
-    {"name": "C/G 空 targets→数据不足(op/target 野字段不认,防假排除)",
+    {"name": "C/G 空 targets→数据不足(op/target 自造字段不识别,防错误排除)",
      "table": _t(["Summary"], ["hwLinkHeartbeatDropAlarm_active"]),
      "binding": {"class": "C", "column": "Summary", "op": "contains", "target": "hwLinkHeartbeatDropAlarm"},
      "expect": {"status": "insufficient_data", "predicate_satisfied": None}},
@@ -182,7 +182,7 @@ CASES = [
      "binding": {"class": "G", "column": "log", "regex": ["[ALM-123"]},
      "expect": {"status": "insufficient_data", "predicate_satisfied": None},
      "reason_has": "编译失败"},
-    {"name": "C match 乱写→数据不足(只认 exact/contains/regex)", "table": _t(["c"], ["X"]),
+    {"name": "C match 乱写→数据不足(只接受 exact/contains/regex)", "table": _t(["c"], ["X"]),
      "binding": {"class": "C", "column": "c", "equals": ["X"], "match": "fuzzy"},
      "expect": {"status": "insufficient_data"}},
 
@@ -424,7 +424,7 @@ CASES = [
      "binding": {"class": "D", "combine": "ANDD", "sub": [
          {"class": "G", "column": "a", "contains": ["x"]},
          {"class": "G", "column": "b", "contains": ["没有的"]}]},
-     "expect": {"status": "insufficient_data"}, "reason_has": "只认 AND/OR"},
+     "expect": {"status": "insufficient_data"}, "reason_has": "只接受 AND/OR"},
     {"name": "P 带野字段(threshold)→数据不足(白名单拒收)",
      "table": _t(["Object", "ip"], ["MLAG*", "1"], ["MLAG", "2"]),
      "binding": {"class": "P", "side_column": "Object", "value_column": "ip", "threshold": 1},
@@ -472,9 +472,9 @@ CASES = [
     {"name": "封存类别 H→数据不足并指路", "table": _t(["CallID", "MessageType"], ["1", "Setup"]),
      "binding": {"class": "H", "key": "CallID", "msg_column": "MessageType", "has": ["Setup"]},
      "expect": {"status": "insufficient_data"}, "reason_has": "封存"},
-    {"name": "未知类别 Z→数据不足(只认 A/C/D/G/J/P)", "table": _t(["x"], ["1"]),
+    {"name": "未知类别 Z→数据不足(只接受 A/C/D/G/J/P)", "table": _t(["x"], ["1"]),
      "binding": {"class": "Z", "column": "x"},
-     "expect": {"status": "insufficient_data"}, "reason_has": "只认"},
+     "expect": {"status": "insufficient_data"}, "reason_has": "只接受"},
 
     # ---- 空表守卫 + filter(EAV 窄表行级预过滤)----
     {"name": "空表(仅表头0行)→数据不足,不当排除", "table": _t(["FaultType"]),

@@ -376,7 +376,7 @@ def _column_claims(facts: dict) -> tuple:
 
 def _uncovered_values(facts: dict) -> dict:
     """覆盖度:分类列里出现、却没被任何绑定 targets 认领的取值 + 记录数(每列最多 8 个)。"""
-    # 覆盖度:分类列(C/G)里出现、却没被任何绑定 targets 认领的取值 + 记录数 → 显式喂给 RCA,
+    # 覆盖度:分类列(C/G)里出现、却没被任何绑定 targets 认领的取值 + 记录数 → 显式提供给 RCA,
     # 这样即便 bind 时漏绑/忽略告警,RCA 也拿到"这 N 条没着落",可归到上面保留的"其他"类节点、不致漏诊。
     # 去噪:跳过占比≥50% 的取值(多半是该列"正常/健康"值,如 Fault/Normal 的 Normal),
     # 但**不**按"认领值个数"去噪——只绑了 1 个值却漏了一堆失败码,正是最该报的(别误伤)。
@@ -445,7 +445,7 @@ def compose_rca_payload(index: dict, results: dict, md_text: str = "") -> dict:
                            "outline": pr["outline"], "pruned_nodes": pr["pruned_nodes"]},
             "unmapped_facts": pr["unmapped"], "tree_issues": cov,
             # 判别列里没被绑定认领的取值 —— prune() 已算好,必须随压缩形态一起送给 RCA
-            # (fault-tree-rca 契约据此把漏绑记录归到"非典型/其他"节点报出、防漏诊);
+            # (fault-tree-rca 的规则据此把漏绑记录归到"非典型/其他"节点报出、防漏诊);
             # 键恒在(空则空 dict),别再在这里静默丢掉。
             "uncovered_values": pr["uncovered_values"]}
     md_payload = {"fault_tree_md": md_text, "indicator_results": results}

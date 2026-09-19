@@ -3,7 +3,7 @@
 各 <指标>_analyzer.py 的 CONDITIONS / plan.json,全程零模型参与、确定性、可重复。
 
 设计要点(每条都是防"人改坏"的,多条来自隔离评审的实测发现):
-- **node_id 只认不改**:已有 id 原样保留;新增行留空,按 max+1 自动分配(历史 id 不复用);
+- **node_id 只读不改**:已有 id 原样保留;新增行留空,按 max+1 自动分配(历史 id 不复用);
   改已有 id、复制 id、**手编一个树里从没有过的 id** = 直接拦下。
 - **先全量校验、全量备料,最后统一写盘**:任何错(JSON 坏/id 问题/上级不符/该有的列被删)都
   收集全、按 Excel 行号用易懂的话报出来,一个文件都不写;写盘阶段不再有任何可失败的计算。
@@ -277,7 +277,7 @@ def _row_parent(filled: list, stack: dict, rowno: int, name: str, errors: list):
 
 
 def _check_node_id(nid: str, name: str, rowno: int, old_nodes: dict, seen_ids: set, errors: list) -> None:
-    """node_id 只认不改:格式要对、不许重复、不许手编树里从没有过的 id。"""
+    """node_id 只读不改:格式要对、不许重复、不许手编树里从没有过的 id。"""
     if not _NID_RE.match(nid):
         errors.append(f"第{rowno}行「{name}」: node_id「{nid}」格式不对(应为 n+数字;新增行请留空)")
     elif nid in seen_ids:
@@ -334,7 +334,7 @@ def _check_binding(b, s: str, name: str, rowno: int, errors: list) -> None:
     cls, dec = str(b.get("class", "")).upper(), b.get("decision")
     if dec is not None and dec not in _DECISIONS:
         errors.append(f"第{rowno}行「{name}」绑定:{s}: decision「{dec}」不认识"
-                      f"(只认 {'/'.join(sorted(_DECISIONS))})")
+                      f"(只接受 {'/'.join(sorted(_DECISIONS))})")
     elif dec is None and cls not in _CLASSES:
         errors.append(f"第{rowno}行「{name}」绑定:{s}: class「{b.get('class')}」不认识"
                       "(A/C/D/G/J/P 之一;查不了就写 decision,"

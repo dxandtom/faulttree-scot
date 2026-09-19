@@ -7,7 +7,7 @@ relativePath),弱模型看见"neName"就当数据表喂,42 个判据集体报"�
 诊断跑完才发现,浪费一整轮。
 
 用法:python check_data.py <用户给的数据路径>
-  退出码 0=认得出可用形态(报告里带**建议喂法**,照抄即可);2=结构不认识/只有清单——
+  退出码 0=认得出可用形态(报告里带**建议的传入方式**,照抄即可);2=结构不认识/只有清单——
   把报告原样给用户,让用户改目录或确认,**不要强行继续**。
 
 识别的形态(可并存,逐个报):
@@ -15,7 +15,7 @@ relativePath),弱模型看见"neName"就当数据表喂,42 个判据集体报"�
      平铺单网元(路径下直接是 CONFIG/CMD/…)也认,网元名=目录名;
   B. 已解析表:csv/xlsx,表头带 CmdName/ObjContent(cmd)、Summary/Log(log)、level1/CfgType(config);
   C. 采集清单/索引 xlsx(fileType/relativePath/zipFile 这类列)——**是目录不是数据**,点名跳过;
-  D. zip 压缩包——直接交给 zip2csv(它既接受 zip 也接受目录)。
+  D. zip 压缩包——用 <assets>/zip2csv/scripts/zip2csv.py 转三表(它既接受 zip 也接受目录)。
 """
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def _csv_header(p: Path):
 def _dir_of_input_file(root: Path):
     """输入是单个文件:zip 直接指路给 zip2csv(返回 None 表示已处理完),其它文件按它所在目录检查。"""
     if root.suffix.lower() == ".zip":
-        print("• 输入是 zip 压缩包 → 直接交给 zip2csv 转三表(它吃 zip 也吃目录),转完把")
+        print("• 输入是 zip 压缩包 → 用 <assets>/zip2csv/scripts/zip2csv.py 转三表(它既接受 zip 也接受目录),转完把")
         print("  extracted/ 当原始目录再跑一次本检查拿 raw= 的正确层。")
         return None
     root_dir = root.parent
@@ -101,7 +101,7 @@ def _dir_of_input_file(root: Path):
 
 
 def _report_flat_ne(root: Path, flat: list, usable: list, problems: list, suggest: list) -> None:
-    """A. 平铺单网元结构(路径下直接是 CONFIG/CMD/…):报文件数、给 raw= 喂法、空目录记为问题。"""
+    """A. 平铺单网元结构(路径下直接是 CONFIG/CMD/…):报文件数、给 raw= 的传入方式、空目录记为问题。"""
     counts = "、".join(f"{k}/ {_txt_count(root / k)} 个文件" for k in flat)
     print(f"✓ 平铺单网元结构:{root.name} 下直接有 {counts}(网元名=目录名)")
     usable.append("raw")
@@ -152,7 +152,7 @@ def _scan_tables(root: Path) -> tuple:
 
 
 def _report_tables(tables: list, manifests: list, unknown_x: list, usable: list, suggest: list) -> None:
-    """B/C. 打印表与清单的识别结果:数据表给喂法,清单点名禁喂,读不了的先跳过。"""
+    """B/C. 打印表与清单的识别结果:数据表给传入方式,清单点名不许传入,读不了的先跳过。"""
     if tables:
         print("✓ 已解析数据表:")
         for name, hit in tables:
@@ -167,14 +167,14 @@ def _report_tables(tables: list, manifests: list, unknown_x: list, usable: list,
 
 
 def _conclude(root: Path, usable: list, problems: list, suggest: list) -> int:
-    """收尾:列问题、给建议喂法(退出码 0);认不出形态时指路散文件补救或让用户确认(退出码 2)。"""
+    """收尾:列问题、给建议的传入方式(退出码 0);认不出形态时指路散文件补救或让用户确认(退出码 2)。"""
     print()
     if problems:
         print("发现问题:")
         for pr in problems:
             print(f"  ✗ {pr}")
     if usable:
-        print("建议喂法(结构没问题,照抄):")
+        print("建议的传入方式(结构没问题,照抄):")
         for s in suggest:
             print(f"  → {s}")
         if "raw" in usable:

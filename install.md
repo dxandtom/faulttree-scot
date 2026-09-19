@@ -7,8 +7,6 @@
 - **cs-scot-generate** — 把故障树 Excel 编译成场景诊断 skill(生成解析脚本 + SCoT 计划)
 - **cs-scot-execute** — 按 `plan.json` 顺序执行 SCoT 计划
 - **fault-tree-rca** — 综合根因分析
-- **fault-tree-rca-debate** — 辩论式多代理 RCA 技能,fault-tree-rca 的可切换平替
-  (真跑需把含密钥的 `vendor/config.yaml` 本地放入,见该技能 SKILL.md;`--mock` 自测不需要)
 
 > 注:以上都是**工具 skill**。用 `cs-scot-generate` 为某场景生成出来的"场景 skill"
 > (如 `examples/sa-access-fail/`)是另外单独上传/使用的,不由本脚本安装。
@@ -50,7 +48,7 @@ pip install openpyxl
 ## 验证
 ```bash
 ls ~/.claude/skills/
-# 应看到:cs-scot-generate/  cs-scot-execute/  fault-tree-rca/  fault-tree-rca-debate/
+# 应看到:cs-scot-generate/  cs-scot-execute/  fault-tree-rca/
 ```
 跑一个现成的场景示例(`examples/sa-access-fail/` 是已生成好的场景 skill):
 ```bash
@@ -68,12 +66,10 @@ python scripts/runner.py --plan plan.json \
 ```bash
 rm -rf ~/.claude/skills/cs-scot-generate \
        ~/.claude/skills/cs-scot-execute \
-       ~/.claude/skills/fault-tree-rca \
-       ~/.claude/skills/fault-tree-rca-debate
+       ~/.claude/skills/fault-tree-rca
 ```
 (若是 `--link` 安装,只删软链,不影响源仓。)
 
 ## 为什么这么简单(对比 SCoT_A 的 install)
 本项目是**轻量自研**,不接入 SCoT_A 框架,也**不需要** venv / registry / MCP / adapters
-那一整套——skill 脚本仅用 Python 标准库(+ 可选 openpyxl;辩论引擎另需
-pandas/numpy/pyyaml/requests)。所以安装就是"把这些 skill 拷过去",比 SCoT_A 的安装流程简单很多。
+那一整套——skill 脚本仅用 Python 标准库(+ 可选 openpyxl;zip2csv 处理散文件时另需 chardet、pandas)。所以安装就是"把这些 skill 拷过去",比 SCoT_A 的安装流程简单很多。

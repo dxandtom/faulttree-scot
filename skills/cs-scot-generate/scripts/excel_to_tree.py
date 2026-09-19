@@ -125,7 +125,7 @@ def find_code_columns(headers: List[str]) -> Dict[int, str]:
     return out
 
 
-# HTML 标签白名单(只删这些已知标签,避免把条件里的 < > 比较运算符当成标签吃掉)
+# HTML 标签白名单(只删这些已知标签,避免把条件里的 < > 比较运算符当成标签误删)
 _HTML_TAG = re.compile(
     r"</?(?:span|div|p|a|br|hr|img|h[1-6]|table|thead|tbody|tr|td|th|ul|ol|li|"
     r"b|i|u|s|em|strong|font|sub|sup|blockquote|pre|code|section|article|center)\b[^>]*>",
@@ -453,7 +453,7 @@ def main() -> None:
                   + (f",带英文名节点 {_ne}" if _ne else ""))
             if _n == 0:
                 print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是判据列没被识别"
-                      "(本脚本只认表头「Judgment Condition(Chinese)」)——**停下检查 Excel 表头,"
+                      "(本脚本只识别表头「Judgment Condition(Chinese)」)——**停下检查 Excel 表头,"
                       "别往下绑定**;0 判据的树绑出来的只能是瞎猜。", file=sys.stderr)
         except Exception:  # noqa: BLE001 — 计数只是提示,不阻断
             pass

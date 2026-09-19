@@ -15,7 +15,7 @@
    ② downloader.py:按 Product_Obs 逐条下载节点 zip;按 prevObjectkey 下载上一版 skill
       (同一个平台下载服务,docId 即 obs 地址——"下载 skill 能力"的改造就在这)
    ③ 解包 skill,定位产物目录(技能形态认 assets/)
-   ④ 调 cs-scot-migrate 对应表批量迁移(平台表直接喂 --map,技能已认这格式)
+   ④ 调 cs-scot-migrate 对应表批量迁移(平台表直接传给 --map,技能能识别这种格式)
    ⑤ 重打包新版 skill zip
    ⑥ 回调 POST /workspace/faultTreeNode/optimizeCallback(versionId + skillFile 文件流)
       平台收到后自己上传 OBS、把版本记录置 COMPLETED
@@ -55,7 +55,7 @@ optimizeType 三档(平台口径,请求带 `optimizeType` 字段;excel 为增强
 python integration/platform1/make_full_table.py --product <runC2>/skill/qos-security-issues/assets \
     --out 全量表.csv --zip-store <货架目录> [--platform-excel 老平台表.xlsx] [--mark 节点甲,节点乙]
 ```
-不改直接喂驱动(fake-store,request 加 `"optimizeType": "ALL"`)= 零改动基线,预期零动作;在表上
+不改直接交给驱动(fake-store,request 加 `"optimizeType": "ALL"`)= 零改动基线,预期零动作;在表上
 改判据/换包/加行/删行/清判据各一格,再跑一遍就是一次真实的树更新(脚本末尾打印了五种改法与
 预期输出符号 ~ ✓ + ✂)。
 

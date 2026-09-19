@@ -162,7 +162,7 @@ def _read_decisions(path):
         v = _VERDICT.get(str(d.get("verdict", "")).strip().lower()) or _VERDICT.get(str(d.get("verdict", "")).strip())
         if not v:
             raise SystemExit(f"节点 {d['node_id']} 的 verdict「{d.get('verdict')}」不认识"
-                             f"(只认 confirmed/probable/excluded/undetermined 及中文同义词)")
+                             f"(只接受 confirmed/probable/excluded/undetermined 及中文同义词)")
         d["_v"] = v
         decisions[str(d["node_id"])] = d
     return decisions

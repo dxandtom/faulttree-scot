@@ -195,7 +195,7 @@ def _ev(nid: str, n: dict) -> dict:
 
 
 def _apply_gap(e: dict, facts) -> None:
-    """四态契约里"判不了"的两种分型(通用适配函数的 gap_kind):缺数据(补采可解) vs 数据在判不动(判据质量信号)。
+    """四态约定里"判不了"的两种分型(通用适配函数的 gap_kind):缺数据(补采可解) vs 数据在判不动(判据质量信号)。
     事实 reason 可能已带适配函数加的分型前缀(字面略长),按前缀族判重,避免双前缀。"""
     kinds = {f.get("gap_kind") for f in facts if isinstance(f, dict) and f.get("gap_kind")}
     if not kinds:

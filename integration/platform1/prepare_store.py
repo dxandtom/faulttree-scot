@@ -34,7 +34,7 @@ def _looks_like_node_pkg(d: Path) -> bool:
 def spread(downloads: Path, store: Path) -> int:
     store.mkdir(parents=True, exist_ok=True)
     n = 0
-    # 1) 递归收所有 zip(嵌套多深都认):合集拆平铺,散节点包原样拷入
+    # 1) 递归收所有 zip(嵌套多深都识别):合集拆平铺,散节点包原样拷入
     for zp in sorted(list(downloads.rglob("*.zip"))):
         if zp.resolve() == (store / zp.name).resolve():
             continue                                     # 货架自身当输入目录时跳过已就位的文件

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """把 cs-scot-generate 的中间产物组装成一个场景的诊断产物目录(它是资产,不是 skill)。
 
-产物 = plan.json(真正的 SCoT 计划)+ manifest.json(产物清单,记录格式契约版本)
+产物 = plan.json(真正的 SCoT 计划)+ manifest.json(产物清单,记录产物格式版本)
        + scripts/<指标>_analyzer.py(待填写的逐条件分析脚本,模型在步骤 2.5 填 CONDITIONS)
-       + 内核/适配器/概览引擎/绑定契约副本 + tree/<场景>.md。由 cs-scot-execute 来跑。
+       + 内核/适配器/概览引擎/绑定格式说明副本 + tree/<场景>.md。由 cs-scot-execute 来跑。
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ KNOWLEDGE_TEMPLATE = """\
 运行时没出现=不成立。解读规则:该日志表示接口 [hwIfMonitorName] 存在错包,原因通常是链路质量问题。
 """
 
-# 产物格式契约版本(写进产物清单 manifest.json):**只在改动使旧产物与新执行器不兼容时才 +1**
+# 产物格式版本(写进产物清单 manifest.json):**只在改动使旧产物与新执行器不兼容时才 +1**
 # (修 bug、改文案不动它)。递增时同步递增 cs-scot-execute/scripts/runner.py 的 EXPECTED_PRODUCT_FORMAT。
 # v2:绑定新增 filter 字段(对 EAV 窄表——一行一个指标的表——做行级预过滤)+ 空表守卫——
 #     旧产物里的旧 condition_kernels 副本会**静默忽略 filter、在全表上算出假阳性**,
@@ -93,7 +93,7 @@ INDICATOR = "__IND__"
 
 # ===== 模型填这里:本场景路由到「__IND__」源的条件 =====
 # 每条 = 公共字段(id/node/node_id/condition_text/class/mapping_reason)+ 该类内核参数(见 schema)。
-# node_id = tree/<场景>.tree_index.json 里该节点的 **key(形如 nN,短、推荐)** 或其 `code` 字段(两者都认)。
+# node_id = tree/<场景>.tree_index.json 里该节点的 **key(形如 nN,短、推荐)** 或其 `code` 字段(两者都识别)。
 # 必填:RCA 靠它把事实挂回树做路径回溯。**别填节点名、别瞎拼。**
 # 默认直接套模板;模板不够用时给该条加 "mode":"custom",并在 CUSTOM 里按 id 写返回 fact 的函数。
 #
@@ -498,7 +498,7 @@ def _load_tree_index(work: Path, scenario: str):
         sys.exit(1)
     if _n_cond == 0:
         print(f"不合格:tree_index 里 {len(_ti.get('nodes') or {})} 个节点**一条判据都没有**。\n"
-              "  多半是步骤1没认出判据列(如混血表的 Judgment Condition 单列/自定义列名)——\n"
+              "  多半是步骤1没认出判据列(如混合格式表的 Judgment Condition 单列/自定义列名)——\n"
               "  升级 excel_to_tree_v2.py 重跑步骤1,确认输出里「带判据节点 N>0」再组装。\n"
               "  **不要**继续绑定、更不要自己读 Excel 写脚本量产绑定(那会产出无法审计的假绑定)。",
               file=sys.stderr)
@@ -531,15 +531,15 @@ def _merge_solutions(work: Path, out: Path) -> None:
 
 
 def _copy_engine(here: Path, out: Path) -> None:
-    """复制公共脚本(预制函数库、概览引擎、绑定契约、调优表工具)进产物 scripts/;外挂知识首次组装时预置。"""
-    # 复制公共脚本(预制函数库、概览引擎、绑定契约)进产物;再为每个指标写一份待填写的"逐条件分析脚本"。
+    """复制公共脚本(预制函数库、概览引擎、绑定格式说明、调优表工具)进产物 scripts/;外挂知识首次组装时预置。"""
+    # 复制公共脚本(预制函数库、概览引擎、绑定格式说明)进产物;再为每个指标写一份待填写的"逐条件分析脚本"。
     copy_into(here / "condition_kernels.py", out / "scripts" / "condition_kernels.py")  # 类别模板库
     copy_into(here / "xlsx_reader.py", out / "scripts" / "xlsx_reader.py")              # 零依赖 xlsx 读取器(内核/导入都靠它读表)
     copy_into(here / "custom_lib.py", out / "scripts" / "custom_lib.py")                # S 类预制函数库(人手调优用)
     copy_into(here / "mo_config.py", out / "scripts" / "mo_config.py")                  # 配置拓扑适配器:MO文本→表 + IP/追溯原语(.txt 配置 + custom 用)
     copy_into(here / "analyzer.py", out / "scripts" / "analyzer.py")                    # 概览辅助:模型先看列再填条件
     copy_into(here.parent / "references" / "condition_binding_schema.md",
-              out / "scripts" / "condition_binding_schema.md")                          # 绑定契约
+              out / "scripts" / "condition_binding_schema.md")                          # 绑定格式说明
     copy_into(here / "export_tree_excel.py", out / "scripts" / "export_tree_excel.py")  # 调优表:产物→Excel
     copy_into(here / "import_tree_excel.py", out / "scripts" / "import_tree_excel.py")  # 调优表:Excel→产物(自包含)
     kn = out / "tree" / "knowledge.md"                   # 外挂知识:人手写的"去哪查/怎么查/什么算正常"
@@ -674,7 +674,7 @@ def main() -> None:
     plan = build_plan(scenario, indicators, tree_rel, stem)
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 产物清单 manifest:这批产物由哪版格式契约、何时编译。execute/benchmark 启动时比对,旧产物只告警不阻断。
+    # 产物清单 manifest:这批产物由哪版产物格式、何时编译。execute/benchmark 启动时比对,旧产物只告警不阻断。
     manifest = {"product_format_version": PRODUCT_FORMAT_VERSION,
                 "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
                 "scenario": scenario, "slug": _ti.get("slug"),

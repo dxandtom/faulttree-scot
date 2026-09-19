@@ -179,7 +179,7 @@ def _select_platform_rows(rows, cn_cols, obs_col, name_col, mk_col):
 def parse_platform_excel(path: Path):
     """平台表 → [(节点路径名字列表, zip 包名, obs 地址)];Product_Name 空的行(结构行)跳过。
     列的识别规则与 cs-scot-migrate 一致:路径取 L{n}_Name_CN,层级动态。
-    表带标记列(是否修改/is_modified 等)时,未标记行的 zip 不下载(标记契约:
+    表带标记列(是否修改/is_modified 等)时,未标记行的 zip 不下载(标记规则:
     内容动作只对标记行执行,与 migrate 同一规则)。"""
     header, rows = _read_table(path)
     cn_cols, obs_col, name_col, mk_col = _classify_platform_header(header)
@@ -678,7 +678,7 @@ def _model_prompt(skill: str, cmd: list) -> str:
              if skill == "cs-scot-generate-optimize" else "")
     return (f"用 {skill} 技能{route}处理一次批量迁移的失败项,只改文件,不用跑命令。"
             f"失败清单看这条命令上一轮的输出(可以重跑它看,但验证不归你,驱动会自动复跑):"
-            f"{' '.join(cmd)}。按 SKILL.md 的规矩逐项处置:契约检查 FAIL 的照修法"
+            f"{' '.join(cmd)}。按 SKILL.md 的规则逐项处置:格式检查 FAIL 的照修法"
             f"只修产物 scripts/custom/ 里的副本管道,判断逻辑一行不动;缺标准入口的按副本旁"
             f" *.contract.json 的修法在副本里补 fault_check(data_dir) 薄封装;拿不准算不算"
             f"改逻辑就跳过并在最后列入退回清单,绝不猜。三条实测经验:S3 这类文件过滤"
@@ -699,7 +699,7 @@ def _model_pass(cmd: list, rc: int, last_out: str, work: Path):
         print("[模型] 迁移没跑到汇总(环境/输入问题,不是节点失败项)——"
               "模型档帮不上,跳过;报错看上方迁移输出")
         return rc, last_out
-    # 机械档处理不了的失败项(语义匹配/修输入输出契约/补入口)交给模型:起 Claude Code 无头会话
+    # 机械档处理不了的失败项(语义匹配/修输入输出格式/补入口)交给模型:起 Claude Code 无头会话
     # 按 cs-scot-migrate 技能处置,完了复跑机械迁移验证——这就是完整的 skill 调用形态
     skill = _skill_name_for_model()
     prompt = _model_prompt(skill, cmd)
@@ -790,7 +790,7 @@ def main():
     ap.add_argument("--keep", action="store_true", help="保留工作目录(排查用)")
     ap.add_argument("--with-model", action="store_true",
                     help="机械迁移有失败行时,起 Claude Code 无头会话按 cs-scot-migrate 技能"
-                         "处置(语义匹配/修输入输出契约/补入口),完了复跑机械迁移;命令可用环境变量"
+                         "处置(语义匹配/修输入输出格式/补入口),完了复跑机械迁移;命令可用环境变量"
                          " PLATFORM1_CLAUDE_CMD 覆盖(默认 claude --permission-mode acceptEdits -p)")
     a = ap.parse_args()
     req = json.loads(Path(a.request).read_text(encoding="utf-8"))

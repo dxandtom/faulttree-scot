@@ -286,7 +286,7 @@ def _required_kwargs(fn) -> dict:
 
 def detect_entry(script: Path):
     """静态探测入口函数(候选见 _ENTRY_CANDIDATES;选中后还要过 arbitrate_entry 的空目录试跑)。
-    入口契约=至少接收 1 个位置参数(数据目录);0 参函数(从 sys.argv 自取路径的老脚本)一律跳过
+    入口约定=至少接收 1 个位置参数(数据目录);0 参函数(从 sys.argv 自取路径的老脚本)一律跳过
     并记入 note——运行期适配函数必传目录参数,选了 0 参入口就是必然的 TypeError,在迁移时拦下。
     单网元入口(check_ne/diagnose_ne)→ per_ne。返回 (entry, per_ne, kwargs, 顶层函数清单, argc 表, note)。"""
     tree = ast.parse(script.read_text(encoding="utf-8", errors="replace"))
@@ -341,7 +341,7 @@ def _shape_ok(r):
 
 def _smoke_call(stage: Path, script_name: str, entry: str, kwargs: dict):
     """空目录试跑:以库方式(argv 隔离/stdout 收走/异常拦截,与运行期适配函数同样的现场保护)调一次
-    入口,验返回形状。空数据下合契约的脚本该返回 undetermined——至少得是个认得出的 dict。"""
+    入口,验返回形状。空数据下合约定的脚本该返回 undetermined——至少得是个认得出的 dict。"""
     import contextlib
     import importlib.util
     import io
@@ -378,7 +378,7 @@ def _smoke_call(stage: Path, script_name: str, entry: str, kwargs: dict):
 
 
 def arbitrate_entry(fc: Path, deps, entry: str, per_ne: bool, kwargs: dict, explicit: bool):
-    """入口试跑仲裁:选中的入口先真调一次;不合契约时——auto 模式按候选序换下一个(谁返回契约
+    """入口试跑仲裁:选中的入口先真调一次;不合约定时——auto 模式按候选序换下一个(谁返回约定
     形状谁当入口,机械裁决不猜名字),全不行则停止并报错、逐个报原因;人工 --entry 指定的只警告不换(人>名单)。
     返回 (entry, per_ne, kwargs, 仲裁说明)。"""
     with tempfile.TemporaryDirectory(prefix="stage_") as sd:
@@ -487,7 +487,7 @@ def edit_tuning_excel(product: Path, nid: str, condition: str, binding: dict):
 
 
 def _lvl_cols(header) -> dict:
-    """调优表中文层级列 → {层级: 1 起列号}(裸 L<n> 与 L<n>(Chinese) 都认)。"""
+    """调优表中文层级列 → {层级: 1 起列号}(裸 L<n> 与 L<n>(Chinese) 都识别)。"""
     lvl_re = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
     lvl_cols = {}
     for i, h in enumerate(header):
@@ -1000,7 +1000,7 @@ def _effective(product: Path, p: Path) -> Path:
 
 def _copy_scripts(product: Path, fc: Path, deps) -> None:
     """脚本进场,两条附加规矩:
-    ①保修复:包没变而 custom/ 副本修过输入输出契约(.orig 基准==包里原件)→ 保留修复副本不覆盖;
+    ①保修复:包没变而 custom/ 副本修过输入输出格式(.orig 基准==包里原件)→ 保留修复副本不覆盖;
       包真变了 → 正常覆盖并清掉过期 .orig(新包重新过检查);
     ②补库:脚本 import 的 search_*.py 包里没带 → 从 skills 目录下的 tester 或 engine/ 拷入(不覆盖已有)。"""
     custom = product / "scripts" / "custom"
@@ -1046,16 +1046,16 @@ def _stage_no_entry(product: Path, fc: Path, deps) -> str:
             f"补薄封装入口后重跑同一条命令即续迁")
 
 
-# ---------- 导入检查(契约检查)+ 契约修复循环 ----------
+# ---------- 导入检查(格式检查)+ 格式修复循环 ----------
 _CC_CACHE = []
 # 检查 FAIL 里适配函数运行时能处理的项(能走到这一步=试跑仲裁已确认能驱动):
 #   S1 入口名/签名(仲裁选定入口+entry_kwargs 驱动)、D2x/D3x 调用崩(_StrPath/护现场/逐网元重调)
-# ——降为 WARN 放行并记台账;其余 FAIL(如 S3 只认 .txt、D2 缺数据当作结论)执行必受影响,拦下。
+# ——降为 WARN 放行并记台账;其余 FAIL(如 S3 只识别 .txt、D2 缺数据当作结论)执行必受影响,拦下。
 _ABSORBED = {"S1", "D2x", "D3x"}
 
 
 def _contract_mod():
-    """加载契约检查模块(skills 目录下的 tester 优先,其次 engine/);都没有 → None(老环境,跳过检查)。"""
+    """加载格式检查模块(skills 目录下的 tester 优先,其次 engine/);都没有 → None(老环境,跳过检查)。"""
     if not _CC_CACHE:
         import importlib.util
         p = _engine_src("check_contract.py", ("def check_script",),
@@ -1074,7 +1074,7 @@ def _contract_mod():
 
 
 def _gate_run_check(cc, product: Path, sub: Path, fc: Path, deps, supplied, entry, per_ne, kwargs):
-    """脚本(生效版)+依赖+补库件搬到临时目录跑契约检查(按试跑仲裁的裁决参数;旧版检查组件退回老签名)。
+    """脚本(生效版)+依赖+补库件搬到临时目录跑格式检查(按试跑仲裁的裁决参数;旧版检查组件退回老签名)。
     检查时导入的脚本/共享库不许留缓存,防止串包。返回检查报告。"""
     data = next((p for p in sorted(sub.rglob("测试数据")) if p.is_dir()), None) if sub else None
     mods_bak, path_bak = set(sys.modules), list(sys.path)
@@ -1149,9 +1149,9 @@ def _gate_fail(product: Path, fc: Path, deps, custom: Path, side: Path, fails, w
 
 
 def _bl_norm(seq):
-    """回归基线归一:undetermined 与 insufficient_data 同属"判不了",契约升级不算结论改变(四态兼容)。"""
+    """回归基线归一:undetermined 与 insufficient_data 同属"判不了",约定升级不算结论改变(四态兼容)。"""
     return [("undetermined" if str(x).strip().lower() in ("undetermined", "insufficient_data")
-             else str(x).strip().lower()) for x in (seq or [])]   # 同属"判不了",契约升级不算结论改变
+             else str(x).strip().lower()) for x in (seq or [])]   # 同属"判不了",约定升级不算结论改变
 
 
 def _gate_regression(fc: Path, prev: dict, baseline, repaired: bool):
@@ -1167,12 +1167,12 @@ def _gate_regression(fc: Path, prev: dict, baseline, repaired: bool):
 
 def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
                    entry=None, per_ne=False, kwargs=None, explicit=False):
-    """导入时的契约检查(两档处置)。返回 ("skip"|"ok"|"fail", info|修法文本):
+    """导入时的格式检查(两档处置)。返回 ("skip"|"ok"|"fail", info|修法文本):
     - FAIL(适配函数处理不了)→ 不写绑定:把脚本连同 .orig 修复基准落进 scripts/custom/,返回修法清单
-      ——模型照清单只修输入输出契约(副本),重跑同命令续迁(保修复规则保证副本不被包里原件冲掉);
+      ——模型照清单只修输入输出格式(副本),重跑同命令续迁(保修复规则保证副本不被包里原件冲掉);
     - WARN(适配函数能处理/静态无法确证)→ 放行,记台账+退回清单;
     - 回归保护:包里带 测试数据/ 时检查自动记基线;修复后基线 matched 与修前不一致 → 拦下
-      (契约修复不许改变判断结论)。"""
+      (格式修复不许改变判断结论)。"""
     cc = _contract_mod()
     if cc is None:
         return "skip", None
@@ -1210,7 +1210,7 @@ def _contract_gate(product: Path, sub: Path, fc: Path, deps, supplied,
 
 
 def _gate_extra(info) -> dict:
-    """契约检查信息 → 台账附加字段(只写非空项)。"""
+    """格式检查信息 → 台账附加字段(只写非空项)。"""
     if not info:
         return {}
     out = {}
@@ -1349,7 +1349,7 @@ def _ledger_read(product: Path) -> dict:
 
 
 def _ledger(product: Path, entries) -> None:
-    """entries 每条 7 元组;可选第 8 元 dict(契约检查信息:contract_warns/repairs)直接并进记录。"""
+    """entries 每条 7 元组;可选第 8 元 dict(格式检查信息:contract_warns/repairs)直接并进记录。"""
     mig_p = product / "tree" / "migrations.json"
     mig = _ledger_read(product)
     for e in entries:
@@ -1421,7 +1421,7 @@ def _delete_targets(nodes, all_paths, n_lvls, force=False):
 
 
 # ---------- 对应表模式(--map:zip 名 ↔ 树路径) ----------
-# 层级列表头:格式没跟交付方钉死,能认的都认——裸 L1 / L1(Chinese) / L1(中文) / 全角括号/
+# 层级列表头:格式不要求交付方固定,能识别的都识别——裸 L1 / L1(Chinese) / L1(中文) / 全角括号/
 # 大小写/内部空格;唯独「L3 Code」这类编码列(无括号带后缀)不吃。
 # 平台1 导出表(L1_Name_CN/L1_Name_EN 成对 + Product_Obs + Product_Name)也认:
 # 节点定位取 _Name_CN 列(树节点名是中文),Product_Obs(下载用的 obs 地址,是工装层的事)整列忽略,
@@ -1512,7 +1512,7 @@ def _parse_map_header(header):
     平台1 增强表判据列成对(judgement_condition_cn/en):取 cn(树节点判据是中文),en 由
     _parse_map_header_en 识别、同步进树的 condition_en。
     标记列(可选,第四返回值):表头含 是否修改/是否变更/需要优化/is_modified/modified 等
-    ——在场即启用**标记契约**:结构(增删)仍看行的出现/消失,内容(迁移/判据同步/清除/
+    ——在场即启用**标记规则**:结构(增删)仍看行的出现/消失,内容(迁移/判据同步/清除/
     解决方案同步)只对标记行执行;未标记行只当结构参照(zip 不迁、判据不同也不动只提示)。
     解决方案列(可选,第五返回值):表头含 解决方案/solution 的列(成对取 cn 弃 en)——
     在场即启用"解决方案以表为准"同步(空不清除:很多节点本无解决方案,空≠删除)。"""
@@ -1638,14 +1638,14 @@ def load_map_excel(path: Path):
           {路径元组: {"name_en", "condition_en", "sol_en", "marked"}})。
     英文列(表有才收):每行的英文名(本行最深层的英文格)、英文判据、英文解决方案原样收进末位字典,
     不看标记;判据列/解决方案列表里没有时对应值为 None,空格为 ""。
-    **标记契约**(表有标记列时):内容动作只对标记行执行——未标记行的 zip 不迁(只当登记,
+    **标记规则**(表有标记列时):内容动作只对标记行执行——未标记行的 zip 不迁(只当登记,
     提示一行)、判据与包名都空的行不清;结构增删不看标记(看行的出现/消失)。无标记列=全部行视同已标记。
     解决方案:只收**标记行的非空值**进末位字典(以表为准同步;空≠删除,不清)。"""
     header, rows = _read_table(path)
     lvls, zip_col, jd_col, mk_col, sol_col = _parse_map_header(header)
     if lvls is None:
         raise SystemExit(f"对应表格式不对:需要层级列(L1..Ln,裸名/带 (Chinese) 后缀/平台1 的"
-                         f" L1_Name_CN 都认)+「zip」列(或平台1 的 Product_Name 列),"
+                         f" L1_Name_CN 都识别)+「zip」列(或平台1 的 Product_Name 列),"
                          f"且不该有 node_id 列;实际表头:{header}")
     en_lvls, jd_en_col, sol_en_col = _parse_map_header_en(header)
     has_en = bool(en_lvls or jd_en_col is not None or sol_en_col is not None)
@@ -1780,7 +1780,7 @@ def _print_map_summary(n_rows, n_ok, n_add, n_refreshed, has_fails, counted) -> 
 
 # 两种批量模式(--auto 逐子包 / --map 对应表)共用的累计器与备注拼接
 class _Acc:
-    """批量模式逐子包的累计器(只是个属性袋):oks / fails / skips 清单,seen_nid / seen_fc 查重,gates 契约信息。"""
+    """批量模式逐子包的累计器(只是个属性袋):oks / fails / skips 清单,seen_nid / seen_fc 查重,gates 格式检查信息。"""
 
     def __init__(self):
         self.oks, self.fails, self.skips = [], [], []    # ok=(sub,method,fc,deps,entry,per_ne,kwargs,nid,note,fp)
@@ -1793,11 +1793,11 @@ def _join_note(note: str, extra: str) -> str:
 
 
 def _gate_note(note: str, ginfo: dict) -> str:
-    """契约检查信息并进节点备注:管道已修 / 契约WARN(适配函数可处理)。"""
+    """格式检查信息并进节点备注:管道已修 / 格式WARN(适配函数可处理)。"""
     if ginfo["repairs"]:
         note = _join_note(note, f"管道已修 {','.join(ginfo['repairs'])}")
     if ginfo["warns"]:
-        note = _join_note(note, f"契约WARN {','.join(ginfo['warns'])}(适配函数可处理,详见退回清单)")
+        note = _join_note(note, f"格式WARN {','.join(ginfo['warns'])}(适配函数可处理,详见退回清单)")
     return note
 
 
@@ -1922,7 +1922,7 @@ def _map_probe(ctx: _MapCtx, label: str, sub: Path, names, nid):
 
 
 def _map_admit(ctx: _MapCtx, label: str, sub: Path, names, key: str, probe, jd: str):
-    """同节点两行/同名脚本内容不同查重 → 包内名≠表名备注 → 契约检查 → 判据以表为准。
+    """同节点两行/同名脚本内容不同查重 → 包内名≠表名备注 → 格式检查 → 判据以表为准。
     返回 (note, cond);拦下 → 进失败清单,返回 None。"""
     method, fc, deps, entry, per_ne, kwargs, note, supplied = probe
     if key in ctx.seen_nid:
@@ -1953,7 +1953,7 @@ def _map_admit(ctx: _MapCtx, label: str, sub: Path, names, key: str, probe, jd: 
 
 
 def _map_row(ctx: _MapCtx, names, zname: str, rowno: int, jd: str) -> None:
-    """对应表一行(zip↔路径):定位 → 指纹/错位 → 探测 → 查重与契约检查 → 进 oks(既有节点)/ adds(增节点)。"""
+    """对应表一行(zip↔路径):定位 → 指纹/错位 → 探测 → 查重与格式检查 → 进 oks(既有节点)/ adds(增节点)。"""
     loc = _map_locate(ctx, names, zname, rowno)
     if loc is None:
         return
@@ -1995,7 +1995,7 @@ def _map_sync_zipless(ctx: _MapCtx, zipless):
                 if mk:
                     ctx.jd_edits.append((znid, jd))
                     synced_nids.add(znid)
-                else:                                    # 标记契约:未标记不动,只提示
+                else:                                    # 标记规则:未标记不动,只提示
                     unmarked_diff.append((znid, names[-1]))
         elif ctx.mode == "all" and len(names) >= 2:
             # 结构以表为准,增节点不看标记:jd 空 = 平台的无判据结构层,建裸节点
@@ -2411,7 +2411,7 @@ def _batch_probe(a, product: Path, index, nodes, ledger, sub: Path, acc: _Acc):
 
 
 def _batch_admit(product: Path, sub: Path, probe, acc: _Acc) -> None:
-    """补库 → 试跑仲裁 → 同节点/同名脚本查重 → 契约检查;都过了才进 oks,否则进失败清单。"""
+    """补库 → 试跑仲裁 → 同节点/同名脚本查重 → 格式检查;都过了才进 oks,否则进失败清单。"""
     label, method, fc, deps, eff_fc, entry, per_ne, kwargs, note, nid, fp = probe
     supplied, unsupplied = _with_supplied(fc, deps)
     if unsupplied:
@@ -2697,7 +2697,7 @@ def _single_arbitrate(a, product: Path, fc: Path, deps, eff_fc: Path, entry, per
 
 def _single_migrate(a, pkg: Path, product: Path, nodes, nid: str, method, fc: Path, deps,
                     entry, per_ne, kwargs, supplied) -> None:
-    """执行模式:指纹跳过 → 契约检查 → 0.引擎检查+补全 → 1.脚本进场 → 2.调优表修改 → 3.脚本框架检查+台账 → 汇报。"""
+    """执行模式:指纹跳过 → 格式检查 → 0.引擎检查+补全 → 1.脚本进场 → 2.调优表修改 → 3.脚本框架检查+台账 → 汇报。"""
     fp = _fingerprint(pkg)
     if not a.force and _ledger_read(product).get(nid, {}).get("fingerprint") == fp:
         print(f"\n跳过:{nid}「{nodes[nid].get('name')}」的交付包内容与上次迁移完全一致"
@@ -2714,7 +2714,7 @@ def _single_migrate(a, pkg: Path, product: Path, nodes, nid: str, method, fc: Pa
     if ginfo and ginfo["warns"]:
         print(f"  [格式WARN] {','.join(ginfo['warns'])}(适配函数可处理;详见结尾的退回清单)")
 
-    # 0. 引擎检查+补全(旧产物的内核/函数库/导入校验不认 S 类,先刷新再改)
+    # 0. 引擎检查+补全(旧产物的内核/函数库/导入校验不识别 S 类,先刷新再改)
     refresh_engine(product)
 
     # 1. 脚本进场

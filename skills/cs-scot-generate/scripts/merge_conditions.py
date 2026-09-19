@@ -8,7 +8,7 @@
   · 格式守卫:点名「C/G 既无 contains 也无 equals」(op/target 之类野字段内核不读,
     实测整源假排除)与「缺 node_id」的条目——条目保留、修绑定去,内核对空 targets 也会明确拒绝;
   · 完全重复的条目去重(实测子代理会把同一段重复两遍);
-  · 用 ast 定位 <ind>_analyzer.py 里的 CONDITIONS 赋值块整体替换(空白脚本/已填过的旧内容都认),幂等。
+  · 用 ast 定位 <ind>_analyzer.py 里的 CONDITIONS 赋值块整体替换(空白脚本/已填过的旧内容都识别),幂等。
 **先到先合**:哪批结果文件在就合哪批,可反复跑——"谁先回来就先写谁"天然成立,不必等全齐。
 
 用法:
@@ -95,7 +95,7 @@ def drift_warnings(entries, tag):
         eid = e.get("id") or e.get("node_id") or "?"
         cls = str(e.get("class") or "").upper()
         if not e.get("node_id"):
-            warns.append(f"  ⚠ [{tag}] 「{eid}」缺 node_id——挂不回树,覆盖度/RCA 都认不到")
+            warns.append(f"  ⚠ [{tag}] 「{eid}」缺 node_id——挂不回树,覆盖度/RCA 都找不到它")
         if (cls in ("C", "G") and not e.get("contains") and not e.get("equals")
                 and not e.get("decision") and not e.get("sub")):
             warns.append(f"  ⚠ [{tag}] 「{eid}」C/G 缺 contains/equals(op/target 等野字段内核不读)——运行时会被内核拒为数据不足,修绑定格式")
@@ -103,7 +103,7 @@ def drift_warnings(entries, tag):
 
 
 def write_conditions(analyzer: Path, entries) -> str | None:
-    """用 ast 定位 CONDITIONS 赋值块并整体替换(空白脚本/旧内容都认)。返回错误串或 None。"""
+    """用 ast 定位 CONDITIONS 赋值块并整体替换(空白脚本/旧内容都识别)。返回错误串或 None。"""
     try:
         src = analyzer.read_text(encoding="utf-8")
         tree = ast.parse(src)
@@ -203,7 +203,7 @@ def _collect_batch(ddir: Path, ind: str, n: int, require_marker: bool):
         return None, f"{ind} 批{n}:{err}——用同一份任务说明重派该批"
     s_ids = [str(e.get("node_id") or "?") for e in entries
              if isinstance(e, dict) and str(e.get("class") or "").upper() == "S"]
-    if s_ids:                                    # S(代码类)只认人工/调优表来源:模型产出=绕过全部 DSL 检查
+    if s_ids:                                    # S(代码类)只接受人工/调优表来源:模型产出=绕过全部 DSL 检查
         return None, (f"{ind} 批{n}:含 class:S 条目({', '.join(s_ids[:5])})——代码类只许人工/调优表"
                       "来源,绑定子代理不得产出;从结果文件删掉这些条目再重跑(确需脚本逻辑请人工补)")
     return entries, None

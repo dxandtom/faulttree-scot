@@ -7,7 +7,7 @@
 - **判断列按源分列**:`CHR判断方法 / X2 cause / RB日志判断方法 / 配置数据(核查/判断方法) /
   DBG日志(DEBUG) / 信令判断方法 / 话统(PFM) …` —— 表头**模糊匹配**成规范源标签
   (CHR/X2/RB/配置/DBG/信令/话统),落进节点的 `data_source`,**列头自带"查哪个源"、给绑定预路由**;
-  判据没按源分列的(混血表的 `Judgment Condition` 单列/「判断条件」)归 **通用** 标签(无预路由,
+  判据没按源分列的(混合格式表的 `Judgment Condition` 单列/「判断条件」)归 **通用** 标签(无预路由,
   路由靠模型读判据原文);同层 L n 与 L n(Chinese) 双列只取中文列(空格逐格回退英文格)。
 - **按场景名(L2)跨页签提取**:输入 `--start-node "NSA场景接入失败"`,把**所有树页签**里该 L2
   场景的行收集起来,按"根→叶"路径合并成**一棵**从 L2 起的子树;同一节点的判断按"源标签 + 出处页签"累积。
@@ -15,7 +15,7 @@
   `--sheet "<页签名>"` 可限定只用某一页(等价"按页签名选")。
 - **元数据**:`和基础诊断对接KPI索引 / 解决方案 / 备注` 存为节点元数据(**不进判断条件**);
   `数据链接` 丢弃;`产品 / 制式` 不参与建树分支。
-- 输出契约与老脚本同形(`<短名>.md` + `<短名>.tree_index.json`);**文件/目录名用英文短名(slug)**:
+- 输出格式与老脚本同形(`<短名>.md` + `<短名>.tree_index.json`);**文件/目录名用英文短名(slug)**:
   自动取场景所在层的英文列转小写连字符(如 layer-3-service-issues),取不到沿用中文名、可 --slug 指定;
   中文场景名保留在 index.scenario。节点多了可选 `meta`/`sheets` 字段(additive,老消费方忽略即可)。
 - **推荐解决方案**:`Recommend Solution(Chinese/English)` 列按节点收进 `tree/solutions.json`
@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from excel_to_tree import _clean_text, _infer_combine, _is_skip_judgment, _set_name_en, scenario_out_dir  # 复用老内核的通用件
 
-_LEVEL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")          # 新格式 L1.. / 老格式 L1(Chinese) 都认
+_LEVEL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")          # 新格式 L1.. / 老格式 L1(Chinese) 都识别
 _OLD_RE = re.compile(r"old\b|旧", re.IGNORECASE)            # 页签名带 old/旧 = 过期版,默认跳过
 DEFAULT_START_LEVEL = 2                                      # 背景业务知识:场景节点通常在 L2
 # 判断列表头 → 规范源标签(按关键词模糊匹配,兼容各页签的命名差异)。顺序无所谓,一个表头通常只含一个源词。
@@ -71,7 +71,7 @@ def classify(h: str) -> Tuple[str, Any]:
     for kw, tag in _SRC_KEYWORDS:                            # 含源关键词 → 判断方法列
         if kw.lower() in h.lower():
             return ("method", tag)
-    # 通用判据列(老格式单列判据,常见于"混血"表:v2 层级列 + v1 判据列,如数通树)——不认它
+    # 通用判据列(老格式单列判据,常见于混合格式表:v2 层级列 + v1 判据列,如数通树)——不识别它
     # 会把整棵树的判据**静默丢光**(建出 0 判据的空树,下游只能瞎猜)。
     # 标签"通用"= 判据未按源分列,路由靠模型读判据原文。
     if "judgment condition" in h.lower() or "判断条件" in h:
@@ -82,7 +82,7 @@ def classify(h: str) -> Tuple[str, Any]:
 def sheet_schema(header: List[str]):
     """表头 → (层级列[(列名,层级)]升序, 判断列{列名:源标签}, 元数据列{列名:名}, 层级备选列{层级:[列名]})。
 
-    「混血」表(同层有 L1 与 L1(Chinese) 双列、判据中英双列)的双列处理:
+    混合格式表(同层有 L1 与 L1(Chinese) 双列、判据中英双列)的双列处理:
     - 同一层级多列 → 主列取「(Chinese)」那列(业务语言);其余列进**备选表**,取值时逐格回退
       (某行中文格空、英文格有值 → 用英文格,不整列丢弃)——否则中英文名会被当成两层节点
       串进路径,树深翻倍;整列取舍又会把漏译的行静默挤层/丢支。
@@ -173,7 +173,7 @@ def slugify(name: str):
 
 def find_english_slug(tree_sheets, scenario: str):
     """任意层级:找「场景名」所在格的同层英文备选列取值,第一个能转成合法 slug 的当英文短名。
-    (混血表同层是 Lx(Chinese)/Lx 双列,主列=中文、备选列=英文——场景名住哪层就取哪层的英文格。)"""
+    (混合格式表同层是 Lx(Chinese)/Lx 双列,主列=中文、备选列=英文——场景名住哪层就取哪层的英文格。)"""
     for _name, header, rows in tree_sheets:
         levels, _, _, fb = sheet_schema(header)
         for col, lvl in levels:
@@ -191,7 +191,7 @@ def find_english_slug(tree_sheets, scenario: str):
 
 def resolve_scenario_alias(tree_sheets, scenario: str):
     """--start-node 传的是英文列(备选列)里的叫法时,翻译成主列真名。
-    背景:混血双列表的 --list 显示中文主列名,但老版脚本曾把英文列名列出来——用户/老会话
+    背景:混合格式双列表的 --list 显示中文主列名,但老版脚本曾把英文列名列出来——用户/老会话
     记住的英文名在新版下点不中,直接报"未找到"会让人以为脚本坏了。返回真名或 None。"""
     for _name, header, rows in tree_sheets:
         levels, _m, _me, fb = sheet_schema(header)
@@ -357,7 +357,7 @@ def build_index(tree_sheets, scenario: str, start_level: int) -> Dict[str, Any]:
         if not levels:
             continue
         en_lvl, jd_en_col = sheet_en_cols(header)
-        # 推荐解决方案列(混血表英文表头,classify 不收):不进树/不进判据,单独按节点收集,
+        # 推荐解决方案列(混合格式表的英文表头,classify 不收):不进树/不进判据,单独按节点收集,
         # 供 RCA 报根因时点查输出——诊断结论"太干巴巴"的补丁,但绝不掺进裁决上下文。
         sol_cols = [(h, "zh" if "chinese" in h.lower() else "en")
                     for h in header if "recommend solution" in h.lower()]
@@ -461,7 +461,7 @@ def _build_scenario_index(tree, start_node: str, start_level: int):
         alias = resolve_scenario_alias(tree, start_node)
         if alias:
             print(f"ℹ 「{start_node}」是英文列里的叫法,主列真名是「{alias}」——已按真名提取"
-                  "(--list 显示的是主列名;老版脚本曾列英文名,两代叫法都认)")
+                  "(--list 显示的是主列名;老版脚本曾列英文名,两代叫法都识别)")
             start_node = alias
             index = build_index(tree, alias, start_level)
     if not index.get("root"):
@@ -610,7 +610,7 @@ def main() -> None:
     _warn_depth(index)
     if not args.bind_top_levels:
         _exempt_top_levels(index)
-    solutions = index.pop("solutions", {})              # 单独写文件,不进 tree_index(别膨胀树契约)
+    solutions = index.pop("solutions", {})              # 单独写文件,不进 tree_index(别膨胀树的格式约定)
     md = index_to_markdown(index)
 
     slug = _pick_slug(tree, args.slug, args.start_node)

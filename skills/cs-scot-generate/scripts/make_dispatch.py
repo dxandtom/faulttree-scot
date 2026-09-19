@@ -60,7 +60,7 @@ COMMON_RULES = """【公共规约——逐条遵守】
 8. 负存在判据(判据说"**没有配置X/未启用X**"):这是可判的,**缺行就是证据**,禁投 insufficient_data——
    绑 C/G 加 `"absent":true`(命中0行=故障成立;列全空时内核自动改判数据不足,不会误判);
    "配了A但没配B"= D 组合(AND)+ 存在子条件 + `absent` 子条件,**照抄此模板的字段名**
-   (子条件列表叫 sub、目标叫 contains 列表;sub_conditions/target 等野字段内核不认、整条变数据不足):
+   (子条件列表叫 sub、目标叫 contains 列表;sub_conditions/target 等自造字段内核不识别、整条变数据不足):
    {{"class": "D", "combine": "AND", "sub": [
        {{"class": "G", "column": "<列>", "contains": ["要存在的内容"]}},
        {{"class": "G", "column": "<列>", "contains": ["要不存在的内容"], "absent": True}}]}}
@@ -89,11 +89,11 @@ COMMON_RULES = """【公共规约——逐条遵守】
   或 "aggregate"(先聚合再比,配 agg:mean/min/max/sum/first/last;注意 mean 无加权,整体水平才用);
   **require 只在 count_rows 下有效**。可选 transforms/filter/extract。
 - C/G 匹配:column + equals/contains/regex 三选一(都是列表)+ 可选 match/require/absent/filter/extract。
-- D 组合:combine(只认 "AND"/"OR")+ sub:[子绑定…] + 可选 group_by(同对象关联)。
+- D 组合:combine(只接受 "AND"/"OR")+ sub:[子绑定…] + 可选 group_by(同对象关联)。
 - P 成对:side_column + value_column + 可选 peer_marker(默认"*")/fault_when/filter/extract。
 - J 人工:note。查不了:{{"decision":"insufficient_data","mapping_reason":"…"}}(不带 class)。
 
-【参考示例(few-shot;是参考写法不是铁律,遇到判据确有例外就按语义变通,mapping_reason 写清)】
+【参考示例(few-shot;是参考写法不是硬性规定,遇到判据确有例外就按语义变通,mapping_reason 写清)】
 ◇「回显里出现某告警/事件字样」(存在即证据):
   {{"node_id":"n6","class":"G","column":"CmdResult","filter":{{"column":"CmdName","contains":"display alarm"}},
     "contains":["hwBaseSocAttackTrap"],"mapping_reason":"告警名只在发生时出现,filter 选中该命令的回显行再找"}}
@@ -632,7 +632,7 @@ def _run_cross(args, out: Path, ov_dir: Path, conditions, inds, scenario: str, k
 def _injectable_digests(digests: dict, conditions) -> dict:
     """可注入的纪要(有正文的),并打印命中/不可用/超长截断统计。"""
     # 可注入 = 有正文的;空条目(unusable,脚本不可用)只留档——没有规格内容却标着"规格以此为准"进任务说明是自相矛盾,
-    # 还白吃字符预算撑批(实测 500+ 字/条)。路由(sources)仍用全量:不可用脚本的取数预扫也可能是对的。
+    # 还白白占用字符预算撑批(实测 500+ 字/条)。路由(sources)仍用全量:不可用脚本的取数预扫也可能是对的。
     inject = {k: v for k, v in digests.items() if str(v.get("digest") or "").strip()}
     if digests:
         n_un = len(digests) - len(inject)

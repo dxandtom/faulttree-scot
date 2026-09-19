@@ -2,7 +2,7 @@
 """从现行 skill 产物生成平台1 **增强全量表**(联调工装,不进技能)。
 
 平台约定(已对齐):每次优化都给全量表 + 标记哪些节点改了,请求带 optimizeType=ALL。
-本脚本把现行 skill 的树原样导成这张表,作为"零改动基线"——不动它直接喂驱动,预期零动作;
+本脚本把现行 skill 的树原样导成这张表,作为"零改动基线"——不动它直接交给驱动,预期零动作;
 在上面改几格(改判据/加一行/删一行/标记"是"),就是一次真实的树更新实验,不用等平台样例。
 
 表的样子(层级列数按树深度动态,列名与平台正式全量表一致):
@@ -19,7 +19,7 @@
       [--platform-excel 老平台表.xlsx]   按路径把老表的 Product_Obs/Product_Name 抄进来
       [--zip-store <目录>]               本地货架:目录里有 <节点名>.zip 的行填 Product_Name
       [--mark 节点甲,节点乙 | --mark-all] 标记列填 TRUE(缺省全 FALSE=零改动基线)
-输出 .csv(utf-8-sig)或 .xlsx(需 openpyxl);驱动与 migrate 两种都认。
+输出 .csv(utf-8-sig)或 .xlsx(需 openpyxl);驱动与 migrate 两种都识别。
 """
 from __future__ import annotations
 
@@ -198,7 +198,7 @@ def main() -> int:
     print(f"[全量表] {out}")
     print(f"  节点 {st['nodes']} 行(含根与结构层),层级 {st['depth']},带 zip {st['zip_rows']} 行,"
           f"标记 TRUE {st['marked']} 行")
-    print("  不改直接喂驱动(optimizeType=ALL)= 零改动基线,预期零动作;要做实验就在表上改:")
+    print("  不改直接交给驱动(optimizeType=ALL)= 零改动基线,预期零动作;要做实验就在表上改:")
     print("    改判据 → 该行 Diagnosis_Method_CN 改文字 + Need_Optimize=TRUE     (预期 ~ 判据同步)")
     print("    换包   → 该行 Product_Name 指向货架上新 zip + Need_Optimize=TRUE   (预期 ✓ 迁移生效)")
     print("    加节点 → 新增一行,上级各层照抄,填判据,zip 留空                  (预期 + 新增)")

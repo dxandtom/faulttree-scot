@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""check_contract.py — 交付脚本契约检查(《判断方法_规范.md》附录的机械化检查)
+"""check_contract.py — 交付脚本格式检查(《判断方法_规范.md》附录的机械化检查)
 
 用法:
     python check_contract.py <交付包目录|交付包.zip|fault_check_*.py> [--strict] [--json]
@@ -13,8 +13,8 @@
   - 单个 .py:只做脚本级检查(生成阶段自查用)
 
 分级(检查项与规范附录逐条对应,FAIL/WARN 行自带修法):
-  FAIL = 违反契约且执行/结论必受影响,下游适配函数处理不了 —— 必须修
-  WARN = 契约不达标,但下游适配函数运行时可处理、或静态无法确证 —— 新脚本必须修(--strict);
+  FAIL = 违反格式约定且执行/结论必受影响,下游适配函数处理不了 —— 必须修
+  WARN = 格式不达标,但下游适配函数运行时可处理、或静态无法确证 —— 新脚本必须修(--strict);
          存量导入可放行,但要记台账
 退出码: 0=通过(默认允许 WARN;--strict 时 WARN 也算不过) 1=不通过 2=用法/输入错误
 
@@ -33,9 +33,9 @@ import zipfile
 from pathlib import Path
 
 # 入口候选:与 cs-scot-migrate 的探测规则一致,但不含 check_ne/diagnose_ne——
-# 那俩是"内部帮手"命名,出过被误认为入口的实测事故,本检查只认全局入口。
+# 那俩是"内部帮手"命名,出过被误认为入口的实测事故,本检查只识别全局入口。
 ENTRY_OK = ("fault_check", "diagnose", "main", "check")
-TRI = ("true", "false", "undetermined", "insufficient_data")   # 四态契约(规范 v1.2);变量名沿用
+TRI = ("true", "false", "undetermined", "insufficient_data")   # 四态约定(规范 v1.2);变量名沿用
 MD_REQUIRED = ("节点名称", "故障描述", "判断条件", "命中条件", "输出", "数据来源")
 
 # py<3.10 没有 sys.stdlib_module_names 时的备用清单(常用标准库)
@@ -127,7 +127,7 @@ def _find_entry(tree):
 
 
 def _check_entry(entry_name, entry_def, tops):
-    """S1 入口:认不出入口记 FAIL(点名内部帮手),认出则按签名契约评 FAIL/WARN/PASS。"""
+    """S1 入口:认不出入口记 FAIL(点名内部帮手),认出则按签名约定评 FAIL/WARN/PASS。"""
     if entry_name is None:
         helper = tops & {"check_ne", "diagnose_ne"}
         hint = (f"(只有内部帮手 {'/'.join(sorted(helper))},帮手不算入口)" if helper else "")
@@ -240,7 +240,7 @@ def _check_file_discovery(src):
         return _pass("S3", "文件发现见 .log 处理(与 .txt 双吃)")
     if ".txt" in low:
         return _fail(
-            "S3", "文件发现只认 .txt,未见 .log 处理——现场常见 log.log,整目录漏掉(实测事故)",
+            "S3", "文件发现只识别 .txt,未见 .log 处理——现场常见 log.log,整目录漏掉(实测事故)",
             "目录扫描改成 .txt/.log 双后缀、大小写不敏感收(规范附录5)")
     return _warn(
         "S3", "源码里未见 .txt/.log 后缀常量,无法静态确认文件发现方式",
@@ -303,7 +303,7 @@ def _check_deps(tree, local_names, pkg_files):
 
 def _static_check(script: Path, local_names, pkg_files, entry_hint=None):
     """返回 (items, 试跑入口名)。local_names=同包可 import 的模块名集合;
-    entry_hint=下游仲裁选定的入口(给了就按它试跑/扫可达路径——S1 仍按契约命名评判)。"""
+    entry_hint=下游仲裁选定的入口(给了就按它试跑/扫可达路径——S1 仍按约定命名评判)。"""
     items = []
     src = script.read_text(encoding="utf-8", errors="replace")
     try:
@@ -446,7 +446,7 @@ def _tri_of(result):
 
 
 def _shape_items(iid, result, expect_undetermined, label):
-    """按输出契约给一次调用结果打分。"""
+    """按输出格式约定给一次调用结果打分。"""
     items = []
     tri, shape = _tri_of(result)
     if tri is None:
@@ -625,7 +625,7 @@ def check_package(pkg: Path, data_dir=None, timeout=120):
     fcs = sorted(set(pkg.rglob("fault_check_*.py")))
     other_py = [p for p in pkg.rglob("*.py")
                 if not p.name.startswith(("fault_check_", "search_", "verify_"))]
-    # 可 import 的"包内模块"只认契约允许随包的两类(fault_check_*/search_*)——别的 .py
+    # 可 import 的"包内模块"只接受约定允许随包的两类(fault_check_*/search_*)——别的 .py
     # (自写帮手/调试遗留/测试数据里的杂项)下游迁移不收,这里就得当包外模块拦,两端规则一致
     pkg_mods = {p.stem for p in pkg.rglob("*.py")
                 if p.name.startswith(("fault_check_", "search_"))}
@@ -651,7 +651,7 @@ def check_package(pkg: Path, data_dir=None, timeout=120):
 def check_script(script: Path, data_dir=None, timeout=120, entry=None, per_ne=False,
                  entry_kwargs=None):
     """检查单个脚本(生成阶段自查/导入检查用):同目录当作共享库所在地。
-    entry/per_ne/entry_kwargs=下游试跑仲裁的裁决——给了就按裁决结果试跑(S1 命名仍照契约评)。"""
+    entry/per_ne/entry_kwargs=下游试跑仲裁的裁决——给了就按裁决结果试跑(S1 命名仍照约定评)。"""
     report = {"target": str(script), "mode": "script", "scripts": [], "md": [],
               "notes": [], "baseline": None}
     local = {p.stem for p in script.parent.glob("*.py")

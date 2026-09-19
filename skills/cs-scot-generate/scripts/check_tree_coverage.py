@@ -165,7 +165,7 @@ def _collect_claims(args, nodes: dict):
         label, units = _claims_from_facts(Path(fp))
         if label is not None:
             _merge_units(per_source, label, units)
-    # node_id 兼容 code 形式:把 claimed 里写成 code 的归一回短 id（schema 明确两者都认,本检查也要认,否则误报漏绑）
+    # node_id 兼容 code 形式:把 claimed 里写成 code 的归一回短 id（格式说明明确两者都识别,本检查也要识别,否则误报漏绑）
     code2nid = {str(n["code"]): nid for nid, n in nodes.items() if n.get("code")}
     per_source = {lab: _renorm(d, code2nid) for lab, d in per_source.items()}
     claimed = set().union(*per_source.values()) if per_source else set()
@@ -182,7 +182,7 @@ def _resolve_columns(args) -> list:
         for apath in args.analyzer:
             p = Path(apath)
             ind = p.stem[:-len("_analyzer")] if p.stem.endswith("_analyzer") else p.stem
-            if ind == "cross":                          # cross 无自己的概览(它吃全部源)
+            if ind == "cross":                          # cross 无自己的概览(它用全部源)
                 continue
             ov = p.resolve().parent.parent / "overview" / f"{ind}_overview.json"
             if not ov.exists():

@@ -29,7 +29,7 @@ SRC = {
     "runner.py": SKILLS / "cs-scot-execute" / "scripts",
     "check_data.py": SKILLS / "cs-scot-execute" / "scripts",
     "tree_prune.py": SKILLS / "cs-scot-execute" / "scripts",
-    # datacom-fault-tree-tester 侧:契约检查脚本(导入前检查用)+ 共享解析库(交付包缺共享模块时作备用补齐)
+    # datacom-fault-tree-tester 侧:格式检查脚本(导入前检查用)+ 共享解析库(交付包缺共享模块时作备用补齐)
     "check_contract.py": SKILLS / "datacom-fault-tree-tester" / "scripts",
     "search_config.py": SKILLS / "datacom-fault-tree-tester" / "scripts",
     "search_log.py": SKILLS / "datacom-fault-tree-tester" / "scripts",

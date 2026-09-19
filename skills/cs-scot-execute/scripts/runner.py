@@ -29,14 +29,14 @@ from typing import Any, Dict
 
 _TOK = re.compile(r"[^.\[\]]+|\[\d+\]")
 
-# 产物格式契约:执行器能识别的版本。与 cs-scot-generate/scripts/assemble_scenario.py 的
+# 产物格式版本:执行器能识别的版本。与 cs-scot-generate/scripts/assemble_scenario.py 的
 # PRODUCT_FORMAT_VERSION 成对维护——产物结构有破坏性变化时两边一起 +1。比对结果只告警不阻断(用于知情,不是强制检查)。
 # 版本 2 加入了绑定的 filter 字段和空表检查(旧产物里的旧内核副本会静默忽略 filter,造成假阳性,因此提示重新 generate)。
 EXPECTED_PRODUCT_FORMAT = 3
 
 
 def check_product_format(base: Path) -> None:
-    """读取产物的 manifest.json,把其中的格式契约版本与执行器期望的版本比对;缺失或不一致时只打告警。"""
+    """读取产物的 manifest.json,把其中的产物格式版本与执行器期望的版本比对;缺失或不一致时只打告警。"""
     mf = base / "manifest.json"
     if not mf.exists():
         print(f"[warn] 产物缺 manifest.json(由旧版工具链生成,早于产物格式版本 {EXPECTED_PRODUCT_FORMAT})——"
@@ -246,7 +246,7 @@ def _write_run_manifest(run_dir: Path, run_id: str, plan: dict, data_map: Dict[s
 
 
 def _parse_knowledge_entries(text: str) -> list:
-    """把 knowledge.md 正文按「### 标题」切成条目 [{title, tags, stage, body}];「适用」「阶段」行只认正文开始之前的。"""
+    """把 knowledge.md 正文按「### 标题」切成条目 [{title, tags, stage, body}];「适用」「阶段」行只识别正文开始之前的。"""
     entries, cur = [], None
     for line in text.splitlines():
         if line.startswith("### "):
@@ -447,7 +447,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--result-base", help="结果输出根目录:各轮 result-<运行号>/ 与总索引 index.jsonl 落在"
                                           "它下面(默认=--base,即产物目录)。平台不允许技能写自身目录时"
                                           "用它把结果外移,如 --result-base <技能目录>/../<技能名>-result")
-    ap.add_argument("--result-suffix", help="可选的结果目录标签:result-<标签>-<运行号>/(只认字母数字-_)。"
+    ap.add_argument("--result-suffix", help="可选的结果目录标签:result-<标签>-<运行号>/(只接受字母数字-_)。"
                                             "隔离不靠它(每轮目录天然独立),纯粹为了好认——如多份数据并行时"
                                             "用站点名/数据文件夹名,一眼分清哪轮是谁的")
     ap.add_argument("--run-id", help="本次运行号(默认自动「时间戳+随机」,并发/重跑都不会重名)。每轮结果写入"
@@ -482,7 +482,7 @@ def _warn_data_gaps(required: Dict[str, list], provided: set, missing: Dict[str,
         if "raw" in provided and has_star:               # 唯一例外:只提供了 raw(原始日志转不出三张表时的备用运行方式)
             print("[warn] 只提供了 raw 原始目录:单源解析步骤全部跳过(相应判据本轮无事实,"
                   "RCA 按「数据不足」对待);迁移的 S 脚本经跨源步骤直读 raw 照常出事实。"
-                  "能转出三表还是要转——原有绑定只有吃到表才有饭吃。")
+                  "能转出三表还是要转——原有绑定只有拿到表才能判断。")
         else:
             print(f"没有绑定任何 plan 需要的数据源(需要: {', '.join(required)});"
                   f"用 --data <指标>=<文件> 提供,如 --data {next(iter(required))}=<文件>。", file=sys.stderr)
@@ -536,7 +536,7 @@ def _make_result_dir(args: argparse.Namespace, base: Path) -> tuple:
     result_base = Path(args.result_base).resolve() if args.result_base else base
     sfx = re.sub(r"[^0-9A-Za-z_-]", "", args.result_suffix or "")
     if args.result_suffix and not sfx:
-        print(f"[warn] --result-suffix「{args.result_suffix}」清洗后为空(只认字母数字-_),按无标签处理")
+        print(f"[warn] --result-suffix「{args.result_suffix}」清洗后为空(只接受字母数字-_),按无标签处理")
     stamp = re.sub(r"[^0-9A-Za-z_-]", "", re.sub(r"^run-", "", run_id)) or "unnamed"
     result_subdir = f"result-{sfx}-{stamp}" if sfx else f"result-{stamp}"
     result_dir = result_base / result_subdir

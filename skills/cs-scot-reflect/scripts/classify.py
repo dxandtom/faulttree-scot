@@ -171,13 +171,13 @@ def _only_raw_form(supportable: List[str], names: set) -> bool:
 
 
 def _binding_form_mismatch(supportable: List[str]) -> Dict[str, Any]:
-    """类1 检测改判为类2 的结果对象:现绑定(表类)吃不了在场的 raw,修复在绑定层。"""
+    """类1 检测改判为类2 的结果对象:现绑定(表类)处理不了在场的 raw,修复在绑定层。"""
     return {
         "class": 2,
         "error_category": "BINDING_GAP",
         "verdict": VERDICTS["BINDING_GAP"],
         "reason": (f"绑定形态不匹配:数据源 {supportable} 的内容在用例数据里以 raw 形态"
-                   "在场(无表文件),执行缺的是表——现绑定(表类)吃不了在场的 raw。"
+                   "在场(无表文件),执行缺的是表——现绑定(表类)处理不了在场的 raw。"
                    "有该节点交付包→migrate 重迁(fault_check 脚本直接吃 raw);"
                    "无包→zip2csv 转表 + data_map.json 映射,或给 tester 出脚本需求单"),
         "binding_form_mismatch": True,

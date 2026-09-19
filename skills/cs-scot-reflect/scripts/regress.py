@@ -19,7 +19,7 @@
   decisions.json 后重跑 finalize+render,再单用例判卷即可。
 - 一键回归供日常回归;要对外讲的量化数字仍按 A/B 双会话规格(诊断会话不读 expected.json)。
 
-数据喂法(机械规则):
+数据传入规则(机械规则):
 - 一律传 --data raw=<该用例 data 目录>(S 类脚本读原始数据的入口,实战高频事故就是漏传它);
 - 用例目录下若有 data_map.json({"cmd": "相对data的路径或绝对路径", ...}),逐条加 --data;
   没有就只传 raw——单源表绑定会按「数据不足」对待(runner 有汇总),这是入口 B 的声明边界:
@@ -103,7 +103,7 @@ def find_rca_scripts(assets: Path) -> Path:
 
 
 def case_suffix(case_id: str, idx: int) -> str:
-    """runner --result-suffix 只认[0-9A-Za-z_-]:取 case_id 首段(nX 惯例);清洗后为空退 c<序号>。
+    """runner --result-suffix 只接受[0-9A-Za-z_-]:取 case_id 首段(nX 惯例);清洗后为空退 c<序号>。
     结果匹配不依赖它——run.json 会记数据路径(eval_run 匹配规则②运行记录)。"""
     seg = case_id.split("-", 1)[0]
     return re.sub(r"[^0-9A-Za-z_-]", "", seg) or f"c{idx}"
@@ -117,7 +117,7 @@ def find_raw_root(data_dir: Path) -> Path:
     用例数据常在外面多包一层(如 formated_result/),直接拿 data 目录当 raw 会让 S 适配器
     报"不合布局"整体判不了。这里用与 check_data 建议同源的**确定性**规则定位:本层任一
     子目录(网元)底下有 CMD/CONFIG/LOG 类子目录 → 本层就是 raw 根;否则仅当只有唯一
-    子目录时才下探一层(多岔不猜),最多探 4 层;探不到原样返回(适配器的报错自带正确喂法)。"""
+    子目录时才下探一层(多岔不猜),最多探 4 层;探不到原样返回(适配器的报错自带正确的传入方式)。"""
     cur = data_dir
     for _ in range(4):
         try:
