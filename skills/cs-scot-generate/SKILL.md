@@ -137,7 +137,7 @@ python "<本目录>/scripts/assemble_scenario.py" \
   --scenario "<场景名>" --indicators <ind1>,<ind2> --out "<OUT>"
 ```
 
-这一步做三件事：把公共脚本复制进 `<OUT>/scripts/`（内核库 `condition_kernels.py`、xlsx 读取器 `xlsx_reader.py`、S 类函数库 `custom_lib.py`、配置适配器 `mo_config.py`、概览工具 `analyzer.py`、调优表导出与导入脚本 `export_tree_excel.py`、`import_tree_excel.py`、绑定格式说明文档；这几个文件每次重跑都会刷新）；为每个指标写一份待填写的分析脚本 `<指标>_analyzer.py`（`CONDITIONS` 留空，步骤 2.5 填），另写一份跨源判据脚本 `cross_analyzer.py`（由步骤 2.5 的跨源补绑填写，没有跨源绑定时执行秒过；已填过的重跑时只升级框架、绑定不动）；生成 `plan.json`（各 `<指标>_analyzer` 脚本步骤 → 跨源判据步骤 `cross` → 根因分析步骤）和 `manifest.json`（产物格式版本）。`--out` 用步骤 1 打印的 `<OUT>`。计划格式见 `references/plan_schema.md`。
+这一步做四件事：把公共脚本复制进 `<OUT>/scripts/`（内核库 `condition_kernels.py`、xlsx 读取器 `xlsx_reader.py`、S 类函数库 `custom_lib.py`、配置适配器 `mo_config.py`、概览工具 `analyzer.py`、调优表导出与导入脚本 `export_tree_excel.py`、`import_tree_excel.py`、绑定格式说明文档；这几个文件每次重跑都会刷新）；为每个指标写一份待填写的分析脚本 `<指标>_analyzer.py`（`CONDITIONS` 留空，步骤 2.5 填），另写一份跨源判据脚本 `cross_analyzer.py`（由步骤 2.5 的跨源补绑填写，没有跨源绑定时执行秒过；已填过的重跑时只升级框架、绑定不动）；生成 `plan.json`（各 `<指标>_analyzer` 脚本步骤 → 跨源判据步骤 `cross` → 根因分析步骤）和 `manifest.json`（产物格式版本）；最后自动导出调优表 `tree/<短名>.tuning.xlsx`（此时绑定列还是空的，步骤 2.5 每次合并绑定后自动刷新；写 xlsx 需要 openpyxl，缺它时只提示不阻断）。`--out` 用步骤 1 打印的 `<OUT>`。计划格式见 `references/plan_schema.md`。
 
 **外挂知识分两级。** 知识条目回答"去哪查、怎么查、什么算正常"，每条一段，用 `### 标题` 开头，可选 `阶段:绑定/诊断` 和 `适用:标签`，是判读规则而不是事实：
 
@@ -183,7 +183,7 @@ python "<本目录>/scripts/assemble_scenario.py" \
    python "<本目录>/scripts/merge_conditions.py" --out "<OUT>"
    ```
 
-   脚本验收、去重，并把绑定写进各 `<指标>_analyzer.py`。缺批、坏批按脚本提示用同一份任务说明重派一次。
+   脚本验收、去重，并把绑定写进各 `<指标>_analyzer.py`，有绑定写入时随即刷新调优表 `tree/<短名>.tuning.xlsx`。缺批、坏批按脚本提示用同一份任务说明重派一次。
 
 6. **跨源补绑**：合并脚本打印"跨源判据候选 N 条"时，跑 `make_dispatch.py --out "<OUT>" --cross` 生成补绑任务说明，派发和合并同上，结果写进 `cross_analyzer.py`。这一小步做完再进步骤 3。
 
@@ -241,7 +241,7 @@ python -c "import shutil,glob,os,sys; O=sys.argv[1]; shutil.rmtree(O+'/overview'
 ├── tree/<短名>.md                          # 故障树 Markdown（产物③；短名 = 英文 slug，取不到英文时 = 中文场景名）
 ├── tree/<短名>.tree_index.json            # 权威拓扑：node_id、父子、判据、数据源（绑定与根因分析都依赖它）
 ├── tree/knowledge.md                      # 外挂知识（产物级；首次组装时从技能级 knowledge.md 复制，交付后业务同事往这里追加）
-├── tree/<短名>.tuning.xlsx                 # 调优表（步骤 5 打包时自动导出，默认流程下在步骤 6 前手动导出）
+├── tree/<短名>.tuning.xlsx                 # 调优表（步骤 2 组装时自动导出，步骤 2.5 每次合并绑定后自动刷新）
 └── tree/solutions.json                    # （可选）节点到推荐解决方案的对照：根因分析报根因时附上，不进裁决上下文
 ```
 
@@ -259,7 +259,7 @@ python "<本目录>/scripts/package_scenario.py" --out "<OUT>"    # 产出 <根�
 
 ## 步骤 6（人工调优）：调优表是树和绑定的可编辑事实源
 
-调优表 `tree/<短名>.tuning.xlsx` 不是默认流程自动产出的：只有步骤 5 的 `package_scenario.py` 打包时会自动导出；默认流程（步骤 1 直接搭好技能目录、跳过步骤 5）下，进入本步前先跑 `python "<OUT>/scripts/export_tree_excel.py" --out "<OUT>"` 生成或刷新调优表。调优表是单页签，一行一个节点，含层级、判据、各源绑定 JSON、解决方案；树里有英文时多出 `L<n>(English)` 和 `Judgment Condition(English)` 列，改英文也在这张表上改，中文判据清空则英文判据一并清空；绑定列的写法和类别模板见产物自带的 `scripts/condition_binding_schema.md`，既是机器读取的格式约定，人也读得懂，不另设第二份文档。人改完表后一条命令编译回产物，零模型参与：
+调优表 `tree/<短名>.tuning.xlsx` 在步骤 2 组装时自动导出，步骤 2.5 每次合并绑定后和步骤 5 打包时自动刷新，产物里始终有一份与树和绑定一致的表。手工改过 `<指标>_analyzer.py` 或想确认表是最新的，再跑 `python "<OUT>/scripts/export_tree_excel.py" --out "<OUT>"` 刷新即可（写 xlsx 需要 openpyxl；缺它时组装和合并只提示不阻断，装好后手动跑这一条）。调优表是单页签，一行一个节点，含层级、判据、各源绑定 JSON、解决方案；树里有英文时多出 `L<n>(English)` 和 `Judgment Condition(English)` 列，改英文也在这张表上改，中文判据清空则英文判据一并清空；绑定列的写法和类别模板见产物自带的 `scripts/condition_binding_schema.md`，既是机器读取的格式约定，人也读得懂，不另设第二份文档。人改完表后一条命令编译回产物，零模型参与：
 
 ```bash
 python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或场景技能的 assets/>"
@@ -275,10 +275,10 @@ python "<产物>/scripts/import_tree_excel.py" --out "<产物目录或场景技�
 |---|---|---|
 | 1 | `excel_to_tree_v2.py "D:\树\接入失败.xlsx" --list` | 场景名"接入失败示例"在列表里 |
 | 1 | `excel_to_tree_v2.py "D:\树\接入失败.xlsx" --start-node "接入失败示例"` | 打印技能目录 `D:\树\scot技能\access-failure-demo\` 和产物目录 `<OUT>`（其 `assets/`）；"带判据节点 N" 大于 0 |
-| 2 | `assemble_scenario.py --scenario "接入失败示例" --indicators kpi,log --out "<OUT>"` | `<OUT>/scripts/` 下出现 `kpi_analyzer.py`、`log_analyzer.py`、`plan.json` |
+| 2 | `assemble_scenario.py --scenario "接入失败示例" --indicators kpi,log --out "<OUT>"` | `<OUT>/scripts/` 下出现 `kpi_analyzer.py`、`log_analyzer.py`、`plan.json`；`tree/` 下出现 `<短名>.tuning.xlsx` |
 | 2.5 | `analyzer.py "D:\数据\kpi.csv" --lean -o "<OUT>/overview/kpi_overview.json"`，log 同理 | 两份概览文件 |
 | 2.5 | `make_dispatch.py --out "<OUT>" --route` → 派 1 个子代理 → `make_dispatch.py --out "<OUT>"` | `dispatch/` 下出现 `kpi_batch1.txt`、`log_batch1.txt` …… |
-| 2.5 | 每份任务说明派一个子代理 → `merge_conditions.py --out "<OUT>"` | 打印每批合并条数；有"跨源判据候选"就再跑 `--cross` 一轮 |
+| 2.5 | 每份任务说明派一个子代理 → `merge_conditions.py --out "<OUT>"` | 打印每批合并条数和"调优表已按最新绑定刷新"；有"跨源判据候选"就再跑 `--cross` 一轮 |
 | 3 | 两个 analyzer 各跑一遍 → `validate_conditions.py` → `check_tree_coverage.py` | 校验无"不合格"，覆盖度检查无 `❌ 漏绑`，退出码 0 |
 | 4 | 清理命令 | `overview/`、`dispatch/` 消失 |
 | 汇报 | 技能目录路径 + 覆盖度输出行 + 警告处理结果 | |
