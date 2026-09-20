@@ -8,6 +8,7 @@
    assets/fault-tree-rca(补上树视图 render_tree.py)与 SKILL.md 正文(带 rca_reply.md 指引)刷新到当前代;
 ⑤ 发行包里的 migrate(无 engine/)靠包根的其他技能目录做同一件事,结果与 ④ 相同——两种形态没有能力差。"""
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,27 @@ p2 = subprocess.run([sys.executable, str(REPO / "skills/cs-scot-generate-optimiz
 pkg = out / "cs-scot-generate-optimize"
 check("打包退出码 0", p2.returncode == 0, (p2.stdout + p2.stderr)[-600:])
 check("包里没有 migrate/engine/", not (pkg / "migrate" / "engine").exists())
+
+
+def _split_fm(p: Path):
+    """SKILL.md → (frontmatter 文本, 正文)。"""
+    t = p.read_text(encoding="utf-8")
+    m = re.match(r"^---\n(.*?)\n---\n", t, re.S)
+    return (m.group(1), t[m.end():]) if m else ("", t)
+
+
+fm_g, body_g = _split_fm(pkg / "generate" / "SKILL.md")
+fm_m, body_m = _split_fm(pkg / "migrate" / "SKILL.md")
+check("两线手册副本的 name 与包内目录名一致(generate、migrate)",
+      re.search(r"(?m)^name: generate$", fm_g) and re.search(r"(?m)^name: migrate$", fm_m))
+check("副本描述写明是发行包内的线手册并点名对应的仓库技能",
+      "生成线手册" in fm_g and "cs-scot-generate 技能" in fm_g and "优化线手册" in fm_m and "cs-scot-migrate 技能" in fm_m)
+check("两线手册副本的正文与源一字不差",
+      body_g == _split_fm(REPO / "skills" / "cs-scot-generate" / "SKILL.md")[1]
+      and body_m == _split_fm(REPO / "skills" / "cs-scot-migrate" / "SKILL.md")[1])
+check("源文件未被改写(仓库里的 name 仍是 cs-scot-generate / cs-scot-migrate)",
+      "name: cs-scot-generate" in _split_fm(REPO / "skills" / "cs-scot-generate" / "SKILL.md")[0]
+      and "name: cs-scot-migrate" in _split_fm(REPO / "skills" / "cs-scot-migrate" / "SKILL.md")[0])
 check("包里有 skills 目录下的源(generate/scripts/xlsx_reader.py、cs-scot-execute/scripts/runner.py)",
       (pkg / "generate" / "scripts" / "xlsx_reader.py").exists() and (pkg / "cs-scot-execute" / "scripts" / "runner.py").exists())
 by_hash = defaultdict(list)

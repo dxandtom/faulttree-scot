@@ -12,13 +12,17 @@
     dist/cs-scot-generate-optimize.zip       同内容 zip(平台认 zip 就给这个;同一提交可复现)
     包内 MANIFEST.txt                        全部文件清单 + 来源提交(带 +dirty 标记)
 
-原则:纯复制,不改写任何源文件;输出目录与任何源目录重叠即拒绝执行;
+原则:纯复制,不改写任何源文件;包内只改一处——两本线手册副本(generate/SKILL.md、migrate/SKILL.md)的
+frontmatter:name 改成包内目录名、description 写明是发行包内的线手册,正文一字不动(它们在包里是入口下面的
+手册,不是注册的技能,目录名与自称不一致会误导模型去找一个叫 cs-scot-generate 的技能);
+输出目录与任何源目录重叠即拒绝执行;
 关键文件逐一核验,缺一个就明确报错并清掉残留(不留半个包)。
 公共素材(cs-scot-execute / fault-tree-rca / zip2csv)与线目录平铺在包根(包根扮演仓库 skills/ 目录的角色)——
 装了这个包,生成线直接生成的场景技能就是完整可执行成品,不再有"只生成产物目录"的边界。
 """
 import argparse
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -45,6 +49,8 @@ LAYOUT = {
     "datacom-fault-tree-tester": ["datacom-fault-tree-tester"],
 }
 MATERIALS = ("cs-scot-execute", "fault-tree-rca", "zip2csv")
+# 两条线在包内是入口下面的手册:包内目录名 → (仓库里的技能名, 线名)。复制后改写副本 frontmatter 用。
+LINE_MANUALS = {"generate": ("cs-scot-generate", "生成线"), "migrate": ("cs-scot-migrate", "优化线")}
 
 
 def _resolve_src(skills_dir: Path, name: str):
@@ -238,6 +244,21 @@ def _copy_tree(src_name: str, src: Path, dst: Path, rel: str) -> None:
     shutil.copytree(src, dst, ignore=ig)
 
 
+def _rewrite_line_manual(pkg_dir: Path, rel: str) -> None:
+    """两线手册副本的 frontmatter:name 改成包内目录名,description 写明是发行包内的线手册;正文一字不动。"""
+    src_name, line = LINE_MANUALS[rel]
+    path = pkg_dir / rel / "SKILL.md"
+    txt = path.read_text(encoding="utf-8")
+    m = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", txt, re.S)
+    if not m:
+        raise SystemExit(f"✗ {path} 缺 frontmatter,无法改写技能名——源 {src_name}/SKILL.md 的开头被改坏了?")
+    desc = (f"{PKG_NAME} 发行包内的{line}手册,对应仓库里的 {src_name} 技能。不单独触发,由入口 SKILL.md 按线调用;"
+            f"手册命令里的 skills/{src_name}/ 前缀换成本目录的绝对路径。")
+    fm = re.sub(r"(?m)^name:.*$", f"name: {rel}", m.group(1), count=1)
+    fm = re.sub(r"(?m)^description:.*$", f"description: {desc}", fm, count=1)
+    path.write_text(f"---\n{fm}\n---\n" + txt[m.end():], encoding="utf-8")
+
+
 def _copy_layout(sources: dict, pkg_dir: Path) -> None:
     """2:按 LAYOUT 纯复制(包根平铺 / 子目录整拷)。"""
     for src_name, dests in LAYOUT.items():
@@ -248,6 +269,8 @@ def _copy_layout(sources: dict, pkg_dir: Path) -> None:
                 _copy_flat(src, dst, rel)
             else:
                 _copy_tree(src_name, src, dst, rel)
+                if rel in LINE_MANUALS:                  # 线手册副本:自称与包内目录名对齐
+                    _rewrite_line_manual(pkg_dir, rel)
 
 
 def _verify_required(pkg_dir: Path, out_root: Path):
