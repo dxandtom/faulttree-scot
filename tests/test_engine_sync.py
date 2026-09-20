@@ -58,9 +58,14 @@ check("两线手册副本的 name 与包内目录名一致(generate、migrate)",
       re.search(r"(?m)^name: generate$", fm_g) and re.search(r"(?m)^name: migrate$", fm_m))
 check("副本描述写明是发行包内的线手册并点名对应的仓库技能",
       "生成线手册" in fm_g and "cs-scot-generate 技能" in fm_g and "优化线手册" in fm_m and "cs-scot-migrate 技能" in fm_m)
-check("两线手册副本的正文与源一字不差",
-      body_g == _split_fm(REPO / "skills" / "cs-scot-generate" / "SKILL.md")[1]
-      and body_m == _split_fm(REPO / "skills" / "cs-scot-migrate" / "SKILL.md")[1])
+check("副本标题行的技能名改成了目录名",
+      re.search(r"(?m)^# generate：", body_g) and re.search(r"(?m)^# migrate：", body_m)
+      and "# cs-scot-generate" not in body_g and "# cs-scot-migrate" not in body_m)
+src_g = _split_fm(REPO / "skills" / "cs-scot-generate" / "SKILL.md")[1]
+src_m = _split_fm(REPO / "skills" / "cs-scot-migrate" / "SKILL.md")[1]
+check("除标题行的技能名外,两线手册副本的正文与源一字不差",
+      body_g == src_g.replace("# cs-scot-generate：", "# generate：", 1)
+      and body_m == src_m.replace("# cs-scot-migrate：", "# migrate：", 1))
 check("源文件未被改写(仓库里的 name 仍是 cs-scot-generate / cs-scot-migrate)",
       "name: cs-scot-generate" in _split_fm(REPO / "skills" / "cs-scot-generate" / "SKILL.md")[0]
       and "name: cs-scot-migrate" in _split_fm(REPO / "skills" / "cs-scot-migrate" / "SKILL.md")[0])

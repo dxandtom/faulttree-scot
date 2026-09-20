@@ -12,9 +12,10 @@
     dist/cs-scot-generate-optimize.zip       同内容 zip(平台认 zip 就给这个;同一提交可复现)
     包内 MANIFEST.txt                        全部文件清单 + 来源提交(带 +dirty 标记)
 
-原则:纯复制,不改写任何源文件;包内只改一处——两本线手册副本(generate/SKILL.md、migrate/SKILL.md)的
-frontmatter:name 改成包内目录名、description 写明是发行包内的线手册,正文一字不动(它们在包里是入口下面的
-手册,不是注册的技能,目录名与自称不一致会误导模型去找一个叫 cs-scot-generate 的技能);
+原则:纯复制,不改写任何源文件;包内只改一处——两本线手册副本(generate/SKILL.md、migrate/SKILL.md):
+frontmatter 的 name 改成包内目录名、description 写明是发行包内的线手册,标题行的技能名同步改,其余正文
+一字不动(它们在包里是入口下面的手册,不是注册的技能,目录名与自称不一致会误导模型去找一个叫
+cs-scot-generate 的技能);
 输出目录与任何源目录重叠即拒绝执行;
 关键文件逐一核验,缺一个就明确报错并清掉残留(不留半个包)。
 公共素材(cs-scot-execute / fault-tree-rca / zip2csv)与线目录平铺在包根(包根扮演仓库 skills/ 目录的角色)——
@@ -245,7 +246,8 @@ def _copy_tree(src_name: str, src: Path, dst: Path, rel: str) -> None:
 
 
 def _rewrite_line_manual(pkg_dir: Path, rel: str) -> None:
-    """两线手册副本的 frontmatter:name 改成包内目录名,description 写明是发行包内的线手册;正文一字不动。"""
+    """两线手册副本:frontmatter 的 name 改成包内目录名,description 写明是发行包内的线手册,
+    标题行"# cs-scot-generate:…"里的技能名同步改成目录名;其余正文一字不动。"""
     src_name, line = LINE_MANUALS[rel]
     path = pkg_dir / rel / "SKILL.md"
     txt = path.read_text(encoding="utf-8")
@@ -256,7 +258,9 @@ def _rewrite_line_manual(pkg_dir: Path, rel: str) -> None:
             f"手册命令里的 skills/{src_name}/ 前缀换成本目录的绝对路径。")
     fm = re.sub(r"(?m)^name:.*$", f"name: {rel}", m.group(1), count=1)
     fm = re.sub(r"(?m)^description:.*$", f"description: {desc}", fm, count=1)
-    path.write_text(f"---\n{fm}\n---\n" + txt[m.end():], encoding="utf-8")
+    body = txt[m.end():]
+    body = re.sub(rf"(?m)^# {re.escape(src_name)}(?=[:：])", f"# {rel}", body, count=1)   # 标题行的技能名
+    path.write_text(f"---\n{fm}\n---\n" + body, encoding="utf-8")
 
 
 def _copy_layout(sources: dict, pkg_dir: Path) -> None:
