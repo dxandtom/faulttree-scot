@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""评估反思整批汇总(评估输出根目录 quality_score_batch.json)口径测试(标准库,直接 python 跑):
+"""评估反思整批汇总(评估输出根目录 quality_score_batch.json)算法测试(标准库,直接 python 跑):
 ① build_batch_score 纯函数:通过 = PASS + PASS_WITH_GAPS;pass_rate = 通过 ÷ 全部用例;total_score = 各用例
    总分平均,没评出分按 0;六维 = 通过该关的用例比例;没判卷的记 NOT_EVALUATED;
 ② 用自带演练场(make_drill)跑两条入口——eval_run 批量判卷、regress --eval-only——两边写出的整批
@@ -43,7 +43,7 @@ def run(args):
 
 KEYS = ("total_cases", "passed", "pass_rate", "total_score", "verdicts", "dimensions")
 
-print("\n== ① build_batch_score 口径 ==")
+print("\n== ① build_batch_score 算法 ==")
 bs = load("batch_summary")
 ALL_T = {k: True for k in ("env_failure", "input_gap", "binding_gap", "knowledge_gap", "criteria_gap", "verdict_gap")}
 idx = bs.build_batch_score([
@@ -63,13 +63,13 @@ check("verdicts 计数:没判卷记 NOT_EVALUATED,合计等于总数",
       idx["verdicts"]["NOT_EVALUATED"] == 1 and idx["verdicts"]["EVAL_ERROR"] == 1
       and sum(idx["verdicts"].values()) == idx["total_cases"] == 5, idx["verdicts"])
 check("空批次不除零", bs.build_batch_score([], "t")["pass_rate"] == 0.0 and bs.build_batch_score([], "t")["total_score"] == 0.0)
-check("format_line 带通过数与口径说明", "2/5" in bs.format_line(idx) and "PASS_WITH_GAPS" in bs.format_line(idx))
+check("format_line 带通过数与算法说明", "2/5" in bs.format_line(idx) and "PASS_WITH_GAPS" in bs.format_line(idx))
 
-print("\n== ② 演练场:两条入口写出同一份口径的整批 quality_score_batch.json ==")
+print("\n== ② 演练场:两条入口写出同一算法的整批 quality_score_batch.json ==")
 W = Path(tempfile.mkdtemp(prefix="reflect-idx-"))
 rc, o = run([SCRIPTS / "make_drill.py", "--out", W / "drill"])
 check("演练场生成", rc == 0, o[-300:])
-flat = W / "flat"                                     # 结果目录平铺(目录名含 case_id → 批量对号规则①)
+flat = W / "flat"                                     # 结果目录平铺(目录名含 case_id → 批量匹配规则①)
 flat.mkdir()
 for d in sorted((W / "drill" / "results").glob("*/result-drill-*")):
     shutil.copytree(d, flat / d.name)
@@ -93,7 +93,7 @@ check("total_score ≈ 六个维度分的平均(算法一致,只差取整)",
       (a.get("total_score"), [d["score"] for d in a.get("dimensions", {}).values()]))
 check("演练场里挂在执行环境关的只有 1 个用例:env_failure 通过 8/9",
       a and a["dimensions"]["env_failure"]["passed_cases"] == n - 1, a.get("dimensions", {}).get("env_failure"))
-check("regress 终端打印与 index 同一口径", f"通过 {a.get('passed')}/{n}" in o2 and "平台/业务取数" in o2, o2[-400:])
+check("regress 终端打印与 index 同一算法", f"通过 {a.get('passed')}/{n}" in o2 and "平台/业务取数" in o2, o2[-400:])
 check("regress_summary.json 带同样的 pass_rate / total_score",
       (lambda s: s.get("pass_rate") == a.get("pass_rate") and s.get("total_score") == a.get("total_score"))(
           json.loads((W / "regress-out" / "regress_summary.json").read_text(encoding="utf-8"))))

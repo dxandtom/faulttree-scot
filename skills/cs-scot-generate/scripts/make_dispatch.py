@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""把"并行绑定的派发准备"从模型手里收回来:机械生成每个子代理的自包含简报文件。
+"""把"并行绑定的派发准备"从模型手里收回来:机械生成每个子代理的自包含任务说明文件。
 
 为什么要它:派发环节的三类实测事故——判据没读全就派发(贴不出原文)、EAV 源没带枚举
 (子代理自编指标名,实测 PORT_RxCRC)、不拆批(单次生成过长 → 回复截断/600s 流挂)——
-全是机械活没做对。散文规矩管不住弱模型,脚本管得住:简报由本脚本拼装,判据自动切批
+全是机械活没做对。写在文档里的规矩管不住弱模型,脚本管得住:任务说明由本脚本拼装,判据自动切批
 (默认 ≤12 条/批——小批防子代理写盘超时被掐+抬并行度)、该源概览/枚举原文自动嵌入、
-公共规约与 C/G·EAV 铁规是固定文本,
-模型只剩「每份简报派一个子代理」一个动作。
+公共规约与 C/G、EAV 规则是固定文本,
+模型只剩「每份任务说明派一个子代理」一个动作。
 
 产物:<OUT>/dispatch/<ind>_batch<N>.txt(自包含:公共规约 + 外挂知识(tree/knowledge.md
 按「适用」标签匹配的条目)+ 本源要点 + 数据词汇原文 + 该批判据原文 + 输出格式)。派发句式(主代理用):
-  「你的全部任务和材料在 <简报路径>,用 Read 读完它(可分段),照其中规约执行,结果放最终回复」
-子代理读不了文件的环境(权限没配)→ 主代理把简报全文读入后原样贴进派发词(纯复制,零转述)。
-简报只在绑定期有用,交付前清场(SKILL 步骤 4)会删掉 dispatch/。
+  「你的全部任务和材料在 <任务说明路径>,用 Read 读完它(可分段),照其中规约执行,结果放最终回复」
+子代理读不了文件的环境(权限没配)→ 主代理把任务说明全文读入后原样贴进派发词(纯复制,零转述)。
+任务说明只在绑定期有用,交付前清理临时文件(SKILL 步骤 4)会删掉 dispatch/。
 
 EAV 窄表源(概览列含 DataItem/DataValue)缺枚举文件(overview/<ind>*枚举*.txt 等)时
-**响亮拒产该源**并给出抽枚举的现成命令——没有词汇表的 EAV 绑定只会逼子代理编造指标名。
+**明确拒绝生成该源**并给出抽枚举的现成命令——没有词汇表的 EAV 绑定只会逼子代理编造指标名。
 
 用法:
     make_dispatch.py --out "<OUT>" [--indicators cmd,dblg,...] [--batch-size 50] [--tree-index <path>]
@@ -43,7 +43,7 @@ COMMON_RULES = """【公共规约——逐条遵守】
    (要两个源接力/比对)。"归别的源单独答"的判据,让那个源去绑就行。
 3. 树驱动:下面清单里的**每条判据都要过一遍**再决定绑/不绑;按判据要的列+值绑,**不管这次数据里出没出现**
    (值没出现 → 照绑,运行时 matched=0 = 确定排除,不是数据不足)。**绑的是规则,不是对这份样例的判词**:
-   成对/两端比对判据在样例只有单侧设备时也照绑(P/cross 口径),运行时缺对端自然报数据不足(理由由内核
+   成对/两端比对判据在样例只有单侧设备时也照绑(P/cross 的规则),运行时缺对端自然报数据不足(理由由内核
    当场生成,永远新鲜);把「本数据仅有某设备」这类样例观察写死进 decision=永久化石——换了齐全数据它也
    醒不来(实测:双设备数据齐了,判据还在背当年的"仅Switch02")。
    **概览只用来定"列的形状"**(有哪些列、值长什么格式),不用来定"值在不在"——样例不可能集齐所有
@@ -53,14 +53,14 @@ COMMON_RULES = """【公共规约——逐条遵守】
    不是碰到一条就算认领了该节点。
 5. 别的源绑不绑与你无关:多源同绑同一节点是期望行为,**不许谦让**。
 6. 每条绑定写实 mapping_reason(为何这列能答这条判据/语义或单位差异)。
-7. C/G 的 contains 铁规:每个 target 必须**独立是"判据成立的充分信号"**——禁止字段标签/命令名/协议名等
+7. C/G 的 contains 规则:每个 target 必须**独立是"判据成立的充分信号"**——禁止字段标签/命令名/协议名等
    泛词(如 "CRC:"/"LLDP"),禁止 ≤3 字符的 ASCII 短串;值否定语义("状态非UP/字段为空")禁用文本捞子串
    (数据有状态枚举列就绑 equals;状态藏在杂糅格里就加 extract 抽出字段值再 equals);趋势语义
    (增长/震荡/抖动)只能绑设备自带的检测告警码,没有就 decision。
 8. 负存在判据(判据说"**没有配置X/未启用X**"):这是可判的,**缺行就是证据**,禁投 insufficient_data——
    绑 C/G 加 `"absent":true`(命中0行=故障成立;列全空时内核自动改判数据不足,不会误判);
    "配了A但没配B"= D 组合(AND)+ 存在子条件 + `absent` 子条件,**照抄此模板的字段名**
-   (子条件列表叫 sub、目标叫 contains 列表;sub_conditions/target 等野字段内核不认、整条变数据不足):
+   (子条件列表叫 sub、目标叫 contains 列表;sub_conditions/target 等自造字段内核不识别、整条变数据不足):
    {{"class": "D", "combine": "AND", "sub": [
        {{"class": "G", "column": "<列>", "contains": ["要存在的内容"]}},
        {{"class": "G", "column": "<列>", "contains": ["要不存在的内容"], "absent": True}}]}}
@@ -73,7 +73,7 @@ COMMON_RULES = """【公共规约——逐条遵守】
    A+extract=抽数比阈值(「回显计数器>阈值」的标准做法:filter 选中命令行 + extract 抽计数,千分位自动归一,
    **别用 G 捞 "CRC:" 这类恒在标签**),C/G+extract=抽出值再 equals/contains。判据自带正则/通配形态
    (如「DOWN state \\d+ times」)→ C/G 用 `"regex": ["<正则>"]` 代替 contains——但判据原文是**原料不是
-   成品**:%u/%d 这类 printf 占位先换成 \\d+、HTML 渣剔掉,编译不过内核会响亮拒收。
+   成品**:%u/%d 这类 printf 占位先换成 \\d+、HTML 残片剔掉,编译不过内核会明确拒收。
    本端/对端一致性判据("查对端,看两侧X是否一致")→ P 类,照抄字段名:
    {{"class":"P","side_column":"<分侧列,含*标记=本端>","value_column":"<取值列>","fault_when":"not_equal"}}
    (可加 filter 选检查项、extract 抽格内值;查不到对端=数据不足,不是"不成立")。
@@ -89,11 +89,11 @@ COMMON_RULES = """【公共规约——逐条遵守】
   或 "aggregate"(先聚合再比,配 agg:mean/min/max/sum/first/last;注意 mean 无加权,整体水平才用);
   **require 只在 count_rows 下有效**。可选 transforms/filter/extract。
 - C/G 匹配:column + equals/contains/regex 三选一(都是列表)+ 可选 match/require/absent/filter/extract。
-- D 组合:combine(只认 "AND"/"OR")+ sub:[子绑定…] + 可选 group_by(同对象关联)。
+- D 组合:combine(只接受 "AND"/"OR")+ sub:[子绑定…] + 可选 group_by(同对象关联)。
 - P 成对:side_column + value_column + 可选 peer_marker(默认"*")/fault_when/filter/extract。
 - J 人工:note。查不了:{{"decision":"insufficient_data","mapping_reason":"…"}}(不带 class)。
 
-【参考示例(few-shot;是参考写法不是铁律,遇到判据确有例外就按语义变通,mapping_reason 写清)】
+【参考示例(few-shot;是参考写法不是硬性规定,遇到判据确有例外就按语义变通,mapping_reason 写清)】
 ◇「回显里出现某告警/事件字样」(存在即证据):
   {{"node_id":"n6","class":"G","column":"CmdResult","filter":{{"column":"CmdName","contains":"display alarm"}},
     "contains":["hwBaseSocAttackTrap"],"mapping_reason":"告警名只在发生时出现,filter 选中该命令的回显行再找"}}
@@ -107,7 +107,7 @@ COMMON_RULES = """【公共规约——逐条遵守】
 ◇反面参考:把"命令名出现在命令列"当故障信号(如 contains:["display vxlan tunnel"] 绑在 CmdName)
   ——健康设备同样执行巡检命令,基本必假阳;命令列一般只当 filter 用,判定落到内容列上。"""
 
-EAV_RULES = """【EAV 窄表铁规(本源适用)】
+EAV_RULES = """【EAV 窄表规则(本源适用)】
 本源是"一行一个量"的窄表:DataItem 说这行是什么指标,DataValue 是值。绑定固定形态:
   {"class":"A","filter":{"column":"DataItem","equals":"<指标名>"},"column":"DataValue","op":">","threshold":0,"scope":"count_rows",...}
   {"class":"C","filter":{"column":"DataItem","equals":"<指标名>"},"column":"DataValue","contains":["<取值>"],...}
@@ -201,7 +201,7 @@ OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
 ROUTE_RULES = """【任务框架——只做路由,不做绑定】
 你要做的是"预分诊":逐条判断每个判据**可能**由下面哪些数据源回答,产出路由表。
 后续每个源会派专门的子代理做绑定(逐条读判据原文、语义映射、写映射理由)——那不是你的活,
-你只决定"这条判据要不要进某个源的批"。判断口径:
+你只决定"这条判据要不要进某个源的批"。判断规则:
 - **多选宁多勿漏**:拿不准就把可能的源都选上——选多了只是该源的绑定代理多判一条(几十秒);
   选漏了该判据不会进被漏源的批,要靠后面的覆盖校验和跨源补绑才捞得回来(拖慢整体);
 - 完全没把握的判据 → sources 填全部源(等同不裁剪,判据不会丢);
@@ -266,7 +266,7 @@ def parse_knowledge(text: str):
             cur = {"title": line[4:].strip(), "tags": None, "stage": None, "body": []}
             entries.append(cur)
         elif cur is not None:
-            s = line.strip().replace(":", ":")
+            s = line.strip().replace("：", ":")            # 全角冒号归一成半角,「阶段：」「适用：」也能识别
             if cur["tags"] is None and not cur["body"] and s.startswith("适用:"):
                 cur["tags"] = [t for t in re.split(r"[、,,/\s]+", s.split(":", 1)[1]) if t]
             elif cur["stage"] is None and not cur["body"] and s.startswith("阶段:"):
@@ -278,13 +278,13 @@ def parse_knowledge(text: str):
 
 def match_knowledge(entries, name_pool: str):
     """按「阶段」与「适用」双维筛条目——阶段管给谁看:标「诊断」且没提「绑定/生成」的是
-    诊断口径知识,不进绑定简报;无阶段=两边都载。适用管哪个分支看:无标签/含「通用」恒选;
-    有标签则任一标签出现在 name_pool(节点名+判据文本拼串)才选——按分支载入,不全量灌。"""
+    诊断阶段的判读规则,不进绑定任务说明;无阶段=两边都载。适用管哪个分支看:无标签/含「通用」恒选;
+    有标签则任一标签出现在 name_pool(节点名+判据文本拼串)才选——按分支载入,不全量塞入。"""
     picked = []
     for e in entries:
         st = e.get("stage") or ""
         if st and "诊断" in st and not ("绑定" in st or "生成" in st):
-            continue                                     # 诊断期专属知识,绑定简报不灌
+            continue                                     # 诊断期专属知识,不进绑定任务说明
         if e["tags"] and "通用" not in e["tags"] and not any(t in name_pool for t in e["tags"]):
             continue
         tagline = f"(适用:{'、'.join(e['tags'])})" if e["tags"] else ""
@@ -305,9 +305,9 @@ def load_knowledge(out: Path, name_pool: str):
 
 
 def load_digests(out: Path) -> dict:
-    """<OUT>/tree/script_digests.json(历史 adopt 流程收编的平台脚本纪要;该流程已删,
+    """<OUT>/tree/script_digests.json(历史 adopt 流程导入的平台脚本纪要;该流程已删,
     存量纪要继续生效)→ {node_id: rec};没有/坏了 → 空 dict(纪要是增益,不因它坏主流程,
-    但坏文件要响亮提示)。"""
+    但坏文件要明确提示)。"""
     p = out / "tree" / "script_digests.json"
     if not p.exists():
         return {}
@@ -315,7 +315,7 @@ def load_digests(out: Path) -> dict:
         d = json.loads(p.read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     except (OSError, json.JSONDecodeError) as e:
-        print(f"[warn] script_digests.json 读取失败({e}),本轮简报不带脚本纪要", file=sys.stderr)
+        print(f"[warn] script_digests.json 读取失败({e}),本轮任务说明不带脚本纪要", file=sys.stderr)
         return {}
 
 
@@ -347,9 +347,9 @@ def _load_route(ddir: Path, inds) -> dict:
 
 
 def digest_block(nid: str, dg: dict, include_depends: bool = False) -> str:
-    """一条纪要 → 简报里的 ◆ 块(单源批与 --cross 补绑简报共用,防两处走形)。
-    depends 只在 include_depends=True(跨源补绑简报)时附——单源批里它唯一的实测作用是投降诱饵
-    ("需上游传参"→insufficient_data 化石),本地绑定落点由纪要正文的命令/字段给出,不需要入参链;
+    """一条纪要 → 任务说明里的 ◆ 块(单源批与 --cross 补绑任务说明共用,防两处不一致)。
+    depends 只在 include_depends=True(跨源补绑任务说明)时附——单源批里它唯一的实测作用是诱导子代理放弃
+    ("需上游传参"→直接写成 insufficient_data),本地绑定落点由纪要正文的命令/字段给出,不需要入参链;
     跨源批则相反:param_from 传参链要靠这些字段名当原料。"""
     extra = ""
     if dg.get("regexes"):
@@ -364,7 +364,7 @@ def digest_block(nid: str, dg: dict, include_depends: bool = False) -> str:
 
 def split_batches(conditions, digests: dict, batch_size: int, char_budget: int = 30000):
     """切批:无纪要时按条数(老行为);有纪要时再叠一个字符预算——带纪要的判据体积大,
-    固定条数会把简报撑爆,按「判据+纪要」总字符封顶自动少装几条。"""
+    固定条数会把任务说明撑爆,按「判据+纪要」总字符封顶自动少装几条。"""
     if not digests:
         import math as _m
         n = max(1, _m.ceil(len(conditions) / batch_size))
@@ -386,7 +386,7 @@ def split_batches(conditions, digests: dict, batch_size: int, char_budget: int =
 def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_text, is_eav, enum_texts, result_path,
                    knowledge_text=None, digests=None):
     sec = []
-    sec.append(f"# 绑定简报:{ind} 源 · 第 {batch_no}/{n_batches} 批(本批 {len(batch)} 条判据,全树共 {total} 条;"
+    sec.append(f"# 绑定任务说明:{ind} 源 · 第 {batch_no}/{n_batches} 批(本批 {len(batch)} 条判据,全树共 {total} 条;"
                f"其余批由别的子代理处理,你只管本批)\n【结果文件】{result_path}")
     sec.append(f"你是诊断绑定专家,任务:把下面这批故障树判据映射(或明确不映射)到 {ind} 数据源,"
                f"产出 {ind}_analyzer.py 的 CONDITIONS 片段。场景:{scenario}。")
@@ -408,7 +408,7 @@ def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_te
     for nid, name, cond in batch:
         lines.append(f"\n[{nid}] {name}\n{cond}")
         dg = (digests or {}).get(nid)
-        if dg and str(dg.get("digest") or "").strip():   # 空壳(unusable)不注入:零规格不配权威帽子
+        if dg and str(dg.get("digest") or "").strip():   # 空条目(unusable)不注入:没有规格内容的不能冒充权威依据
             has_digest = True
             lines.append(digest_block(nid, dg, include_depends=False))
     if has_digest:
@@ -420,13 +420,9 @@ def build_briefing(ind, scenario, batch_no, n_batches, batch, total, overview_te
     return "\n\n" .join(sec) + "\n"
 
 
-def main() -> int:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")   # 拒产信息走 stderr,漏配会在 Windows 上变乱码(实测)
-    except Exception:
-        pass
-    ap = argparse.ArgumentParser(description="机械生成并行绑定的子代理简报(判据切批+概览/枚举嵌入+固定规约)")
+def _build_parser() -> argparse.ArgumentParser:
+    """CLI 参数定义(--out/--indicators/--batch-size/--tree-index/--cross/--route/--no-route)。"""
+    ap = argparse.ArgumentParser(description="机械生成并行绑定的子代理任务说明(判据切批+概览/枚举嵌入+固定规约)")
     ap.add_argument("--out", required=True, help="场景产物目录 <OUT>")
     ap.add_argument("--indicators", default="", help="逗号分隔;缺省=按 <OUT>/scripts/*_analyzer.py 自动发现")
     ap.add_argument("--batch-size", type=int, default=12,
@@ -435,241 +431,269 @@ def main() -> int:
                          "(实测);②批多=并行度高(61 条判据从 2 批并行变 5~6 批并行)。")
     ap.add_argument("--tree-index", default="", help="缺省=<OUT>/tree/*.tree_index.json(须唯一)")
     ap.add_argument("--cross", action="store_true",
-                    help="生成跨源补绑简报(读 dispatch/cross_candidates.json,由 merge_conditions 汇集)")
+                    help="生成跨源补绑任务说明(读 dispatch/cross_candidates.json,由 merge_conditions 汇集)")
     ap.add_argument("--route", action="store_true",
-                    help="生成路由简报(预分诊小步):子代理只判每条判据可能归哪些源,写 "
-                         "dispatch/route_batch<N>_result.json;收货后重跑本脚本(不带 --route),"
+                    help="生成路由任务说明(预分诊小步):子代理只判每条判据可能归哪些源,写 "
+                         "dispatch/route_batch<N>_result.json;合并结果后重跑本脚本(不带 --route),"
                          "各源批只装归自己的判据——砍掉'每源都判全量判据'的 N 倍重复")
     ap.add_argument("--no-route", action="store_true",
-                    help="显式跳过路由按广播派发(判断量 ×源数)。路由简报在场却没有结果时,"
+                    help="显式跳过路由按广播派发(判断量 ×源数)。路由任务说明在场却没有结果时,"
                          "正常模式默认拒产硬拦防跳步——确要广播才用这个放行")
-    args = ap.parse_args()
-    if args.route and args.cross:
-        _fail("--route 与 --cross 互斥:路由是绑定前的预分诊,cross 是绑定后的补绑")
-        return 2
-    if args.route and args.no_route:
-        _fail("--route 与 --no-route 互斥")
-        return 2
-    t0 = time.time()
+    return ap
 
-    out = Path(args.out)
-    if args.tree_index:
-        ti = Path(args.tree_index)
-    else:
-        cands = sorted(out.glob("tree/*.tree_index.json"))
-        if len(cands) != 1:
-            _fail(f"tree_index 不唯一/不存在({len(cands)} 个),用 --tree-index 指定")
-            return 2
-        ti = cands[0]
-    conditions = load_conditions(ti)
-    if not conditions:
-        _fail("tree_index 里没有任何带判据的节点——先回步骤 1 检查建树输出的「带判据节点 N」")
-        return 2
-    scenario = ti.stem.replace(".tree_index", "")
 
-    if args.indicators:
-        inds = [x.strip() for x in args.indicators.split(",") if x.strip()]
-    else:
-        inds = sorted(p.stem[:-len("_analyzer")] for p in out.glob("scripts/*_analyzer.py")
-                      if p.name != "cross_analyzer.py")  # cross 走 --cross 补绑简报,不按单源派
-    if not inds:
-        _fail("没找到任何指标(--indicators 或 <OUT>/scripts/*_analyzer.py)")
-        return 2
+def _locate_tree_index(out: Path, explicit: str):
+    """定位 tree_index:--tree-index 显式给了用它,否则 <OUT>/tree/*.tree_index.json 须唯一;不唯一 → None(已报错)。"""
+    if explicit:
+        return Path(explicit)
+    cands = sorted(out.glob("tree/*.tree_index.json"))
+    if len(cands) != 1:
+        _fail(f"tree_index 不唯一/不存在({len(cands)} 个),用 --tree-index 指定")
+        return None
+    return cands[0]
 
-    ov_dir = out / "overview"
 
-    if args.route:                                       # 路由小步:只出"预分诊"简报,不出绑定简报
-        digests = load_digests(out)
-        pool = [c for c in conditions
-                if not any(s in inds for s in (digests.get(c[0]) or {}).get("sources") or [])]
-        if not pool:
-            print("全部判据都有纪要 sources 路由,无需路由批——直接跑本脚本(不带 --route)出简报。")
-            return 0
-        ddir = out / "dispatch"
-        ddir.mkdir(parents=True, exist_ok=True)
-        old = _load_route(ddir, inds)
-        if old:
-            print(f"⚠ dispatch/ 已有路由结果覆盖 {len(old)} 条判据——本次会重写路由简报,"
-                  "收到新结果后以新为准")
-        src_lines = ["【可选源清单(sources 只能从这些名字里选,原样照抄)】"]
-        for ind in inds:
-            ov = ov_dir / f"{ind}_overview.json"
-            cols = []
-            if ov.exists():
-                try:
-                    cols = (json.loads(ov.read_text(encoding="utf-8")).get("summary") or {}).get("columns") or []
-                except (OSError, json.JSONDecodeError):
-                    cols = []
-            hint = ("列名:" + "、".join(str(c) for c in cols[:30])) if cols \
-                else "(概览缺失,列名未知——拿不准是否归它时把它也选上)"
-            src_lines.append(f"- {ind}:{hint}")
-        src_block = "\n".join(src_lines)
-        batches = split_batches(pool, {}, 60)            # 路由是快判,批可以大:60 条/批
-        for i, batch in enumerate(batches, 1):
-            rp = ddir / f"route_batch{i}_result.json"
-            lines = [f"# 路由简报:第 {i}/{len(batches)} 批(本批 {len(batch)} 条判据,路由池共 {len(pool)} 条)\n"
-                     f"【结果文件】{rp}",
-                     ROUTE_RULES, src_block,
-                     f"【本批判据清单(共 {len(batch)} 条)】"]
-            for nid, name, cond in batch:
-                lines.append(f"\n[{nid}] {name}\n{cond}")
-            lines.append(ROUTE_OUTPUT)
-            (ddir / f"route_batch{i}.txt").write_text("\n\n".join(lines) + "\n", encoding="utf-8")
-        print(f"路由简报 {len(batches)} 份 → {ddir}/route_batch<N>.txt(判据 {len(pool)} 条,≤60 条/批)。")
-        print("派发句式(一份简报派一个子代理,批少通常 1 个就够):")
-        print("  「你的全部任务和材料在 <简报路径>,用 Read 读完它,照其中规约执行——")
-        print("    结果写到简报指定的结果文件,最终回复只报『共 N 条,已写 <路径>』」")
-        print("收货后重跑本脚本(不带 --route)出各源绑定简报;路由结果坏/缺 → 对应判据自动回落广播,不丢。")
-        _record_timing(out, "make_dispatch_route", time.time() - t0,
-                       judgments=len(pool), briefs=len(batches))
-        return 0
+def _discover_indicators(out: Path, explicit: str) -> list:
+    """源清单:--indicators 显式给了按它,否则按 <OUT>/scripts/*_analyzer.py 自动发现。"""
+    if explicit:
+        return [x.strip() for x in explicit.split(",") if x.strip()]
+    return sorted(p.stem[:-len("_analyzer")] for p in out.glob("scripts/*_analyzer.py")
+                  if p.name != "cross_analyzer.py")  # cross 走 --cross 补绑任务说明,不按单源派
 
-    # 外挂知识(tree/knowledge.md):按树的节点名+判据文本匹配「适用」标签,命中的条目进每份简报
-    name_pool = scenario + "\n" + "\n".join(f"{name} {cond}" for _, name, cond in conditions)
-    knowledge_text = load_knowledge(out, name_pool)
-    if knowledge_text:
-        n_kn = knowledge_text.count("◆ ")
-        print(f"外挂知识:tree/knowledge.md 命中 {n_kn} 条,已嵌入全部简报")
 
-    if args.cross:                                       # 跨源补绑简报:一份装下全部候选 + 所有源的词汇
-        ddir = out / "dispatch"
-        cand_p = ddir / "cross_candidates.json"
-        cands = json.loads(cand_p.read_text(encoding="utf-8")) if cand_p.exists() else []
-        # 机械兜底:没被**任何**源认领的诊断节点也进候选——cross_source 标记靠子代理自觉,实测会失灵
-        # (没人打标记/合并被绕过),机械补位保证跨源判据不静默消失;补绑代理逐条判"真跨源还是真缺数据"。
-        claimed = set()
-        import ast as _ast
-        for ap_ in sorted(out.glob("scripts/*_analyzer.py")):
-            if ap_.name == "cross_analyzer.py":
-                continue
+def _route_source_block(ov_dir: Path, inds) -> str:
+    """路由任务说明的【可选源清单】块:每个源附概览列名(概览缺失/坏 → 提示拿不准时也选上)。"""
+    src_lines = ["【可选源清单(sources 只能从这些名字里选,原样照抄)】"]
+    for ind in inds:
+        ov = ov_dir / f"{ind}_overview.json"
+        cols = []
+        if ov.exists():
             try:
-                for node in _ast.parse(ap_.read_text(encoding="utf-8")).body:
-                    if isinstance(node, _ast.Assign) and any(
-                            isinstance(t, _ast.Name) and t.id == "CONDITIONS" for t in node.targets):
-                        claimed |= {str(e.get("node_id")) for e in _ast.literal_eval(node.value)
-                                    if isinstance(e, dict) and e.get("node_id")}
-            except Exception:  # noqa: BLE001
-                continue
-        cand_ids = {c.get("node_id") for c in cands}
-        unclaimed = [(nid, name) for nid, name, _ in conditions
-                     if nid not in claimed and nid not in cand_ids]
-        for nid, name in unclaimed:
-            cands.append({"node_id": nid, "node": name, "sources": [],
-                          "reasons": ["机械兜底:未被任何源认领——请判断是跨源联查还是确实缺数据"]})
-        if unclaimed:
-            print(f"机械兜底:{len(unclaimed)} 个无人认领的诊断节点已并入候选(不靠标记自觉)")
-        if not cands:
-            print("没有跨源候选(无 cross_source 标记,诊断节点也都已被认领)——无需补绑。")
-            return 0
-        cond_by_id = {nid: (name, cond) for nid, name, cond in conditions}
-        ddir.mkdir(parents=True, exist_ok=True)
-        # 候选清单写回(含机械兜底扫进来的)——这是"cross 正在处理谁"的权威清单,
-        # check_tree_coverage 靠它给未绑叶子标"已进跨源候选",把"流程中"和"真漏"分开。
-        cand_p.write_text(json.dumps(cands, ensure_ascii=False, indent=1), encoding="utf-8")
-        shared = [f"你是诊断绑定专家,任务:为下面的跨源判据写 param_from/pair_from 绑定(或明确绑不了),"
-                  f"产出 cross_analyzer.py 的 CONDITIONS 片段。场景:{scenario}。",
-                  CROSS_RULES.format()]
-        if knowledge_text:
-            shared.append("【外挂知识(业务同事手写:指路可信——去哪查/怎么查照它;但不是事实,查证靠数据)】\n"
-                          + knowledge_text)
-        for ind in inds:
-            ov = ov_dir / f"{ind}_overview.json"
-            if ov.exists():
-                shared.append(f"【{ind} 源数据词汇——概览原文】\n" + ov.read_text(encoding="utf-8").strip())
-            else:
-                shared.append(f"【{ind} 源概览缺失】overview/{ind}_overview.json 不存在——该源列名未知,"
-                              "涉及它的绑定老实写 decision:insufficient_data 并注明缺概览")
-            for f in find_enums(ov_dir, ind):
-                shared.append(f"【{ind} 源数据词汇——枚举清单原文:{f.name}】\n"
-                              + f.read_text(encoding="utf-8").strip())
-        digests = load_digests(out)
-        digests = {k: v for k, v in digests.items() if str(v.get("digest") or "").strip()}  # 空壳不注入
-        if digests:
-            n_hit = sum(1 for c in cands if str(c.get("node_id")) in digests)
-            print(f"脚本纪要:跨源候选命中 {n_hit}/{len(cands)} 条——◆块已附进补绑简报(规格以纪要为准,"
-                  "含依赖字段供 param_from 取材)")
-        # 切批(≤12 条/批,与单源批同因):实测 27 条候选塞单代理,一跑 13 分钟、输出截断炸格式,整批返工。
-        # 词汇/规约每份简报原样重复——简报自包含,子代理互相看不见。
-        chunks = [cands[i:i + args.batch_size] for i in range(0, len(cands), args.batch_size)]
-        (ddir / "manifest.json").write_text(json.dumps({"complete_marker": True}, ensure_ascii=False),
-                                            encoding="utf-8")
-        for i, chunk in enumerate(chunks, 1):
-            rp = ddir / f"cross_batch{i}_result.py"
-            lines = [f"【候选判据清单(共 {len(chunk)} 条;condition_text 必须逐字取自这里)】"]
-            for c in chunk:
-                nid = c.get("node_id")
-                name, cond = cond_by_id.get(nid, (c.get("node") or "?",
-                                                  "(tree_index 里查不到判据原文——node_id 可能填错,核实后表态)"))
-                srcs = "、".join(c.get("sources") or [])
-                reasons = ";".join(c.get("reasons") or [])
-                lines.append(f"\n[{nid}] {name}(由 {srcs} 源标记" + (f":{reasons}" if reasons else "") + f")\n{cond}")
-                dg = digests.get(str(nid))
-                if dg:
-                    lines.append(digest_block(str(nid), dg, include_depends=True))
-            sec = ([f"# 跨源补绑简报:cross · 第 {i}/{len(chunks)} 批(本批 {len(chunk)} 条,候选共 {len(cands)} 条;"
-                    f"其余批由别的子代理处理,你只管本批)\n【结果文件】{rp}"]
-                   + shared + ["\n".join(lines), CROSS_OUTPUT_FORMAT])
-            (ddir / f"cross_batch{i}.txt").write_text("\n\n".join(sec) + "\n", encoding="utf-8")
-        print(f"跨源补绑简报 {len(chunks)} 份 → {ddir / 'cross_batch<N>.txt'}(候选 {len(cands)} 条,"
-              f"≤{args.batch_size} 条/批)。一份简报派一个子代理(分波规矩同单源批),"
-              "结果收各批 cross_batch<N>_result.py,然后重跑 merge_conditions.py 合并进 cross_analyzer.py。")
-        return 0
+                cols = (json.loads(ov.read_text(encoding="utf-8")).get("summary") or {}).get("columns") or []
+            except (OSError, json.JSONDecodeError):
+                cols = []
+        hint = ("列名:" + "、".join(str(c) for c in cols[:30])) if cols \
+            else "(概览缺失,列名未知——拿不准是否归它时把它也选上)"
+        src_lines.append(f"- {ind}:{hint}")
+    return "\n".join(src_lines)
 
+
+def _write_route_briefs(ddir: Path, pool, batches, src_block: str) -> None:
+    """逐批写 dispatch/route_batch<N>.txt(任务框架 + 源清单 + 本批判据 + 输出格式)。"""
+    for i, batch in enumerate(batches, 1):
+        rp = ddir / f"route_batch{i}_result.json"
+        lines = [f"# 路由任务说明:第 {i}/{len(batches)} 批(本批 {len(batch)} 条判据,路由池共 {len(pool)} 条)\n"
+                 f"【结果文件】{rp}",
+                 ROUTE_RULES, src_block,
+                 f"【本批判据清单(共 {len(batch)} 条)】"]
+        for nid, name, cond in batch:
+            lines.append(f"\n[{nid}] {name}\n{cond}")
+        lines.append(ROUTE_OUTPUT)
+        (ddir / f"route_batch{i}.txt").write_text("\n\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _run_route(out: Path, ov_dir: Path, conditions, inds, t0: float) -> int:
+    """路由小步:只出"预分诊"任务说明,不出绑定任务说明。"""
     digests = load_digests(out)
-    # 可注入 = 有正文的;空壳(unusable,脚本不可用)只留档——零规格顶着"规格以此为准"进简报是自相矛盾,
-    # 还白吃字符预算撑批(实测 500+ 字/条)。路由(sources)仍用全量:不可用脚本的取数预扫也可能是对的。
+    pool = [c for c in conditions
+            if not any(s in inds for s in (digests.get(c[0]) or {}).get("sources") or [])]
+    if not pool:
+        print("全部判据都有纪要 sources 路由,无需路由批——直接跑本脚本(不带 --route)出任务说明。")
+        return 0
+    ddir = out / "dispatch"
+    ddir.mkdir(parents=True, exist_ok=True)
+    old = _load_route(ddir, inds)
+    if old:
+        print(f"⚠ dispatch/ 已有路由结果覆盖 {len(old)} 条判据——本次会重写路由任务说明,"
+              "收到新结果后以新为准")
+    src_block = _route_source_block(ov_dir, inds)
+    batches = split_batches(pool, {}, 60)            # 路由是快判,批可以大:60 条/批
+    _write_route_briefs(ddir, pool, batches, src_block)
+    print(f"路由任务说明 {len(batches)} 份 → {ddir}/route_batch<N>.txt(判据 {len(pool)} 条,≤60 条/批)。")
+    print("派发句式(一份任务说明派一个子代理,批少通常 1 个就够):")
+    print("  「你的全部任务和材料在 <任务说明路径>,用 Read 读完它,照其中规约执行——")
+    print("    结果写到任务说明指定的结果文件,最终回复只报『共 N 条,已写 <路径>』」")
+    print("合并结果后重跑本脚本(不带 --route)出各源绑定任务说明;路由结果坏/缺 → 对应判据自动回落广播,不丢。")
+    _record_timing(out, "make_dispatch_route", time.time() - t0,
+                   judgments=len(pool), briefs=len(batches))
+    return 0
+
+
+def _claimed_node_ids(out: Path) -> set:
+    """各单源 analyzer 的 CONDITIONS 已认领的 node_id 集(ast 静态读,坏文件跳过)。"""
+    claimed = set()
+    import ast as _ast
+    for ap_ in sorted(out.glob("scripts/*_analyzer.py")):
+        if ap_.name == "cross_analyzer.py":
+            continue
+        try:
+            for node in _ast.parse(ap_.read_text(encoding="utf-8")).body:
+                if isinstance(node, _ast.Assign) and any(
+                        isinstance(t, _ast.Name) and t.id == "CONDITIONS" for t in node.targets):
+                    claimed |= {str(e.get("node_id")) for e in _ast.literal_eval(node.value)
+                                if isinstance(e, dict) and e.get("node_id")}
+        except Exception:  # noqa: BLE001
+            continue
+    return claimed
+
+
+def _cross_candidates(out: Path, cand_p: Path, conditions) -> list:
+    """读 dispatch/cross_candidates.json,并机械补漏:没被任何源认领的诊断节点也进候选。"""
+    cands = json.loads(cand_p.read_text(encoding="utf-8")) if cand_p.exists() else []
+    # 机械补漏:没被**任何**源认领的诊断节点也进候选——cross_source 标记靠子代理自觉,实测会失灵
+    # (没人打标记/合并被绕过),机械补位保证跨源判据不静默消失;补绑代理逐条判"真跨源还是真缺数据"。
+    claimed = _claimed_node_ids(out)
+    cand_ids = {c.get("node_id") for c in cands}
+    unclaimed = [(nid, name) for nid, name, _ in conditions
+                 if nid not in claimed and nid not in cand_ids]
+    for nid, name in unclaimed:
+        cands.append({"node_id": nid, "node": name, "sources": [],
+                      "reasons": ["自动补漏:未被任何源认领——请判断是跨源联查还是确实缺数据"]})
+    if unclaimed:
+        print(f"自动补漏:{len(unclaimed)} 个无人认领的诊断节点已并入候选(不靠标记自觉)")
+    return cands
+
+
+def _cross_shared_sections(ov_dir: Path, inds, scenario: str, knowledge_text) -> list:
+    """跨源补绑任务说明各批共用的段落:任务框架 + 跨源规约 + 外挂知识 + 所有源的概览/枚举原文。"""
+    shared = [f"你是诊断绑定专家,任务:为下面的跨源判据写 param_from/pair_from 绑定(或明确绑不了),"
+              f"产出 cross_analyzer.py 的 CONDITIONS 片段。场景:{scenario}。",
+              CROSS_RULES.format()]
+    if knowledge_text:
+        shared.append("【外挂知识(业务同事手写:指路可信——去哪查/怎么查照它;但不是事实,查证靠数据)】\n"
+                      + knowledge_text)
+    for ind in inds:
+        ov = ov_dir / f"{ind}_overview.json"
+        if ov.exists():
+            shared.append(f"【{ind} 源数据词汇——概览原文】\n" + ov.read_text(encoding="utf-8").strip())
+        else:
+            shared.append(f"【{ind} 源概览缺失】overview/{ind}_overview.json 不存在——该源列名未知,"
+                          "涉及它的绑定老实写 decision:insufficient_data 并注明缺概览")
+        for f in find_enums(ov_dir, ind):
+            shared.append(f"【{ind} 源数据词汇——枚举清单原文:{f.name}】\n"
+                          + f.read_text(encoding="utf-8").strip())
+    return shared
+
+
+def _cross_batch_lines(chunk, cond_by_id: dict, digests: dict) -> list:
+    """一批候选的【候选判据清单】行:判据原文 + 标记来源/理由 + 纪要 ◆ 块(含依赖字段)。"""
+    lines = [f"【候选判据清单(共 {len(chunk)} 条;condition_text 必须逐字取自这里)】"]
+    for c in chunk:
+        nid = c.get("node_id")
+        name, cond = cond_by_id.get(nid, (c.get("node") or "?",
+                                          "(tree_index 里查不到判据原文——node_id 可能填错,核实后表态)"))
+        srcs = "、".join(c.get("sources") or [])
+        reasons = ";".join(c.get("reasons") or [])
+        lines.append(f"\n[{nid}] {name}(由 {srcs} 源标记" + (f":{reasons}" if reasons else "") + f")\n{cond}")
+        dg = digests.get(str(nid))
+        if dg:
+            lines.append(digest_block(str(nid), dg, include_depends=True))
+    return lines
+
+
+def _run_cross(args, out: Path, ov_dir: Path, conditions, inds, scenario: str, knowledge_text) -> int:
+    """跨源补绑任务说明:一份装下全部候选 + 所有源的词汇(按 --batch-size 切批)。"""
+    ddir = out / "dispatch"
+    cand_p = ddir / "cross_candidates.json"
+    cands = _cross_candidates(out, cand_p, conditions)
+    if not cands:
+        print("没有跨源候选(无 cross_source 标记,诊断节点也都已被认领)——无需补绑。")
+        return 0
+    cond_by_id = {nid: (name, cond) for nid, name, cond in conditions}
+    ddir.mkdir(parents=True, exist_ok=True)
+    # 候选清单写回(含机械补漏扫进来的)——这是"cross 正在处理谁"的权威清单,
+    # check_tree_coverage 靠它给未绑叶子标"已进跨源候选",把"流程中"和"真漏"分开。
+    cand_p.write_text(json.dumps(cands, ensure_ascii=False, indent=1), encoding="utf-8")
+    shared = _cross_shared_sections(ov_dir, inds, scenario, knowledge_text)
+    digests = load_digests(out)
+    digests = {k: v for k, v in digests.items() if str(v.get("digest") or "").strip()}  # 空条目不注入
+    if digests:
+        n_hit = sum(1 for c in cands if str(c.get("node_id")) in digests)
+        print(f"脚本纪要:跨源候选命中 {n_hit}/{len(cands)} 条——◆块已附进补绑任务说明(规格以纪要为准,"
+              "含依赖字段供 param_from 取材)")
+    # 切批(≤12 条/批,与单源批同因):实测 27 条候选塞单代理,一跑 13 分钟、输出截断炸格式,整批返工。
+    # 词汇/规约每份任务说明原样重复——任务说明自包含,子代理互相看不见。
+    chunks = [cands[i:i + args.batch_size] for i in range(0, len(cands), args.batch_size)]
+    (ddir / "manifest.json").write_text(json.dumps({"complete_marker": True}, ensure_ascii=False),
+                                        encoding="utf-8")
+    for i, chunk in enumerate(chunks, 1):
+        rp = ddir / f"cross_batch{i}_result.py"
+        lines = _cross_batch_lines(chunk, cond_by_id, digests)
+        sec = ([f"# 跨源补绑任务说明:cross · 第 {i}/{len(chunks)} 批(本批 {len(chunk)} 条,候选共 {len(cands)} 条;"
+                f"其余批由别的子代理处理,你只管本批)\n【结果文件】{rp}"]
+               + shared + ["\n".join(lines), CROSS_OUTPUT_FORMAT])
+        (ddir / f"cross_batch{i}.txt").write_text("\n\n".join(sec) + "\n", encoding="utf-8")
+    print(f"跨源补绑任务说明 {len(chunks)} 份 → {ddir / 'cross_batch<N>.txt'}(候选 {len(cands)} 条,"
+          f"≤{args.batch_size} 条/批)。一份任务说明派一个子代理(分波规矩同单源批),"
+          "结果收各批 cross_batch<N>_result.py,然后重跑 merge_conditions.py 合并进 cross_analyzer.py。")
+    return 0
+
+
+def _injectable_digests(digests: dict, conditions) -> dict:
+    """可注入的纪要(有正文的),并打印命中/不可用/超长截断统计。"""
+    # 可注入 = 有正文的;空条目(unusable,脚本不可用)只留档——没有规格内容却标着"规格以此为准"进任务说明是自相矛盾,
+    # 还白白占用字符预算撑批(实测 500+ 字/条)。路由(sources)仍用全量:不可用脚本的取数预扫也可能是对的。
     inject = {k: v for k, v in digests.items() if str(v.get("digest") or "").strip()}
     if digests:
         n_un = len(digests) - len(inject)
         n_hit = sum(1 for c in conditions if c[0] in inject)
-        print(f"脚本纪要:{len(inject)} 条可注入(本树判据命中 {n_hit} 条)——逐条附进简报,按字符预算分批"
+        print(f"脚本纪要:{len(inject)} 条可注入(本树判据命中 {n_hit} 条)——逐条附进任务说明,按字符预算分批"
               + (f";另有 {n_un} 条脚本不可用,留档不注入(对应节点按判据原文绑)" if n_un else ""))
         trunc = [k for k, v in inject.items()
                  if len(str(v.get("digest") or "")) > 2000 or len(v.get("regexes") or []) > 8]
         if trunc:
-            print(f"⚠ 纪要超长截断 {len(trunc)} 条(正文>2000字或正则>8条,超出部分不进简报,"
+            print(f"⚠ 纪要超长截断 {len(trunc)} 条(正文>2000字或正则>8条,超出部分不进任务说明,"
                   f"必要时精简纪要):{'、'.join(trunc[:6])}")
+    return inject
 
+
+def _load_route_map(args, out: Path, inds):
+    """路由批结果 → {node_id: set(源)};路由任务说明在场却一条结果都没有 → 拒产(返回 None,已报错)。"""
     route_map = {} if args.no_route else _load_route(out / "dispatch", inds)  # 路由批结果(--route 小步产出)
-    # 跳步硬拦:路由简报生成了、结果却一条没解析出来 → 拒产。实测弱模型出完路由简报 19 秒就直接
+    # 跳步拦截:路由任务说明生成了、结果却一条没解析出来 → 拒绝生成。实测弱模型出完路由任务说明 19 秒就直接
     # 重跑本命令(没派子代理、没收结果),脚本按"结果缺→回落广播"静默放行,路由白做、判断量 ×源数
     # 全数回来。广播必须是显式选择(--no-route),不能是跳步的默认奖励。
     if not args.no_route and not route_map:
         rb = sorted((out / "dispatch").glob("route_batch*.txt")) if (out / "dispatch").is_dir() else []
         if rb:
             has_res = any((out / "dispatch").glob("route_batch*_result.json"))
-            _fail("路由简报已生成但路由没走完——"
+            _fail("路由任务说明已生成但路由没走完——"
                   + ("结果文件在,但一条路由都没解析出来(全坏/全空,看上方 [warn])"
-                     if has_res else f"还没派子代理收结果({len(rb)} 份简报,0 份 route_batch*_result.json)")
+                     if has_res else f"还没派子代理收结果({len(rb)} 份任务说明,0 份 route_batch*_result.json)")
                   + "。两条路(二选一):\n"
-                    "  ① 按路由简报派子代理(派发句式见 --route 的输出),结果落盘后重跑本命令;\n"
+                    "  ① 按路由任务说明派子代理(派发句式见 --route 的输出),结果写入文件后重跑本命令;\n"
                     "  ② 确要跳过路由按广播派(判断量 ×源数,不推荐)→ 重跑本命令加 --no-route。")
-            return 1
+            return None
+    return route_map
 
-    def routed_conditions(ind):
-        """源路由三级:①纪要声明了 sources 的判据只进对应源的批(最强,来自交付包实测);
-        ②路由批标注(模型快判"可能归哪些源",多选宁多勿漏);③都没有 → 广播(进每个源的批,
-        老行为,谁能答谁答——三源全量重复=3× 判断量,路由批就是为砍它)。"""
-        outc = []
-        for c in conditions:
-            srcs = (digests.get(c[0]) or {}).get("sources") or []
-            known = [s for s in srcs if s in inds]
-            if known:
-                if ind in known:
-                    outc.append(c)
-                continue
-            rt = route_map.get(c[0])
-            if rt and ind not in rt:
-                continue
-            outc.append(c)
-        return outc
 
+def _route_conditions(conditions, ind: str, digests: dict, inds, route_map: dict) -> list:
+    """源路由三级:①纪要声明了 sources 的判据只进对应源的批(最强,来自交付包实测);
+    ②路由批标注(模型快判"可能归哪些源",多选宁多勿漏);③都没有 → 广播(进每个源的批,
+    老行为,谁能答谁答——三源全量重复=3× 判断量,路由批就是为砍它)。"""
+    outc = []
+    for c in conditions:
+        srcs = (digests.get(c[0]) or {}).get("sources") or []
+        known = [s for s in srcs if s in inds]
+        if known:
+            if ind in known:
+                outc.append(c)
+            continue
+        rt = route_map.get(c[0])
+        if rt and ind not in rt:
+            continue
+        outc.append(c)
+    return outc
+
+
+def _report_routing(conditions, inds, digests: dict, route_map: dict) -> None:
+    """路由批生效统计 + 纪要 sources 与本产物源集全对不上的孤儿判据提示。"""
     if route_map:
         routed_n = sum(1 for c in conditions if c[0] in route_map
                        and not [s for s in (digests.get(c[0]) or {}).get("sources") or [] if s in inds])
-        total_evals = sum(len(routed_conditions(i)) for i in inds)
+        total_evals = sum(len(_route_conditions(conditions, i, digests, inds, route_map)) for i in inds)
         print(f"路由批生效:{routed_n} 条判据按路由裁剪,其余按纪要/广播;"
-              f"各源判断量合计 {total_evals}(广播口径为 {len(conditions) * len(inds)},"
+              f"各源判断量合计 {total_evals}(广播方式为 {len(conditions) * len(inds)},"
               f"省 {100 - round(total_evals * 100 / max(1, len(conditions) * len(inds)))}%)")
 
     if digests:
@@ -679,38 +703,50 @@ def main() -> int:
         if orphan:
             print(f"⚠ {len(orphan)} 条判据的纪要 sources 与本产物源集全对不上(将回落广播):"
                   + "、".join(f"{c[0]}" for c in orphan[:8]))
+
+
+def _source_material(ov_dir: Path, ind: str):
+    """一个源的原料:(概览原文, 是否 EAV, 枚举原文列表, 拒产原因或 None)。缺概览/EAV 缺枚举 → 拒产。"""
+    ov = ov_dir / f"{ind}_overview.json"
+    if not ov.exists():
+        return None, False, [], (f"{ind}:缺概览 {ov} —— 先跑步骤 2.5:"
+                                 f"python \"<OUT>/scripts/analyzer.py\" \"<该源数据>\" --lean -o \"{ov}\"")
+    ov_text = ov.read_text(encoding="utf-8")
+    try:
+        cols = (json.loads(ov_text).get("summary") or {}).get("columns") or []
+    except json.JSONDecodeError:
+        cols = []
+    is_eav = ("DataItem" in cols and "DataValue" in cols)
+    enum_files = find_enums(ov_dir, ind)
+    if is_eav and not enum_files:
+        return None, is_eav, [], (
+            f"{ind}:EAV 窄表源缺枚举清单(概览列含 DataItem/DataValue,但 overview/ 下没有 {ind}*枚举*.txt)。"
+            f"没有词汇表的 EAV 绑定只会逼子代理编造指标名,拒产。先抽枚举:\n"
+            f"  python -c \"import csv,sys;csv.field_size_limit(10**9);"
+            f"print('\\n'.join(sorted({{r.get('DataItem','') for r in "
+            f"csv.DictReader(open(sys.argv[1],encoding='utf-8',errors='ignore'))}})))\" "
+            f"\"<{ind}的csv>\" > \"{ov_dir / (ind + '_dataitem枚举.txt')}\"")
+    enum_texts = [(f.name, f.read_text(encoding="utf-8")) for f in enum_files]
+    return ov_text, is_eav, enum_texts, None
+
+
+def _write_source_briefs(args, out: Path, ov_dir: Path, conditions, inds, scenario: str, knowledge_text,
+                         digests: dict, inject: dict, route_map: dict):
+    """逐源:取原料 → 源路由裁剪判据 → 切批 → 写 dispatch/<ind>_batch<N>.txt。返回 (拒产原因, 已写清单)。"""
     ddir = out / "dispatch"
     ddir.mkdir(parents=True, exist_ok=True)
 
     errors, written = [], []
     for ind in inds:
-        ov = ov_dir / f"{ind}_overview.json"
-        if not ov.exists():
-            errors.append(f"{ind}:缺概览 {ov} —— 先跑步骤 2.5:"
-                          f"python \"<OUT>/scripts/analyzer.py\" \"<该源数据>\" --lean -o \"{ov}\"")
+        ov_text, is_eav, enum_texts, err = _source_material(ov_dir, ind)
+        if err:
+            errors.append(err)
             continue
-        ov_text = ov.read_text(encoding="utf-8")
-        try:
-            cols = (json.loads(ov_text).get("summary") or {}).get("columns") or []
-        except json.JSONDecodeError:
-            cols = []
-        is_eav = ("DataItem" in cols and "DataValue" in cols)
-        enum_files = find_enums(ov_dir, ind)
-        if is_eav and not enum_files:
-            errors.append(
-                f"{ind}:EAV 窄表源缺枚举清单(概览列含 DataItem/DataValue,但 overview/ 下没有 {ind}*枚举*.txt)。"
-                f"没有词汇表的 EAV 绑定只会逼子代理编造指标名,拒产。先抽枚举:\n"
-                f"  python -c \"import csv,sys;csv.field_size_limit(10**9);"
-                f"print('\\n'.join(sorted({{r.get('DataItem','') for r in "
-                f"csv.DictReader(open(sys.argv[1],encoding='utf-8',errors='ignore'))}})))\" "
-                f"\"<{ind}的csv>\" > \"{ov_dir / (ind + '_dataitem枚举.txt')}\"")
-            continue
-        enum_texts = [(f.name, f.read_text(encoding="utf-8")) for f in enum_files]
-        ind_conds = routed_conditions(ind)
+        ind_conds = _route_conditions(conditions, ind, digests, inds, route_map)
         if (digests or route_map) and len(ind_conds) < len(conditions):
             print(f"  {ind}:源路由后 {len(ind_conds)}/{len(conditions)} 条(其余判据由纪要/路由批归到别的源)")
         if not ind_conds:
-            print(f"  {ind}:没有归本源的判据(纪要/路由批全路由走了),本源不出简报")
+            print(f"  {ind}:没有归本源的判据(纪要/路由批全路由走了),本源不出任务说明")
             continue
         batches = split_batches(ind_conds, inject, args.batch_size)
         n_batches = len(batches)
@@ -721,20 +757,25 @@ def main() -> int:
                                         ov_text, is_eav, enum_texts, str(rp), knowledge_text,
                                         digests=inject), encoding="utf-8")
             written.append((ind, i, len(batch), p))
+    return errors, written
 
-    # 派发铭牌:声明"结果文件须带完成标记"(merge 据此逮半路截断的合法短列表;
-    # 老 dispatch 目录没有铭牌 → merge 不启用该检查,向后兼容)
+
+def _report_written(args, out: Path, conditions, written, errors, t0: float) -> int:
+    """写派发标记文件、打印任务说明清单与派发句式、耗时打点;有源拒产 → 1。"""
+    ddir = out / "dispatch"
+    # 派发标记文件:声明"结果文件须带完成标记"(merge 据此发现半路截断的、看似合法的短列表;
+    # 老 dispatch 目录没有标记文件 → merge 不启用该检查,向后兼容)
     (ddir / "manifest.json").write_text(json.dumps({"complete_marker": True}, ensure_ascii=False),
                                         encoding="utf-8")
-    print(f"判据共 {len(conditions)} 条 → 简报 {len(written)} 份(≤{args.batch_size} 条/批;路由/纪要生效时各源批数不同):")
+    print(f"判据共 {len(conditions)} 条 → 任务说明 {len(written)} 份(≤{args.batch_size} 条/批;路由/纪要生效时各源批数不同):")
     for ind, i, n, p in written:
         print(f"  {ind} 批{i}({n} 条) → {p}")
     if written:
-        print("\n派发句式(一份简报派一个子代理;简报多就分波派——一波 4~8 个、收完一波再下一波;不许合并简报、不许转述):")
-        print("  「你的全部任务和材料在 <简报路径>,用 Read 读完它(可分段),照其中规约执行——")
-        print("    结果写到简报指定的结果文件,最终回复只报『共 N 条,已写 <路径>』」")
-        print("收货(可反复跑,先到先合):python merge_conditions.py --out \"<OUT>\" ——机械验收+合并+写进各 <ind>_analyzer.py。")
-        print("子代理读不了文件的环境 → 主代理把简报全文读入后原样贴进派发词(纯复制)。")
+        print("\n派发句式(一份任务说明派一个子代理;任务说明多就分波派——一波 4~8 个、收完一波再下一波;不许合并任务说明、不许转述):")
+        print("  「你的全部任务和材料在 <任务说明路径>,用 Read 读完它(可分段),照其中规约执行——")
+        print("    结果写到任务说明指定的结果文件,最终回复只报『共 N 条,已写 <路径>』」")
+        print("合并结果(可反复跑,先到先合):python merge_conditions.py --out \"<OUT>\" ——机械验收+合并+写进各 <ind>_analyzer.py。")
+        print("子代理读不了文件的环境 → 主代理把任务说明全文读入后原样贴进派发词(纯复制)。")
     _record_timing(out, "make_dispatch", time.time() - t0,
                    judgments=len(conditions), briefs=len(written), batch_size=args.batch_size)
     if errors:
@@ -743,6 +784,62 @@ def main() -> int:
             print("  - " + e, file=sys.stderr)
         return 1
     return 0
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")   # 拒产信息走 stderr,漏配会在 Windows 上变乱码(实测)
+    except Exception:
+        pass
+    args = _build_parser().parse_args()
+    if args.route and args.cross:
+        _fail("--route 与 --cross 互斥:路由是绑定前的预分诊,cross 是绑定后的补绑")
+        return 2
+    if args.route and args.no_route:
+        _fail("--route 与 --no-route 互斥")
+        return 2
+    t0 = time.time()
+
+    out = Path(args.out)
+    ti = _locate_tree_index(out, args.tree_index)
+    if ti is None:
+        return 2
+    conditions = load_conditions(ti)
+    if not conditions:
+        _fail("tree_index 里没有任何带判据的节点——先回步骤 1 检查建树输出的「带判据节点 N」")
+        return 2
+    scenario = ti.stem.replace(".tree_index", "")
+
+    inds = _discover_indicators(out, args.indicators)
+    if not inds:
+        _fail("没找到任何指标(--indicators 或 <OUT>/scripts/*_analyzer.py)")
+        return 2
+
+    ov_dir = out / "overview"
+
+    if args.route:                                       # 路由小步:只出"预分诊"任务说明,不出绑定任务说明
+        return _run_route(out, ov_dir, conditions, inds, t0)
+
+    # 外挂知识(tree/knowledge.md):按树的节点名+判据文本匹配「适用」标签,命中的条目进每份任务说明
+    name_pool = scenario + "\n" + "\n".join(f"{name} {cond}" for _, name, cond in conditions)
+    knowledge_text = load_knowledge(out, name_pool)
+    if knowledge_text:
+        n_kn = knowledge_text.count("◆ ")
+        print(f"外挂知识:tree/knowledge.md 命中 {n_kn} 条,已嵌入全部任务说明")
+
+    if args.cross:                                       # 跨源补绑任务说明:一份装下全部候选 + 所有源的词汇
+        return _run_cross(args, out, ov_dir, conditions, inds, scenario, knowledge_text)
+
+    digests = load_digests(out)
+    inject = _injectable_digests(digests, conditions)
+    route_map = _load_route_map(args, out, inds)
+    if route_map is None:
+        return 1
+    _report_routing(conditions, inds, digests, route_map)
+    errors, written = _write_source_briefs(args, out, ov_dir, conditions, inds, scenario, knowledge_text,
+                                           digests, inject, route_map)
+    return _report_written(args, out, conditions, written, errors, t0)
 
 
 if __name__ == "__main__":

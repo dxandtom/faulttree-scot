@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""批量评估汇总——评估输出根目录的 quality_score_batch.json(整批;单用例目录里的 quality_score.json
-不动):一键回归(regress.py)与批量判卷(eval_run.py)都写这一份,算法只有这一处。
+"""批量评估汇总——生成评估输出根目录下的 quality_score_batch.json(整批一份;单用例目录里的
+quality_score.json 不动):一键回归(regress.py)与批量评估(eval_run.py)都写这一份,计算方式只在这里定义。
 
-口径:
-- 通过 = verdict 为 PASS 或 PASS_WITH_GAPS(期望根因全命中;缺部分数据不扣通过);
-- pass_rate = 通过数 ÷ 用例总数,分母是全部用例——执行失败、判卷异常、待裁决都算不通过;
-- total_score = 各用例 total_score 的算术平均(没评出分的按 0),一位小数;
-- dimensions 六维 = 该关通过的用例数 ÷ 用例总数(单用例文件里是 true/false/null,批量里是比例),
-  没评到的关(前一关已挂)按不通过计——与单用例"通过维度数 ÷ 6"的算法一致,所以
+计算方式:
+- 通过 = verdict 为 PASS 或 PASS_WITH_GAPS(期望根因全部命中;缺部分数据不影响通过);
+- pass_rate = 通过数 ÷ 用例总数,分母是全部用例——执行失败、评估异常、待裁决都算不通过;
+- total_score = 各用例 total_score 的算术平均(没评出分的按 0),保留一位小数;
+- dimensions 六个维度 = 该维度通过的用例数 ÷ 用例总数(单用例文件里是 true/false/null,批量里是比例),
+  没评到的维度(前一维度已未通过)按不通过计——与单用例"通过维度数 ÷ 6"的算法一致,所以
   total_score 也等于六个维度分的平均。
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ VERDICT_KEYS = ("PASS", "PASS_WITH_GAPS", "PARTIAL_PASS", "FAIL", "EVAL_ERROR", 
 
 
 def _dims():
-    """六个维度的 key 与中英文名,直接取单用例评分脚本的定义,不另抄一份。"""
+    """六个维度的 key 与中英文名,直接取单用例评分脚本(score_report.py)的定义,不再重复维护一份。"""
     spec = importlib.util.spec_from_file_location("score_report", Path(__file__).resolve().parent / "score_report.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -38,7 +38,7 @@ def _verdict_counts(cases: list) -> dict:
 
 
 def _dimension_ratios(cases: list) -> dict:
-    """各维 = 通过该关(value 为 true)的用例数 ÷ 用例总数;没评到(null)按不通过。"""
+    """各维度 = 通过该维度(value 为 true)的用例数 ÷ 用例总数;没评到(null)按不通过。"""
     total = len(cases)
     out = {}
     for key, zh, en in _dims():
@@ -50,7 +50,7 @@ def _dimension_ratios(cases: list) -> dict:
 
 
 def build_batch_score(cases: list, evaluation_time: str) -> dict:
-    """cases 每条至少有 case_id;可带 verdict(缺=NOT_EVALUATED)、quality_score(单用例总分)、
+    """cases 每条至少有 case_id;可带 verdict(缺省按 NOT_EVALUATED)、quality_score(单用例总分)、
     dimensions({维度: true/false/null})。"""
     total = len(cases)
     passed = sum(1 for c in cases if c.get("verdict") in PASS_VERDICTS)
@@ -86,6 +86,6 @@ def read_case_score(path: Path):
 
 
 def format_line(score: dict) -> str:
-    """终端一行:通过 k/N = xx.x%,总得分 s(口径注明)。"""
+    """终端输出一行:通过 k/N = xx.x%,总得分 s(附计算方式说明)。"""
     return (f"通过 {score['passed']}/{score['total_cases']} = {score['pass_rate']:.1%}"
             f"(通过=PASS+PASS_WITH_GAPS,分母含未判卷);总得分 {score['total_score']}(各用例平均)")

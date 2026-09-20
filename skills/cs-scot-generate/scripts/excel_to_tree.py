@@ -4,7 +4,10 @@
 输入 Excel 的约定(沿用现网故障树导出格式):
 - 层级列:L1(Chinese)、L2(Chinese) … Ln(Chinese),每列是该层的节点名;
 - 判断条件列:Judgment Condition(Chinese),挂在每行最深的那个节点上;
-- 值为"不涉及"的判断条件会被跳过。
+- 值为"不涉及"的判断条件会被跳过;
+- 英文列(可选):L1(English)…Ln(English) 与 Judgment Condition(English)(平台写法 L1_Name_EN、
+  Diagnosis_Method_EN 也识别)。有值时存进 tree_index 的 name_en / condition_en,供树视图与报告按
+  用户语言输出;没有英文列一切照旧。
 
 输出 Markdown:用 #/##/### 表示层级,标题下面紧跟该节点的判断条件正文。
 
@@ -16,7 +19,7 @@
 
 要点:
 - 背景业务知识:场景节点通常在 **L2**,所以 `--start-level` 默认 2,`--start-node` 在该层选具体场景;
-  万一不在 L2,会自动在其它层找到该场景名并以它为根截取(兜底)。
+  万一不在 L2,会自动在其它层找到该场景名并以它为根截取(备用做法)。
 - `--exclude-pattern` 默认排除噪声节点 `萃取新增节点-.*`;传 `--exclude-pattern ""` 可保留全部。
 读 xlsx 走同目录 xlsx_reader.py(零三方依赖,不需要 openpyxl);csv 用标准库即可。
 """
@@ -35,6 +38,9 @@ _LEVEL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")     # 裸 L7 也认(实测:�
                                                         # 老正则静默丢整层、该层判据错挂到上一层)
 _CODE_RE = re.compile(r"^L(\d+) Code$")
 _JUDGMENT_HEADER = "Judgment Condition(Chinese)"
+# 英文列:与中文列成对,只做存储,不参与建树分支与判据解析
+_LEVEL_EN_RE = re.compile(r"^L(\d+)(?:\(English\)|_Name_EN)$", re.IGNORECASE)
+_JUDGMENT_HEADERS_EN = ("judgment condition(english)", "diagnosis_method_en")
 _ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1")
 # 现网导出里常见的"自动萃取"噪声节点,默认排除(与同事产出 69KB 子树的做法一致)
 DEFAULT_EXCLUDE = r"萃取新增节点-.*"
@@ -75,7 +81,7 @@ def _read_table(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
 
 def find_level_columns(headers: List[str]) -> List[Tuple[str, int]]:
     """从表头里找出所有 Ln(Chinese)/Ln 层级列,按层级升序返回 (列名, 层级)。
-    同层裸列与 (Chinese) 列并存时取中文列(与 v2 的混血表口径一致),每层只留一列。"""
+    同层裸列与 (Chinese) 列并存时取中文列(与 v2 处理混合格式表的规则一致),每层只留一列。"""
     cols: Dict[int, str] = {}
     for h in headers:
         m = _LEVEL_RE.match((h or "").strip())
@@ -95,6 +101,20 @@ def find_judgment_column(headers: List[str]) -> Optional[str]:
     return None
 
 
+def find_english_columns(headers: List[str]) -> Tuple[Dict[int, str], Optional[str]]:
+    """从表头找英文层级列 {层级: 列名} 与英文判据列名(没有则空字典 / None)。"""
+    lvls: Dict[int, str] = {}
+    jd_en: Optional[str] = None
+    for h in headers:
+        hs = (h or "").strip()
+        m = _LEVEL_EN_RE.match(hs)
+        if m:
+            lvls.setdefault(int(m.group(1)), h)
+        elif hs.lower().replace(" ", "") in tuple(x.replace(" ", "") for x in _JUDGMENT_HEADERS_EN) and jd_en is None:
+            jd_en = h
+    return lvls, jd_en
+
+
 def find_code_columns(headers: List[str]) -> Dict[int, str]:
     """从表头找出 "Ln Code" 稳定编码列,返回 {层级: 列名}。"""
     out: Dict[int, str] = {}
@@ -105,7 +125,7 @@ def find_code_columns(headers: List[str]) -> Dict[int, str]:
     return out
 
 
-# HTML 标签白名单(只删这些已知标签,避免把条件里的 < > 比较运算符当成标签吃掉)
+# HTML 标签白名单(只删这些已知标签,避免把条件里的 < > 比较运算符当成标签误删)
 _HTML_TAG = re.compile(
     r"</?(?:span|div|p|a|br|hr|img|h[1-6]|table|thead|tbody|tr|td|th|ul|ol|li|"
     r"b|i|u|s|em|strong|font|sub|sup|blockquote|pre|code|section|article|center)\b[^>]*>",
@@ -165,6 +185,43 @@ def _infer_combine(method: Optional[str]) -> Optional[str]:
     return "unknown"
 
 
+def _row_judgment(row: Dict[str, str], judgment_col: Optional[str]) -> Optional[str]:
+    """取本行判断格原文(strip 后);没有判据列、格为空或是 pass-through 标记(不涉及/无条件进入…)→ None。"""
+    if judgment_col:
+        jv = (row.get(judgment_col) or "").strip()
+        if not _is_skip_judgment(jv):
+            return jv
+    return None
+
+
+def _cut_path(items: list, names: List[str], start_level: Optional[int], start_node: Optional[str]):
+    """路径截取规则(build_tree / build_index 共用):给了 start_node 时优先在 start_level 层(默认 L2,
+    背景业务知识)匹配场景名;若该层不是,则在该行任意层找到 start_node 并以它为根(备用做法);都没有 → None。
+    没给 start_node 时从 start_level 层起截。items 与 names 逐位对应(names 为各层名字)。"""
+    if start_node:
+        sl = start_level or 1
+        if len(items) >= sl and names[sl - 1] == start_node:
+            return items[sl - 1:]                       # 优先:场景名在 L2
+        if start_node in names:
+            return items[names.index(start_node):]      # 备用做法:在别的层找到也认
+        return None
+    if start_level and start_level > 1:
+        return items[start_level - 1:]
+    return items
+
+
+def _insert_path(tree: Dict[str, Any], path: List[str], judgment: Optional[str]) -> None:
+    """把一条路径逐层挂进嵌套树;判断条件挂到路径最深的节点上(同一判据不重复挂)。"""
+    cur = tree
+    for i, node in enumerate(path):
+        cur.setdefault(node, {})
+        if i == len(path) - 1 and judgment:
+            cur[node].setdefault("_judgment_", [])
+            if judgment not in cur[node]["_judgment_"]:
+                cur[node]["_judgment_"].append(judgment)
+        cur = cur[node]
+
+
 def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                start_level: Optional[int] = None, start_node: Optional[str] = None,
                judgment_col: Optional[str] = None,
@@ -173,7 +230,7 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
 
     路径截取规则(给了 start_node 时):
     - 优先在 start_level 层(默认 L2,背景业务知识)匹配场景名;
-    - 若该层不是,则在该行任意层找到 start_node 并以它为根(兜底);
+    - 若该层不是,则在该行任意层找到 start_node 并以它为根(备用做法);
     - 都没有则跳过该行。
     """
     tree: Dict[str, Any] = {}
@@ -190,45 +247,75 @@ def build_tree(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
             continue
         if exclude_re and any(exclude_re.search(v) for v in full):
             continue
-        judgment = None
-        if judgment_col:
-            jv = (row.get(judgment_col) or "").strip()
-            if not _is_skip_judgment(jv):
-                judgment = _clean_text(jv)          # md 也清洗(去 HTML/图片、保留运算符)
-
-        if start_node:
-            sl = start_level or 1
-            if len(full) >= sl and full[sl - 1] == start_node:
-                path = full[sl - 1:]                    # 优先:场景名在 L2
-            elif start_node in full:
-                path = full[full.index(start_node):]    # 兜底:在别的层找到也认
-            else:
-                continue
-        elif start_level and start_level > 1:
-            path = full[start_level - 1:]
-        else:
-            path = full
+        jv = _row_judgment(row, judgment_col)
+        judgment = _clean_text(jv) if jv is not None else None   # md 也清洗(去 HTML/图片、保留运算符)
+        path = _cut_path(full, full, start_level, start_node)
         if not path:
             continue
-
-        cur = tree
-        for i, node in enumerate(path):
-            cur.setdefault(node, {})
-            if i == len(path) - 1 and judgment:
-                cur[node].setdefault("_judgment_", [])
-                if judgment not in cur[node]["_judgment_"]:
-                    cur[node]["_judgment_"].append(judgment)
-            cur = cur[node]
+        _insert_path(tree, path, judgment)
     return tree
+
+
+def _row_triples(row: Dict[str, str], level_cols: List[Tuple[str, int]],
+                 code_cols: Dict[int, str]) -> List[Tuple[int, str, str]]:
+    """一行 → [(层级, 名字, 编码)],名字为空的层跳过;
+    相邻同名层折叠(与 build_tree 同款,防右向填充数据建出千级重名链)。"""
+    triples: List[Tuple[int, str, str]] = []
+    for col, lvl in level_cols:
+        nm = (row.get(col) or "").strip()
+        if not nm:
+            continue
+        cd = (row.get(code_cols.get(lvl, "")) or "").strip()
+        triples.append((lvl, nm, cd))
+    return [t for i, t in enumerate(triples) if i == 0 or t[1] != triples[i - 1][1]]
+
+
+def _row_judgment_en(row: Dict[str, str], judgment_en_col: Optional[str],
+                     judgment: Optional[str]) -> Optional[str]:
+    """英文判据只在中文判据成立时跟着存(中英成对);清洗后为空或是 pass-through 标记 → None。"""
+    if judgment_en_col and judgment:
+        jev = _clean_text(row.get(judgment_en_col))
+        if jev and not _is_skip_judgment(jev):
+            return jev
+    return None
+
+
+def _set_name_en(node: Dict[str, Any], row: Dict[str, str], en_cols: Dict[int, str], lvl: int, nm: str) -> None:
+    """节点还没有英文名且该层有英文列时,取本行该层英文格存为 name_en(空或与中文名相同就不存)。"""
+    if not node.get("name_en") and lvl in en_cols:
+        en_name = (row.get(en_cols[lvl]) or "").strip()
+        if en_name and en_name != nm:
+            node["name_en"] = en_name
+
+
+def _attach_judgment(node: Dict[str, Any], judgment: str, judgment_en: Optional[str]) -> None:
+    """把一行的判断条件挂到路径最深节点:方法正文累加进 condition(并重推 combine)、数据源合并、英文判据去重累加。"""
+    method, src = _split_judgment(judgment)
+    if method:
+        node["condition"] = (node["condition"] + "\n" + method) if node["condition"] else method
+        node["combine"] = _infer_combine(node["condition"])
+        node["pass_through"] = False
+    if src:
+        node["data_source"].update(src)
+    if judgment_en:
+        prev = node.get("condition_en")
+        if not prev:
+            node["condition_en"] = judgment_en
+        elif judgment_en not in prev:
+            node["condition_en"] = prev + "\n" + judgment_en
 
 
 def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                 code_cols: Dict[int, str], start_level: Optional[int], start_node: Optional[str],
-                judgment_col: Optional[str], exclude_pattern: Optional[str]) -> Dict[str, Any]:
+                judgment_col: Optional[str], exclude_pattern: Optional[str],
+                en_cols: Optional[Dict[int, str]] = None,
+                judgment_en_col: Optional[str] = None) -> Dict[str, Any]:
     """与 build_tree 同样的截取规则,但产出**扁平权威 index**(给压缩/RCA 用):
     每个节点 = 稳定 id(L-Code 链,缺则用名字链)+ name/parent/level/condition/combine/data_source/pass_through。
+    母表带英文列时另存 name_en(该层英文格)与 condition_en(英文判据格,挂最深节点);英文格为空就不存。
     """
     exclude_re = re.compile(exclude_pattern) if exclude_pattern else None
+    en_cols = en_cols or {}
     nodes: Dict[str, Any] = {}
     root_id: Optional[str] = None
     short_map: Dict[str, str] = {}  # code-chain → 短稳定 id(n1,n2,…),同一节点跨行一致
@@ -238,38 +325,15 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
             short_map[chain] = "n" + str(len(short_map) + 1)
         return short_map[chain]
     for row in rows:
-        triples: List[Tuple[int, str, str]] = []  # (层级, 名字, 编码)
-        for col, lvl in level_cols:
-            nm = (row.get(col) or "").strip()
-            if not nm:
-                continue
-            cd = (row.get(code_cols.get(lvl, "")) or "").strip()
-            triples.append((lvl, nm, cd))
+        triples = _row_triples(row, level_cols, code_cols)
         if not triples:
             continue
-        # 相邻同名层折叠(与 build_tree 同款,防右向填充数据建出千级重名链)
-        triples = [t for i, t in enumerate(triples) if i == 0 or t[1] != triples[i - 1][1]]
         names = [t[1] for t in triples]
         if exclude_re and any(exclude_re.search(n) for n in names):
             continue
-        judgment = None
-        if judgment_col:
-            jv = (row.get(judgment_col) or "").strip()
-            if not _is_skip_judgment(jv):
-                judgment = jv                       # 原文交给 _split_judgment(内部 _clean_text)
-        # 截取(镜像 build_tree)
-        if start_node:
-            sl = start_level or 1
-            if len(triples) >= sl and triples[sl - 1][1] == start_node:
-                path = triples[sl - 1:]
-            elif start_node in names:
-                path = triples[names.index(start_node):]
-            else:
-                continue
-        elif start_level and start_level > 1:
-            path = triples[start_level - 1:]
-        else:
-            path = triples
+        judgment = _row_judgment(row, judgment_col)         # 原文交给 _split_judgment(内部 _clean_text)
+        judgment_en = _row_judgment_en(row, judgment_en_col, judgment)
+        path = _cut_path(triples, names, start_level, start_node)   # 截取(镜像 build_tree)
         if not path:
             continue
         parent_id, id_parts = None, []
@@ -284,14 +348,9 @@ def build_index(rows: List[Dict[str, str]], level_cols: List[Tuple[str, int]],
                 nodes[parent_id]["children"].append(nid)
             if j == 0:
                 root_id = nid
+            _set_name_en(node, row, en_cols, lvl, nm)
             if j == len(path) - 1 and judgment:
-                method, src = _split_judgment(judgment)
-                if method:
-                    node["condition"] = (node["condition"] + "\n" + method) if node["condition"] else method
-                    node["combine"] = _infer_combine(node["condition"])
-                    node["pass_through"] = False
-                if src:
-                    node["data_source"].update(src)
+                _attach_judgment(node, judgment, judgment_en)
             parent_id = nid
     return {"scenario": start_node, "root": root_id, "nodes": nodes}
 
@@ -331,13 +390,15 @@ def excel_to_tree_markdown(excel_path: str, output_path: Optional[str] = None,
         raise ValueError("未找到 Ln(Chinese) 格式的层级列,请检查 Excel 表头")
     judgment_col = find_judgment_column(headers)
     code_cols = find_code_columns(headers)
+    en_cols, judgment_en_col = find_english_columns(headers)
     tree = build_tree(rows, level_cols, start_level, start_node, judgment_col, exclude_pattern)
     lines = tree_to_markdown(tree)
     if not lines:
         raise ValueError(f"未构建出任何节点。请确认场景名是否准确(--start-node「{start_node}」是否在故障树里)")
     md = "\n".join(lines) + "\n"
     # 同时产权威 index(给压缩/RCA;Code 链当稳定 id),写在 md 旁边
-    index = build_index(rows, level_cols, code_cols, start_level, start_node, judgment_col, exclude_pattern)
+    index = build_index(rows, level_cols, code_cols, start_level, start_node, judgment_col, exclude_pattern,
+                        en_cols=en_cols, judgment_en_col=judgment_en_col)
     if output_path:
         outp = Path(output_path)
         outp.parent.mkdir(parents=True, exist_ok=True)
@@ -378,7 +439,7 @@ def main() -> None:
     try:
         md = excel_to_tree_markdown(args.excel_path, output_path, args.start_level,
                                     args.start_node, args.exclude_pattern)
-    except Exception as e:  # noqa: BLE001 — CLI 边界统一兜底
+    except Exception as e:  # noqa: BLE001 — CLI 边界统一捕获
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
     if output_path:
@@ -387,10 +448,12 @@ def main() -> None:
         try:                                             # 与 v2 同款:亮出判据数,0 判据当场喊停
             _idx = json.loads(Path(output_path).with_suffix(".tree_index.json").read_text(encoding="utf-8"))
             _n = sum(1 for nd in (_idx.get("nodes") or {}).values() if nd.get("condition"))
-            print(f"节点数 {len(_idx.get('nodes') or {})},带判据节点 {_n}")
+            _ne = sum(1 for nd in (_idx.get("nodes") or {}).values() if nd.get("name_en"))
+            print(f"节点数 {len(_idx.get('nodes') or {})},带判据节点 {_n}"
+                  + (f",带英文名节点 {_ne}" if _ne else ""))
             if _n == 0:
                 print("⚠⚠ 带判据节点为 0:这棵子树没有任何判断条件,多半是判据列没被识别"
-                      "(本脚本只认表头「Judgment Condition(Chinese)」)——**停下检查 Excel 表头,"
+                      "(本脚本只识别表头「Judgment Condition(Chinese)」)——**停下检查 Excel 表头,"
                       "别往下绑定**;0 判据的树绑出来的只能是瞎猜。", file=sys.stderr)
         except Exception:  # noqa: BLE001 — 计数只是提示,不阻断
             pass
