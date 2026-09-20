@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import subprocess
 import shutil
 import sys
 from pathlib import Path
@@ -615,6 +616,27 @@ def _scaffold_analyzers(out: Path, indicators: List[str], keep: bool):
     return scaffolded, regenerated
 
 
+def export_tuning_table(out: Path, reason: str) -> None:
+    """自动导出调优表 tree/<短名>.tuning.xlsx:用产物 scripts/ 里的 export_tree_excel.py 以子进程跑一遍。
+    调优表是树与绑定的可编辑事实源,组装后、每次合并绑定后都要与产物保持一致;导出失败(如缺 openpyxl)
+    只提示不阻断,随时可手动重跑。表比 tree_index 新(可能有未导入的人工修改)时导出器自己会备份 .bak 并提示。"""
+    exp = out / "scripts" / "export_tree_excel.py"
+    if not exp.exists():
+        print(f"  调优表未导出:产物里没有 scripts/export_tree_excel.py(重跑组装可补齐)")
+        return
+    r = subprocess.run([sys.executable, str(exp), "--out", str(out)],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    notes = [ln for ln in (r.stderr or "").splitlines() if ln.strip()]
+    if r.returncode == 0:
+        xls = sorted((out / "tree").glob("*.tuning.xlsx"))
+        print(f"  调优表已{reason}: {xls[0] if xls else out / 'tree'}")
+        for ln in notes:                                 # 转发导出器的提示(如备份了未导入的人工修改)
+            print("  " + ln)
+        return
+    tail = (notes or (r.stdout or "").strip().splitlines() or ["无输出"])[-1]
+    print(f"  ⚠ 调优表未导出({tail})——需要时手动跑: python {exp} --out {out}(写 xlsx 需要 openpyxl)")
+
+
 def _print_next_steps(out: Path, here: Path, indicators: List[str], scaffolded: list, regenerated: list,
                       stem: str) -> None:
     """收尾打印:产物清单、待填脚本的下一步指引、执行命令。"""
@@ -682,6 +704,9 @@ def main() -> None:
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     _print_next_steps(out, here, indicators, scaffolded, regenerated, stem)
+    # 调优表随组装自动导出;还有待填的 analyzer 时绑定列是空的,步骤 2.5 每次合并绑定后会再刷新
+    hint = "(绑定列待步骤 2.5 合并后刷新)" if scaffolded or regenerated else ""
+    export_tuning_table(out, "导出" + hint)
 
 
 if __name__ == "__main__":

@@ -49,7 +49,7 @@
 | `assets/tree/<短名>.tree_index.json` | generate | execute、rca、migrate、reflect | 故障树结构：节点编号、名称、判据、层级 |
 | `assets/plan.json` | generate | execute | 执行计划：先跑哪些分析脚本，最后做根因分析 |
 | `assets/scripts/<数据源>_analyzer.py` | generate（绑定由模型填） | execute | 每个数据源的逐条件分析脚本 |
-| `assets/tree/<短名>.tuning.xlsx` | generate（步骤 5 打包时自动导出；默认流程下在步骤 6 前用 `export_tree_excel.py` 导出）、migrate | 人工调优、migrate | 调优表：一行一个节点，树和绑定的可编辑事实源 |
+| `assets/tree/<短名>.tuning.xlsx` | generate（组装时自动导出，合并绑定与打包时自动刷新）、migrate | 人工调优、migrate | 调优表：一行一个节点，树和绑定的可编辑事实源 |
 | `result-<运行号>/rca_input.json` | execute | rca、reflect | 逐节点事实 |
 | `result-<运行号>/rca.json` | rca | execute（渲染）、reflect | 四档根因结论 |
 | `tree/migrations.json` | migrate | reflect（建用例库）、optimize | 迁移记录：节点对应哪个交付包 |
