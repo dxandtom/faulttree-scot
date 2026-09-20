@@ -156,7 +156,7 @@ python "<本目录>/scripts/route_feedback.py" --record <处理清单文件> --d
 python "<本目录>/scripts/package_skill.py"
 ```
 
-把本入口、两线、公共素材合成 `dist/cs-scot-generate-optimize/` 并打同名 zip：generate、migrate 与素材（cs-scot-execute、fault-tree-rca、zip2csv、datacom-fault-tree-tester）平铺在包根；关键文件逐一核验，缺一个就报错并清理残留；`MANIFEST.txt` 记全部文件与来源提交（工作区有未提交改动标 `+dirty`）；zip 可复现（同一提交两次打包 sha256 一致）。打包是纯复制，不改写任何源文件；包内只改一处：`generate/SKILL.md`、`migrate/SKILL.md` 这两份副本的 frontmatter，`name` 改成包内目录名，`description` 写明是本发行包内的生成线、优化线手册并点名对应的仓库技能，正文一字不动。输出目录与任何源目录重叠会拒绝执行。本脚本只在仓库开发态可用，发行包内不含它。
+把本入口、两线、公共素材合成 `dist/cs-scot-generate-optimize/` 并打同名 zip：generate、migrate 与素材（cs-scot-execute、fault-tree-rca、zip2csv、datacom-fault-tree-tester）平铺在包根；关键文件逐一核验，缺一个就报错并清理残留；`MANIFEST.txt` 记全部文件与来源提交（工作区有未提交改动标 `+dirty`）；zip 可复现（同一提交两次打包 sha256 一致）。打包是纯复制，不改写任何源文件；包内只改一处：`generate/SKILL.md`、`migrate/SKILL.md` 这两份副本的 frontmatter，`name` 改成包内目录名，`description` 写明是本发行包内的生成线、优化线手册并点名对应的仓库技能，标题行里的技能名同步改成目录名，其余正文一字不动。输出目录与任何源目录重叠会拒绝执行。本脚本只在仓库开发态可用，发行包内不含它。
 
 ## 完整例子
 
