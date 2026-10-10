@@ -91,7 +91,7 @@ description: 生成与优化技能的统一入口，只负责按输入判断该�
 
 每条线的手册按下面次序找，找到第一个就用（与 generate 找 zip2csv 的次序相同）：
 
-1. 发行包形态：`<本目录>/generate/SKILL.md`、`<本目录>/migrate/SKILL.md`（发行包把两线放在子目录）。
+1. 发行包形态：`<本目录>/generate/SKILL.md`、`<本目录>/migrate/SKILL.md`（发行包把两线放在子目录，两份手册的 `name` 就是目录名 generate、migrate；它们是本入口下面的手册，不是可单独触发的技能）。
 2. 仓库形态：`<本目录>/../cs-scot-generate/SKILL.md`、`<本目录>/../cs-scot-migrate/SKILL.md`（开发时的兄弟目录）。
 
 发行包形态下唯一的路径改写规则：子手册命令里的 `skills/cs-scot-generate/`、`skills/cs-scot-migrate/` 前缀，换成 `<本目录>/generate/`、`<本目录>/migrate/`（用绝对路径）；`skills/zip2csv/` 等素材前缀换成 `<本目录>/zip2csv/`（素材平铺在包根）。除此之外照手册逐字执行，不增不减。
@@ -156,7 +156,7 @@ python "<本目录>/scripts/route_feedback.py" --record <处理清单文件> --d
 python "<本目录>/scripts/package_skill.py"
 ```
 
-把本入口、两线、公共素材合成 `dist/cs-scot-generate-optimize/` 并打同名 zip：generate、migrate 与素材（cs-scot-execute、fault-tree-rca、zip2csv、datacom-fault-tree-tester）平铺在包根；关键文件逐一核验，缺一个就报错并清理残留；`MANIFEST.txt` 记全部文件与来源提交（工作区有未提交改动标 `+dirty`）；zip 可复现（同一提交两次打包 sha256 一致）。打包是纯复制，不改写任何源文件；输出目录与任何源目录重叠会拒绝执行。本脚本只在仓库开发态可用，发行包内不含它。
+把本入口、两线、公共素材合成 `dist/cs-scot-generate-optimize/` 并打同名 zip：generate、migrate 与素材（cs-scot-execute、fault-tree-rca、zip2csv、datacom-fault-tree-tester）平铺在包根；关键文件逐一核验，缺一个就报错并清理残留；`MANIFEST.txt` 记全部文件与来源提交（工作区有未提交改动标 `+dirty`）；zip 可复现（同一提交两次打包 sha256 一致）。打包是纯复制，不改写任何源文件；包内只改一处：`generate/SKILL.md`、`migrate/SKILL.md` 这两份副本的 frontmatter，`name` 改成包内目录名，`description` 写明是本发行包内的生成线、优化线手册并点名对应的仓库技能，标题行里的技能名同步改成目录名，其余正文一字不动。输出目录与任何源目录重叠会拒绝执行。本脚本只在仓库开发态可用，发行包内不含它。
 
 ## 完整例子
 
