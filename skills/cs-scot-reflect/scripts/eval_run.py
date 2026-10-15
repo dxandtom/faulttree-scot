@@ -817,7 +817,7 @@ def _build_feedback(case_id: str, round_num: int, feedback_iteration: int, evalu
 
 
 def _write_quality_score(case_id: str, report_path: Path):
-    """平台展示适配:同目录机械产出 quality_score.json(六维 BOOLEAN 计分,短路后未评维度
+    """平台展示适配:同目录机械产出 quality_score_batch.json(六维 BOOLEAN 计分,短路后未评维度
     记 null/N-A,总分=通过关数/6×100;算法与实现见 score_report.py)。EVAL_ERROR 无有效
     评分主动跳过;生成失败不拖垮评估——报告仍是权威,可手跑 score_report.py 补出。
     返回 (总分, 六维);没产出时 (None, {})。"""
@@ -834,7 +834,7 @@ def _write_quality_score(case_id: str, report_path: Path):
     except ValueError as e:
         print(f"[eval_run] {case_id}: 不产 quality_score({e})")
     except Exception as e:  # noqa: BLE001
-        print(f"[eval_run] ⚠ {case_id}: quality_score.json 生成失败({e})——评估报告不受影响,"
+        print(f"[eval_run] ⚠ {case_id}: quality_score_batch.json 生成失败({e})——评估报告不受影响,"
               f"可手跑 score_report.py \"{report_path}\" 补出")
     return case_score, case_dims
 
@@ -936,7 +936,7 @@ def _emit_case_report(
     )
     print(f"[eval_run] {case_id}: 报告已写入 {report_path}")
 
-    # 平台展示适配:同目录机械产出 quality_score.json(六维 BOOLEAN 计分,短路后未评维度
+    # 平台展示适配:同目录机械产出 quality_score_batch.json(六维 BOOLEAN 计分,短路后未评维度
     # 记 null/N-A,总分=通过关数/6×100;算法与实现见 score_report.py)。EVAL_ERROR 无有效
     # 评分主动跳过;生成失败不拖垮评估——报告仍是权威,可手跑 score_report.py 补出。
     case_score, case_dims = _write_quality_score(case_id, report_path)
@@ -985,10 +985,10 @@ def _write_batch_outputs(
     all_feedback: List[Dict[str, Any]],
     evaluation_time: str
 ) -> Dict[str, Any]:
-    """根目录整批产物:quality_score_batch.json、failure_signatures.json、feedback_to_generate.json;返回整批汇总。"""
-    # 根目录 quality_score_batch.json(整批):与一键回归同一算法(batch_summary.py),平台读这一份
+    """根目录整批产物:quality_score.json、failure_signatures.json、feedback_to_generate.json;返回整批汇总。"""
+    # 根目录 quality_score.json(整批):与一键回归同一算法(batch_summary.py),平台读这一份
     summary_report = write_batch_score(out_dir, all_case_summaries, evaluation_time)
-    print(f"[eval_run] 整批汇总已写入 {out_dir / 'quality_score_batch.json'}")
+    print(f"[eval_run] 整批汇总已写入 {out_dir / 'quality_score.json'}")
 
     # 写入 failure_signatures.json
     if all_failure_signatures:

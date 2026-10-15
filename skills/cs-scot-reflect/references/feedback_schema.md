@@ -4,16 +4,16 @@
 
 ## 位置
 
-文件写在评估输出根目录（`--out` 目录）下，与整批汇总 `quality_score_batch.json`、失败签名 `failure_signatures.json` 并列；单用例目录 `<case_id>-v<round>-<时间戳>/` 里不再单独放一份（评估报告里的 `feedback_to_generate` 字段为 null）。只在至少有一个用例触发反馈时才生成。
+文件写在评估输出根目录（`--out` 目录）下，与整批汇总 `quality_score.json`、失败签名 `failure_signatures.json` 并列；单用例目录 `<case_id>-v<round>-<时间戳>/` 里不再单独放一份（评估报告里的 `feedback_to_generate` 字段为 null）。只在至少有一个用例触发反馈时才生成。
 
 ```
 <out>/
-├── quality_score_batch.json
+├── quality_score.json
 ├── failure_signatures.json
 ├── feedback_to_generate.json          # 本文说明的文件
 └── <case_id>-v<round>-<时间戳>/
     ├── evaluation_report.json
-    ├── quality_score.json
+    ├── quality_score_batch.json
     ├── failure_signatures.json
     └── eval_run.json
 ```

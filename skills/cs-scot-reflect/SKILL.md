@@ -31,8 +31,8 @@ description: 评估反思。把 cs-scot-execute 的执行结果与用例库里�
 | 熔断 | 同一用例、同一节点、同一类错误连续三轮没修好，标记转人工深查 |
 | 一键回归 | 用一条命令把用例库里的每个用例依次执行诊断、判卷并汇总。"回归"指改动之后重跑同一批用例，确认原来通过的没有被改坏 |
 | 待裁决 | 一键回归里 finalize 拦下需要权衡的真冲突候选，脚本不代为裁决 |
-| 单用例评分 `quality_score.json` | 每个用例目录里的六维布尔评分 |
-| 整批汇总 `quality_score_batch.json` | 评估输出根目录里整批的通过率与平均分，业务取数用 |
+| 单用例评分 `quality_score_batch.json` | 每个用例目录里的六维布尔评分 |
+| 整批汇总 `quality_score.json` | 评估输出根目录里整批的通过率与平均分，业务取数用 |
 | 防泄题 | 期望只在 cases 目录，不传给生成与执行；读过期望的会话不做诊断 |
 
 ## 执行规矩
@@ -110,7 +110,7 @@ python "<本目录>/scripts/eval_run.py" \
 
 - finalize 拦下需要权衡的真冲突时，该用例记为待裁决并点名，脚本不代为裁决。默认按无人值守规则：待裁决直接按不通过计（FAIL，error_category 为 `pending_adjudication`）进通过率分母，裁决做不了等于这轮没优化好；事后有人了可按 fault-tree-rca 的规则在该结果目录补 `decisions.json`、重跑 finalize 与 render，再用 `--eval-only` 或 `--case <该用例>` 补判。有人盯着的场合加 `--pending-hold`，恢复"挂起点名、不计分母、裁决后补判"。`--pending-as-fail` 已是默认，保留只为兼容。
 - 执行器与根因分析链优先用场景技能自带的副本（`<skill>/scripts/runner.py`、`<skill>/assets/fault-tree-rca/`，与产物同代），其次是同一 skills 目录下部署的 cs-scot-execute 与 fault-tree-rca，最后到 cs-scot-generate-optimize 发行包内的组件副本里找。不需要为回归单独部署执行技能。
-- 产出：整批汇总 `<工作目录>/eval/quality_score_batch.json`，回归自己的明细（待裁决、异常清单）`<工作目录>/regress_summary.json`（也带 pass_rate 与 total_score），逐用例日志 `<工作目录>/logs/`。
+- 产出：整批汇总 `<工作目录>/eval/quality_score.json`，回归自己的明细（待裁决、异常清单）`<工作目录>/regress_summary.json`（也带 pass_rate 与 total_score），逐用例日志 `<工作目录>/logs/`。
 - 一键回归供日常回归。要对外发布的量化数字仍按双会话规格跑：诊断会话不读 expected.json。
 
 ## 评估怎么判
@@ -147,18 +147,18 @@ python "<本目录>/scripts/eval_run.py" \
 
 ```
 <out>/                                # 默认 <result-dir 父目录>/<场景>-eval/
-├── quality_score_batch.json          # 整批汇总：pass_rate、total_score、六维通过比例
+├── quality_score.json                # 整批汇总：pass_rate、total_score、六维通过比例
 ├── feedback_to_generate.json         # 反馈，只在有问题时生成
 ├── failure_signatures.json           # 全部失败签名，只在有问题时生成
 ├── fuse_history.jsonl                # 熔断历史，跨轮累计
 └── <case_id>-v<round>-<时间戳>/
     ├── evaluation_report.json        # 完整评估报告，唯一对外出口
-    ├── quality_score.json            # 单用例六维评分
+    ├── quality_score_batch.json      # 单用例六维评分
     ├── failure_signatures.json       # 本用例失败签名
     └── eval_run.json                 # 本次评估元数据
 ```
 
-业务取数的两个值都在 `quality_score_batch.json`：准确率取 `pass_rate`（PASS 加 PASS_WITH_GAPS 的用例数除以全部用例数，执行失败、判卷异常、待裁决都算不通过）；多用例总得分取 `total_score`（各用例 total_score 的算术平均，没评出分的按 0）。单用例的 total_score 是"六关过了几关"（通过维度数除以 6 乘 100 取整）；六维与六类错误一一对应，单用例是布尔，整批是比例。
+业务取数的两个值都在 `quality_score.json`：准确率取 `pass_rate`（PASS 加 PASS_WITH_GAPS 的用例数除以全部用例数，执行失败、判卷异常、待裁决都算不通过）；多用例总得分取 `total_score`（各用例 total_score 的算术平均，没评出分的按 0）。单用例的 total_score 是"六关过了几关"（通过维度数除以 6 乘 100 取整）；六维与六类错误一一对应，单用例是布尔，整批是比例。
 
 每个文件的完整例子和字段的计算规则见 `references/output_files.md`；六维的键名、三语名称与描述见 `references/score_dimensions.md`；反馈文件的完整结构见 `references/feedback_schema.md`。对任意历史报告可手跑 `python scripts/score_report.py <evaluation_report.json 或其目录>` 补出单用例评分。
 
@@ -191,7 +191,7 @@ python "<本目录>/scripts/eval_run.py" \
   --prev-evaluation output/ldp-lsp-eval/ldp-lsp-001-v1-20260810T034800Z/evaluation_report.json
 ```
 
-预期：`output/ldp-lsp-eval/ldp-lsp-001-v2-<时间戳>/` 下出现 evaluation_report.json 与 quality_score.json，round 为 2；根目录的 quality_score_batch.json 更新。汇报时原样给出脚本打印的 verdict、对账计数、命中的错误类（如有）与两个文件的路径；有反馈文件就指出它的位置，由优化技能承接。
+预期：`output/ldp-lsp-eval/ldp-lsp-001-v2-<时间戳>/` 下出现 evaluation_report.json 与 quality_score_batch.json，round 为 2；根目录的 quality_score.json 更新。汇报时原样给出脚本打印的 verdict、对账计数、命中的错误类（如有）与两个文件的路径；有反馈文件就指出它的位置，由优化技能承接。
 
 日常回归的例子：
 
@@ -200,7 +200,7 @@ python "<本目录>/scripts/regress.py" --skill-dir scot技能/ldp-lsp-is-not-es
   --case-dir cases --out output/ldp-lsp-regress
 ```
 
-预期：逐用例打印执行与判卷状态，结尾打印通过数、通过率与总得分；`output/ldp-lsp-regress/eval/quality_score_batch.json` 与 `regress_summary.json` 写出。
+预期：逐用例打印执行与判卷状态，结尾打印通过数、通过率与总得分；`output/ldp-lsp-regress/eval/quality_score.json` 与 `regress_summary.json` 写出。
 
 ## 注意
 

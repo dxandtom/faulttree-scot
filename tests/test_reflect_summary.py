@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""评估反思整批汇总(评估输出根目录 quality_score_batch.json)算法测试(标准库,直接 python 跑):
+"""评估反思整批汇总(评估输出根目录 quality_score.json)算法测试(标准库,直接 python 跑):
 ① build_batch_score 纯函数:通过 = PASS + PASS_WITH_GAPS;pass_rate = 通过 ÷ 全部用例;total_score = 各用例
    总分平均,没评出分按 0;六维 = 通过该关的用例比例;没判卷的记 NOT_EVALUATED;
 ② 用自带演练场(make_drill)跑两条入口——eval_run 批量判卷、regress --eval-only——两边写出的整批
-   quality_score_batch.json 汇总字段完全一致,且与逐用例数据的算术吻合。"""
+   quality_score.json 汇总字段完全一致,且与逐用例数据的算术吻合。"""
 import importlib.util
 import json
 import shutil
@@ -65,7 +65,7 @@ check("verdicts 计数:没判卷记 NOT_EVALUATED,合计等于总数",
 check("空批次不除零", bs.build_batch_score([], "t")["pass_rate"] == 0.0 and bs.build_batch_score([], "t")["total_score"] == 0.0)
 check("format_line 带通过数与算法说明", "2/5" in bs.format_line(idx) and "PASS_WITH_GAPS" in bs.format_line(idx))
 
-print("\n== ② 演练场:两条入口写出同一算法的整批 quality_score_batch.json ==")
+print("\n== ② 演练场:两条入口写出同一算法的整批 quality_score.json ==")
 W = Path(tempfile.mkdtemp(prefix="reflect-idx-"))
 rc, o = run([SCRIPTS / "make_drill.py", "--out", W / "drill"])
 check("演练场生成", rc == 0, o[-300:])
@@ -73,12 +73,17 @@ flat = W / "flat"                                     # 结果目录平铺(目�
 flat.mkdir()
 for d in sorted((W / "drill" / "results").glob("*/result-drill-*")):
     shutil.copytree(d, flat / d.name)
+(W / "eval-out").mkdir()
+(W / "eval-out" / "quality_score_batch.json").write_text("{}", encoding="utf-8")   # 旧版整批文件残留
 rc1, o1 = run([SCRIPTS / "eval_run.py", "--case-dir", W / "drill" / "cases", "--result-dir", flat,
                "--skill-dir", W / "drill" / "product", "--out", W / "eval-out"])
 rc2, o2 = run([SCRIPTS / "regress.py", "--skill-dir", W / "drill" / "product", "--case-dir", W / "drill" / "cases",
                "--eval-only", "--result-dir", flat, "--out", W / "regress-out"])
-a_p, b_p = W / "eval-out" / "quality_score_batch.json", W / "regress-out" / "eval" / "quality_score_batch.json"
-check("两条入口都在根目录写出整批 quality_score_batch.json", a_p.exists() and b_p.exists(), (o1[-300:], o2[-300:]))
+a_p, b_p = W / "eval-out" / "quality_score.json", W / "regress-out" / "eval" / "quality_score.json"
+check("两条入口都在根目录写出整批 quality_score.json", a_p.exists() and b_p.exists(), (o1[-300:], o2[-300:]))
+check("根目录旧版整批文件 quality_score_batch.json 已被清掉", not (W / "eval-out" / "quality_score_batch.json").exists())
+check("单用例目录里的评分文件叫 quality_score_batch.json",
+      any((d / "quality_score_batch.json").exists() for d in (W / "eval-out").iterdir() if d.is_dir()))
 a = json.loads(a_p.read_text(encoding="utf-8")) if a_p.exists() else {}
 b = json.loads(b_p.read_text(encoding="utf-8")) if b_p.exists() else {}
 check("汇总字段(含六维)完全一致", a and b and all(a[k] == b[k] for k in KEYS), (a.get("pass_rate"), b.get("pass_rate")))
