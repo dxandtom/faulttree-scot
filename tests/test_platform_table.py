@@ -172,7 +172,7 @@ rows[("接入失败示例", "QoS建立失败", "干扰导致")]["Product_Obs"] =
 write_table(table, rows.values())
 rc, o = run_all(store, product, table)
 check("退出码 0", rc == 0, o[-800:])
-check("首轮按能力补齐工具链公共文件(compression-demo 引擎脚本旧代缺能力标记),并把表里的英文同步进树(英文同步 N 个)",
+check("首轮按能力标记补齐工具链公共文件(compression-demo 引擎脚本是缺能力标记的旧版),并把表里的英文同步进树(英文同步 N 个)",
       "工具链公共文件补齐" in o and "英文同步" in o and "英文已按对应表更新" in o, o[-800:])
 check("未标记的 zip 行只汇总一行,不逐行刷屏", o.count("[标记]") == 1 and "干扰导致" in o.split("[标记]")[1].split("\n")[0], o[-800:])
 check("没有 ✓ / + / ✂ / ~ 动作,节点数不变", not any(s in o for s in ("✓ n", "✂ n", "+ n")) and len(load_tree(product)) == len(nodes0), o[-800:])

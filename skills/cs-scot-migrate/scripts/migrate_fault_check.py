@@ -787,7 +787,7 @@ def _refresh_skill_scripts(skill_root: Path, exe: Path, touched: list, full: boo
 
 
 def _refresh_zip2csv(product: Path, touched: list, full: bool = True) -> None:
-    """③ assets/zip2csv(原始日志文件→三表转换器,含 ifilter 归类器):缺→补齐;源是旧代只补不刷;否则逐文件同步。
+    """③ assets/zip2csv(原始日志文件→三表转换器,含 ifilter 归类器):缺→补齐;源是旧版只补不刷;否则逐文件同步。
     full=False 是补齐模式:目录已存在就一概不动。"""
     z2c_dst, z2c_src = product / "zip2csv", _mat("zip2csv")
     z2c_main_src = z2c_src / "scripts" / "zip2csv.py"
@@ -818,7 +818,7 @@ def _refresh_zip2csv(product: Path, touched: list, full: bool = True) -> None:
 
 def _refresh_rca_existing(rca_dst: Path, rca_src: Path, rca_ok: bool, rca_caps, ignore, touched: list,
                           full: bool = True) -> None:
-    """④ 已有 assets/fault-tree-rca:旧代或与源不同 → 整目录刷新(旧副本备份 .bak);旧代又无可信源 → 只提醒。
+    """④ 已有 assets/fault-tree-rca:旧版或与源不同 → 整目录刷新(旧副本备份 .bak);旧版又无可信源 → 只提醒。
     full=False 是补齐模式:只有旧版(缺能力标记或缺脚本)才整目录刷新,与源内容不同不算。"""
     cur_draft = rca_dst / "scripts" / "draft_rca.py"
     cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
