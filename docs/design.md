@@ -54,7 +54,7 @@
 | `result-<运行号>/rca.json` | rca | execute（渲染）、reflect | 四档根因结论 |
 | `tree/migrations.json` | migrate | reflect（建用例库）、optimize | 迁移记录：节点对应哪个交付包 |
 | `cases/<case_id>/expected.json` | reflect（case_gen） | reflect | 用例期望；不传给生成与执行 |
-| `quality_score_batch.json`、`evaluation_report.json` | reflect | 平台、optimize | 整批通过率与得分；单用例评估报告 |
+| `quality_score.json`、`evaluation_report.json` | reflect | 平台、optimize | 整批通过率与得分；单用例评估报告 |
 
 ## 5. 设计原则
 

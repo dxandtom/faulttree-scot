@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""evaluation_report.json → quality_score.json(适配平台展示,纯机械转换,不经过模型)。
+"""evaluation_report.json → quality_score_batch.json(适配平台展示,纯机械转换,不经过模型)。
 
 平台的评估展示 = 若干维度各一个分 + 一个综合分。本技能的评估是"六类错误按顺序检查、命中即停",
 不做程度打分——对就是对、错就是错,所以:
@@ -106,7 +106,7 @@ def _meta_echo(report: dict, ec) -> dict:
 def write_score(report_path: Path, out_path: Path | None = None) -> Path:
     report = json.loads(Path(report_path).read_text(encoding="utf-8"))
     score = build_score(report)
-    out = Path(out_path) if out_path else Path(report_path).parent / "quality_score.json"
+    out = Path(out_path) if out_path else Path(report_path).parent / "quality_score_batch.json"
     out.write_text(json.dumps(score, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
 
@@ -117,9 +117,9 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
-    ap = argparse.ArgumentParser(description="evaluation_report.json → quality_score.json(平台六维评分,机械转换)")
+    ap = argparse.ArgumentParser(description="evaluation_report.json → quality_score_batch.json(平台六维评分,机械转换)")
     ap.add_argument("report", help="evaluation_report.json 路径,或其所在目录")
-    ap.add_argument("-o", "--out", default="", help="输出路径(默认与报告同目录 quality_score.json)")
+    ap.add_argument("-o", "--out", default="", help="输出路径(默认与报告同目录 quality_score_batch.json)")
     args = ap.parse_args()
     rp = Path(args.report)
     if rp.is_dir():

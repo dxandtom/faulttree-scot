@@ -1,6 +1,6 @@
-# quality_score.json 维度对照表（平台置信度配置用）
+# quality_score_batch.json 维度对照表（平台置信度配置用）
 
-评估反思的平台评分六维度 = 错误分类六类（`SKILL.md`「评估怎么判」一节的表），顺序即评估顺序。平台侧配置置信度（confidence）时照此表填；我方输出文件 `quality_score.json` 的 `dimensions` 键名 = 本表 `dimension_key`，格式见 `output_files.md` 第 3 节。
+评估反思的平台评分六维度 = 错误分类六类（`SKILL.md`「评估怎么判」一节的表），顺序即评估顺序。平台侧配置置信度（confidence）时照此表填；我方输出文件 `quality_score_batch.json` 的 `dimensions` 键名 = 本表 `dimension_key`，格式见 `output_files.md` 第 3 节。
 
 计分规则：六关按序、命中即停，不做程度打分。`value_type` 一律 **BOOLEAN**（通过 `value:true` → `score:100`；命中 `value:false` → `score:0`；前序命中导致没评到 → `value:null`/`score:null`，展示渲染 N/A）。总分 = 通过维度数 ÷ 6 × 100（取整），语义是"六关过了几关"；权重等权（1/6 ≈ 0.1667，平台按需归一），`weight` 仅供平台展示配置，我方总分不按权重加权。
 
@@ -15,4 +15,4 @@
 
 `dimension_name`/`dimension_desc` 的多语言对象里 `default` = `zh_CN` 文案。
 
-与报告的对应关系：`quality_score.json` 由 `scripts/score_report.py` 从 `evaluation_report.json` 机械转换（判定来源 = `verdict_detail.error_class` 的命中即停链条，不读 checks 的 passed）；`checks` 六键三态（true/false/null）与本表维度一一对应。EVAL_ERROR（评估自身失败）不产评分文件。
+与报告的对应关系：`quality_score_batch.json` 由 `scripts/score_report.py` 从 `evaluation_report.json` 机械转换（判定来源 = `verdict_detail.error_class` 的命中即停链条，不读 checks 的 passed）；`checks` 六键三态（true/false/null）与本表维度一一对应。EVAL_ERROR（评估自身失败）不产评分文件。

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""批量评估汇总——生成评估输出根目录下的 quality_score_batch.json(整批一份;单用例目录里的
-quality_score.json 不动):一键回归(regress.py)与批量评估(eval_run.py)都写这一份,计算方式只在这里定义。
+"""批量评估汇总——生成评估输出根目录下的 quality_score.json(整批一份;单用例目录里的
+quality_score_batch.json 不动):一键回归(regress.py)与批量评估(eval_run.py)都写这一份,计算方式只在这里定义。
 
 计算方式:
 - 通过 = verdict 为 PASS 或 PASS_WITH_GAPS(期望根因全部命中;缺部分数据不影响通过);
@@ -64,7 +64,7 @@ def build_batch_score(cases: list, evaluation_time: str) -> dict:
         "verdicts": _verdict_counts(cases),
         "dimensions": _dimension_ratios(cases),
         "meta": {"evaluation_time": evaluation_time, "value_type": "RATIO",
-                 "note": "单用例 quality_score.json 的六维是 true/false/null;本文件是整批:各维=通过该关的用例比例"},
+                 "note": "单用例 quality_score_batch.json 的六维是 true/false/null;本文件是整批:各维=通过该关的用例比例"},
         "cases": cases,
     }
 
@@ -72,12 +72,16 @@ def build_batch_score(cases: list, evaluation_time: str) -> dict:
 def write_batch_score(out_dir: Path, cases: list, evaluation_time: str) -> dict:
     score = build_batch_score(cases, evaluation_time)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    (Path(out_dir) / "quality_score_batch.json").write_text(json.dumps(score, ensure_ascii=False, indent=2), encoding="utf-8")
+    stale = Path(out_dir) / "quality_score_batch.json"
+    if stale.exists():                               # 旧版整批文件名:根目录下没有单用例文件,这里只可能是旧版残留
+        stale.unlink()
+        print(f"[batch_summary] 已删除旧版整批文件 {stale}(整批汇总现在叫 quality_score.json)")
+    (Path(out_dir) / "quality_score.json").write_text(json.dumps(score, ensure_ascii=False, indent=2), encoding="utf-8")
     return score
 
 
 def read_case_score(path: Path):
-    """读单用例 quality_score.json → (total_score, {维度: value});文件不在或读不了 → (None, {})。"""
+    """读单用例 quality_score_batch.json → (total_score, {维度: value});文件不在或读不了 → (None, {})。"""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):

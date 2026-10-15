@@ -183,7 +183,10 @@ def find_eval_report(eval_out: Path, case_id: str):
         rep = json.loads((latest / "evaluation_report.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
-    qs, dims = read_case_score(latest / "quality_score.json")
+    qs_p = latest / "quality_score_batch.json"
+    if not qs_p.exists():                            # 旧版评估目录里单用例文件叫 quality_score.json,照读
+        qs_p = latest / "quality_score.json"
+    qs, dims = read_case_score(qs_p)
     vd = rep.get("verdict_detail") or {}
     return {"report_dir": str(latest), "verdict": (rep.get("meta") or {}).get("verdict") or vd.get("verdict"),
             "error_class": vd.get("error_class"), "error_category": vd.get("error_category"),
@@ -340,11 +343,11 @@ def _evaluate_case(cid: str, i: int, case_dir: Path, result_root: Path, skill_di
 
 
 def _summarize(rows: list, out: Path, eval_out: Path) -> int:
-    """整批汇总:写 quality_score_batch.json(与 eval_run 同一算法)与 regress_summary.json,打印汇总,返回退出码。"""
+    """整批汇总:写 quality_score.json(与 eval_run 同一算法)与 regress_summary.json,打印汇总,返回退出码。"""
     done = [r for r in rows if r["stage"] == "evaluated"]
     pending = [r for r in rows if r["stage"] == "pending_adjudication"]
     broken = [r for r in rows if r["stage"] in ("exec_fail", "eval_error")]
-    # 整批 quality_score_batch.json:与 eval_run 批量判卷同一算法(batch_summary.py),平台读这一份;
+    # 整批 quality_score.json:与 eval_run 批量判卷同一算法(batch_summary.py),平台读这一份;
     # 没判卷的用例(挂起/执行失败/判卷异常)verdict 记 NOT_EVALUATED,计入分母
     index = write_batch_score(eval_out, [{"case_id": r["case_id"],
                                           "verdict": r.get("verdict") if r["stage"] == "evaluated" else None,
@@ -362,7 +365,7 @@ def _summarize(rows: list, out: Path, eval_out: Path) -> int:
     print(f"\n[regress] 汇总:{len(rows)} 用例 | 已判卷 {len(done)}(通过 {passed})"
           f" | 挂起待裁决 {len(pending)} | 执行/判卷异常 {len(broken)}")
     print(f"  {format_line(index)}")
-    print(f"  平台/业务取数:{eval_out / 'quality_score_batch.json'}(整批:pass_rate、total_score、六维通过比例)")
+    print(f"  平台/业务取数:{eval_out / 'quality_score.json'}(整批:pass_rate、total_score、六维通过比例)")
     if pending:
         print("  ⏸ 挂起用例(裁决后重跑 finalize+render,再 `--eval-only` 或 --case 补判):"
               + "、".join(r["case_id"] for r in pending))

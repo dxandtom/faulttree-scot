@@ -57,9 +57,11 @@
 
 `checks` 六个键与六类错误一一对应，`passed` 三态：`true` 是评了且通过；`false` 是命中（整场唯一，链条停在这里，detail 附机械原料）；`null` 是没评到（前面某类已命中，按序评估终止）。三态按分类结果的链条机械推导。
 
-## 2. quality_score_batch.json（整批，评估输出根目录）
+## 2. quality_score.json（整批，评估输出根目录）
 
-两级两个文件：每个用例目录里的 `quality_score.json` 是单用例的，评估输出根目录的 `quality_score_batch.json` 是整批的，文件名不同，解析时不会混。一键回归（regress.py，落在 `<工作目录>/eval/`）与批量判卷（eval_run.py，落在 `--out` 目录）写的是同一格式，由 `scripts/batch_summary.py` 统一计算。
+两级两个文件：每个用例目录里的 `quality_score_batch.json` 是单用例的，评估输出根目录的 `quality_score.json` 是整批的，文件名不同，解析时不会混。一键回归（regress.py，落在 `<工作目录>/eval/`）与批量判卷（eval_run.py，落在 `--out` 目录）写的是同一格式，由 `scripts/batch_summary.py` 统一计算。
+
+这两个名字曾经相反（整批叫 `quality_score_batch.json`，单用例叫 `quality_score.json`）。对改名前的评估输出：回归脚本读旧用例目录时两个名字都能识别；根目录残留的旧版整批文件会在下次写整批汇总时删掉并打印一行提示，以免与新的单用例文件名混淆。
 
 ```json
 {
@@ -96,7 +98,7 @@
 - 整批六维：各维等于通过该关的用例数除以用例总数，没评到的关按不通过。因此 total_score 也等于六个维度分的平均；平台可以用同一套六维界面展示，单用例是布尔、整批是比例（`meta.value_type`）。
 - `verdicts` 里的 NOT_EVALUATED 计没有产生报告的用例（执行失败、待裁决等）。
 
-## 3. quality_score.json（单用例，平台展示评分）
+## 3. quality_score_batch.json（单用例，平台展示评分）
 
 评估末尾由 eval_run.py 调 `score_report.py` 自动生成，零模型参与；平台展示直接读这个文件。
 
