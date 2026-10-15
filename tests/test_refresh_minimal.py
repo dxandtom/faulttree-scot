@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""migrate 收包、收表时的补齐模式(refresh_engine 的 full=False)测试(标准库,直接 python 跑):
-① 能力齐全但内容不同的公共文件(check_data.py、SKILL.md 正文、zip2csv、fault-tree-rca 的规则说明)
+"""migrate 迁入交付包、按对应表批量处理时的补齐模式(refresh_engine 的 full=False)测试(标准库,直接 python 跑):
+① 能力标记齐全但内容不同的公共文件(check_data.py、SKILL.md 正文、zip2csv、fault-tree-rca 的规则说明)
    一概不覆盖,不产生 .bak;
-② 缺能力标记的旧代引擎脚本(compression-demo 的 condition_kernels.py)照样刷新;
+② 缺能力标记的旧版引擎脚本(compression-demo 的 condition_kernels.py)照样刷新;
 ③ 缺失的文件(references/plan_schema.md、custom_lib.py)照样补齐;
 ④ 同一个技能再按整体刷新(full=True)跑,①里没动的文件全部刷到源版本。
-目的:别的工具(批量适配)升过的公共文件,不会被迁移刷回本机工具链的版本。"""
+目的:别的工具(批量适配)升级过的公共文件,不会被迁移覆盖回本机工具链的版本。"""
 import importlib.util
 import re
 import shutil
@@ -46,7 +46,7 @@ def load(path: Path, name: str):
 
 
 def mk_skill(root: Path):
-    """按当前 skills 目录下的源拼一个打包技能(与 test_refresh_policy 同一拼法)。"""
+    """按当前 skills 目录下的源组装一个打包技能(与 test_refresh_policy 同一组装方式)。"""
     exe = SK / "cs-scot-execute"
     (root / "scripts").mkdir(parents=True)
     for n in ("runner.py", "check_data.py", "tree_prune.py"):
@@ -75,11 +75,11 @@ root = W / "demo-scenario"
 assets = mk_skill(root)
 mig = load(MIG, "mig_fx")
 
-# 做旧与做差异:能力齐全但内容不同(模拟被批量适配升过、比本机更新的文件)
+# 构造旧版文件与内容差异:能力标记齐全但内容不同(模拟被批量适配升级过、比本机更新的文件)
 cd = root / "scripts" / "check_data.py"
-append_line(cd, "\n# 批量适配升过的版本多出来的一行\n")
+append_line(cd, "\n# 批量适配升级过的版本多出来的一行\n")
 sk = root / "SKILL.md"
-append_line(sk, "\n批量适配升过的正文多一行。\n")
+append_line(sk, "\n批量适配升级过的正文多一行。\n")
 c2c = assets / "zip2csv" / "scripts" / "config2csv.py"
 append_line(c2c, "\n# newer\n")
 rules = assets / "fault-tree-rca" / "references" / "rca_rules.md"
@@ -87,23 +87,23 @@ append_line(rules, "\n新版规则多一行\n")
 (root / "references" / "plan_schema.md").unlink()                      # 缺失的文件要补
 before = {p: norm(p) for p in (cd, sk, c2c, rules)}
 
-print("\n== 补齐模式(full=False):只补缺失与缺能力的,已有文件不覆盖 ==")
+print("\n== 补齐模式(full=False):只补缺失的文件和缺能力标记的旧版文件,已有文件不覆盖 ==")
 touched = mig.refresh_engine(assets, full=False)
 print("  动了:", touched)
-check("① check_data.py 能力齐全、内容不同:不覆盖、无 .bak",
+check("① check_data.py 能力标记齐全、内容不同:不覆盖、无 .bak",
       norm(cd) == before[cd] and not cd.with_name("check_data.py.bak").exists())
-check("① SKILL.md 正文能力齐全、内容不同:不换、无 .bak",
+check("① SKILL.md 正文能力标记齐全、内容不同:不换、无 .bak",
       norm(sk) == before[sk] and not (root / "SKILL.md.bak").exists())
 check("① zip2csv 已存在:不动", norm(c2c) == before[c2c] and not c2c.with_name("config2csv.py.bak").exists())
-check("① fault-tree-rca 能力齐全、内容不同:不整目录刷新",
+check("① fault-tree-rca 能力标记齐全、内容不同:不整目录刷新",
       norm(rules) == before[rules] and not (assets / "fault-tree-rca.bak").exists())
 ck = assets / "scripts" / "condition_kernels.py"
-check("② 缺能力标记的旧代 condition_kernels.py 被刷新并留 .bak",
+check("② 缺能力标记的旧版 condition_kernels.py 被刷新并留 .bak",
       same(ck, SK / "cs-scot-generate" / "scripts" / "condition_kernels.py")
       and ck.with_name("condition_kernels.py.bak").exists())
 check("③ 缺失的 references/plan_schema.md 补齐", (root / "references" / "plan_schema.md").exists())
 check("③ 缺失的 custom_lib.py 补齐", (assets / "scripts" / "custom_lib.py").exists())
-check("清单里只有补齐与旧代刷新,没有 check_data / SKILL.md / zip2csv / fault-tree-rca",
+check("清单里只有补齐与旧版刷新,没有 check_data / SKILL.md / zip2csv / fault-tree-rca",
       not any(k in t for t in touched for k in ("check_data", "SKILL.md", "zip2csv", "fault-tree-rca")), touched)
 
 print("\n== 再按整体刷新(full=True)跑:上面没动的文件全部刷到源版本 ==")

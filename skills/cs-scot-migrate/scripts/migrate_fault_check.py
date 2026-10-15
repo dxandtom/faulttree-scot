@@ -747,7 +747,7 @@ def _manual_registered_skip(dst: Path, src: Path, old_text: str, caps_ok: bool) 
 
 def _refresh_engine_scripts(product: Path, touched: list, full: bool = True) -> None:
     """① assets/scripts 引擎文件:逐文件取可信源比对刷新;拿不出可信源时能力齐全的副本照旧、否则停止并报错。
-    full=False 是补齐模式:能力齐全的已有文件不覆盖,只补缺失的和缺能力的。"""
+    full=False 是补齐模式:能力标记齐全的已有文件不覆盖,只补缺失的文件和缺能力标记的旧版文件。"""
     sdir = product / "scripts"
     gen = _mat("cs-scot-generate") / "scripts"
     for name, caps in ENGINE_CAPS.items():
@@ -767,7 +767,7 @@ def _refresh_engine_scripts(product: Path, touched: list, full: bool = True) -> 
 
 def _refresh_skill_scripts(skill_root: Path, exe: Path, touched: list, full: bool = True) -> None:
     """② 打包技能根 scripts/ 的 runner/check_data/tree_prune 与 references/:与执行技能的源比对刷新。
-    full=False 是补齐模式:能力齐全的脚本不覆盖,references/ 只补缺失的文件。"""
+    full=False 是补齐模式:能力标记齐全的脚本不覆盖,references/ 只补缺失的文件。"""
     for name, caps, why in (("runner.py", (RUNNER_CAP,), "原始日志目录/两代源名/执行状态写入"),
                             ("check_data.py", ("def main",), "数据入口检查"),
                             ("tree_prune.py", (TREE_PRUNE_CAP,), "剪枝保留 S 脚本证据")):
@@ -819,7 +819,7 @@ def _refresh_zip2csv(product: Path, touched: list, full: bool = True) -> None:
 def _refresh_rca_existing(rca_dst: Path, rca_src: Path, rca_ok: bool, rca_caps, ignore, touched: list,
                           full: bool = True) -> None:
     """④ 已有 assets/fault-tree-rca:旧代或与源不同 → 整目录刷新(旧副本备份 .bak);旧代又无可信源 → 只提醒。
-    full=False 是补齐模式:只有旧代(缺能力或缺脚本)才整目录刷新,与源内容不同不算。"""
+    full=False 是补齐模式:只有旧版(缺能力标记或缺脚本)才整目录刷新,与源内容不同不算。"""
     cur_draft = rca_dst / "scripts" / "draft_rca.py"
     cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
     old_gen = any(c not in cur for c in rca_caps) \
@@ -842,7 +842,7 @@ def _refresh_rca_existing(rca_dst: Path, rca_src: Path, rca_ok: bool, rca_caps, 
 
 
 def _refresh_rca(product: Path, touched: list, full: bool = True) -> None:
-    """④ assets/fault-tree-rca(根因规则副本):缺→补齐;旧或与源不同→整目录刷新(full=False 时只有旧代才刷)。"""
+    """④ assets/fault-tree-rca(根因规则副本):缺→补齐;旧或与源不同→整目录刷新(full=False 时只有旧版才刷新)。"""
     rca_dst, rca_src = product / "fault-tree-rca", _mat("fault-tree-rca")
     rca_src_draft = rca_src / "scripts" / "draft_rca.py"
     _rca_caps = ("gap_kind", 'f.get("evidence")')    # 四态分型 + S 证据标签引用这一代
@@ -895,8 +895,9 @@ def refresh_engine(product: Path, full: bool = True) -> list:
     两种模式:
     - full=True(整体刷新,--refresh-only 用):逐文件与本机 skills 目录下的源比对(行尾差异不算),
       内容不同就刷新,旧文件留 .bak;
-    - full=False(补齐模式,收包、收表时用):只补缺失的文件和缺能力标记的旧代文件,已有且能力齐全的
-      文件一概不覆盖。这样别的工具(如批量适配)升过的公共文件不会被迁移刷回本机的版本。
+    - full=False(补齐模式,迁入交付包或按对应表批量处理时用):只补缺失的文件和缺能力标记的旧版
+      文件,已有且能力标记齐全的文件一概不覆盖。这样别的工具(如批量适配)升级过的公共文件不会被
+      迁移覆盖回本机的版本。
     返回本次动过的清单(逐项文字),--refresh-only 原样打印。
     某引擎文件缺能力又找不到可信源 → 停止并报错(迁过去也是全线'未知类别')。"""
     touched = []
@@ -918,8 +919,8 @@ def refresh_engine(product: Path, full: bool = True) -> list:
 
 
 def _refresh_standard(product: Path) -> int:
-    """每次收表/收包都先按补齐模式检查工具链公共文件(见 refresh_engine 的 full=False):只补缺失的和
-    缺能力的,已有文件不覆盖;打一行结果,返回动了几处。整体刷新只在 --refresh-only 做。"""
+    """每次收表/收包都先按补齐模式检查工具链公共文件(见 refresh_engine 的 full=False):只补缺失的文件和
+    缺能力标记的旧版文件,已有文件不覆盖;打一行结果,返回动了几处。整体刷新只在 --refresh-only 做。"""
     touched = refresh_engine(product, full=False)
     print(f"  工具链公共文件补齐 {len(touched)} 处" if touched
           else "  工具链公共文件无需补齐(已有文件不覆盖;整体刷新用 --refresh-only)")
@@ -2732,7 +2733,7 @@ def _single_migrate(a, pkg: Path, product: Path, nodes, nid: str, method, fc: Pa
     if ginfo and ginfo["warns"]:
         print(f"  [格式WARN] {','.join(ginfo['warns'])}(适配函数可处理;详见结尾的退回清单)")
 
-    # 0. 引擎检查+补全(旧产物的内核/函数库/导入校验不识别 S 类,先按能力补齐再改;已有文件不覆盖)
+    # 0. 引擎检查+补全(旧产物的内核/函数库/导入校验不识别 S 类,先按能力标记补齐再改;已有文件不覆盖)
     refresh_engine(product, full=False)
 
     # 1. 脚本进场
