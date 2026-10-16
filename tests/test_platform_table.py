@@ -5,7 +5,7 @@ Node_ID | L1_Name_CN | L1_Name_EN | … | Diagnosis_Method_CN | Diagnosis_Method
 | Product_Obs | Product_Name | Need_Optimize
 ① 表头识别:Node_ID 忽略、Diagnosis_Method_CN 当判据列、Need_Optimize 当标记列、Solution_CN 当方案列;
    我们自己的调优表(node_id + 判据:/绑定: 列)仍被拒;带 Need_Optimize 的一律按平台表认(备用规则);
-② 全 FALSE、表与树一致(ALL 模式)→ 零结构动作,工具链公共文件刷新照做;表带英文列时首轮把英文名/
+② 全 FALSE、表与树一致(ALL 模式)→ 零结构动作,工具链公共文件按能力补齐照做;表带英文列时首轮把英文名/
    英文判据同步进树(不看标记),再跑一遍没有任何改动;未标记的 zip 行只汇总一行;
 ③ 全 FALSE、表里少了一个节点 → 删除;
 ④ TRUE 行:有包 → 迁移;判据改了没包 → 只同步判据(英文判据随行同步);方案改了 → 同步方案(含英文);
@@ -164,7 +164,7 @@ mk_pkg(store, "干扰导致")
 mk_pkg(store, "新增节点甲")
 table = W / "full.csv"
 
-print("\n== ② 全 FALSE、表与树一致:零结构动作,只刷新工具链公共文件 ==")
+print("\n== ② 全 FALSE、表与树一致:零结构动作,只按能力补齐工具链公共文件 ==")
 nodes0 = load_tree(product)
 rows = rows_from_tree(nodes0)
 rows[("接入失败示例", "QoS建立失败", "干扰导致")]["Product_Name"] = "干扰导致.zip"      # 有包但 FALSE
@@ -172,8 +172,8 @@ rows[("接入失败示例", "QoS建立失败", "干扰导致")]["Product_Obs"] =
 write_table(table, rows.values())
 rc, o = run_all(store, product, table)
 check("退出码 0", rc == 0, o[-800:])
-check("首轮刷新工具链公共文件(compression-demo 引擎脚本旧代),并把表里的英文同步进树(英文同步 N 个)",
-      "工具链公共文件刷新" in o and "英文同步" in o and "英文已按对应表更新" in o, o[-800:])
+check("首轮按能力标记补齐工具链公共文件(compression-demo 引擎脚本是缺能力标记的旧版),并把表里的英文同步进树(英文同步 N 个)",
+      "工具链公共文件补齐" in o and "英文同步" in o and "英文已按对应表更新" in o, o[-800:])
 check("未标记的 zip 行只汇总一行,不逐行刷屏", o.count("[标记]") == 1 and "干扰导致" in o.split("[标记]")[1].split("\n")[0], o[-800:])
 check("没有 ✓ / + / ✂ / ~ 动作,节点数不变", not any(s in o for s in ("✓ n", "✂ n", "+ n")) and len(load_tree(product)) == len(nodes0), o[-800:])
 nodes_en = load_tree(product)

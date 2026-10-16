@@ -701,9 +701,11 @@ def _differs(dst: Path, src: Path) -> bool:
     return not dst.exists() or _norm_text(dst) != _norm_text(src)
 
 
-def _sync_file(dst: Path, src: Path, label: str, touched: list) -> bool:
+def _sync_file(dst: Path, src: Path, label: str, touched: list, full: bool = True) -> bool:
     """工具链公共文件同步:与已核验的源内容不同就覆盖,旧文件留 <原名>.bak(x.py → x.py.bak);
-    记入 touched 并打印一行。返回是否动了。"""
+    记入 touched 并打印一行。返回是否动了。full=False 是补齐模式:已有文件一概不覆盖,只补缺失的。"""
+    if not full and dst.exists():
+        return False
     if not _differs(dst, src):
         return False
     was = dst.exists()
@@ -743,8 +745,9 @@ def _manual_registered_skip(dst: Path, src: Path, old_text: str, caps_ok: bool) 
     return False
 
 
-def _refresh_engine_scripts(product: Path, touched: list) -> None:
-    """① assets/scripts 引擎文件:逐文件取可信源比对刷新;拿不出可信源时能力齐全的副本照旧、否则停止并报错。"""
+def _refresh_engine_scripts(product: Path, touched: list, full: bool = True) -> None:
+    """① assets/scripts 引擎文件:逐文件取可信源比对刷新;拿不出可信源时能力齐全的副本照旧、否则停止并报错。
+    full=False 是补齐模式:能力标记齐全的已有文件不覆盖,只补缺失的文件和缺能力标记的旧版文件。"""
     sdir = product / "scripts"
     gen = _mat("cs-scot-generate") / "scripts"
     for name, caps in ENGINE_CAPS.items():
@@ -759,30 +762,33 @@ def _refresh_engine_scripts(product: Path, touched: list) -> None:
                              "都拿不出可信版本——迁移技能安装不完整(engine/ 目录丢了?),重装后再迁。")
         if name == "custom_lib.py" and old_text and _manual_registered_skip(dst, src, old_text, caps_ok):
             continue                                     # 手工 @register 的函数:别静默丢
-        _sync_file(dst, src, f"scripts/{name}", touched)
+        _sync_file(dst, src, f"scripts/{name}", touched, full or not caps_ok)
 
 
-def _refresh_skill_scripts(skill_root: Path, exe: Path, touched: list) -> None:
-    """② 打包技能根 scripts/ 的 runner/check_data/tree_prune 与 references/:与执行技能的源比对刷新。"""
+def _refresh_skill_scripts(skill_root: Path, exe: Path, touched: list, full: bool = True) -> None:
+    """② 打包技能根 scripts/ 的 runner/check_data/tree_prune 与 references/:与执行技能的源比对刷新。
+    full=False 是补齐模式:能力标记齐全的脚本不覆盖,references/ 只补缺失的文件。"""
     for name, caps, why in (("runner.py", (RUNNER_CAP,), "原始日志目录/两代源名/执行状态写入"),
                             ("check_data.py", ("def main",), "数据入口检查"),
                             ("tree_prune.py", (TREE_PRUNE_CAP,), "剪枝保留 S 脚本证据")):
         dst = skill_root / "scripts" / name
+        cur = dst.read_text(encoding="utf-8", errors="replace") if dst.exists() else ""
+        caps_ok = bool(cur) and all(c in cur for c in caps)
         src = _engine_src(name, caps, exe / "scripts")
         if src is None:
-            cur = dst.read_text(encoding="utf-8", errors="replace") if dst.exists() else ""
-            if not (cur and all(c in cur for c in caps)):
+            if not caps_ok:
                 print(f"  [warn] 打包技能的 scripts/{name} 缺失或是旧版({why}),且本机无处取可信版本")
             continue
-        _sync_file(dst, src, f"scripts/{name}", touched)
+        _sync_file(dst, src, f"scripts/{name}", touched, full or not caps_ok)
     if (exe / "references").is_dir():                    # 执行技能随包的参考文档(plan_schema 等)
         for rel in _tracked(exe / "references"):
             _sync_file(skill_root / "references" / rel, exe / "references" / rel,
-                       f"references/{rel.as_posix()}", touched)
+                       f"references/{rel.as_posix()}", touched, full)
 
 
-def _refresh_zip2csv(product: Path, touched: list) -> None:
-    """③ assets/zip2csv(原始日志文件→三表转换器,含 ifilter 归类器):缺→补齐;源是旧代只补不刷;否则逐文件同步。"""
+def _refresh_zip2csv(product: Path, touched: list, full: bool = True) -> None:
+    """③ assets/zip2csv(原始日志文件→三表转换器,含 ifilter 归类器):缺→补齐;源是旧版只补不刷;否则逐文件同步。
+    full=False 是补齐模式:目录已存在就一概不动。"""
     z2c_dst, z2c_src = product / "zip2csv", _mat("zip2csv")
     z2c_main_src = z2c_src / "scripts" / "zip2csv.py"
     z2c_new = z2c_main_src.exists() \
@@ -805,19 +811,22 @@ def _refresh_zip2csv(product: Path, touched: list) -> None:
         shutil.copytree(z2c_src, z2c_dst, ignore=_z2c_ignore)
         touched.append("assets/zip2csv(补齐)")
         print("  补齐 assets/zip2csv(原始日志文件→三表转换器,含原始散文件归类)")
-    else:
+    elif full:
         for rel in _tracked(z2c_src):
             _sync_file(z2c_dst / rel, z2c_src / rel, f"assets/zip2csv/{rel.as_posix()}", touched)
 
 
-def _refresh_rca_existing(rca_dst: Path, rca_src: Path, rca_ok: bool, rca_caps, ignore, touched: list) -> None:
-    """④ 已有 assets/fault-tree-rca:旧代或与源不同 → 整目录刷新(旧副本备份 .bak);旧代又无可信源 → 只提醒。"""
+def _refresh_rca_existing(rca_dst: Path, rca_src: Path, rca_ok: bool, rca_caps, ignore, touched: list,
+                          full: bool = True) -> None:
+    """④ 已有 assets/fault-tree-rca:旧版或与源不同 → 整目录刷新(旧副本备份 .bak);旧版又无可信源 → 只提醒。
+    full=False 是补齐模式:只有旧版(缺能力标记或缺脚本)才整目录刷新,与源内容不同不算。"""
     cur_draft = rca_dst / "scripts" / "draft_rca.py"
     cur = cur_draft.read_text(encoding="utf-8", errors="replace") if cur_draft.exists() else ""
     old_gen = any(c not in cur for c in rca_caps) \
         or not (rca_dst / "scripts" / "render_report.py").exists() \
         or not (rca_dst / "scripts" / "render_tree.py").exists()
-    stale = rca_ok and (old_gen or any(_differs(rca_dst / rel, rca_src / rel) for rel in _tracked(rca_src)))
+    differs = full and any(_differs(rca_dst / rel, rca_src / rel) for rel in _tracked(rca_src))
+    stale = rca_ok and (old_gen or differs)
     if stale:
         bak = rca_dst.with_name("fault-tree-rca.bak")
         if bak.exists():
@@ -832,8 +841,8 @@ def _refresh_rca_existing(rca_dst: Path, rca_src: Path, rca_ok: bool, rca_caps, 
               "且本机 skills 目录下没有 fault-tree-rca 技能可刷新——RCA 仍按旧规则手工裁决")
 
 
-def _refresh_rca(product: Path, touched: list) -> None:
-    """④ assets/fault-tree-rca(根因规则副本):缺→补齐;旧或与源不同→整目录刷新。"""
+def _refresh_rca(product: Path, touched: list, full: bool = True) -> None:
+    """④ assets/fault-tree-rca(根因规则副本):缺→补齐;旧或与源不同→整目录刷新(full=False 时只有旧版才刷新)。"""
     rca_dst, rca_src = product / "fault-tree-rca", _mat("fault-tree-rca")
     rca_src_draft = rca_src / "scripts" / "draft_rca.py"
     _rca_caps = ("gap_kind", 'f.get("evidence")')    # 四态分型 + S 证据标签引用这一代
@@ -849,11 +858,12 @@ def _refresh_rca(product: Path, touched: list) -> None:
             print("  [warn] 打包技能缺 assets/fault-tree-rca,且本机 skills 目录下没有 fault-tree-rca 技能可复制——"
                   "RCA 步骤没有规则手册与候选清单/合成脚本,诊断走不到根因")
     else:
-        _refresh_rca_existing(rca_dst, rca_src, rca_ok, _rca_caps, _rca_ignore, touched)
+        _refresh_rca_existing(rca_dst, rca_src, rca_ok, _rca_caps, _rca_ignore, touched, full)
 
 
-def _refresh_skill_md(skill_root: Path, exe: Path, touched: list) -> None:
-    """⑤ SKILL.md 正文(执行指引):换正文保身份——frontmatter(技能名/描述)原样,正文取 skills 目录下技能的当前版。"""
+def _refresh_skill_md(skill_root: Path, exe: Path, touched: list, full: bool = True) -> None:
+    """⑤ SKILL.md 正文(执行指引):换正文保身份——frontmatter(技能名/描述)原样,正文取 skills 目录下技能的当前版。
+    full=False 是补齐模式:正文带齐能力标记就不换。"""
     sk = skill_root / "SKILL.md"
     sk_text = sk.read_text(encoding="utf-8", errors="replace")
     _sk_caps = ("check_data.py", "draft_rca.py", "rca_reply.md")   # 执行指引正文须带齐的三处引用:数据检查、候选清单、回复稿
@@ -864,7 +874,8 @@ def _refresh_skill_md(skill_root: Path, exe: Path, touched: list) -> None:
     src_ok = bool(m_new) and all(m in new_txt for m in _sk_caps)
     body_old = (sk_text[m_old.end():] if m_old else sk_text).replace("\r\n", "\n")
     body_new = (new_txt[m_new.end():] if m_new else "").replace("\r\n", "\n")
-    if src_ok and m_old and body_old != body_new:
+    old_caps_ok = all(m in sk_text for m in _sk_caps)
+    if src_ok and m_old and body_old != body_new and (full or not old_caps_ok):
         shutil.copy2(sk, sk.with_name("SKILL.md.bak"))
         sk.write_text(f"---\n{m_old.group(1)}\n---\n" + new_txt[m_new.end():], encoding="utf-8")
         touched.append("SKILL.md 正文(已刷新到当前执行指引,旧文备份 SKILL.md.bak)")
@@ -875,37 +886,44 @@ def _refresh_skill_md(skill_root: Path, exe: Path, touched: list) -> None:
               "(frontmatter 异常或本机 skills 目录下的 cs-scot-execute 版本不够新)——建议重新 package")
 
 
-def refresh_engine(product: Path) -> list:
+def refresh_engine(product: Path, full: bool = True) -> list:
     """产物工具链公共文件检查+同步。工具链公共文件 = 工具链所有、与场景无关的文件:assets/scripts 引擎脚本、
     技能根 scripts/ 的 runner/check_data/tree_prune 与 references/、assets/zip2csv、
-    assets/fault-tree-rca 规则副本、SKILL.md 执行指引正文。逐文件与本机 skills 目录下的源比对(行尾差异
-    不算),内容不同就刷新,旧文件留 .bak;源须先通过自身能力标记核验,坏源不用(本机技能 →
-    本技能内置 engine/ 备用)。场景件(树、绑定、cross_analyzer、各指标脚本、节点脚本、knowledge)
-    一概不碰;custom_lib.py 含手工 @register 的函数时只按能力标记补缺、不整体覆盖,并点名。
+    assets/fault-tree-rca 规则副本、SKILL.md 执行指引正文。源须先通过自身能力标记核验,坏源不用
+    (本机技能 → 本技能内置 engine/ 备用)。场景件(树、绑定、cross_analyzer、各指标脚本、节点脚本、
+    knowledge)一概不碰;custom_lib.py 含手工 @register 的函数时只按能力标记补缺、不整体覆盖,并点名。
+    两种模式:
+    - full=True(整体刷新,--refresh-only 用):逐文件与本机 skills 目录下的源比对(行尾差异不算),
+      内容不同就刷新,旧文件留 .bak;
+    - full=False(补齐模式,迁入交付包或按对应表批量处理时用):只补缺失的文件和缺能力标记的旧版
+      文件,已有且能力标记齐全的文件一概不覆盖。这样别的工具(如批量适配)升级过的公共文件不会被
+      迁移覆盖回本机的版本。
     返回本次动过的清单(逐项文字),--refresh-only 原样打印。
     某引擎文件缺能力又找不到可信源 → 停止并报错(迁过去也是全线'未知类别')。"""
     touched = []
     # ① assets/scripts 引擎文件
-    _refresh_engine_scripts(product, touched)
+    _refresh_engine_scripts(product, touched, full)
     # ② 打包技能形态:assets/ 的上一级是技能根(有 SKILL.md + scripts/runner.py)
     skill_root = product.parent
     if not ((skill_root / "scripts" / "runner.py").exists() and (skill_root / "SKILL.md").exists()):
         return touched
     exe = _mat("cs-scot-execute")
-    _refresh_skill_scripts(skill_root, exe, touched)
+    _refresh_skill_scripts(skill_root, exe, touched, full)
     # ③ assets/zip2csv(原始日志文件→三表转换器,含 ifilter 归类器)
-    _refresh_zip2csv(product, touched)
+    _refresh_zip2csv(product, touched, full)
     # ④ assets/fault-tree-rca(根因规则副本):缺→补齐;旧或与源不同→整目录刷新
-    _refresh_rca(product, touched)
+    _refresh_rca(product, touched, full)
     # ⑤ SKILL.md 正文(执行指引):换正文保身份——frontmatter(技能名/描述)原样,正文取 skills 目录下技能的当前版
-    _refresh_skill_md(skill_root, exe, touched)
+    _refresh_skill_md(skill_root, exe, touched, full)
     return touched
 
 
 def _refresh_standard(product: Path) -> int:
-    """每次收表/收包都先把工具链公共文件与本机 skills 目录下的源对齐(见 refresh_engine),打一行结果;返回动了几处。"""
-    touched = refresh_engine(product)
-    print(f"  工具链公共文件刷新 {len(touched)} 处" if touched else "  工具链公共文件与本机 skills 目录下的源一致,无需刷新")
+    """每次收表/收包都先按补齐模式检查工具链公共文件(见 refresh_engine 的 full=False):只补缺失的文件和
+    缺能力标记的旧版文件,已有文件不覆盖;打一行结果,返回动了几处。整体刷新只在 --refresh-only 做。"""
+    touched = refresh_engine(product, full=False)
+    print(f"  工具链公共文件补齐 {len(touched)} 处" if touched
+          else "  工具链公共文件无需补齐(已有文件不覆盖;整体刷新用 --refresh-only)")
     return len(touched)
 
 
@@ -1766,16 +1784,17 @@ def _pick_for_row(sub: Path, row_name: str, md_name: str):
 
 
 def _print_map_summary(n_rows, n_ok, n_add, n_refreshed, has_fails, counted) -> None:
-    """对应表批量迁移的汇总行:生效行数 + 各类动作计数(为 0 的不显示)+ 工具链公共文件刷新;
+    """对应表批量迁移的汇总行:生效行数 + 各类动作计数(为 0 的不显示)+ 工具链公共文件补齐;
     表里没有标记行、结构也没变时,说清楚这一单到底做了什么。"""
     head = f"落地 {n_ok + n_add}/{n_rows} 行" + (f"(其中新增节点 {n_add} 个)" if n_add else "")
     parts = [text.format(n=n) for n, text in counted if n]
     if n_refreshed:
-        parts.append(f"工具链公共文件刷新 {n_refreshed} 处")
+        parts.append(f"工具链公共文件补齐 {n_refreshed} 处")
     print("\n对应表批量迁移汇总:" + ",".join([head] + parts))
     if not (n_rows or n_add or has_fails or any(n for n, _t in counted[1:7])):
         print("  表里没有标记行,结构与树一致——本次"
-              + ("只刷新了工具链公共文件" if n_refreshed else "没有任何改动(工具链公共文件也已是最新)"))
+              + ("只补齐了缺失的工具链公共文件" if n_refreshed
+                 else "没有任何改动(工具链公共文件无需补齐;整体刷新用 --refresh-only)"))
 
 
 # 两种批量模式(--auto 逐子包 / --map 对应表)共用的累计器与备注拼接
@@ -2714,8 +2733,8 @@ def _single_migrate(a, pkg: Path, product: Path, nodes, nid: str, method, fc: Pa
     if ginfo and ginfo["warns"]:
         print(f"  [格式WARN] {','.join(ginfo['warns'])}(适配函数可处理;详见结尾的退回清单)")
 
-    # 0. 引擎检查+补全(旧产物的内核/函数库/导入校验不识别 S 类,先刷新再改)
-    refresh_engine(product)
+    # 0. 引擎检查+补全(旧产物的内核/函数库/导入校验不识别 S 类,先按能力标记补齐再改;已有文件不覆盖)
+    refresh_engine(product, full=False)
 
     # 1. 脚本进场
     _copy_scripts(product, fc, deps)
