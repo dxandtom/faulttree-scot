@@ -53,7 +53,7 @@ python scripts/runner.py --plan <场景产物>/plan.json --data kpi=<kpi数据> 
 
 | 步骤 | 做什么 | 关键命令或产出 |
 |---|---|---|
-| 1 数据入口 | 先跑 `scripts/check_data.py` 认数据形态；已解析的表直接用，原始数据用 `assets/zip2csv/scripts/zip2csv.py` 转成三表，原始目录另外用 `--data raw=<目录>` 传入 | 数据传入建议；`csv/<网元>/CMD、CONFIG、LOG/*.csv` |
+| 1 数据入口 | 先跑 `scripts/check_data.py` 认数据形态；已解析的表直接用（数通三表按表头认，其它 csv/xlsx 按文件名对指标名），原始数据用 `assets/zip2csv/scripts/zip2csv.py` 转成三表，原始目录另外用 `--data raw=<目录>` 传入 | 数据传入建议；`csv/<网元>/CMD、CONFIG、LOG/*.csv` |
 | 2 数据与指标匹配 | 数据文件按文件名对上 `assets/scripts/<指标>_analyzer.py` 的指标名；对不上的和缺的都记入汇报 | 一组 `--data <指标>=<文件>` |
 | 3 执行 | `scripts/runner.py --plan assets/plan.json --result-base <平级结果目录> --data ...`；随后进入根因分析：先 `draft_rca.py`，只裁决冲突候选，再 `finalize_rca.py` | `result-<运行号>/rca_input.json`、`rca.json` |
 | 4 输出汇报 | `render_report.py rca.json --tree <tree_index>`，英文提问加 `--lang en`；`rca_reply.md` 全文原样贴进回复，前面加执行过程，末尾写补充说明 | `rca_report.md`、`rca_tree.txt`、`rca_reply.md` |

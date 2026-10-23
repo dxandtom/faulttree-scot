@@ -14,6 +14,8 @@ relativePath),弱模型看见"neName"就当数据表喂,42 个判据集体报"�
   A. 原始采集目录:<网元层父目录>/<网元>/CONFIG|CMD|LOG|DIAG/*.txt(raw= 必须传网元层父目录);
      平铺单网元(路径下直接是 CONFIG/CMD/…)也认,网元名=目录名;
   B. 已解析表:csv/xlsx,表头带 CmdName/ObjContent(cmd)、Summary/Log(log)、level1/CfgType(config);
+     表头对不上这三种的其它 csv/xlsx(无线的话统、CHR 这类宽表)认作**通用数据表**,按文件名对指标名
+     (技能的 assets/plan.json 里有指标清单时,文件名对得上哪个就建议哪个);故障树/调优表 xlsx 不算数据;
   C. 采集清单/索引 xlsx(fileType/relativePath/zipFile 这类列)——**是目录不是数据**,点名跳过;
   D. zip 压缩包——用 <assets>/zip2csv/scripts/zip2csv.py 转三表(它既接受 zip 也接受目录)。
 """
@@ -28,6 +30,34 @@ _TABLE_SIGNS = {"cmd": {"CmdName", "ObjContent", "CmdResult"},
                 "log": {"Summary", "Log", "Level", "Content"},
                 "config": {"level1", "CfgType", "L2Module"}}
 _MANIFEST_SIGNS = {"fileType", "relativePath", "zipFile"}
+# 故障树母表/调优表的表头特征:它们是树,不是数据,混在数据目录里也不能当数据表传入
+_TREE_SIGNS = ("L1(Chinese)", "L1_Name_CN", "Judgment Condition", "判据:原文", "node_id")
+_DATA_EXTS = (".csv", ".xlsx", ".xlsm")
+
+
+def _plan_indicators() -> list:
+    """技能形态下 assets/plan.json 里的指标名(各 <指标>_analyzer 脚本步骤);找不到或读不了返回 []。"""
+    import json
+    here = Path(__file__).resolve().parent
+    for cand in (here.parent / "assets" / "plan.json", here.parent / "plan.json"):
+        if cand.exists():
+            try:
+                plan = json.loads(cand.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return []
+            names = [str(n.get("name") or "") for n in (plan.get("nodes") or []) if n.get("kind") == "script"]
+            return [n[:-len("_analyzer")] for n in names if n.endswith("_analyzer") and n != "cross_analyzer"]
+    return []
+
+
+def _match_indicator(stem: str, indicators: list):
+    """文件名(去扩展名)对指标名:相等优先,其次文件名含指标名(与 runner 的匹配规则一致);对不上返回 None。"""
+    s = stem.lower()
+    for ind in indicators:
+        if s == ind.lower():
+            return ind
+    hits = [ind for ind in indicators if ind.lower() in s]
+    return hits[0] if len(hits) == 1 else None
 
 
 def _kind_dirs(d: Path):
@@ -133,8 +163,8 @@ def _report_ne_parents(root: Path, usable: list, problems: list, suggest: list) 
 
 def _scan_tables(root: Path) -> tuple:
     """B/C. 扫描根目录下的 csv/xlsx/xlsm,按表头分成 数据表 [(文件名, 命中的指标)]、清单表、读不了表头的表。"""
-    tables, manifests, unknown_x = [], [], []
-    for p in sorted(list(root.glob("*.csv")) + list(root.glob("*.xlsx")) + list(root.glob("*.xlsm"))):
+    tables, manifests, unknown_x, generic = [], [], [], []
+    for p in sorted(q for q in root.iterdir() if q.is_file() and q.suffix.lower() in _DATA_EXTS):
         if p.name.startswith("~$"):
             continue
         header = _csv_header(p) if p.suffix.lower() == ".csv" else _xlsx_header(p)
@@ -148,22 +178,51 @@ def _scan_tables(root: Path) -> tuple:
         hit = [ind for ind, signs in _TABLE_SIGNS.items() if hs & signs]
         if hit:
             tables.append((p.name, hit))
-    return tables, manifests, unknown_x
+            continue
+        if any(sign in h for h in header for sign in _TREE_SIGNS):   # 故障树母表/调优表:不是数据
+            continue
+        cols = [h for h in header if h]
+        if len(cols) >= 2 and not p.name.lower().endswith(".tuning.xlsx"):
+            generic.append((p.name, cols))
+    return tables, manifests, unknown_x, generic
 
 
-def _report_tables(tables: list, manifests: list, unknown_x: list, usable: list, suggest: list) -> None:
-    """B/C. 打印表与清单的识别结果:数据表给传入方式,清单点名不许传入,读不了的先跳过。"""
+def _report_tables(tables: list, manifests: list, unknown_x: list, usable: list, suggest: list,
+                   generic: list = ()) -> None:
+    """B/C. 打印表与清单的识别结果:数据表给传入方式,通用表按文件名对指标,清单点名不许传入,读不了的先跳过。"""
     if tables:
         print("✓ 已解析数据表:")
         for name, hit in tables:
             print(f"    {name} → 像 {'/'.join(hit)} 表(按表头判)")
         usable.append("tables")
         suggest.append("已解析表直接按指标名喂:--data \"<指标>=<表路径>\"(cmd/diag 两代名 runner 互认)")
+    if generic:
+        _report_generic(list(generic), usable, suggest)
     if manifests:
         print(f"⚠ 采集清单/索引表(不是数据,**禁止**当数据表喂):{', '.join(manifests)}")
         print("    (列是 fileType/relativePath/zipFile 这类——它只登记'数据都有哪些文件',真数据在它指的目录里)")
     if unknown_x:
         print(f"• 读不了表头的表文件(缺读取器,先跳过):{', '.join(unknown_x)}")
+
+
+def _report_generic(generic: list, usable: list, suggest: list) -> None:
+    """B 的补充:表头不是数通三表的 csv/xlsx(无线话统、CHR 等宽表)——按文件名对指标名给传入方式。"""
+    inds = _plan_indicators()
+    print("✓ 通用数据表(表头不是 cmd/log/config 三表,按文件名对指标名):")
+    matched = []
+    for name, cols in generic:
+        stem = Path(name).stem
+        ind = _match_indicator(stem, inds) if inds else None
+        head = "、".join(cols[:6]) + ("…" if len(cols) > 6 else "")
+        tail = f" → 对上指标「{ind}」" if ind else ("(文件名对不上本技能的任何指标:" + "/".join(inds) + ")" if inds else "")
+        print(f"    {name}:列 {head}{tail}")
+        if ind:
+            matched.append((ind, name))
+    usable.append("tables")
+    if matched:
+        suggest.append("通用表按对上的指标名传入:" + " ".join(f'--data "{i}=<目录>/{n}"' for i, n in matched))
+    else:
+        suggest.append("通用表按指标名传入:--data \"<指标>=<表路径>\"(指标名=assets/scripts/<指标>_analyzer.py 的前缀,文件名要对得上)")
 
 
 def _conclude(root: Path, usable: list, problems: list, suggest: list) -> int:
@@ -180,7 +239,7 @@ def _conclude(root: Path, usable: list, problems: list, suggest: list) -> int:
         if "raw" in usable:
             print("  → 原始日志文件还要转成三张表供原有绑定使用:python <assets>/zip2csv/scripts/zip2csv.py <上面 raw= 的目录> -o <输出>")
         return 0
-    print("✗ 认不出可用的数据形态:既没有 <网元>/CONFIG|CMD|LOG 结构,也没有表头能对上号的数据表。")
+    print("✗ 认不出可用的数据形态:既没有 <网元>/CONFIG|CMD|LOG 结构,也没有任何可用的 csv/xlsx 数据表。")
     # 原始散文件(零散的 log/txt/嵌套 zip,连分类目录都没有)是可以自动补救的:zip2csv 会调内置
     # ifilter 归类后再转——这种情况指路,别一律停手问用户(rar 它不再解,用户要先手工解压)
     raw_loose = next((p for p in root.rglob("*") if p.is_file()
@@ -223,8 +282,8 @@ def main() -> int:
         _report_ne_parents(root, usable, problems, suggest)
 
     # B/C. 表与清单
-    tables, manifests, unknown_x = _scan_tables(root)
-    _report_tables(tables, manifests, unknown_x, usable, suggest)
+    tables, manifests, unknown_x, generic = _scan_tables(root)
+    _report_tables(tables, manifests, unknown_x, usable, suggest, generic)
 
     return _conclude(root, usable, problems, suggest)
 

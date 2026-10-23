@@ -250,7 +250,7 @@ def _fact_problems(cid, cls, st, pred, f: dict) -> list:
     """字面层问题:类别缺失 / J类越权 / 无中生有 / 缺理由 / 越权判定。"""
     problems = []
     if not cls:
-        problems.append(f"[类别缺失]「{cid}」没有 class(应为 A/C/D/G/J/P)")
+        problems.append(f"[类别缺失]「{cid}」没有 class(应为 A/B/C/D/E/G/H/J/P)")
     if str(cls).upper() == "J" and st != "manual":
         problems.append(f"[J类越权]「{cid}」J 类应 status=manual,实际 {st!r}")
 
