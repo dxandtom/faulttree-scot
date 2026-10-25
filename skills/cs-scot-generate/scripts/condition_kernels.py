@@ -638,6 +638,31 @@ def k_pair(table, b, cls="P"):
 
 
 # ---------- B:差值计算(Σ被减列 − Σ减列,逐操作数变换后与阈值比较;2026-10 自 v1 恢复,无线话统判据用)----------
+def _difference_columns(header, mens, subs):
+    """解析差值两侧的原始计数列 → ({列名: 真实表头}, 缺失列表)。"""
+    cols, missing = {}, []
+    for name in mens + subs:
+        c, _ = resolve_column(header, name)
+        if c:
+            cols[name] = c
+        else:
+            missing.append(name)
+    return cols, missing
+
+
+def _difference_series(rows, cols, mens, subs, tr):
+    """逐行算 Σ被减 − Σ减(逐操作数先做 transforms)→ (差值列表, 含空值的行数)。"""
+    per, nulls = [], 0
+    for r in rows:
+        mv = [_num(r.get(cols[n], "")) for n in mens]
+        sv = [_num(r.get(cols[n], "")) for n in subs]
+        if any(x is None for x in mv + sv):
+            nulls += 1
+            continue
+        per.append(sum(_apply_transforms(x, tr) for x in mv) - sum(_apply_transforms(x, tr) for x in sv))
+    return per, nulls
+
+
 def k_difference(table, b, cls="B"):
     header, rows = table
     mens, subs = b.get("minuend") or [], b.get("subtrahend") or []
@@ -647,22 +672,11 @@ def k_difference(table, b, cls="B"):
     err = _shape_err(b)
     if err:
         return _insuf(cls, f"绑定参数不合法:{err}", resolved_column=None)
-    cols, missing = {}, []
-    for name in mens + subs:
-        c, _ = resolve_column(header, name)
-        (cols.__setitem__(name, c) if c else missing.append(name))
+    cols, missing = _difference_columns(header, mens, subs)
     if missing:
         return _insuf(cls, f"缺原始计数列:{missing}(只有成功率/无原始计数 → 无法算差值)",
                       resolved_column=None, missing=missing)
-    tr = b.get("transforms")
-    per, nulls = [], 0
-    for r in rows:
-        mv = [_num(r.get(cols[n], "")) for n in mens]
-        sv = [_num(r.get(cols[n], "")) for n in subs]
-        if any(x is None for x in mv + sv):
-            nulls += 1
-            continue
-        per.append(sum(_apply_transforms(x, tr) for x in mv) - sum(_apply_transforms(x, tr) for x in sv))
+    per, nulls = _difference_series(rows, cols, mens, subs, b.get("transforms"))
     if not per:
         return _insuf(cls, "无有效行(计数列空/NIL)", nulls=nulls)
     op, thr = b.get("op", ">"), b.get("threshold", 0)
@@ -704,60 +718,84 @@ def k_proportion(table, b, cls="E"):
 
 
 # ---------- H:信令流程(会话级 has/lacks/where;2026-10 自 v1 恢复,信令 trace 判据用)----------
+def _parse_where(header, where):
+    """解析 H 的 where 约束 → (约束列表 [(列, 取值, 模式)], None) 或 (None, 数据不足原因)。"""
+    constraints = []
+    for cst in (where if isinstance(where, list) else [where]):
+        wc, _ = resolve_column(header, cst.get("column", ""))
+        if not wc:
+            return None, f"where 未找到列「{cst.get('column')}」"
+        vals = [str(v).strip() for v in (cst.get("contains") or cst.get("equals") or [])]
+        if not vals:                                     # 空取值的 where 恒不满足 → 全会话假排除,明确拒绝
+            return None, (f"where 子句缺 equals/contains 取值(列「{cst.get('column')}」)——"
+                          "空约束恒不满足=假排除;修绑定格式")
+        constraints.append((wc, vals, "contains" if cst.get("contains") else "exact"))
+    return constraints, None
+
+
+def _row_meets(r, constraints) -> bool:
+    """一行是否同时满足全部 where 约束。"""
+    for wc, vals, mode in constraints:
+        v = str(r.get(wc, "")).strip()
+        if not (any(t in v for t in vals) if mode == "contains" else v in vals):
+            return False
+    return True
+
+
+def _group_sessions(rows, key, msgcol, constraints) -> dict:
+    """按会话键分组:{key: {"msgs": 消息集合, "where_ok": 是否有一行满足全部 where 约束}}。"""
+    groups = {}
+    for r in rows:
+        k = str(r.get(key, "")).strip() if key else "_all"
+        g = groups.setdefault(k, {"msgs": set(), "where_ok": not constraints})
+        g["msgs"].add(str(r.get(msgcol, "")).strip())
+        if constraints and not g["where_ok"] and _row_meets(r, constraints):
+            g["where_ok"] = True
+    return groups
+
+
+def _resolve_session_cols(header, b, cls):
+    """解析 H 的消息列与会话键列 → ((msgcol, key), None) 或 (None, 数据不足事实)。"""
+    msgcol = resolve_column(header, b.get("msg_column", ""))[0] if b.get("msg_column") else None
+    if not msgcol:
+        return None, _insuf(cls, "无信令/消息数据源(需 trace 记录、含消息类型列 msg_column)", resolved_column=None)
+    key = resolve_column(header, b.get("key", ""))[0] if b.get("key") else None
+    if b.get("key") and not key:                        # 显式给了 key 却解析不到 → 全表并成一个会话,has/lacks 语义畸变
+        return None, _insuf(cls, f"未找到会话键列「{b.get('key')}」——解析不到会把全表并成一个会话;"
+                                 "确要全表当一个会话请显式 key:null", resolved_column=msgcol, msg_column=msgcol)
+    return (msgcol, key), None
+
+
+def _unknown_has_fact(cls, has, all_msgs, msgcol):
+    """has 里的消息名在整列从未出现 → 多半是消息名写错或本数据无此流程,改判数据不足并摆出词汇样例。"""
+    unknown_has = sorted(t for t in has if t not in all_msgs)
+    if not unknown_has:
+        return None
+    sample = sorted(v for v in all_msgs if v)[:15]
+    return _insuf(cls, f"has 里的消息名在 msg_column 从未出现:{unknown_has}——疑似消息名与数据词汇不符,"
+                       f"或本数据无此流程(非'真没失败')。msg_column 实际取值样例:{sample}",
+                  resolved_column=msgcol, msg_column=msgcol,
+                  unknown_messages=unknown_has, msg_vocab_sample=sample)
+
+
 def k_signaling(table, b, cls="H"):
     """会话级信令判定:按 key 分组,看每个会话的消息集合是否满足 has/lacks;
     可选 where:要求会话里**存在一行**同时满足若干"列=值"约束(如"FAIL 且携带 cause=X")。
     where 写法:单个 {column, equals|contains} 或其列表(列表内所有约束须落在同一行)。"""
     header, rows = table
-    msgcol, _ = resolve_column(header, b.get("msg_column", "")) if b.get("msg_column") else (None, "")
-    if not msgcol:
-        return _insuf(cls, "无信令/消息数据源(需 trace 记录、含消息类型列 msg_column)", resolved_column=None)
-    key, _ = resolve_column(header, b.get("key", "")) if b.get("key") else (None, "")
-    if b.get("key") and not key:                        # 显式给了 key 却解析不到 → 全表并成一个会话,has/lacks 语义畸变(实测)
-        return _insuf(cls, f"未找到会话键列「{b.get('key')}」——解析不到会把全表并成一个会话;"
-                           "确要全表当一个会话请显式 key:null", resolved_column=msgcol, msg_column=msgcol)
+    cols, fact = _resolve_session_cols(header, b, cls)
+    if fact is not None:
+        return fact
+    msgcol, key = cols
     has, lacks = set(b.get("has") or []), set(b.get("lacks") or [])
-
-    # 解析 where:行级约束(同一行须满足全部),会话存在这样一行才算满足
-    where = b.get("where")
-    constraints = []
-    if where:
-        for cst in (where if isinstance(where, list) else [where]):
-            wc, _ = resolve_column(header, cst.get("column", ""))
-            if not wc:
-                return _insuf(cls, f"where 未找到列「{cst.get('column')}」", resolved_column=None)
-            vals = [str(v).strip() for v in (cst.get("contains") or cst.get("equals") or [])]
-            if not vals:                                # 空取值的 where 恒不满足 → 全会话假排除(实测),响亮拒绝
-                return _insuf(cls, f"where 子句缺 equals/contains 取值(列「{cst.get('column')}」)——"
-                                   "空约束恒不满足=假排除;修绑定格式", resolved_column=msgcol, msg_column=msgcol)
-            constraints.append((wc, vals, "contains" if cst.get("contains") else "exact"))
-
-    def _row_ok(r):
-        for wc, vals, mode in constraints:
-            v = str(r.get(wc, "")).strip()
-            if not (any(t in v for t in vals) if mode == "contains" else v in vals):
-                return False
-        return True
-
-    groups = {}  # key -> {"msgs": set, "where_ok": bool}
-    for r in rows:
-        k = str(r.get(key, "")).strip() if key else "_all"
-        g = groups.setdefault(k, {"msgs": set(), "where_ok": not constraints})
-        g["msgs"].add(str(r.get(msgcol, "")).strip())
-        if constraints and not g["where_ok"] and _row_ok(r):
-            g["where_ok"] = True
-
-    # 保护:has 里的消息名若在整列里从未出现过 → 多半是消息名写错(或本数据无此流程),
-    # 不是"真没失败"。别默默给 predicate=False,改判数据不足、把真实词汇样例摆出来。
+    constraints, err = _parse_where(header, b.get("where")) if b.get("where") else ([], None)
+    if err:
+        return _insuf(cls, err, resolved_column=msgcol, msg_column=msgcol)
+    groups = _group_sessions(rows, key, msgcol, constraints)
     all_msgs = set().union(*(g["msgs"] for g in groups.values())) if groups else set()
-    unknown_has = sorted(t for t in has if t not in all_msgs)
-    if unknown_has:
-        sample = sorted(v for v in all_msgs if v)[:15]
-        return _insuf(cls, f"has 里的消息名在 msg_column 从未出现:{unknown_has}——疑似消息名与数据词汇不符,"
-                           f"或本数据无此流程(非'真没失败')。msg_column 实际取值样例:{sample}",
-                      resolved_column=msgcol, msg_column=msgcol,
-                      unknown_messages=unknown_has, msg_vocab_sample=sample)
-
+    fact = _unknown_has_fact(cls, has, all_msgs, msgcol)
+    if fact is not None:
+        return fact
     matched = sum(1 for g in groups.values()
                   if has <= g["msgs"] and not (lacks & g["msgs"]) and g["where_ok"])
     out = {"class": cls, "status": "ok", "key": key, "msg_column": msgcol, "groups": len(groups),
