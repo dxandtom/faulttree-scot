@@ -71,13 +71,13 @@ KNOWLEDGE_TEMPLATE = """\
 PRODUCT_FORMAT_VERSION = 3
 
 # 每个指标一份待填写的"逐条件分析脚本":模型在 generate 时按类别模板填 CONDITIONS
-# (类别 A/B/C/D/E/G/H/J/P:A 阈值比较、B 差值、C/G 文本匹配、D 组合、E 占比、H 信令流程、J 人工确认、P 成对比较)。
+# (类别 A/C/G/D/J/P:A 阈值比较、C/G 文本匹配、D 组合、J 人工确认、P 成对比较)。
 # 默认直接套预制内核(evaluate_binding);模板不够用时,模型才为个别条件写 custom。
 # execute 把它当普通脚本跑:python <ind>_analyzer.py <数据> -o out.json,直接输出该源的逐条件事实。
 ANALYZER_SCAFFOLD = '''#!/usr/bin/env python3
 """生成的「__IND__」逐条件分析脚本——读表 → 逐条件统计 → 输出事实。
 
-generate 时由模型按类别模板(A/B/C/D/E/G/H/J/P)填 CONDITIONS;execute 当普通脚本跑(快):
+generate 时由模型按类别模板(A/C/G/D/J/P)填 CONDITIONS;execute 当普通脚本跑(快):
     python __IND___analyzer.py <数据文件> -o out.json
 默认直接套预制内核;仅当数据格式特殊、模板不够用时,模型才为个别条件写 custom 函数
 (会在 generate 校验时拿真实数据真跑、出错即暴露)。绑定字段与各类参数见同目录 condition_binding_schema.md。
@@ -88,7 +88,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from condition_kernels import load_table, evaluate_binding  # 预制模板库(A/B/C/D/E/G/H/J/P 内核)
+from condition_kernels import load_table, evaluate_binding  # 预制模板库(A/C/G/D/J/P 内核)
 
 INDICATOR = "__IND__"
 
@@ -651,7 +651,7 @@ def _print_next_steps(out: Path, here: Path, indicators: List[str], scaffolded: 
         fill_src = [i for i in to_fill if i != "cross"]
         print(f"\n下一步(generate 的关键一步):为 {fill_src} 各自的 <指标>_analyzer.py 填 CONDITIONS——")
         print("  先用 analyzer.py 看各源真实列;再按 condition_binding_schema.md,把故障树每条判据")
-        print("  路由到对应源、选 A/B/C/D/E/G/H/J/P 内核、对哪列(裸名即可,组前缀自动剥)、给阈值/变换;对不上就标数据不足。")
+        print("  路由到对应源、选 A/C/G/D/J/P 内核、对哪列(裸名即可,组前缀自动剥)、给阈值/变换;对不上就标数据不足。")
         print("  默认直接套模板;模板不够用才为个别条件写 custom。填好后用真实数据各跑一遍校验:")
         for ind in fill_src:
             print(f"    python {out}/scripts/{ind}_analyzer.py <{ind}数据> -o /tmp/{ind}.json && "

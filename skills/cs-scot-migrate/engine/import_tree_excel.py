@@ -337,7 +337,7 @@ def _check_binding(b, s: str, name: str, rowno: int, errors: list) -> None:
                       f"(只接受 {'/'.join(sorted(_DECISIONS))})")
     elif dec is None and cls not in _CLASSES:
         errors.append(f"第{rowno}行「{name}」绑定:{s}: class「{b.get('class')}」不认识"
-                      "(A/B/C/D/E/G/H/J/P 之一;查不了就写 decision,"
+                      "(A/C/D/G/J/P 之一;查不了就写 decision,"
                       "模板见 scripts/condition_binding_schema.md)")
     elif dec is None and cls == "S" and s != "cross":
         errors.append(f"第{rowno}行「{name}」绑定:{s}: S 类(代码脚本)请写到「绑定:cross」列——"

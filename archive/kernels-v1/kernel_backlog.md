@@ -1,8 +1,8 @@
 # 判别内核总览 + 待扩展清单(带证据)
 
-> **⚠ 2026-07 内核重构后，本文的 A–J 清单是 v1 历史说法**：现役内核集 = **A/B/C/D/E/G/H/J/P**
-> （新增 P 成对比较、`extract` 格内取值、C/G `regex` 匹配模式；B/E/F/H/I 曾因数通判据普查零命中
-> 封存于 `archive/kernels-v1/`，2026-10 为重启无线场景把 B/E/H 恢复进主干，F/I 仍封存）。现役类表以 `condition_binding_schema.md` 为准;
+> **⚠ 2026-07 内核重构后，本文的 A–J 清单是 v1 历史说法**：数通版 cs-scot-generate 的现役内核集 = **A/C/D/G/J/P**
+> （新增 P 成对比较、`extract` 格内取值、C/G `regex` 匹配模式；B/E/F/H/I 因数通判据普查零命中封存于
+> `archive/kernels-v1/`）；2026-10 为重启无线场景新开 cs-scot-generate-wireless，其中恢复了 B/E/H，F/I 仍封存。现役类表以 `condition_binding_schema.md` 为准;
 > 本文保留作 v1 语义存档与 K–O 扩展依据。
 
 把"故障树的判断条件"归纳成**可机械执行的判别原语**。本文件两件事:

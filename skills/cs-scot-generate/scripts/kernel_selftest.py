@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""内核回归自测(A/B/C/D/E/G/H/J/P):每个内核给若干「合成小表 + 绑定 → 期望事实」用例,断言关键字段。
+"""内核回归自测(A/C/G/D/J/P):每个内核给若干「合成小表 + 绑定 → 期望事实」用例,断言关键字段。
 
 为什么要它:condition_kernels.py 是整条流水线的地基(execute 只跑、不改统计),
 但此前它**没有任何回归测试**——谁改坏一行(改了谓词、漏了分量字段、动了解析)都不会有东西报警。
 这份用例覆盖每类的 成立/不成立/数据不足/边界(空表、缺列、%值、transform 链、require、三态组合、
 regex 匹配、extract 取值、P 成对比较、封存类别拒收),是确定性的(无 ground truth、不调模型、
-可反复跑出同一结果)。v1 的 F/I 内核仍封存 archive/kernels-v1;B/E/H 已恢复,用例一并恢复在下面。
+可反复跑出同一结果)。v1 的 B/E/F/H/I 内核已封存 archive/kernels-v1,对应用例随内核一起封存。
 
 用法:
     kernel_selftest.py            # 跑全量,打印逐条结果,全过 exit 0、有失败 exit 1
@@ -469,60 +469,10 @@ CASES = [
      "binding": {"class": "F", "param": "p", "equals": "ON"},
      "expect": {"status": "insufficient_data", "predicate_satisfied": None},
      "reason_has": "封存"},
-    {"name": "封存类别 I→数据不足并指路", "table": _t(["TA"], ["5"]),
-     "binding": {"class": "I", "column": "TA", "row_threshold": 3},
+    {"name": "封存类别 H→数据不足并指路", "table": _t(["CallID", "MessageType"], ["1", "Setup"]),
+     "binding": {"class": "H", "key": "CallID", "msg_column": "MessageType", "has": ["Setup"]},
      "expect": {"status": "insufficient_data"}, "reason_has": "封存"},
-    # ---- B 差值(2026-10 自 v1 恢复)----
-    {"name": "B 差值成立(Att-Succ>0)", "table": _t(["att", "succ"], ["10", "7"], ["8", "8"]),
-     "binding": {"class": "B", "minuend": ["att"], "subtrahend": ["succ"], "op": ">", "threshold": 0, "scope": "aggregate", "agg": "sum"},
-     "expect": {"status": "ok", "value": 3.0, "predicate_satisfied": True}},
-    {"name": "B 主分集 10log10(a)-10log10(b)>6dB", "table": _t(["a", "b"], ["100", "1"]),
-     "binding": {"class": "B", "minuend": ["a"], "subtrahend": ["b"], "transforms": ["log10", "scale:10"],
-                 "op": ">", "threshold": 6, "scope": "aggregate", "agg": "mean"},
-     "expect": {"status": "ok", "value": 20.0, "predicate_satisfied": True}},
-    {"name": "B 缺原始计数列→数据不足", "table": _t(["att"], ["10"]),
-     "binding": {"class": "B", "minuend": ["att"], "subtrahend": ["succ"], "op": ">", "threshold": 0},
-     "expect": {"status": "insufficient_data"}},
-    {"name": "B 单侧为空→数据不足(0-0=0 恒不成立是假排除)", "table": _t(["a"], ["3"]),
-     "binding": {"class": "B", "minuend": ["a"], "subtrahend": []},
-     "expect": {"status": "insufficient_data"}},
-    {"name": "B count_rows 逐行差值越线计数", "table": _t(["att", "succ"], ["10", "7"], ["8", "8"], ["5", "1"]),
-     "binding": {"class": "B", "minuend": ["att"], "subtrahend": ["succ"], "op": ">", "threshold": 0, "scope": "count_rows", "require": 2},
-     "expect": {"status": "ok", "count_satisfied": 2, "predicate_satisfied": True}},
-    # ---- E 占比/TopN(2026-10 自 v1 恢复;行级 filter 走统一的 _run_filtered)----
-    {"name": "E top1 占比>0.7 成立 + 报分量", "table": _t(["term"], ["A"], ["A"], ["A"], ["A"], ["B"]),
-     "binding": {"class": "E", "group_by": "term", "op": ">", "threshold": 0.7},
-     "expect": {"status": "ok", "top1": "A", "top1_count": 4, "valid": 5, "predicate_satisfied": True}},
-    {"name": "E 带 filter(列表子句)先选行再分组", "table": _t(["DCErrType", "term"], ["X", "A"], ["X", "A"], ["Y", "B"], ["Y", "B"], ["Y", "B"]),
-     "binding": {"class": "E", "filter": [{"column": "DCErrType", "equals": "X"}], "group_by": "term", "op": ">", "threshold": 0.9},
-     "expect": {"status": "ok", "top1": "A", "filtered_n": 2, "filter_rows": 2, "predicate_satisfied": True}},
-    {"name": "E 分组列全空→数据不足", "table": _t(["term"], [""], ["NIL"]),
-     "binding": {"class": "E", "group_by": "term", "op": ">", "threshold": 0.5},
-     "expect": {"status": "insufficient_data"}},
-    # ---- H 信令流程(2026-10 自 v1 恢复)----
-    {"name": "H 会话含某消息→匹配", "table": _t(["CallID", "MessageType"], ["1", "RRCSetupRequest"], ["1", "RRCSetupFailure"]),
-     "binding": {"class": "H", "key": "CallID", "msg_column": "MessageType", "has": ["RRCSetupFailure"]},
-     "expect": {"status": "ok", "matched_sessions": 1, "predicate_satisfied": True}},
-    {"name": "H has+lacks+where 同会话约束", "table": _t(["CallID", "MessageType", "cause"], ["1", "Setup", ""], ["1", "Fail", "X"], ["2", "Setup", ""], ["2", "Complete", ""]),
-     "binding": {"class": "H", "key": "CallID", "msg_column": "MessageType", "has": ["Fail"], "lacks": ["Complete"],
-                 "where": {"column": "cause", "equals": ["X"]}},
-     "expect": {"status": "ok", "groups": 2, "matched_sessions": 1, "predicate_satisfied": True}},
-    {"name": "H 无消息列→数据不足", "table": _t(["CallID"], ["1"]),
-     "binding": {"class": "H", "key": "CallID", "msg_column": "MessageType", "has": ["X"]},
-     "expect": {"status": "insufficient_data"}},
-    {"name": "H key 列解析不到→数据不足(否则全表并成一个会话)", "table": _t(["MessageType"], ["Setup"]),
-     "binding": {"class": "H", "key": "SessionKey", "msg_column": "MessageType", "has": ["Setup"]},
-     "expect": {"status": "insufficient_data"}},
-    {"name": "H has 消息名整列未出现→数据不足并给词汇样例", "table": _t(["CallID", "MessageType"], ["1", "Setup"]),
-     "binding": {"class": "H", "key": "CallID", "msg_column": "MessageType", "has": ["RRCSetupFailure"]},
-     "expect": {"status": "insufficient_data"}, "present": ["msg_vocab_sample"]},
-    {"name": "H where 子句缺取值→数据不足(空约束恒不满足=假排除)", "table": _t(["MessageType", "cause"], ["Fail", "X"]),
-     "binding": {"class": "H", "msg_column": "MessageType", "has": ["Fail"], "where": {"column": "cause", "equal": ["X"]}},
-     "expect": {"status": "insufficient_data"}},
-    {"name": "H 顶层 filter→拒收(会话内行级约束用 where)", "table": _t(["msg", "key"], ["Setup", "c1"]),
-     "binding": {"class": "H", "filter": {"column": "key", "equals": "c1"}, "msg_column": "msg", "key": "key", "has": ["Setup"]},
-     "expect": {"status": "insufficient_data"}, "reason_has": "不认识的字段"},
-    {"name": "未知类别 Z→数据不足(只接受 A/B/C/D/E/G/H/J/P)", "table": _t(["x"], ["1"]),
+    {"name": "未知类别 Z→数据不足(只接受 A/C/D/G/J/P)", "table": _t(["x"], ["1"]),
      "binding": {"class": "Z", "column": "x"},
      "expect": {"status": "insufficient_data"}, "reason_has": "只接受"},
 
@@ -631,7 +581,7 @@ def main() -> int:
     except Exception:
         pass
     passed, total, lines = run_battery()
-    print(f"内核回归自测({total} 例,A/B/C/D/E/G/H/J/P):")
+    print(f"内核回归自测({total} 例,A/C/G/D/J/P):")
     print("\n".join(lines))
     ok = passed == total
     print(f"\n结论: {'✓ 全部通过 %d/%d' % (passed, total) if ok else '✗ %d/%d 通过,有回归' % (passed, total)}")

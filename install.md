@@ -4,7 +4,8 @@
 把本仓 `skills/` 下的**四个 skill** 安装(拷贝或软链)到外层 harness 的 skills 目录,
 让 Claude Code / OpenClaw 等能加载它们:
 
-- **cs-scot-generate** — 把故障树 Excel 编译成场景诊断 skill(生成解析脚本 + SCoT 计划)
+- **cs-scot-generate** — 把故障树 Excel 编译成场景诊断 skill(生成解析脚本 + SCoT 计划;数通场景)
+- **cs-scot-generate-wireless** — 同上,无线接入类场景版(内核多 B 差值、E 占比、H 信令流程三类)
 - **cs-scot-execute** — 按 `plan.json` 顺序执行 SCoT 计划
 - **fault-tree-rca** — 综合根因分析
 
@@ -48,7 +49,7 @@ pip install openpyxl
 ## 验证
 ```bash
 ls ~/.claude/skills/
-# 应看到:cs-scot-generate/  cs-scot-execute/  fault-tree-rca/
+# 应看到:cs-scot-generate/  cs-scot-generate-wireless/  cs-scot-execute/  fault-tree-rca/
 ```
 跑一个现成的场景示例(`examples/sa-access-fail/` 是已生成好的场景 skill):
 ```bash
@@ -64,7 +65,7 @@ python scripts/runner.py --plan plan.json \
 ```
 等价于:
 ```bash
-rm -rf ~/.claude/skills/cs-scot-generate \
+rm -rf ~/.claude/skills/cs-scot-generate ~/.claude/skills/cs-scot-generate-wireless \
        ~/.claude/skills/cs-scot-execute \
        ~/.claude/skills/fault-tree-rca
 ```

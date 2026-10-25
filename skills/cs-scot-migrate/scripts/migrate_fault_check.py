@@ -648,8 +648,7 @@ def run_step(product: Path, script_name: str, desc: str) -> None:
 ENGINE_CAPS = {
     "condition_kernels.py": ("def k_script", "def alias_sources", "【位置 ",
                              "except SystemExit", "xlsx_reader",
-                             'setdefault("script"',     # script 字段不覆盖 fault_check 写的脚本真身
-                             "def k_signaling"),         # 末项=B/E/H 内核已恢复(无线场景)
+                             'setdefault("script"'),    # 末项=script 字段不覆盖 fault_check 写的脚本真身
     "xlsx_reader.py": ("def read_rows",),                # 零依赖 xlsx 读取器(旧产物没有此文件→直接补)
     # 注意:引擎文件行为语义有变时要**升级这里的标记**(加一个只在新版存在的串),
     # 否则旧产物副本因"标记齐全"永远不被刷新——results 信封识别就是靠新增标记下发的。

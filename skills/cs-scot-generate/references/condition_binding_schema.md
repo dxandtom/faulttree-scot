@@ -4,7 +4,7 @@
 
 整套诊断里随场景变化的部分只有绑定。生成阶段，模型对照故障树条件和各数据源的真实表头与样本（先用 `analyzer.py` 生成概览），为每条判据写一条绑定：选哪个类别内核（A/C/G/D/J/P；内核指 `condition_kernels.py` 里每个类别对应的统计函数，逻辑已经固定并经过测试）、看哪一列、做什么处理变换、由哪个数据源回答、阈值多少；**对不上就如实标为数据不足**。绑定平铺写进对应数据源脚本的 `CONDITIONS` 列表。
 
-早期版本的 F（配置检查）、I（特征分析）两个内核已停用，存放在 `archive/kernels-v1/`，各有替代写法（见下文类表后的说明）；新绑定用到会得到"已封存"的数据不足。B（差值）、E（占比 TopN）、H（信令流程）三个内核在数通场景没有用到、曾一并封存，无线场景（话统、CHR、信令）要用且没有替代写法，已恢复进现役内核集。老产物自带内核副本，照常执行，不受影响。
+早期版本的 B/E/F/H/I 五个内核（差值、占比 TopN、配置检查、信令流程、特征分析）已停用，存放在 `archive/kernels-v1/`（在数通场景判据的全面核查中一次也没有用到；数通指数据通信，即路由器、交换机场景）。新绑定不要再用这些类别：内核会以"已停用"为由明确返回数据不足。老产物自带旧内核的副本，照常执行，不受影响；蜂窝等早期场景确实需要这些内核时，按 archive 目录下的 README 恢复。
 
 脚本运行时，对每条绑定调用 `evaluate_binding(绑定, {源:表}, 源)`，得到一条事实：算出的量、来源信息（provenance）和 `predicate_satisfied`（按字面比较得到的真假）。成立、不成立、数据不足的最终裁决，路径回溯，以及语义是否真正相同（例如 RSRP 与 RSSI 不是一回事，要降低置信度），仍由根因分析（RCA，由 `fault-tree-rca` 完成）负责。
 
@@ -18,7 +18,7 @@
 | `node` | 故障树节点名 |
 | `node_id` | 该节点在 `tree/<短名>.tree_index.json` 里的 key（形如 `nN`，短，推荐）或 `code`，两种写法都能识别。必填：根因分析靠它把事实挂回树上。不要填节点名；填错或填了不存在的编号，会被当作无主的"孤儿"绑定报出来 |
 | `condition_text` | 逐字取自故障树的判断条件（供根因分析复核） |
-| `class` | `A`/`B`/`C`/`D`/`E`/`G`/`H`/`J`/`P` 之一，决定用哪个内核（F/I 已停用，见上） |
+| `class` | `A`/`C`/`G`/`D`/`J`/`P` 之一，决定用哪个内核（B/E/F/H/I 已停用，见上） |
 | `source` | 数据源逻辑名（对应执行时的 `--data <name>=<file>`）；J 类可以为 null |
 | `mapping_reason` | 为什么这样对应、语义或单位上有什么差异、为什么判数据不足（必写，供审核） |
 | `decision`（可选） | 模型已经判定本条无法机械评估时填 `"insufficient_data"`（或 `"manual"`；也接受 `"not_applicable"`，按数据不足输出）：直接输出该状态，不跑内核、不给判断。比起写一堆 has/lacks/column 再在 reason 里说"数据不足"，这样更诚实，也更快、更短。 |
@@ -31,16 +31,13 @@
 | 类 | 名称 | 关键参数 | 产出的事实 |
 |---|---|---|---|
 | A | 阈值比较 | `column`，`op`（`< <= > >= == !=`，`=` 与 `==` 等价），`threshold`，`scope`（`aggregate`/`count_rows`），`agg`（mean/min/max/first/last/sum），`transforms`；可加 `extract`（先从单元格里提取数值，见公共字段） | aggregate 给 `value`；count_rows 给 `count_satisfied`/`ratio` |
-| B | 差值计算 | `minuend`：[被减列…]，`subtrahend`：[减列…]（两侧都是原始计数列，单侧为空拒收），`op`，`threshold`，`scope`（`aggregate` 配 `agg`，或 `count_rows` 配 `require`），`transforms`（逐操作数变换，如 `log10`、`scale:10`，主分集功率差这类判据用），可加 `filter` | aggregate 给 `value`（Σ被减 − Σ减）；count_rows 给 `count_satisfied`/`ratio`；缺任一原始计数列判数据不足（只有成功率、没有原始计数时不要硬绑） |
 | C | 字段匹配 | `column`，`equals`：[值…] 或 `contains`：[子串…] 或 `regex`：[正则…]（任一命中即命中；regex 用 `re.search`，大小写敏感，逐条编译校验，坏正则明确拒收），`match`（`exact`/`contains`/`regex`），`case_insensitive`，`require`（默认 1）；`absent:true` 表示负存在（命中 0 行才算故障成立，与 `require` 互斥；列全空判数据不足）；可加 `extract`（先提取值再匹配） | `matched` 命中行数，加 `total`/`ratio`/`top` 和样例 |
 | D | 多条件组合 | `combine`（`AND`/`OR`），`sub`：[子绑定…]（每个子绑定自带 `class`，可以自带 `source`）；`group_by`："<对象列>" 表示同对象关联（按该列分组，每组单独跑全部 sub，任一组全真才成立；sub 不得跨源） | AND：有子条件为 False 则 False，有数据不足则数据不足，否则 True；OR 对称；group_by 给 `matched_groups` |
-| E | 占比/TopN | `group_by`：分组列（如终端型号、错误类型），`op`，`threshold`（0 到 1 的比例），可加 `filter`（先选行再分组） | `top1`、`top1_count`、`top1_ratio`、`valid`；分组列全空判数据不足 |
 | G | 日志匹配 | `column`（日志文本列），`contains`：[码/串…] 或 `regex`：[正则…]；其余同 C | 同 C（实现就是 C） |
-| H | 信令流程 | `msg_column`：消息类型列，`key`：会话键列（如 CallID；给了却解析不到拒收，免得全表并成一个会话），`has`：[须出现的消息…]，`lacks`：[须不出现的消息…]，`where`：{`column`，`equals`/`contains`} 或其列表（同一行须全部满足，如"失败消息且携带 cause=X"）；顶层不收 `filter` | `groups`、`matched_sessions`，任一会话满足即成立；`has` 里的消息名整列从未出现判数据不足并附词汇样例；`lacks` 里的消息名整列从未出现只标注 `lacks_never_seen` |
 | J | 人工确认 | `note` | `status:"manual"`，不给判断 |
 | P | 成对比较 | `side_column`（分侧列）加 `peer_marker`（默认 `"*"`，含该标记的行是本端），`value_column`（取值列），可加 `extract`/`filter`，`fault_when`（`not_equal` 为默认，两侧不相等算故障；`equal` 相反） | `local`/`peer`/`equal`；任一侧没有值判数据不足（"查不到对端"是判断不了，不是不成立）；一侧有多个不同的值判数据不足（有歧义，先用 filter 缩小行） |
 
-早期版本的 F（配置检查）、I（特征分析）两个内核已停用，存放在 `archive/kernels-v1/`；新绑定用到会得到"已封存"的数据不足。替代写法：F 类的"参数=期望值"改用 C 类 `equals`（整格）或 C 类加 `extract`（单元格内的字段）；I 类的 `row_threshold` 改用 A 类 `count_rows`；B/E/H 在数通判据里没有用到，确实需要时按 archive 目录下的 README 恢复。
+早期版本的 B（差值）、E（占比/TopN）、F（配置检查）、H（信令流程）、I（特征分析）五个内核已停用，存放在 `archive/kernels-v1/`；新绑定用到会得到"已停用"的数据不足。原有用途的替代写法：F 类的"参数=期望值"改用 C 类 `equals`（整格）或 C 类加 `extract`（单元格内的字段）；I 类的 `row_threshold` 改用 A 类 `count_rows`；B/E/H 在数通判据里没有用到，确实需要时按 archive 目录下的 README 恢复。
 
 P 类的使用场景：判据要"查对端，比较本端和对端的某项信息是否一致"（如 MLAG 两侧的 IP、版本、配置是否一致）。数据形态是同一张表里本端行与对端行靠分侧列区分（如 `Object` 列的本端行带 `*` 标记）；要比较的值在 `value_column`（整格）或该格里的某一段（加 `extract`）；一次只比较一项信息，多项信息各写一条 P 类绑定，并用 `filter` 先把行缩小到该检查项。两侧在不同文件里时改用 `pair_from`（见下一节）。
 

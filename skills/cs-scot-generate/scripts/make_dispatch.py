@@ -91,11 +91,6 @@ COMMON_RULES = """【公共规约——逐条遵守】
 - C/G 匹配:column + equals/contains/regex 三选一(都是列表)+ 可选 match/require/absent/filter/extract。
 - D 组合:combine(只接受 "AND"/"OR")+ sub:[子绑定…] + 可选 group_by(同对象关联)。
 - P 成对:side_column + value_column + 可选 peer_marker(默认"*")/fault_when/filter/extract。
-- B 差值(话统"Att−Succ>0"这类原始计数相减):minuend:[被减列…] + subtrahend:[减列…] + op + threshold
-  + scope(aggregate 配 agg,或 count_rows 配 require)+ 可选 transforms(如 log10、scale:10)/filter;只有成功率没有原始计数不要硬绑。
-- E 占比/TopN("某类终端占比 > X%"):group_by:分组列 + op + threshold(0 到 1 的比例)+ 可选 filter;报 top1/top1_ratio。
-- H 信令流程(会话级"缺某消息/出现某失败消息且携带 cause"):msg_column:消息类型列 + key:会话键列 + has:[消息…]
-  / lacks:[消息…] + 可选 where:{{column, equals|contains}}(同一行须满足);顶层不收 filter。
 - J 人工:note。查不了:{{"decision":"insufficient_data","mapping_reason":"…"}}(不带 class)。
 
 【参考示例(few-shot;是参考写法不是硬性规定,遇到判据确有例外就按语义变通,mapping_reason 写清)】
@@ -190,7 +185,7 @@ OUTPUT_FORMAT = """【输出格式——只交"判定",别抄判据】
 把结果用 Write 写到文首【结果文件】路径(**文件名逐字照抄,以 `_result.py` 结尾——别写成 `.json`**,
 那是路由批的格式;实测写错扩展名整批要返工),内容是一个 Python 列表字面量(带不带 `CONDITIONS = ` 前缀都行);
 写完后最终回复只报一行「共 N 条,已写 <路径>」。**每条只写四类字段**:
-{{"node_id":"<nN>","class":"A/B/C/D/E/G/H/J/P 之一(F/I 已封存,别用)",...类参数...,"mapping_reason":"<写实>"}}
+{{"node_id":"<nN>","class":"A/C/D/G/J/P 之一(B/E/F/H/I 已封存,别用)",...类参数...,"mapping_reason":"<写实>"}}
 - **id/node/condition_text/source 都不用写**——合并脚本会从 tree_index 机械回填(逐字、权威;
   你抄反而会截断/抄错,写了也会被覆盖)。这让你的输出短一半以上,别再超长截断;
 - 答不了又确属本源该答 → {{"node_id":"<nN>","decision":"insufficient_data","mapping_reason":"<原因>"}};
