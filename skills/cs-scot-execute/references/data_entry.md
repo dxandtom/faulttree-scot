@@ -21,6 +21,8 @@ python "<本目录>/scripts/check_data.py" <数据路径>
 
 csv 或 xlsx，表头带 NEName、CmdName、Summary、level1 这类列。按正文第 2 条匹配指标后直接传给执行器。检查脚本按表头认表：CmdName、ObjContent、CmdResult 认作 cmd，Summary、Log、Level、Content 认作 log，level1、CfgType、L2Module 认作 config；EAV 窄表（DataItem、DataValue，见 `cs-scot-generate/references/datacom_log_adapter.md`）不在它的识别清单里，报告不会把它列为数据表，这类文件按文件名与指标名匹配后直接传入。
 
+表头对不上这三种的其它 csv 或 xlsx（无线场景的话统表、CHR 表这类宽表），检查脚本认作通用数据表，按文件名对指标名：文件名与 `assets/scripts/<指标>_analyzer.py` 的指标名相等或包含它就对上，报告里直接给出 `--data <指标>=<表路径>`；对不上的点名，让用户改文件名或明确指标。故障树母表和调优表混在数据目录里不算数据，会被跳过。
+
 ### 零散的原始文件
 
 单个或一堆 log/txt、混杂的 zip，没有 CONFIG、CMD、LOG 分类目录（rar 需先手工解压）。检查退出码 2 且连分类目录都找不到，就是这种。同样交给 zip2csv：它会调用内置的 ifilter 先归类成 `formated_result/<网元>/<CMD|CONFIG|LOG>/`，再转成三张表。此时 `--data raw=` 指向 `formated_result/`（zip2csv 结束时会打印建议值）。ifilter 只依赖 chardet 和 pandas，装不上时 zip2csv 会明确报错并给替代做法，把报错原样给用户，不要强行继续。

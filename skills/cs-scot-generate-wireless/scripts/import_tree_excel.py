@@ -1,0 +1,644 @@
+#!/usr/bin/env python3
+"""调优表(<短名>.tuning.xlsx)→ 机械编译回场景产物:tree_index / tree md / solutions.json /
+各 <指标>_analyzer.py 的 CONDITIONS / plan.json,全程零模型参与、确定性、可重复。
+
+设计要点(每条都是防"人改坏"的,多条来自隔离评审的实测发现):
+- **node_id 只读不改**:已有 id 原样保留;新增行留空,按 max+1 自动分配(历史 id 不复用);
+  改已有 id、复制 id、**手编一个树里从没有过的 id** = 直接拦下。
+- **先全量校验、全量备料,最后统一写盘**:任何错(JSON 坏/id 问题/上级不符/该有的列被删)都
+  收集全、按 Excel 行号用易懂的话报出来,一个文件都不写;写盘阶段不再有任何可失败的计算。
+- **页签按表头找**(含 node_id 的那页),不吃"活动页"的亏(业务同事复制页签留底是常态);
+  表头的全角冒号/空格自动归一,重复表头、非法源名直接拦下。
+- **判据以「判据:<标签>」列或「判据:原文」列为准**(原文列=老格式 v1 树的逐字判据,优先);
+- 绑定 JSON 里保留的 id/source/condition_text 覆盖默认值(自定义 id/页签路由/逐字子句不丢);
+  code 从旧 tree_index 按 node_id 继承(老产物 code 兼容不丢)。
+- **新增数据源列**(绑定:<新源>)自动克隆现有 analyzer 换 INDICATOR 并接进 plan;
+  绑定全清空时 plan 同步退化为只剩 rca(与 assemble 空指标行为一致)。
+- **变更摘要**:节点增/删/改名/移动、判据/解决方案改动、各源绑定条数——每次导入可评审。
+- **英文列**(L<n>(English)、Judgment Condition(English),导出时树里有英文才带):英文名取本行
+  最深层的英文格,英文判据随中文判据走(中文判据空则英文判据一并清空);旧产物有英文而表头
+  被删掉英文列 → 拦下,防"删列即清数据"。
+
+用法:import_tree_excel.py --out <场景产物目录(或打包技能的 assets/)>
+读 xlsx 走同目录 xlsx_reader.py(零三方依赖,与本脚本一起随产物分发);除它外不依赖 generate
+技能的其它模块。
+"""
+from __future__ import annotations
+
+import argparse
+import ast
+import json
+import re
+import sys
+from pathlib import Path
+
+_LVL_RE = re.compile(r"^L(\d+)(?:\(Chinese\))?$")
+_LVL_EN_RE = re.compile(r"^L(\d+)\(English\)$")
+COND_EN_COL = "Judgment Condition(English)"
+_NID_RE = re.compile(r"^n\d+$")
+_SRC_RE = re.compile(r"^[A-Za-z0-9_]+$")
+_CLASSES = set("ABCDEFGHIJ") | {"P", "S"}   # A-J 含封存字母(老产物兼容);P 成对;S 代码类(人手调优专用)
+_DECISIONS = {"insufficient_data", "manual", "not_applicable"}
+_CURLY = {"“": '"', "”": '"', "‘": "'", "’": "'"}
+RAW_TAG = "原文"
+
+
+def _infer_combine(method):
+    if not method:
+        return None
+    if re.search(r"(满足.{0,6}(一个|其一|任一|其中一)|任选其一|至少一)", method):
+        return "OR"
+    if re.search(r"(同时满足|需同时|均满足|且|&)", method):
+        return "AND"
+    return "unknown"
+
+
+def _index_to_markdown(index):
+    nodes, lines = index["nodes"], []
+
+    def rec(nid, depth):
+        nd = nodes[nid]
+        lines.append("#" * depth + " " + nd["name"])
+        if nd.get("condition"):
+            lines.extend(nd["condition"].split("\n"))
+        for tag, v in (nd.get("meta") or {}).items():
+            lines.append(f"（{tag}）{v}")
+        for ch in nd["children"]:
+            rec(ch, depth + 1)
+
+    if index.get("root"):
+        rec(index["root"], 1)
+    return "\n".join(lines) + "\n"
+
+
+def _replace_conditions(src: str, entries, fname: str):
+    """在 analyzer 源码文本里定位 CONDITIONS 赋值块整体替换,返回 (新文本, 错误串)。只备料不写盘。"""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as e:
+        return None, f"{fname}: analyzer 解析失败:{e}"
+    span = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "CONDITIONS" for t in node.targets):
+            span = (node.lineno, node.end_lineno)
+            break
+    if span is None:
+        return None, f"{fname}: 找不到 CONDITIONS 赋值块"
+    block = "CONDITIONS = [\n" + "".join(f"    {e!r},\n" for e in entries) + "]"
+    lines = src.splitlines(keepends=True)
+    new_src = "".join(lines[:span[0] - 1]) + block + "\n" + "".join(lines[span[1]:])
+    try:
+        ast.parse(new_src)
+    except SyntaxError as e:
+        return None, f"{fname}: 替换后语法自检失败:{e}"
+    return new_src, None
+
+
+def _read_conditions_text(src: str):
+    tree = ast.parse(src)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "CONDITIONS" for t in node.targets):
+            return ast.literal_eval(node.value)
+    return []
+
+
+def _read_condition_node_ids(path):
+    """从某 analyzer(如 cross_analyzer.py)静态抽 CONDITIONS 里的 node_id 集(联动核对用)。"""
+    entries = _read_conditions_text(path.read_text(encoding="utf-8"))
+    return [str(e.get("node_id")) for e in entries if isinstance(e, dict) and e.get("node_id")]
+
+
+def _no_const(name):
+    raise ValueError(f"数字「{name}」不合法(NaN/Infinity 不能用,写具体数字)")
+
+
+def _parse_cell_json(raw, where, errors, warns):
+    """绑定格 JSON 解析:中文引号先修一轮再试(业务同事最常见的手误),修好算过但提醒。"""
+    txt = str(raw).strip()
+    if not txt:
+        return None
+    try:
+        return json.loads(txt, parse_constant=_no_const)
+    except ValueError as e:
+        fixed = txt
+        for k, v in _CURLY.items():
+            fixed = fixed.replace(k, v)
+        if fixed != txt:
+            try:
+                val = json.loads(fixed, parse_constant=_no_const)
+                warns.append(f"{where}: 用了中文引号(“ ” ‘ ’),本次已自动纠正——下次请用英文引号 \" '")
+                return val
+            except ValueError:
+                pass
+        msg = getattr(e, "msg", str(e))
+        errors.append(f"{where}: 绑定格式不对({msg})。常见原因:引号用了中文引号、少了逗号或括号。"
+                      "照 scripts/condition_binding_schema.md 的类别模板改。")
+        return None
+
+
+def _pick_sheet(path):
+    """按表头找「node_id + 层级列」的那一页(返回页签名)——绝不吃'活动页'的亏
+    (复制页签留底是常态)。"""
+    import xlsx_reader
+    hits = [b["name"] for b in xlsx_reader.sheet_briefs(path)
+            if "node_id" in b["columns"] and any(_LVL_RE.match(h) for h in b["columns"])]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise SystemExit("没有任何页签的表头含 node_id + 层级列(L2(Chinese) 这种)——"
+                         "别删表头行;若把表复制到了新页签,保留一页正式的即可")
+    raise SystemExit(f"有 {len(hits)} 个页签都像正式调优表({hits})——"
+                     "只保留一页,备份页请删掉或去掉它的表头行")
+
+
+def _locate_product(out: Path):
+    """定位并读入产物:调优表与 tree_index 各恰一份、旧 solutions、可当克隆模板的 analyzer(缺了直接拦)。
+    返回 (调优表路径, tree_index 路径, 旧 index, 旧 solutions, 现有 analyzer 路径列表)。"""
+    xls = sorted(p for p in (out / "tree").glob("*.tuning.xlsx")
+                 if not p.name.startswith("~$"))          # ~$xxx = Excel 打开时的锁文件,不是调优表
+    tis = sorted((out / "tree").glob("*.tree_index.json"))
+    if len(xls) != 1 or len(tis) != 1:
+        raise SystemExit(f"tree/ 下应各有一份调优表与 tree_index(现有 {len(xls)} / {len(tis)} 份)")
+    old_index = json.loads(tis[0].read_text(encoding="utf-8"))
+    old_sol_p = out / "tree" / "solutions.json"
+    old_solutions = json.loads(old_sol_p.read_text(encoding="utf-8")) if old_sol_p.exists() else {}
+    existing_aps = sorted(p for p in (out / "scripts").glob("*_analyzer.py")
+                          if p.name != "cross_analyzer.py")   # cross 脚本的框架形态不同,不能当克隆模板
+    if not existing_aps:
+        raise SystemExit("产物 scripts/ 下没有任何 analyzer,无法落绑定(产物不完整)")
+    return xls[0], tis[0], old_index, old_solutions, existing_aps
+
+
+def _read_tuning_table(xls: Path):
+    """按表头找正式页签,整页读成 (表头, 数据行),格值一律 str + strip。"""
+    import xlsx_reader                                   # 同目录零依赖读取器(公式取缓存值=原 data_only=True)
+    sheet = _pick_sheet(xls)
+    rows = [[str(c).strip() for c in r] for r in xlsx_reader.read_rows(xls, sheet)]
+    return rows[0], rows[1:]
+
+
+_FIXED_COLS = {"node_id": "id", COND_EN_COL: "cond_en", "Recommend Solution(Chinese)": "sol_zh",
+               "Recommend Solution(English)": "sol_en", "meta(勿改)": "meta"}   # 固定名列 → 列位表键
+
+
+def _parse_cond_header(hn: str, i: int, cols: dict, errors: list) -> None:
+    """「判据:<标签>」列:原文列单独记,其余按标签进 tag 表(重复标签拦)。"""
+    t = hn.split(":", 1)[1].strip()
+    if t == RAW_TAG:
+        cols["raw"] = i
+    elif t in cols["tag"]:
+        errors.append(f"表头有两个「判据:{t}」列——删掉多余的一列")
+    else:
+        cols["tag"][t] = i
+
+
+def _parse_bind_header(h: str, hn: str, i: int, src_col: dict, errors: list) -> None:
+    """「绑定:<源名>」列:源名只许字母/数字/下划线,重复源拦。"""
+    s = hn.split(":", 1)[1].strip()
+    if not _SRC_RE.match(s):
+        errors.append(f"表头「{h}」的源名「{s}」不合法(只能用英文字母/数字/下划线,别带空格)")
+    elif s in src_col:
+        errors.append(f"表头有两个「绑定:{s}」列——删掉多余的一列")
+    else:
+        src_col[s] = i
+
+
+def _parse_header(header: list, errors: list) -> dict:
+    """表头解析(全角冒号/空格归一;重复列、非法源名硬拦)。返回列位表:
+    lvl/en_lvl/tag/src 为 {层级|标签|源: 列号},id/sol_zh/sol_en/meta/raw/cond_en 为 列号|None。"""
+    cols = {"lvl": {}, "en_lvl": {}, "tag": {}, "src": {},
+            "id": None, "sol_zh": None, "sol_en": None, "meta": None, "raw": None, "cond_en": None}
+    for i, h in enumerate(header):
+        hn = h.replace("：", ":").strip()
+        m = _LVL_RE.match(hn)
+        m_en = _LVL_EN_RE.match(hn)
+        if hn in _FIXED_COLS:
+            cols[_FIXED_COLS[hn]] = i
+        elif m:
+            l = int(m.group(1))
+            if l in cols["lvl"]:
+                errors.append(f"表头有两个 L{l} 层级列——删掉多余的一列")
+            cols["lvl"][l] = i
+        elif m_en:
+            l = int(m_en.group(1))
+            if l in cols["en_lvl"]:
+                errors.append(f"表头有两个 L{l}(English) 列——删掉多余的一列")
+            cols["en_lvl"][l] = i
+        elif hn.startswith("判据:"):
+            _parse_cond_header(hn, i, cols, errors)
+        elif hn.startswith("绑定:"):
+            _parse_bind_header(h, hn, i, cols["src"], errors)
+        elif hn and ("判据" in hn or "绑定" in hn):
+            errors.append(f"表头「{h}」看着像判据/绑定列但格式不对——应写成「判据:<标签>」或「绑定:<源名>」(半角冒号)")
+    return cols
+
+
+def _old_tags(old_nodes: dict) -> list:
+    """旧产物各节点 data_source 出现过的判据标签(按首次出现序)。"""
+    old_tags = []
+    for n in old_nodes.values():
+        for t in (n.get("data_source") or {}):
+            if t not in old_tags:
+                old_tags.append(t)
+    return old_tags
+
+
+def _check_deleted_columns(cols: dict, old_nodes: dict, old_solutions: dict, errors: list) -> None:
+    """防"删列即清数据"(评审 M2):旧产物有的东西,表里必须还有对应列。"""
+    miss_tags = [t for t in _old_tags(old_nodes) if t not in cols["tag"]]
+    if miss_tags and cols["raw"] is None:
+        errors.append(f"旧产物的判据标签 {miss_tags} 在表头找不到对应「判据:<标签>」列——删了会把这些判据整列清空;"
+                      "误删就把列加回来")
+    if old_solutions and cols["sol_zh"] is None and cols["sol_en"] is None:
+        errors.append("旧产物有 solutions.json,但表头没有 Recommend Solution 列——删了会清空全部解决方案;误删就加回来")
+    if any((n.get("meta") or {}) for n in old_nodes.values()) and cols["meta"] is None:
+        errors.append("旧产物节点带 meta,但表头没有 meta(勿改) 列——误删就加回来")
+    miss_en = sorted(set(cols["lvl"]) - set(cols["en_lvl"]))
+    if any(n.get("name_en") for n in old_nodes.values()) and miss_en:
+        errors.append("旧产物节点带英文名,但表头缺 " + "、".join(f"L{l}(English)" for l in miss_en)
+                      + " 列——删了会清空该层的英文名;误删就加回来")
+    if any(n.get("condition_en") for n in old_nodes.values()) and cols["cond_en"] is None:
+        errors.append(f"旧产物节点带英文判据,但表头没有「{COND_EN_COL}」列——删了会清空全部英文判据;误删就加回来")
+
+
+def _row_parent(filled: list, stack: dict, rowno: int, name: str, errors: list):
+    """按本行填了的上级各层名字与上文(stack)核对,返回父节点键;顶层行或上级对不上(记错)→ None。"""
+    if not filled[:-1]:
+        return None
+    for al, aname in filled[:-1]:
+        st = stack.get(al)
+        if not st or st[1] != aname:
+            errors.append(f"第{rowno}行「{name}」: 上级「{aname}」(L{al})和上文对不上——"
+                          "新行要插在它上级的块里面,并把上级各层的名字照抄")
+            return None
+    return stack[filled[-2][0]][0]
+
+
+def _check_node_id(nid: str, name: str, rowno: int, old_nodes: dict, seen_ids: set, errors: list) -> None:
+    """node_id 只读不改:格式要对、不许重复、不许手编树里从没有过的 id。"""
+    if not _NID_RE.match(nid):
+        errors.append(f"第{rowno}行「{name}」: node_id「{nid}」格式不对(应为 n+数字;新增行请留空)")
+    elif nid in seen_ids:
+        errors.append(f"第{rowno}行「{name}」: node_id「{nid}」重复了——新增行 node_id 要留空,别复制别的行的")
+    elif nid not in old_nodes:                    # 评审 M1:手编新 id = 静默断外部引用,拦
+        errors.append(f"第{rowno}行「{name}」: node_id「{nid}」是新造的(树里从来没有过)——"
+                      "新增节点请把这格留空,系统会自动编号")
+
+
+def _row_condition(cell, cols: dict, nid: str, name: str, rowno: int, old_nodes: dict, errors: list):
+    """本行判据:「判据:原文」列(v1 老树,逐字保真)或各「判据:<标签>」列(按旧序拼成 [标签] 文本);两种都填 → 记错。
+    返回 (condition, data_source)。"""
+    raw_cond = cell(cols["raw"])
+    cond_parts = [(t, cell(ci)) for t, ci in cols["tag"].items() if cell(ci)]
+    if raw_cond and cond_parts:
+        errors.append(f"第{rowno}行「{name}」:「判据:原文」和「判据:<标签>」列都填了——只能用一种"
+                      "(原文列是老格式树专用的逐字判据)")
+    if raw_cond:                                      # v1 老树:逐字保真,不加任何标签前缀
+        return raw_cond, {}
+    if nid in old_nodes:                              # 评审 M6:同节点多标签按旧序,防往返抖动
+        old_order = list((old_nodes[nid].get("data_source") or {}).keys())
+        cond_parts.sort(key=lambda tv: (old_order.index(tv[0]) if tv[0] in old_order else 10**6))
+    condition = "\n".join(f"[{t}] {v}" for t, v in cond_parts) or None
+    return condition, {t: v for t, v in cond_parts}
+
+
+def _row_node(cell, cols: dict, name: str, parent, lvl: int, nid: str, old_nodes: dict,
+              condition, data_source: dict, meta: dict) -> dict:
+    """组一个节点记录:code 从旧 tree_index 按 node_id 继承;英文名取本行所在层的英文格;英文判据随中文判据走。
+    pass_through:既有节点**保留原值**(建树时按母表层级定的"高层不判断"标记,调优表的列号
+    是相对深度、语义已不同,按列号重算会误伤);新增节点默认只豁免根,带判据的新行照常参与绑定。"""
+    node = {"name": name, "parent": parent, "level": lvl,
+            "code": (old_nodes.get(nid) or {}).get("code") if nid else None,
+            "children": [], "condition": condition,
+            "combine": _infer_combine(condition), "data_source": data_source,
+            "pass_through": (not condition) or (
+                old_nodes[nid].get("pass_through", False) if nid in old_nodes
+                else parent is None),
+            "sheets": ["tuning"], "meta": meta}
+    name_en = cell(cols["en_lvl"].get(lvl))              # 英文名:本行最深层(本节点所在层)的英文格
+    if name_en and name_en != name:
+        node["name_en"] = name_en
+    cond_en = cell(cols["cond_en"]) if condition else ""  # 英文判据随中文判据:中文清空则英文清空
+    if cond_en:
+        node["condition_en"] = cond_en
+    return node
+
+
+def _check_binding(b, s: str, name: str, rowno: int, errors: list) -> None:
+    """一条绑定的静态校验:须是对象;decision/class 要认识;S 类只许在 cross 列且 func/file 二选一;cross 列须带真实 source。"""
+    if not isinstance(b, dict):
+        errors.append(f"第{rowno}行「{name}」绑定:{s}: 每条绑定要是 {{...}} 对象")
+        return
+    cls, dec = str(b.get("class", "")).upper(), b.get("decision")
+    if dec is not None and dec not in _DECISIONS:
+        errors.append(f"第{rowno}行「{name}」绑定:{s}: decision「{dec}」不认识"
+                      f"(只接受 {'/'.join(sorted(_DECISIONS))})")
+    elif dec is None and cls not in _CLASSES:
+        errors.append(f"第{rowno}行「{name}」绑定:{s}: class「{b.get('class')}」不认识"
+                      "(A/B/C/D/E/G/H/J/P 之一;查不了就写 decision,"
+                      "模板见 scripts/condition_binding_schema.md)")
+    elif dec is None and cls == "S" and s != "cross":
+        errors.append(f"第{rowno}行「{name}」绑定:{s}: S 类(代码脚本)请写到「绑定:cross」列——"
+                      "cross 执行时全部数据源都在,脚本里 load('<源>') 全可用;单源列拿不到其他表")
+    elif dec is None and cls == "S" and bool(b.get("func")) == bool(b.get("file")):
+        errors.append(f"第{rowno}行「{name}」绑定:{s}: S 类须 func(函数库函数名)/"
+                      "file(scripts 下脚本路径,如 custom/n31_xxx.py)二选一")
+    elif s == "cross" and dec is None and cls != "S" and str(b.get("source") or "") in ("", "cross"):
+        errors.append(f"第{rowno}行「{name}」绑定:cross: 每条跨源绑定必须带"
+                      " source=最终查询落点的**真实源名**(如 config;没有叫 cross 的数据源)"
+                      "——写法见 scripts/condition_binding_schema.md 跨源节")
+
+
+def _row_bindings(cell, src_col: dict, name: str, rowno: int, errors: list, warns: list) -> dict:
+    """本行各「绑定:<源>」格:JSON 解析(中文引号自动纠正并提醒)+ 逐条校验。
+    返回 {源: 绑定列表}(空格/解析失败的源不在其中)。"""
+    out = {}
+    for s, ci in src_col.items():
+        val = _parse_cell_json(cell(ci), f"第{rowno}行「{name}」绑定:{s}", errors, warns)
+        if val is None:
+            continue
+        items = val if isinstance(val, list) else [val]
+        for b in items:
+            _check_binding(b, s, name, rowno, errors)
+        out[s] = items
+    return out
+
+
+def _parse_rows(body: list, cols: dict, old_nodes: dict, errors: list, warns: list):
+    """逐行解析:按层级列建节点与父链、校验 node_id、收判据/英文/meta/解决方案/绑定;错误按 Excel 行号记入 errors。
+    返回 (nodes, order, solutions, binds{源: [(行下标, 键, 绑定列表)]}, seen_ids, blank_rows);新增行的临时键为 __new__<行下标>。"""
+    lvl_col, id_col, src_col = cols["lvl"], cols["id"], cols["src"]
+    nodes, order, solutions = {}, [], {}
+    binds = {s: [] for s in src_col}
+    stack, seen_ids, blank_rows = {}, set(), []
+    for ri, row in enumerate(body):
+        rowno = ri + 2
+
+        def cell(i, _row=row):
+            return _row[i] if (i is not None and i < len(_row)) else ""
+        filled = [(l, cell(ci)) for l, ci in sorted(lvl_col.items()) if cell(ci)]
+        if not filled:
+            continue
+        lvl, name = filled[-1]
+        parent = _row_parent(filled, stack, rowno, name, errors)
+        nid = cell(id_col)
+        if nid:
+            _check_node_id(nid, name, rowno, old_nodes, seen_ids, errors)
+            seen_ids.add(nid)
+        else:
+            blank_rows.append(ri)
+        key = nid or f"__new__{ri}"
+        condition, data_source = _row_condition(cell, cols, nid, name, rowno, old_nodes, errors)
+        meta = {}
+        if cell(cols["meta"]):
+            meta = _parse_cell_json(cell(cols["meta"]), f"第{rowno}行「{name}」meta 列", errors, warns) or {}
+        nodes[key] = _row_node(cell, cols, name, parent, lvl, nid, old_nodes, condition, data_source, meta)
+        order.append(key)
+        if parent:
+            nodes[parent]["children"].append(key)
+        stack = {l: v for l, v in stack.items() if l < lvl}
+        stack[lvl] = (key, name)
+        if cell(cols["sol_zh"]) or cell(cols["sol_en"]):
+            solutions[key] = {k: v for k, v in (("zh", cell(cols["sol_zh"])), ("en", cell(cols["sol_en"]))) if v}
+        for s, items in _row_bindings(cell, src_col, name, rowno, errors, warns).items():
+            binds[s].append((ri, key, items))
+    return nodes, order, solutions, binds, seen_ids, blank_rows
+
+
+def _assign_new_ids(nodes: dict, order: list, roots: list, seen_ids: set, blank_rows: list,
+                    old_index: dict, old_nodes: dict, solutions: dict):
+    """分配新 id(历史 id 不复用:取 表内∪旧index 的最大号+1),把临时键换成正式 id,组出新 index。
+    返回 (index, new_nodes, solutions[换过键], rename{临时键: 新 id})。"""
+    used = {int(k[1:]) for k in seen_ids if _NID_RE.match(k)}
+    used |= {int(k[1:]) for k in old_nodes if _NID_RE.match(k)}
+    nxt = max(used, default=0) + 1
+    rename = {}
+    for ri in blank_rows:
+        rename[f"__new__{ri}"] = f"n{nxt}"
+        nxt += 1
+
+    def rid(k):
+        return rename.get(k, k)
+    new_nodes = {}
+    for k in order:
+        nd = dict(nodes[k])
+        nd["parent"] = rid(nd["parent"]) if nd["parent"] else None
+        nd["children"] = [rid(c) for c in nd["children"]]
+        new_nodes[rid(k)] = nd
+    index = {"scenario": old_index.get("scenario"), "root": rid(roots[0]), "nodes": new_nodes}
+    if old_index.get("slug"):
+        index["slug"] = old_index["slug"]
+    return index, new_nodes, {rid(k): v for k, v in solutions.items()}, rename
+
+
+def _prepare_analyzers(out: Path, src_col: dict, binds: dict, new_nodes: dict, rename: dict, existing_aps: list):
+    """备料:各源 CONDITIONS 与 analyzer 文本(全部成功才进入写盘);新增数据源克隆现有 analyzer 换 INDICATOR。
+    返回 (指标列表, writes[(路径, 新文本)], 各源条数摘要串列表)。"""
+    # cross 不是数据指标(不进 plan 的指标链、不参与克隆),但它的绑定照常从「绑定:cross」列写回
+    indicators = [s for s in src_col if s != "cross" and any(it for _r, _k, it in binds[s])]
+    writes, summary_src = [], []
+    for s in src_col:
+        full = []
+        for _ri, key, items in binds[s]:
+            nid = rename.get(key, key)
+            nd = new_nodes[nid]
+            for b in items:
+                entry = {"id": f"{s}-{nid}", "node": nd["name"], "node_id": nid,
+                         "condition_text": nd["condition"] or nd["name"], "source": s, **b}
+                full.append(entry)
+        ap_path = out / "scripts" / f"{s}_analyzer.py"
+        if ap_path.exists():
+            src_text = ap_path.read_text(encoding="utf-8")
+            before = len(_read_conditions_text(src_text))
+        elif s == "cross":                                # cross 脚本的框架形态特殊,不能克隆普通 analyzer 充数
+            raise SystemExit("不合格(未改动任何文件):表有「绑定:cross」列,但产物没有"
+                             " scripts/cross_analyzer.py 脚本框架——先跑 assemble_scenario 补齐再导入")
+        else:                                             # 新增数据源:克隆现有 analyzer 换 INDICATOR
+            src_text = existing_aps[0].read_text(encoding="utf-8")
+            src_text = re.sub(r'(?m)^INDICATOR = .*$', f'INDICATOR = "{s}"', src_text, count=1)
+            before = 0
+        new_text, err = _replace_conditions(src_text, full, ap_path.name)
+        if err:
+            raise SystemExit(f"不合格(未改动任何文件):{err}")
+        writes.append((ap_path, new_text))
+        summary_src.append(f"{s}: {before}→{len(full)} 条")
+    return indicators, writes, summary_src
+
+
+def _prepare_plan(out: Path, indicators: list):
+    """plan / manifest 备料:指标 = 有绑定的源(表列顺序);全部清空也要重写(评审 M3,防 plan 与 manifest 撕裂)。
+    返回 (plan 文本|None, manifest 文本|None),文件不存在的为 None。"""
+    plan_p, mf_p = out / "plan.json", out / "manifest.json"
+    plan_text = mf_text = None
+    if plan_p.exists():
+        plan = json.loads(plan_p.read_text(encoding="utf-8"))
+        # cross 现也走调优表(「绑定:cross」列);表里没这列时既有绑定原样不动。无论哪种,
+        # 产物里有 cross_analyzer.py 就必须保留其 plan 节点——否则跨源绑定被静默甩出执行链。
+        has_cross = (out / "scripts" / "cross_analyzer.py").exists()
+        last_next = "cross" if has_cross else "rca"
+        pnodes = []
+        for i, ind in enumerate(indicators):
+            nxt_id = indicators[i + 1] if i + 1 < len(indicators) else last_next
+            pnodes.append({"id": ind, "kind": "script", "name": f"{ind}_analyzer",
+                           "purpose": f"读 {ind} 数据,逐条件统计出事实(条件已在生成脚本里按类别模板算好)",
+                           "inputs": {"data": f"$input.{ind}"},
+                           "outputs": {"result": f"$memory.{ind}_result"},
+                           "transition": {"next_on_success": nxt_id}})
+        if has_cross:
+            pnodes.append({"id": "cross", "kind": "script", "name": "cross_analyzer",
+                           "purpose": "跨源判据统计(一条判据动用多个数据源:传参链/两侧比较);CONDITIONS 为空时秒过",
+                           "inputs": {"data": "$input.*"},
+                           "outputs": {"result": "$memory.cross_result"},
+                           "transition": {"next_on_success": "rca"}})
+        rca = next((n for n in plan.get("nodes", []) if n.get("id") == "rca"), None) or {
+            "id": "rca", "kind": "agent_skill", "name": "fault-tree-rca",
+            "purpose": "综合根因分析", "outputs": {"result": "$output.final_answer"},
+            "transition": {"end": True}}
+        rca["inputs"] = {"fault_tree_md": "$memory.fault_tree_md",
+                         **{ind: f"$memory.{ind}_result" for ind in indicators},
+                         **({"cross": "$memory.cross_result"} if has_cross else {})}
+        plan["nodes"] = pnodes + [rca]
+        plan["entry"] = indicators[0] if indicators else ("cross" if has_cross else "rca")
+        plan_text = json.dumps(plan, ensure_ascii=False, indent=2)
+    if mf_p.exists():
+        mf = json.loads(mf_p.read_text(encoding="utf-8"))
+        mf["indicators"] = indicators
+        mf_text = json.dumps(mf, ensure_ascii=False, indent=2)
+    return plan_text, mf_text
+
+
+def _node_changes(old_nodes: dict, new_nodes: dict) -> dict:
+    """变更摘要之节点部分(评审 H6):新增/删除/改名/移动(换了上级)的 id 列表。"""
+    return {"added": [k for k in new_nodes if k not in old_nodes],
+            "removed": [k for k in old_nodes if k not in new_nodes],
+            "renamed": [k for k in new_nodes if k in old_nodes and old_nodes[k].get("name") != new_nodes[k]["name"]],
+            "moved": [k for k in new_nodes if k in old_nodes and old_nodes[k].get("parent") != new_nodes[k]["parent"]]}
+
+
+def _content_changes(old_nodes: dict, new_nodes: dict, solutions: dict, old_solutions: dict) -> dict:
+    """变更摘要之内容部分(评审 M2):判据/英文名·英文判据/解决方案改动的 id 列表。"""
+    cond_chg = [k for k in new_nodes if k in old_nodes
+                and (old_nodes[k].get("condition") or None) != new_nodes[k]["condition"]]
+    en_chg = [k for k in new_nodes if k in old_nodes
+              and ((old_nodes[k].get("name_en") or None, old_nodes[k].get("condition_en") or None)
+                   != (new_nodes[k].get("name_en"), new_nodes[k].get("condition_en")))]
+    sol_chg = [k for k in set(solutions) | set(old_solutions)
+               if (solutions.get(k) or {}) != (old_solutions.get(k) or {})]
+    return {"cond": cond_chg, "en": en_chg, "sol": sol_chg}
+
+
+def _write_outputs(ti_path: Path, out: Path, stem: str, index: dict, old_sol_p: Path, solutions: dict,
+                   writes: list, plan_text, mf_text) -> None:
+    """统一写盘(此后无任何可失败的计算)。"""
+    ti_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out / "tree" / f"{stem}.md").write_text(_index_to_markdown(index), encoding="utf-8")
+    if solutions:
+        old_sol_p.write_text(json.dumps(solutions, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        old_sol_p.unlink(missing_ok=True)
+    for p, text in writes:
+        p.write_text(text, encoding="utf-8")
+    if plan_text:
+        (out / "plan.json").write_text(plan_text, encoding="utf-8")
+    if mf_text:
+        (out / "manifest.json").write_text(mf_text, encoding="utf-8")
+
+
+def _nm(k, pool):
+    """摘要里的节点写法:id「名字」。"""
+    return f"{k}「{(pool.get(k) or {}).get('name', '')}」"
+
+
+def _print_summary(warns: list, new_nodes: dict, old_nodes: dict, chg: dict, summary_src: list) -> None:
+    """打印提醒与变更摘要(节点增/删/改名/移动、判据/英文/解决方案改动、各源绑定条数)。"""
+    for w in warns:
+        print(f"⚠ {w}")
+    print(f"导入完成:节点 {len(new_nodes)} 个。变更摘要:")
+    print(f"  新增节点 {len(chg['added'])}: {', '.join(_nm(k, new_nodes) for k in chg['added']) or '无'}")
+    print(f"  删除节点 {len(chg['removed'])}: {', '.join(_nm(k, old_nodes) for k in chg['removed']) or '无'}")
+    print(f"  改名 {len(chg['renamed'])}: "
+          + (", ".join(f"{k}: {old_nodes[k].get('name')}→{new_nodes[k]['name']}" for k in chg['renamed']) or "无"))
+    print(f"  移动(换了上级){len(chg['moved'])}: "
+          + (", ".join(f"{_nm(k, new_nodes)}: {old_nodes[k].get('parent')}→{new_nodes[k]['parent']}"
+                       for k in chg['moved']) or "无"))
+    print(f"  判据改动 {len(chg['cond'])}: {', '.join(_nm(k, new_nodes) for k in chg['cond']) or '无'}")
+    if chg["en"]:
+        print(f"  英文名/英文判据改动 {len(chg['en'])}: {', '.join(_nm(k, new_nodes) for k in chg['en'])}")
+    print(f"  解决方案改动 {len(chg['sol'])}: {', '.join(sorted(chg['sol'])) or '无'}")
+    print(f"  绑定: {'; '.join(summary_src) or '无'}")
+
+
+def _check_cross_drift(out: Path, src_col: dict, chg: dict, new_nodes: dict, old_nodes: dict) -> None:
+    """跨源绑定联动核对:仅当调优表**没有**「绑定:cross」列时才需要——那时 cross_analyzer 是表外
+    维护的,树在这里改了它不会跟上(新判据+旧传参链=静默漂移),必须点名;表里有 cross 列时
+    绑定刚按表重写,天然一致,不提醒。"""
+    cross_ap = out / "scripts" / "cross_analyzer.py"
+    if cross_ap.exists() and "cross" not in src_col:
+        try:
+            cross_ids = set(_read_condition_node_ids(cross_ap))
+        except Exception:  # noqa: BLE001
+            cross_ids = set()
+        hit_chg = sorted(cross_ids & set(chg["cond"]))
+        hit_rm = sorted(cross_ids & set(chg["removed"]))
+        if hit_chg or hit_rm:
+            print("⚠ 以下节点另有**跨源绑定**(scripts/cross_analyzer.py,工程侧维护,不随调优表更新):")
+            if hit_chg:
+                print(f"  判据已改但 cross 绑定未动 {len(hit_chg)}: {', '.join(_nm(k, new_nodes) for k in hit_chg)}"
+                      "——不复核会按旧逻辑算新判据(静默漂移),请知会工程同事核对/更新对应绑定")
+            if hit_rm:
+                print(f"  节点已删除但 cross 仍认领 {len(hit_rm)}: {', '.join(_nm(k, old_nodes) for k in hit_rm)}"
+                      "——运行时会变孤儿事实,请让工程同事删掉对应 cross 绑定")
+
+
+def main() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    ap = argparse.ArgumentParser(description="调优表 → 机械编译回场景产物")
+    ap.add_argument("--out", required=True, help="场景产物目录(或打包技能的 assets/ 目录)")
+    a = ap.parse_args()
+    out = Path(a.out).expanduser().resolve()
+
+    xls, ti_path, old_index, old_solutions, existing_aps = _locate_product(out)
+    old_nodes = old_index.get("nodes") or {}
+    stem = ti_path.name[: -len(".tree_index.json")]
+    old_sol_p = out / "tree" / "solutions.json"
+    header, body = _read_tuning_table(xls)
+
+    # ---- 表头解析 → 防删列检查 → 逐行解析(先全量校验,任何错都不写盘)----
+    errors, warns = [], []
+    cols = _parse_header(header, errors)
+    if cols["id"] is None or not cols["lvl"]:
+        raise SystemExit("表头不合格:缺 node_id 列或层级列(L2(Chinese) 这种)——别删表头行/表头列")
+    _check_deleted_columns(cols, old_nodes, old_solutions, errors)
+    nodes, order, solutions, binds, seen_ids, blank_rows = _parse_rows(body, cols, old_nodes, errors, warns)
+
+    roots = [k for k in order if nodes[k]["parent"] is None]
+    if len(roots) != 1:
+        errors.append(f"树应恰有一个根,现有 {len(roots)} 个顶层节点:{[nodes[k]['name'] for k in roots]}"
+                      "——检查是不是有行的上级各层忘了照抄")
+    if errors:
+        print(f"不合格:发现 {len(errors)} 处问题,**没有改动任何文件**。逐条修完重跑:", file=sys.stderr)
+        for e in errors:
+            print(f"  - {e}", file=sys.stderr)
+        sys.exit(2)
+
+    # ---- 分配新 id → 备料(analyzer / plan / manifest)→ 变更摘要 → 统一写盘 → 打印 ----
+    index, new_nodes, solutions, rename = _assign_new_ids(nodes, order, roots, seen_ids, blank_rows,
+                                                          old_index, old_nodes, solutions)
+    indicators, writes, summary_src = _prepare_analyzers(out, cols["src"], binds, new_nodes, rename, existing_aps)
+    plan_text, mf_text = _prepare_plan(out, indicators)
+    chg = {**_node_changes(old_nodes, new_nodes),
+           **_content_changes(old_nodes, new_nodes, solutions, old_solutions)}
+    _write_outputs(ti_path, out, stem, index, old_sol_p, solutions, writes, plan_text, mf_text)
+    _print_summary(warns, new_nodes, old_nodes, chg, summary_src)
+    _check_cross_drift(out, cols["src"], chg, new_nodes, old_nodes)
+    print("下一步:重新打包/上传前,建议用真实数据跑一遍 runner 验证。")
+
+
+if __name__ == "__main__":
+    main()

@@ -3,7 +3,8 @@
 #
 # 作用:把本仓 skills/ 下的四个 skill 拷贝(或 --link 软链)到外层 harness
 # 的 skills 目录,让 Claude Code / OpenClaw 等能加载它们:
-#   - cs-scot-generate      把故障树 Excel 编译成场景诊断 skill(解析脚本 + SCoT 计划)
+#   - cs-scot-generate      把故障树 Excel 编译成场景诊断 skill(解析脚本 + SCoT 计划;数通场景)
+#   - cs-scot-generate-wireless  同上,无线接入类场景版(内核多 B/E/H 三类)
 #   - cs-scot-execute       按 plan.json 顺序执行 SCoT 计划
 #   - fault-tree-rca        综合根因分析
 #
@@ -53,7 +54,7 @@ fi
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SKILLS_SRC="$SRC/skills"
-DIRS=(cs-scot-generate cs-scot-execute fault-tree-rca)
+DIRS=(cs-scot-generate cs-scot-generate-wireless cs-scot-execute fault-tree-rca)
 
 echo "[install] source:  $SKILLS_SRC"
 echo "[install] target:  $TARGET"
@@ -99,7 +100,8 @@ done
 cat <<EOF
 
 [install] DONE. 已安装 3 个 skill 到:$TARGET
-  - cs-scot-generate      生成场景诊断 skill(故障树 → 解析脚本 + SCoT 计划)
+  - cs-scot-generate      生成场景诊断 skill(故障树 → 解析脚本 + SCoT 计划;数通场景)
+  - cs-scot-generate-wireless  无线接入类场景版
   - cs-scot-execute       执行 SCoT 计划(按 plan.json 顺序跑)
   - fault-tree-rca        综合根因分析
 

@@ -1013,6 +1013,7 @@ def get_file_info(diagFile):
         print(e)
         return False
 
+
 def get_snmp_trap_log_info(logFile):
     """兜底识别：从 SNMP Trap 风格日志文件中提取设备名并归类为 LOG 文件
 
